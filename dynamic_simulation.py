@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.integrate import ode
-from dynamic_systems import NonlinearSystem, LinearSystem
+from dynamic_systems import NonlinearSystem, LinearSystem, AffineSystem
 
 class SimulateDynamics:
     def __init__(self, dimension, state0 = np.zeros(2)):

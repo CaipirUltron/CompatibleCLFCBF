@@ -3,8 +3,8 @@ from sage.all import *
 from sage.symbolic.function import BuiltinFunction
 from sage.calculus.var import *
 
-class NonlinearSystem(BuiltinFunction):
 
+class NonlinearSystem(BuiltinFunction):
     def __init__(self, state_str, control_str, *expressions):
         BuiltinFunction.__init__(self, 'Dynamic System', nargs=2)
 
@@ -18,20 +18,7 @@ class NonlinearSystem(BuiltinFunction):
         self._gen_control_str()
         self._create_dictionary()
 
-        self.change_expression(*expressions)
-
-    def _create_dictionary(self):
-        self._var_dictionary = {}
-        for i in range(self._state_dim):
-            self._var_dictionary[self._state_str[i]] = []
-        for j in range(self._control_dim):
-            self._var_dictionary[self._control_str[j]] = []
-
-    def change_expression(self, *expressions):
-        f_array = []
-        for f_expr in expressions:
-            f_array.append(SR(f_expr))
-        self._vector_field = vector(f_array)
+        self.set_expression(*expressions)
 
     def _gen_state_str(self):
         self._state_str = list()
@@ -43,6 +30,19 @@ class NonlinearSystem(BuiltinFunction):
         for i in range(self._control_dim):
             self._control_str.append(str(self._control[i]))
 
+    def _create_dictionary(self):
+        self._var_dictionary = {}
+        for i in range(self._state_dim):
+            self._var_dictionary[self._state_str[i]] = []
+        for j in range(self._control_dim):
+            self._var_dictionary[self._control_str[j]] = []
+
+    def set_expression(self, *expressions):
+        f_array = []
+        for f_expr in expressions:
+            f_array.append(SR(f_expr))
+        self._vector_field = vector(f_array)
+
     def state(self):
         return self._state
 
@@ -53,7 +53,6 @@ class NonlinearSystem(BuiltinFunction):
         return self._vector_field
 
     def _eval_numpy_(self, State, Control):
-
         for i in range(self._state_dim):
             self._var_dictionary[ self._state_str[i] ] = State[i]
         for j in range(self._control_dim):
@@ -61,12 +60,6 @@ class NonlinearSystem(BuiltinFunction):
 
         return self._vector_field(**self._var_dictionary)
 
-class LinearSystem(NonlinearSystem):
-    def __init__(self, state_str, control_str, A, B):
-        NonlinearSystem.__init__(self, state_str, control_str)
-
-        Asym, Bsym = matrix(A), matrix(B)
-        self._f = Asym * self._state + Bsym * self._control
 
 class AffineSystem(NonlinearSystem):
     def __init__(self, state_str, control_str, f, *columns_g):
@@ -87,3 +80,72 @@ class AffineSystem(NonlinearSystem):
         self._g = matrix(g_array)
 
         self._vector_field = self._f + self._g * self._control
+
+
+class LinearSystem(NonlinearSystem):
+    def __init__(self, state_str, control_str, A, B):
+        NonlinearSystem.__init__(self, state_str, control_str)
+
+        A_symb, B_symb = matrix(A), matrix(B)
+        self._f = A_symb * self._state + B_symb * self._control
+
+
+class QuadraticFunction(BuiltinFunction):
+    def __init__(self, var_str, A, b, c):
+        BuiltinFunction.__init__(self, 'Quadratic Function', nargs=1)
+
+        self._var = vector(var(var_str+','))
+        self._dimension = np.size(self._var)
+
+        self._gen_var_str()
+        self._create_dictionary()
+
+        A_symb, b_symb = matrix(A), vector(b)
+        self._function = self._var * ( A_symb * self._var ) + b_symb * self._var + c
+        self._gradient = self._function.gradient()
+        self._hessian = self._function.hessian()
+
+    def _gen_var_str(self):
+        self._var_str = list()
+        for i in range(self._dimension):
+            self._var_str.append(str(self._var[i]))
+
+    def _create_dictionary(self):
+        self._var_dictionary = {}
+        for i in range(self._dimension):
+            self._var_dictionary[self._var_str[i]] = []
+
+    def function(self):
+        return self._function
+
+    def gradient(self):
+        return self._gradient
+
+    def hessian(self):
+        return self._hessian
+
+    def _eval_numpy_(self, vars):
+        for i in range(self._dimension):
+            self._var_dictionary[ self._var_str[i] ] = vars[i]
+
+        return self._function(**self._var_dictionary)
+
+
+class QuadraticLyapunov(QuadraticFunction):
+    def __init__(self, var_str, H, x0):
+
+        self._minimum = x0
+        b = -2*H.T.dot(self._minimum)
+        c = H.dot(self._minimum).dot(self._minimum)
+        
+        QuadraticFunction.__init__(self, var_str, H, b, c)
+
+
+class QuadraticBarrier(QuadraticFunction):
+    def __init__(self, var_str, H, x0):
+
+        self._minimum = x0
+        b = -2*H.T.dot(self._minimum)
+        c = H.dot(self._minimum).dot(self._minimum) - 1
+        
+        QuadraticFunction.__init__(self, var_str, H, b, c)
