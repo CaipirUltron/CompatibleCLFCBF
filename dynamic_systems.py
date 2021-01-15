@@ -5,7 +5,7 @@ from sage.calculus.var import *
 
 class NonlinearSystem(BuiltinFunction):
 
-    def __init__(self, state_str, control_str, *f_expressions):
+    def __init__(self, state_str, control_str, *expressions):
         BuiltinFunction.__init__(self, 'Dynamic System', nargs=2)
 
         self._state = vector(var(state_str+','))
@@ -18,7 +18,7 @@ class NonlinearSystem(BuiltinFunction):
         self._gen_control_str()
         self._create_dictionary()
 
-        self.change_expression(*f_expressions)
+        self.change_expression(*expressions)
 
     def _create_dictionary(self):
         self._var_dictionary = {}
@@ -27,11 +27,11 @@ class NonlinearSystem(BuiltinFunction):
         for j in range(self._control_dim):
             self._var_dictionary[self._control_str[j]] = []
 
-    def change_expression(self, *f_expressions):
+    def change_expression(self, *expressions):
         f_array = []
-        for f_expr in f_expressions:
+        for f_expr in expressions:
             f_array.append(SR(f_expr))
-        self._f = vector(f_array)
+        self._vector_field = vector(f_array)
 
     def _gen_state_str(self):
         self._state_str = list()
@@ -50,7 +50,7 @@ class NonlinearSystem(BuiltinFunction):
         return self._control
 
     def expression(self):
-        return self._f
+        return self._vector_field
 
     def _eval_numpy_(self, State, Control):
 
@@ -59,23 +59,31 @@ class NonlinearSystem(BuiltinFunction):
         for j in range(self._control_dim):
             self._var_dictionary[ self._control_str[j] ] = Control[j]
 
-        return self._f(**self._var_dictionary)
-
-    # def _gen_state(self):
-    #     self._state_str = 'x1'
-    #     for i in range(self._state_dim-1):
-    #         self._state_str += (' x'+str(i+2))
-
-    # def _gen_control(self):
-    #     self._control_str = 'u1'
-    #     for i in range(self._control_dim-1):
-    #         self._control_str += (' u'+str(i+2))
-
+        return self._vector_field(**self._var_dictionary)
 
 class LinearSystem(NonlinearSystem):
     def __init__(self, state_str, control_str, A, B):
         NonlinearSystem.__init__(self, state_str, control_str)
 
-        Asym = matrix(A)
-        Bsym = matrix(B)
+        Asym, Bsym = matrix(A), matrix(B)
         self._f = Asym * self._state + Bsym * self._control
+
+class AffineSystem(NonlinearSystem):
+    def __init__(self, state_str, control_str, f, *columns_g):
+
+        NonlinearSystem.__init__(self, state_str, control_str)
+
+        f_array = []
+        for i in range(len(f)):
+            f_array.append(SR(f[i]))
+        self._f = vector(f_array)
+
+        g_array_transposed = []
+        for column_g in columns_g:
+            g_array_transposed.append(column_g)
+            for i in range(len(column_g)):
+                g_array_transposed[-1][i] = SR(column_g[i])
+        g_array = np.array(g_array_transposed).T.tolist()
+        self._g = matrix(g_array)
+
+        self._vector_field = self._f + self._g * self._control
