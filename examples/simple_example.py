@@ -1,6 +1,7 @@
 import numpy as np
-from dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier
-from dynamic_simulation import SimulateDynamics
+
+from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier
+from compatible_clf_cbf.dynamic_simulation import SimulateDynamics
 
 # Simulation parameters
 dt = .01

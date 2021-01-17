@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.integrate import ode
-from dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier
+from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier
 
 class SimulateDynamics:
     def __init__(self, plant, initial_state):
