@@ -115,14 +115,24 @@ class QuadraticFunction(BuiltinFunction):
         for i in range(self._dimension):
             self._var_dictionary[self._var_str[i]] = []
 
-    def function(self):
-        return self._function
+    def function(self, *vars):
+        if len(vars) == 0:
+            return self._function
+        else:
+            for i in range(self._dimension):
+                self._var_dictionary[ self._var_str[i] ] = vars[0][i]
+            return self._function(**self._var_dictionary)
 
-    def gradient(self):
-        return self._gradient
+    def gradient(self, *vars):
+        if len(vars) == 0:
+            return self._gradient
+        else:
+            for i in range(self._dimension):
+                self._var_dictionary[ self._var_str[i] ] = vars[0][i]
+            return np.array(self._gradient(**self._var_dictionary),dtype=float)
 
     def hessian(self):
-        return self._hessian
+        return np.array(self._hessian, dtype=float)
 
     def _eval_numpy_(self, vars):
         for i in range(self._dimension):
