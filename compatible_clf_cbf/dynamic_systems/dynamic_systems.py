@@ -12,8 +12,8 @@ class NonlinearSystem(BuiltinFunction):
         self._state = vector(var(state_str+','))
         self._control = vector(var(control_str+','))
 
-        self._state_dim = np.size(self._state)
-        self._control_dim = np.size(self._control)
+        self.state_dim = np.size(self._state)
+        self.control_dim = np.size(self._control)
 
         self._gen_state_str()
         self._gen_control_str()
@@ -23,20 +23,20 @@ class NonlinearSystem(BuiltinFunction):
 
     def _gen_state_str(self):
         self._state_str = list()
-        for i in range(self._state_dim):
+        for i in range(self.state_dim):
             self._state_str.append(str(self._state[i]))
 
     def _gen_control_str(self):
         self._control_str = list()
-        for i in range(self._control_dim):
+        for i in range(self.control_dim):
             self._control_str.append(str(self._control[i]))
 
     def _create_dictionary(self):
         self._var_dictionary = {}
-        for i in range(self._state_dim):
-            self._var_dictionary[self._state_str[i]] = []
-        for j in range(self._control_dim):
-            self._var_dictionary[self._control_str[j]] = []
+        for i in range(self.state_dim):
+            self._var_dictionary[self._state_str[i]] = 0.0
+        for j in range(self.control_dim):
+            self._var_dictionary[self._control_str[j]] = 0.0
 
     def set_expression(self, *expressions):
         f_array = []
@@ -54,9 +54,9 @@ class NonlinearSystem(BuiltinFunction):
         return self._vector_field
 
     def _eval_numpy_(self, State, Control):
-        for i in range(self._state_dim):
+        for i in range(self.state_dim):
             self._var_dictionary[ self._state_str[i] ] = State[i]
-        for j in range(self._control_dim):
+        for j in range(self.control_dim):
             self._var_dictionary[ self._control_str[j] ] = Control[j]
 
         return self._vector_field(**self._var_dictionary)
@@ -83,6 +83,15 @@ class AffineSystem(NonlinearSystem):
 
         self._vector_field = self._f + self._g * self._control
 
+    def compute_f(self, state):
+        for i in range(self.state_dim):
+            self._var_dictionary[ self._state_str[i] ] = state[i]
+        return np.array(self._f(**self._var_dictionary),dtype=float)
+
+    def compute_g(self, state):
+        for i in range(self.state_dim):
+            self._var_dictionary[ self._state_str[i] ] = state[i]
+        return np.array(self._g(**self._var_dictionary),dtype=float)
 
 class LinearSystem(NonlinearSystem):
 

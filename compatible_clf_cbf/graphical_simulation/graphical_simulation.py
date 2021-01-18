@@ -104,7 +104,7 @@ class GraphicalSimulation():
         self._clf_marker.action = self._clf_marker.ADD
         self._clf_marker.scale.x = 2*np.sqrt(1/self.clf_lambda[0])
         self._clf_marker.scale.y = 2*np.sqrt(1/self.clf_lambda[1])
-        self._clf_marker.scale.z = -0.1
+        self._clf_marker.scale.z = -0.5
         self._clf_marker.color.a = 0.3
         self._clf_marker.color.r = 0.0
         self._clf_marker.color.g = 0.4
