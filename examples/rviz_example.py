@@ -21,8 +21,7 @@ try:
     plant = AffineSystem(state_string, control_string, f, g1, g2)
 
     # Define initial state for plant simulation
-    x_init = 0.1
-    y_init = 5
+    x_init, y_init = 0.1, 5
     initial_state = np.array([x_init,y_init])
 
     # Create CLF
@@ -39,9 +38,6 @@ try:
                     [ 0.0 , lambda2 ] ])
     p0 = np.array([0,3])
     cbf = QuadraticBarrier(state_string, Hh, p0)
-    
-    # lambda1, lambda2 = 1, 1
-    # Kappa = np.array([[lambda1, 0],[0, lambda2]])
 
     # Create QP controller
     ref = np.array([0,0])
@@ -59,17 +55,10 @@ try:
         state = dynamicSimulation.state()
 
         # Control
-        # ref = graphicalSimulation.get_reference()
-        # error = state - ref
-        # control = - Kappa.dot(error)
         control = qp_controller.compute_control(state)
 
         # Send actuation commands 
         dynamicSimulation.send_control_inputs(control, dt)
-        
-        # if np.linalg.norm(error) < 0.1:
-        #     ref = np.random.randint(low = -10, high = 10, size = 2)
-        #     graphicalSimulation.draw_reference(ref)
 
         # Draw graphical simulation
         graphicalSimulation.draw_trajectory(state)
