@@ -18,16 +18,18 @@ try:
     state_string = 'x1, x2'
     control_string = 'u1, u2'
     plant = AffineSystem(state_string, control_string, f, g1, g2)
-    initial_state = np.array([0,0])
+    initial_state = np.array([0,1])
 
     # Create CLF and CBF
-    Hv = np.array([ [ 1.0 , 0.0 ],
+    Hv = np.array([ [ 3.0 , 0.0 ],
                     [ 0.0 , 1.0 ] ])
     x0 = np.array([0,0])
 
-    Hh = np.array([ [ 1.0 , 0.0 ],
-                    [ 0.0 , 1.0 ] ])
-    p0 = np.array([0,1])
+    xaxis_length, yaxis_length = 1.0, 2.0
+    lambda1, lambda2 = 1/xaxis_length**2, 1/yaxis_length**2
+    Hh = np.array([ [ lambda1 , 0.0 ],
+                    [ 0.0 , lambda2 ] ])
+    p0 = np.array([0,3])
 
     clf = QuadraticLyapunov(state_string, Hv, x0)
     cbf = QuadraticBarrier(state_string, Hh, p0)
@@ -35,11 +37,11 @@ try:
     # Provisional linear controller (to be removed)
     lambda1, lambda2 = 1, 1
     Kappa = np.array([[lambda1, 0],[0, lambda2]])
-    ref = np.array([4,4])
+    ref = np.array([0,1])
 
     # Initialize simulation object
     dynamicSimulation = SimulateDynamics(plant, initial_state)
-    graphicalSimulation = GraphicalSimulation(ref)
+    graphicalSimulation = GraphicalSimulation(ref, clf, cbf)
 
     # Main ROS loop
     rate = rospy.Rate(sim_freq)
@@ -58,10 +60,13 @@ try:
         
         if np.linalg.norm(error) < 0.1:
             ref = np.random.randint(low = -10, high = 10, size = 2)
-            graphicalSimulation.set_reference(ref)
+            graphicalSimulation.draw_reference(ref)
 
         # Draw graphical simulation
         graphicalSimulation.draw_trajectory(state)
+        graphicalSimulation.draw_reference(ref)
+        graphicalSimulation.draw_clf(state)
+        graphicalSimulation.draw_cbf()
 
         rate.sleep()
 

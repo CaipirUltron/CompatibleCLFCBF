@@ -4,6 +4,7 @@ import numpy as np
 from rospy.numpy_msg import numpy_msg
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point, Pose, PoseStamped, PolygonStamped, PointStamped, TransformStamped
+from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier
 
 import tf, tf2_ros
 import time
@@ -12,21 +13,20 @@ from tf.transformations import quaternion_from_euler
 # Class for 2D simulations in Rviz
 class GraphicalSimulation():
 
-    def __init__(self, ref, *args):
+    def __init__(self, ref, clf, cbf):
         # Initialize important class attributes
-        # self._clf = clf
-        # self._cbf = cbf
+
+        self._clf = clf
+        self._cbf = cbf
 
         # Initialize node
         rospy.init_node('graphics_broadcaster', anonymous = True)
         rospy.loginfo("Starting graphical simulation...")
 
         self.ref_marker_size = 0.2
-        for arg_index in range(len(args)):
-            self.ref_marker_size = args[arg_index]
 
         # ROS subscribers
-        click_subscriber = rospy.Subscriber("clicked_point", PointStamped, self.set_reference)
+        click_subscriber = rospy.Subscriber("clicked_point", PointStamped, self.draw_reference)
 
         # ROS Publishers
         self.trajectory_publisher = rospy.Publisher('trajectory', Marker, queue_size=1)
@@ -96,6 +96,48 @@ class GraphicalSimulation():
         # Load reference
         self._reference = ref
 
+        # Initialize CLF marker
+        self.clf_lambda, self.clf_angle = self._clf.compute_eig()
+
+        self._clf_marker.header.frame_id = "base_frame"
+        self._clf_marker.type = self._clf_marker.SPHERE
+        self._clf_marker.action = self._clf_marker.ADD
+        self._clf_marker.scale.x = 2*np.sqrt(1/self.clf_lambda[0])
+        self._clf_marker.scale.y = 2*np.sqrt(1/self.clf_lambda[1])
+        self._clf_marker.scale.z = -0.1
+        self._clf_marker.color.a = 0.3
+        self._clf_marker.color.r = 0.0
+        self._clf_marker.color.g = 0.4
+        self._clf_marker.color.b = 1.0
+        self._clf_marker.pose.position.x = self._clf.minimum[0]
+        self._clf_marker.pose.position.y = self._clf.minimum[1]
+        self._clf_marker.pose.position.z = 0
+        self._clf_marker.pose.orientation.x = 0.0
+        self._clf_marker.pose.orientation.y = 0.0
+        self._clf_marker.pose.orientation.z = np.sin(self.clf_angle/2)
+        self._clf_marker.pose.orientation.w = np.cos(self.clf_angle/2)
+
+        # Initialize CBF marker
+        self.cbf_lambda, self.cbf_angle = self._cbf.compute_eig()
+
+        self._cbf_marker.header.frame_id = "base_frame"
+        self._cbf_marker.type = self._cbf_marker.SPHERE
+        self._cbf_marker.action = self._clf_marker.ADD
+        self._cbf_marker.scale.x = 2*np.sqrt(1/self.cbf_lambda[0])
+        self._cbf_marker.scale.y = 2*np.sqrt(1/self.cbf_lambda[1])
+        self._cbf_marker.scale.z = 0.1
+        self._cbf_marker.color.a = 1.0
+        self._cbf_marker.color.r = 0.0
+        self._cbf_marker.color.g = 1.0
+        self._cbf_marker.color.b = 0.0
+        self._cbf_marker.pose.position.x = self._cbf.minimum[0]
+        self._cbf_marker.pose.position.y = self._cbf.minimum[1]
+        self._cbf_marker.pose.position.z = 0
+        self._cbf_marker.pose.orientation.x = 0.0
+        self._cbf_marker.pose.orientation.y = 0.0
+        self._cbf_marker.pose.orientation.z = np.sin(self.cbf_angle/2)
+        self._cbf_marker.pose.orientation.w = np.cos(self.cbf_angle/2)
+
     def draw_trajectory(self, point):
         new_trajectory_point = Point()
         new_trajectory_point.x = point[0]
@@ -103,13 +145,10 @@ class GraphicalSimulation():
         new_trajectory_point.z = 0
         self._trajectory_marker.points.append( new_trajectory_point )
 
-        # Sends baseline transformation
-        # self.world_tf.sendTransform((point[0], point[1], 0), quaternion_from_euler(0, 0, 0), rospy.Time.now(), "robot_frame", "world")
-
         # Publishes Rviz graphical objects
         self.trajectory_publisher.publish(self._trajectory_marker)
 
-    def set_reference(self, ref_point):        
+    def draw_reference(self, ref_point):        
         if isinstance(ref_point,type(PointStamped())):
             self._reference[0] = ref_point.point.x
             self._reference[1] = ref_point.point.y
@@ -120,11 +159,19 @@ class GraphicalSimulation():
         self._ref_pos_marker.pose.position.x = self._reference[0]
         self._ref_pos_marker.pose.position.y = self._reference[1]
 
-        # Sends baseline transformation
-        # self.world_tf.sendTransform((self._reference[0], self._reference[1], 0), quaternion_from_euler(0, 0, 0), rospy.Time.now(), "ref_frame", "world")
-
         # Publishes Rviz graphical objects
         self.ref_publisher.publish(self._ref_pos_marker)
+
+    def draw_clf(self, point):
+        V_point = self._clf(point)
+        bar_clf_lambda = self.clf_lambda/V_point
+
+        self._clf_marker.scale.x = 2*np.sqrt(1/bar_clf_lambda[0])
+        self._clf_marker.scale.y = 2*np.sqrt(1/bar_clf_lambda[1])
+        self.clf_publisher.publish(self._clf_marker)
+
+    def draw_cbf(self):
+        self.cbf_publisher.publish(self._cbf_marker)
 
     def get_reference(self):
         return self._reference

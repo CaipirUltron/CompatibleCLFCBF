@@ -5,6 +5,7 @@ from sage.calculus.var import *
 
 
 class NonlinearSystem(BuiltinFunction):
+    
     def __init__(self, state_str, control_str, *expressions):
         BuiltinFunction.__init__(self, 'Dynamic System', nargs=2)
 
@@ -62,6 +63,7 @@ class NonlinearSystem(BuiltinFunction):
 
 
 class AffineSystem(NonlinearSystem):
+
     def __init__(self, state_str, control_str, f, *columns_g):
 
         NonlinearSystem.__init__(self, state_str, control_str)
@@ -83,6 +85,7 @@ class AffineSystem(NonlinearSystem):
 
 
 class LinearSystem(NonlinearSystem):
+
     def __init__(self, state_str, control_str, A, B):
         NonlinearSystem.__init__(self, state_str, control_str)
 
@@ -91,17 +94,25 @@ class LinearSystem(NonlinearSystem):
 
 
 class QuadraticFunction(BuiltinFunction):
+
     def __init__(self, var_str, A, b, c):
         BuiltinFunction.__init__(self, 'Quadratic Function', nargs=1)
 
         self._var = vector(var(var_str+','))
         self._dimension = np.size(self._var)
 
+        self.set_param(A,b,c)
+
         self._gen_var_str()
         self._create_dictionary()
 
-        A_symb, b_symb = matrix(A), vector(b)
-        self._function = self._var * ( A_symb * self._var ) + b_symb * self._var + c
+    def set_param(self, A, b, c):
+        self.A = A
+        self.b = b
+        self.c = c
+
+        A_symb, b_symb = matrix(self.A), vector(self.b)
+        self._function = self._var * ( A_symb * self._var ) + b_symb * self._var + self.c
         self._gradient = self._function.gradient()
         self._hessian = self._function.hessian()
 
@@ -134,6 +145,11 @@ class QuadraticFunction(BuiltinFunction):
     def hessian(self):
         return np.array(self._hessian, dtype=float)
 
+    def compute_eig(self):
+        clf_lambda, clf_rot = np.linalg.eig(self.A)
+        clf_angle = np.arctan2(clf_rot[0, 1], clf_rot[0, 0])
+        return clf_lambda, clf_angle
+
     def _eval_numpy_(self, vars):
         for i in range(self._dimension):
             self._var_dictionary[ self._var_str[i] ] = vars[i]
@@ -142,20 +158,36 @@ class QuadraticFunction(BuiltinFunction):
 
 
 class QuadraticLyapunov(QuadraticFunction):
+
     def __init__(self, var_str, H, x0):
 
-        self._minimum = x0
-        b = -2*H.T.dot(self._minimum)
-        c = H.dot(self._minimum).dot(self._minimum)
+        self.minimum = x0
+        self.A = H
+        self.b = -2*self.A.T.dot(self.minimum)
+        self.c = self.A.dot(self.minimum).dot(self.minimum)
         
-        QuadraticFunction.__init__(self, var_str, H, b, c)
+        QuadraticFunction.__init__(self, var_str, self.A, self.b, self.c)
+
+    def set_hessian(self, H):
+        A = H
+        b = -2*self.A.T.dot(self.minimum)
+        c = self.A.dot(self.minimum).dot(self.minimum)
+        self.set_param(A,b,c)
 
 
 class QuadraticBarrier(QuadraticFunction):
+
     def __init__(self, var_str, H, x0):
 
-        self._minimum = x0
-        b = -2*H.T.dot(self._minimum)
-        c = H.dot(self._minimum).dot(self._minimum) - 1
+        self.minimum = x0
+        self.A = H
+        self.b = -2*self.A.T.dot(self.minimum)
+        self.c = self.A.dot(self.minimum).dot(self.minimum) - 1
         
-        QuadraticFunction.__init__(self, var_str, H, b, c)
+        QuadraticFunction.__init__(self, var_str, self.A, self.b, self.c)
+
+    def set_hessian(self, H):
+        A = H
+        b = -2*self.A.T.dot(self.minimum)
+        c = self.A.dot(self.minimum).dot(self.minimum) - 1
+        self.set_param(A,b,c)
