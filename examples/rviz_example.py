@@ -8,7 +8,7 @@ from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, 
 
 try:
     # Simulation parameters
-    dt = .005
+    dt = .002
     sim_freq = 1/dt
     T = 20
 
@@ -16,23 +16,24 @@ try:
     f = ['0','0']
     g1 = ['1','0']
     g2 = ['0','1']
-    state_string = 'x1, x2'
-    control_string = 'u1, u2'
-    plant = AffineSystem(state_string, control_string, f, g1, g2)
+    g = [g1,g2]
+    state_string = 'x1, x2, '
+    control_string = 'u1, u2, '
+    plant = AffineSystem(state_string, control_string, f, *g)
 
     # Define initial state for plant simulation
     x_init, y_init = 0.1, 5
     initial_state = np.array([x_init,y_init])
 
     # Create CLF
-    lambda_x, lambda_y = 2.0, 1.0
+    lambda_x, lambda_y = 3.0, 1.0
     Hv = np.array([ [ lambda_x , 0.0 ],
                     [ 0.0 , lambda_y ] ])
     x0 = np.array([0,0])
     clf = QuadraticLyapunov(state_string, Hv, x0)
 
     # Create CBF
-    xaxis_length, yaxis_length = 2.0, 1.0
+    xaxis_length, yaxis_length = 1.0, 1.0
     lambda1, lambda2 = 1/xaxis_length**2, 1/yaxis_length**2
     Hh = np.array([ [ lambda1 , 0.0 ],
                     [ 0.0 , lambda2 ] ])
