@@ -165,6 +165,21 @@ class QuadraticFunction(BuiltinFunction):
 
         return self._function(**self._var_dictionary)
 
+    @staticmethod
+    def symmetric_basis(n):
+
+        # dim_symm = int(n*(n+1)/2)
+        symm_basis = list()
+
+        EYE = np.eye(n)
+        for i in range(n):
+            for j in range(i,n):
+                if i == j:
+                    symm_basis.append(np.outer(EYE[:,i], EYE[:,j]))
+                else:
+                    symm_basis.append(np.outer(EYE[:,i], EYE[:,j]) + np.outer(EYE[:,j], EYE[:,i]))
+
+        return symm_basis
 
 class QuadraticLyapunov(QuadraticFunction):
 
@@ -200,3 +215,4 @@ class QuadraticBarrier(QuadraticFunction):
         b = -2*self.A.T.dot(self.minimum)
         c = self.A.dot(self.minimum).dot(self.minimum) - 1
         self.set_param(A,b,c)
+

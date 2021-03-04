@@ -47,4 +47,4 @@ qp_controller = QPController(plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0
 # print(qp_controller.LHopital_den)
 # print(qp_controller.LHopital_num)
 
-print(qp_controller.clf_dynamics.expression())
+basis = qp_controller._clf.symmetric_basis(3)
