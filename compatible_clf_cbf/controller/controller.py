@@ -12,13 +12,13 @@ class QPController():
 
         # Initialize active CLF
         self._clf = clf
-        self.Hv = self._clf.A
-        self.x0 = self._clf.minimum
+        self.Hv = self._clf.hessian_matrix
+        self.x0 = self._clf.critical_point
 
         # Initialize active CBF
         self._cbf = cbf
-        self.Hh = self._cbf.A
-        self.p0 = self._cbf.minimum
+        self.Hh = self._cbf.hessian_matrix
+        self.p0 = self._cbf.critical_point
 
         # Dimensions and system model initialization
         self.state_dim = self._plant.state_dim
@@ -166,11 +166,16 @@ class QPController():
             poly_term = np.polymul( W[:,k], EYE[k,:] )
             self.num_poly = np.polyadd(self.num_poly, poly_term)
 
+        # Computes polynomial roots
+        self.pencil_char_roots = np.polynomial.polynomial.polyroots(self.pencil_char)
+        self.num_roots = np.polynomial.polynomial.polyroots(self.num_poly)
+        self.den_roots = np.polynomial.polynomial.polyroots(self.den_poly)
+
         # Computes f(0)
         self.f0 = self.num_poly[0]/pow(self.pencil_char[0],2)
 
         # Computes the numerator and denominator second derivatives for degenerate cases (L'Hopital's rule) 
-        dpencil_char = np.polyder(self.pencil_char)
-        ddpencil_char = np.polyder(dpencil_char)
-        self.LHopital_num = np.polyder(np.polyder(self.num_poly))
-        self.LHopital_den = 2*np.polyadd( np.polymul(dpencil_char,dpencil_char) , np.polymul(self.pencil_char,ddpencil_char) )
+        # dpencil_char = np.polyder(self.pencil_char)
+        # ddpencil_char = np.polyder(dpencil_char)
+        # self.LHopital_num = np.polyder(np.polyder(self.num_poly))
+        # self.LHopital_den = 2*np.polyadd( np.polymul(dpencil_char,dpencil_char) , np.polymul(self.pencil_char,ddpencil_char) )

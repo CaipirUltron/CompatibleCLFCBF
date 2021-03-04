@@ -1,4 +1,7 @@
+from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
+from sage.symbolic.constants import Pi
 import rospy
+import math
 import numpy as np
 
 from compatible_clf_cbf.controller import QPController
@@ -22,22 +25,27 @@ try:
     plant = AffineSystem(state_string, control_string, f, *g)
 
     # Define initial state for plant simulation
-    x_init, y_init = 0.1, 5
+    x_init, y_init = -2.0, 5
     initial_state = np.array([x_init,y_init])
 
     # Create CLF
-    lambda_x, lambda_y = 3.0, 1.0
-    Hv = np.array([ [ lambda_x , 0.0 ],
-                    [ 0.0 , lambda_y ] ])
+    lambdav_x, lambdav_y = 1.0, 2.0
+    CLFangle = math.pi/4
     x0 = np.array([0,0])
+
+    CLFeigen = np.array([ lambdav_x , lambdav_y ])
+    Hv = QuadraticFunction.canonical2D(CLFeigen, CLFangle)
     clf = QuadraticLyapunov(state_string, Hv, x0)
 
     # Create CBF
-    xaxis_length, yaxis_length = 1.0, 1.0
-    lambda1, lambda2 = 1/xaxis_length**2, 1/yaxis_length**2
-    Hh = np.array([ [ lambda1 , 0.0 ],
-                    [ 0.0 , lambda2 ] ])
+    xaxis_length, yaxis_length = 1.0, 2.0
+    CBFangle = -math.pi/4
     p0 = np.array([0,3])
+
+    lambdah_x, lambdah_y = 1/xaxis_length**2, 1/yaxis_length**2
+    CBFeigen = np.array([ lambdah_x , lambdah_y ])
+    Hh = QuadraticFunction.canonical2D(CBFeigen, CBFangle)
+    print(Hh)
     cbf = QuadraticBarrier(state_string, Hh, p0)
 
     # Create QP controller

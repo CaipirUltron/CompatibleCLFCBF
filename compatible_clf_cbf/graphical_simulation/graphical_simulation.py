@@ -109,13 +109,13 @@ class GraphicalSimulation():
         self._clf_marker.color.r = 0.0
         self._clf_marker.color.g = 0.4
         self._clf_marker.color.b = 1.0
-        self._clf_marker.pose.position.x = self._clf.minimum[0]
-        self._clf_marker.pose.position.y = self._clf.minimum[1]
+        self._clf_marker.pose.position.x = self._clf.critical_point[0]
+        self._clf_marker.pose.position.y = self._clf.critical_point[1]
         self._clf_marker.pose.position.z = 0
         self._clf_marker.pose.orientation.x = 0.0
         self._clf_marker.pose.orientation.y = 0.0
-        self._clf_marker.pose.orientation.z = np.sin(self.clf_angle/2)
-        self._clf_marker.pose.orientation.w = np.cos(self.clf_angle/2)
+        self._clf_marker.pose.orientation.z = np.sin(-self.clf_angle/2)
+        self._clf_marker.pose.orientation.w = np.cos(-self.clf_angle/2)
 
         # Initialize CBF marker
         self.cbf_lambda, self.cbf_angle = self._cbf.compute_eig()
@@ -130,13 +130,13 @@ class GraphicalSimulation():
         self._cbf_marker.color.r = 0.0
         self._cbf_marker.color.g = 1.0
         self._cbf_marker.color.b = 0.0
-        self._cbf_marker.pose.position.x = self._cbf.minimum[0]
-        self._cbf_marker.pose.position.y = self._cbf.minimum[1]
+        self._cbf_marker.pose.position.x = self._cbf.critical_point[0]
+        self._cbf_marker.pose.position.y = self._cbf.critical_point[1]
         self._cbf_marker.pose.position.z = 0
         self._cbf_marker.pose.orientation.x = 0.0
         self._cbf_marker.pose.orientation.y = 0.0
-        self._cbf_marker.pose.orientation.z = np.sin(self.cbf_angle/2)
-        self._cbf_marker.pose.orientation.w = np.cos(self.cbf_angle/2)
+        self._cbf_marker.pose.orientation.z = np.sin(-self.cbf_angle/2)
+        self._cbf_marker.pose.orientation.w = np.cos(-self.cbf_angle/2)
 
     def draw_trajectory(self, point):
         new_trajectory_point = Point()

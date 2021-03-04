@@ -1,10 +1,11 @@
+from sage.symbolic.constants import Pi
 import rospy
 import numpy as np
-
+from scipy.spatial.transform import Rotation as R
 from compatible_clf_cbf.controller import QPController
 from compatible_clf_cbf.dynamic_simulation import SimulateDynamics
 from compatible_clf_cbf.graphical_simulation import GraphicalSimulation
-from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier
+from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier, QuadraticFunction
     
 # Simulation parameters
 dt = .002
@@ -31,10 +32,13 @@ x0 = np.array([0,0])
 clf = QuadraticLyapunov(state_string, Hv, x0)
 
 # Create CBF
-xaxis_length, yaxis_length = 1.0, 1.0
+xaxis_length = 1.0
+yaxis_length = 1.0
+obs_angle = Pi/10
 lambda1, lambda2 = 1/xaxis_length**2, 1/yaxis_length**2
-Hh = np.array([ [ lambda1 , 0.0 ],
-                [ 0.0 , lambda2 ] ])
+Sigma_h = np.array([ [ lambda1 , 0.0 ],
+                     [ 0.0 , lambda2 ] ])
+R = QuadraticFunction.rot2D(obs_angle)
 p0 = np.array([0,1])
 cbf = QuadraticBarrier(state_string, Hh, p0)
 
@@ -42,9 +46,9 @@ cbf = QuadraticBarrier(state_string, Hh, p0)
 ref = np.array([0,0])
 qp_controller = QPController(plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0)
 
-# print(np.polynomial.polynomial.polyroots(qp_controller.pencil_char))
-# print(np.polynomial.polynomial.polyroots(qp_controller.num_poly))
-# print(qp_controller.LHopital_den)
-# print(qp_controller.LHopital_num)
+n = 2
+print("Basis of R"+str(n)+":")
+basis = QuadraticFunction.symmetric_basis(n)
+for i in range(np.size(basis,0)):
+    print(basis[0])
 
-basis = qp_controller._clf.symmetric_basis(3)

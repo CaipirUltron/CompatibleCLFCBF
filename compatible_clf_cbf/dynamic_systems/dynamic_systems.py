@@ -1,5 +1,6 @@
 import numpy as np
 from sage.all import *
+from sage.combinat.sloane_functions import A109814
 from sage.symbolic.function import BuiltinFunction
 from sage.calculus.var import *
 
@@ -104,26 +105,83 @@ class LinearSystem(NonlinearSystem):
 
 class QuadraticFunction(BuiltinFunction):
 
-    def __init__(self, var_str, A, b, c):
+    def __init__(self, var_str, A, b, c, *types):
         BuiltinFunction.__init__(self, 'Quadratic Function', nargs=1)
 
         self._var = vector(var(var_str+','))
         self._dimension = np.size(self._var)
 
-        self.set_param(A,b,c)
+        # Configure type: 'default' = x'Ax + b'x + c
+        #                 'factored' = (x - b)'A(x-b) + c
+        if len(types) == 0:
+            self.type = 'default'
+        else:
+            for type in types:
+                if type == 'default':
+                    self.type = 'default'
+                elif type == 'factored':
+                    self.type = 'factored'
 
+        self.set_param(A,b,c)
         self._gen_var_str()
         self._create_dictionary()
 
     def set_param(self, A, b, c):
-        self.A = A
-        self.b = b
-        self.c = c
+
+        if self.type == 'default':
+            self.A = A
+            self.b = b
+            self.c = c
+        else:
+            self.hessian_matrix = A
+            self.critical_point = b
+            self.height = c
+            self.A = self.hessian_matrix
+            self.b = -(self.hessian_matrix + self.hessian_matrix.T).dot(self.critical_point)
+            self.c = self.height + self.hessian_matrix.dot(self.critical_point).dot(self.critical_point)
 
         A_symb, b_symb = matrix(self.A), vector(self.b)
         self._function = self._var * ( A_symb * self._var ) + b_symb * self._var + self.c
         self._gradient = self._function.gradient()
         self._hessian = self._function.hessian()
+
+    # Define A, b, c for Quadratics of type 'default' = x'Ax + b'x + c
+    def set_A(self, A):
+        if self.type == 'factored':
+            return
+        else:
+            self.set_param(A, self.b, self.c)
+
+    def set_b(self, b):
+        if self.type == 'factored':
+            return
+        else:
+            self.set_param(self.A, b, self.c)
+
+    def set_c(self, c):
+        if self.type == 'factored':
+            return
+        else:
+            self.set_param(self.A, self.b, c)
+
+    # Define hessian, critical point and height for Quadratics of type 'factored' = (x - b)'A(x-b) + c
+    def set_hessian(self, H):
+        if self.type == 'default':
+            return
+        else:
+            self.set_param(H, self.critical_point, self.height)
+
+    def set_critical(self, x0):
+        if self.type == 'default':
+            return
+        else:
+            self.set_param(self.hessian_matrix, x0, self.height)
+
+    def set_height(self, height):
+        if self.type == 'default':
+            return
+        else:
+            self.set_param(self.hessian_matrix, self.critical_point, height)
 
     def _gen_var_str(self):
         self._var_str = list()
@@ -181,38 +239,27 @@ class QuadraticFunction(BuiltinFunction):
 
         return symm_basis
 
+    @staticmethod
+    def rot2D(theta):
+        c, s = np.cos(theta), np.sin(theta)
+        R = np.array(((c,-s),(s,c)))
+        return R
+
+    @staticmethod
+    def canonical2D(eigen, theta):
+        Diag = np.diag(eigen)
+        R = QuadraticFunction.rot2D(theta)
+        H = np.matmul(R, np.matmul(Diag, R.T))
+        return H
+
+
 class QuadraticLyapunov(QuadraticFunction):
 
     def __init__(self, var_str, H, x0):
-
-        self.minimum = x0
-        self.A = H
-        self.b = -2*self.A.T.dot(self.minimum)
-        self.c = self.A.dot(self.minimum).dot(self.minimum)
-        
-        QuadraticFunction.__init__(self, var_str, self.A, self.b, self.c)
-
-    def set_hessian(self, H):
-        A = H
-        b = -2*self.A.T.dot(self.minimum)
-        c = self.A.dot(self.minimum).dot(self.minimum)
-        self.set_param(A,b,c)
+        QuadraticFunction.__init__(self, var_str, H, x0, 0.0, 'factored')
 
 
 class QuadraticBarrier(QuadraticFunction):
 
     def __init__(self, var_str, H, x0):
-
-        self.minimum = x0
-        self.A = H
-        self.b = -2*self.A.T.dot(self.minimum)
-        self.c = self.A.dot(self.minimum).dot(self.minimum) - 1
-        
-        QuadraticFunction.__init__(self, var_str, self.A, self.b, self.c)
-
-    def set_hessian(self, H):
-        A = H
-        b = -2*self.A.T.dot(self.minimum)
-        c = self.A.dot(self.minimum).dot(self.minimum) - 1
-        self.set_param(A,b,c)
-
+        QuadraticFunction.__init__(self, var_str, H, x0, -1.0, 'factored')
