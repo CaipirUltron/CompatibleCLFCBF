@@ -1,5 +1,5 @@
 from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
-from sage.symbolic.constants import Pi
+# from sage.symbolic.constants import Pi
 import rospy
 import math
 import numpy as np
@@ -31,7 +31,7 @@ try:
     # Create CLF
     lambdav_x, lambdav_y = 1.0, 2.0
     CLFangle = math.pi/4
-    x0 = np.array([0,0])
+    x0 = np.array([1,0])
 
     CLFeigen = np.array([ lambdav_x , lambdav_y ])
     Hv = QuadraticFunction.canonical2D(CLFeigen, CLFangle)
@@ -45,16 +45,14 @@ try:
     lambdah_x, lambdah_y = 1/xaxis_length**2, 1/yaxis_length**2
     CBFeigen = np.array([ lambdah_x , lambdah_y ])
     Hh = QuadraticFunction.canonical2D(CBFeigen, CBFangle)
-    print(Hh)
     cbf = QuadraticBarrier(state_string, Hh, p0)
 
     # Create QP controller
-    ref = np.array([0,0])
     qp_controller = QPController(plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0)
 
     # Initialize simulation object
     dynamicSimulation = SimulateDynamics(plant, initial_state)
-    graphicalSimulation = GraphicalSimulation(ref, clf, cbf)
+    graphicalSimulation = GraphicalSimulation(clf.critical_point, clf, cbf)
 
     # Main loop
     rate = rospy.Rate(sim_freq)
@@ -71,7 +69,7 @@ try:
 
         # Draw graphical simulation
         graphicalSimulation.draw_trajectory(state)
-        graphicalSimulation.draw_reference(ref)
+        graphicalSimulation.draw_reference(clf.critical_point)
         graphicalSimulation.draw_clf(state)
         graphicalSimulation.draw_cbf()
 

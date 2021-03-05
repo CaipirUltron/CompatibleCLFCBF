@@ -226,7 +226,6 @@ class QuadraticFunction(BuiltinFunction):
     @staticmethod
     def symmetric_basis(n):
 
-        # dim_symm = int(n*(n+1)/2)
         symm_basis = list()
 
         EYE = np.eye(n)

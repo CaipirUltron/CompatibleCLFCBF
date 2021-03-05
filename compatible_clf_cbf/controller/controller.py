@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.linalg.linalg import det
 from scipy.optimize import linprog
 from qpsolvers import solve_qp, solve_safer_qp
 from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier
@@ -131,10 +132,11 @@ class QPController():
         W = np.zeros([n,n])
         self.pencil_char = np.zeros(n+1)
         
-        detHv = np.linalg.det(self.Hv)
+        self.detHv = np.linalg.det(self.Hv)
+        self.detHh = np.linalg.det(self.Hh)
         try:
             Hv_inv = np.linalg.inv(self.Hv)
-            Hv_adj = detHv * Hv_inv
+            Hv_adj = self.detHv * Hv_inv
         except np.linalg.LinAlgError as error:
             print(error)
             return
@@ -142,7 +144,7 @@ class QPController():
         # Main loop of the adapted Faddeev-LeVerrier algorithm for linear matrix pencils.
         # This computes the pencil characteristic polynomial, pencil adjugate expansion and
         # the set of numerator vectors.
-        self.pencil_char[0] = pow(-1,n) * detHv
+        self.pencil_char[0] = pow(-1,n) * self.detHv
         D[:][:][0] = pow(-1,n-1) * Hv_adj
         Omega[0,:] = D[:][:][0].dot(self.v0)
         for k in range(1,n+1):
@@ -167,6 +169,11 @@ class QPController():
             self.num_poly = np.polyadd(self.num_poly, poly_term)
 
         # Computes polynomial roots
+        Hh_invHv = np.matmul(np.linalg.inv(self.Hh), self.Hv)
+        self.pencil_char_roots2, _ = np.linalg.eig( Hh_invHv )
+
+        self.pencil_char2 = np.poly(self.pencil_char_roots2)*self.detHh
+
         self.pencil_char_roots = np.polynomial.polynomial.polyroots(self.pencil_char)
         self.num_roots = np.polynomial.polynomial.polyroots(self.num_poly)
         self.den_roots = np.polynomial.polynomial.polyroots(self.den_poly)
