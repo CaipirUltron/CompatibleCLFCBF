@@ -46,8 +46,8 @@ cbf = QuadraticBarrier(state_string, Hh, p0)
 # Create QP controller
 qp_controller = QPController(plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0)
 
-# print("Pencil eigenvalues:" + str(qp_controller.pencil_char_roots))
-# print("Eigenvalues of Hh^-1 Hv:" + str(qp_controller.eigen))
+print("Pencil eigenvalues:" + str(qp_controller.pencil_char_roots))
+print("det(H(\lambda)) = " + str(qp_controller.pencil_char))
 
-print(qp_controller.pencil_char)
-print(qp_controller.pencil_char2)
+print("Zeros = " + str(qp_controller.num_roots))
+print("Poles = " + str(qp_controller.den_roots))

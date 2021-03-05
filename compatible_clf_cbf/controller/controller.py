@@ -1,8 +1,10 @@
+from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
 import numpy as np
 from numpy.linalg.linalg import det
 from scipy.optimize import linprog
 from qpsolvers import solve_qp, solve_safer_qp
 from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier
+from compatible_clf_cbf.dynamic_simulation import SimulateDynamics
 
 class QPController():
     
@@ -12,14 +14,14 @@ class QPController():
         self._plant = plant
 
         # Initialize active CLF
-        self._clf = clf
-        self.Hv = self._clf.hessian_matrix
-        self.x0 = self._clf.critical_point
+        self.active_clf = clf
+        self.Hv = self.active_clf.hessian_matrix
+        self.x0 = self.active_clf.critical_point
 
         # Initialize active CBF
-        self._cbf = cbf
-        self.Hh = self._cbf.hessian_matrix
-        self.p0 = self._cbf.critical_point
+        self.active_cbf = cbf
+        self.Hh = self.active_cbf.hessian_matrix
+        self.p0 = self.active_cbf.critical_point
 
         # Dimensions and system model initialization
         self.state_dim = self._plant.state_dim
@@ -39,20 +41,31 @@ class QPController():
         self.control = np.zeros(self.control_dim)
         self.delta = 0
 
-        # Initialize CLF dynamical system
-        f_CLF_dynamics, g_CLF_dynamics = list(), list()
-        CLF_state_string, CLF_ctrl_string = str(), str()
+        # Initialize integrator subsystem for the CLF eigenvalues
+        f_clf_integrator, g_clf_integrator = list(), list()
+        clf_state_string, clf_ctrl_string = str(), str()
         EYE = np.eye(self.state_dim)
         for k in range(self.state_dim):
-            f_CLF_dynamics.append('0')
-            g_CLF_dynamics.append(EYE[k,:])
-            CLF_state_string = CLF_state_string + 'lambdav' + str(k+1) + ', '
-            CLF_ctrl_string = CLF_ctrl_string + 'dlambdav' + str(k+1) + ', '
-            
-        self.clf_dynamics = AffineSystem(CLF_state_string, CLF_ctrl_string, f_CLF_dynamics, *g_CLF_dynamics)
+            f_clf_integrator.append('0')
+            g_clf_integrator.append(EYE[k,:])
+            clf_state_string = clf_state_string + 'lambdav' + str(k+1) + ', '
+            clf_ctrl_string = clf_ctrl_string + 'dlambdav' + str(k+1) + ', '
+        self.clf_integrator = AffineSystem(clf_state_string, clf_ctrl_string, f_clf_integrator, *g_clf_integrator)
+
+        clf_eig, clf_angle = self.active_clf.compute_eig()
+
+        self.clf_dynamics = SimulateDynamics(self.clf_integrator, clf_eig)
+
+
 
     # This function returns the QP-based control
     def compute_control(self, state):
+
+        # Updates the CLF Hessian
+        clf_eig = self.clf_dynamics.state()
+        Hv = QuadraticFunction.canonical2D(clf_eig, clf_angle)
+        self.active_clf.set_hessian(Hv)
+
         a_clf, b_clf = self.compute_Lyapunov_constraints(state)
         a_cbf, b_cbf = self.compute_barrier_constraints(state)
 
@@ -72,8 +85,8 @@ class QPController():
         g = self._plant.compute_g(state)
 
         # Lyapunov function and gradient
-        V = self._clf(state)
-        nablaV = self._clf.gradient(state)
+        V = self.active_clf(state)
+        nablaV = self.active_clf.gradient(state)
 
         LfV = nablaV.dot(f)
         LgV = g.T.dot(nablaV)
@@ -91,8 +104,8 @@ class QPController():
         g = self._plant.compute_g(state)
 
         # Barrier function and gradient
-        h = self._cbf(state)
-        nablah = self._cbf.gradient(state)
+        h = self.active_cbf(state)
+        nablah = self.active_cbf.gradient(state)
 
         Lfh = nablah.dot(f)
         Lgh = g.T.dot(nablah)
@@ -141,27 +154,26 @@ class QPController():
             print(error)
             return
 
+        # Computes the pencil characteristic polynomial and its roots (pencil eigenvalues)
+        Hh_invHv = np.matmul(np.linalg.inv(self.Hh), self.Hv)
+        self.pencil_char_roots, _ = np.linalg.eig( Hh_invHv )
+        self.pencil_char = self.detHh * np.real(np.polynomial.polynomial.polyfromroots(self.pencil_char_roots))
+
         # Main loop of the adapted Faddeev-LeVerrier algorithm for linear matrix pencils.
-        # This computes the pencil characteristic polynomial, pencil adjugate expansion and
-        # the set of numerator vectors.
-        self.pencil_char[0] = pow(-1,n) * self.detHv
+        # This computes the pencil adjugate expansion and the set of numerator vectors.
         D[:][:][0] = pow(-1,n-1) * Hv_adj
         Omega[0,:] = D[:][:][0].dot(self.v0)
-        for k in range(1,n+1):
-            self.pencil_char[k] = (1/k)*np.trace( self.Hh * D[:][:][k-1] )
-            if k < n:
+        for k in range(1,n):
                 D[:][:][k] = Hv_inv * ( self.Hh * D[:][:][k-1] - self.pencil_char[k]*np.eye(n) )
                 Omega[k,:] = D[:][:][k].dot(self.v0)
 
-        # Pencil characteristic polynomial and denominator of f(\lambda) function
+        # Computes the denominator of f(\lambda) function
         self.den_poly = np.polymul(self.pencil_char, self.pencil_char)
 
-        # Computes the W matrix, for the numerator polynomial
+        # Computes the numerator polynomial
         for i in range(n):
             for j in range(n):
                 W[i,j] = self.Hh.dot(Omega[i,:]).dot(Omega[j,:])
-
-        # Computes the numerator polynomial
         EYE = np.eye(n)
         self.num_poly = np.zeros(n+1)
         for k in range(n):
@@ -169,12 +181,6 @@ class QPController():
             self.num_poly = np.polyadd(self.num_poly, poly_term)
 
         # Computes polynomial roots
-        Hh_invHv = np.matmul(np.linalg.inv(self.Hh), self.Hv)
-        self.pencil_char_roots2, _ = np.linalg.eig( Hh_invHv )
-
-        self.pencil_char2 = np.poly(self.pencil_char_roots2)*self.detHh
-
-        self.pencil_char_roots = np.polynomial.polynomial.polyroots(self.pencil_char)
         self.num_roots = np.polynomial.polynomial.polyroots(self.num_poly)
         self.den_roots = np.polynomial.polynomial.polyroots(self.den_poly)
 

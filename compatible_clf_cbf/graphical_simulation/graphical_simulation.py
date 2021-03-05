@@ -163,8 +163,13 @@ class GraphicalSimulation():
         self.ref_publisher.publish(self._ref_pos_marker)
 
     def draw_clf(self, point):
+
+        V_threshold = 0.01
         V_point = self._clf(point)
-        bar_clf_lambda = self.clf_lambda/V_point
+        if V_point > V_threshold:
+            bar_clf_lambda = self.clf_lambda/V_point
+        else:
+            bar_clf_lambda = self.clf_lambda/V_threshold
 
         self._clf_marker.scale.x = 2*np.sqrt(1/bar_clf_lambda[0])
         self._clf_marker.scale.y = 2*np.sqrt(1/bar_clf_lambda[1])
