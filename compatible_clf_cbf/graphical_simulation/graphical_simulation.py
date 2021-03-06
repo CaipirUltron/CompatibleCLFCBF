@@ -13,9 +13,9 @@ from tf.transformations import quaternion_from_euler
 # Class for 2D simulations in Rviz
 class GraphicalSimulation():
 
-    def __init__(self, ref, clf, cbf):
+    def __init__(self, clf, cbf):
+        
         # Initialize important class attributes
-
         self._clf = clf
         self._cbf = cbf
 
@@ -93,11 +93,8 @@ class GraphicalSimulation():
         self._ref_pos_marker.pose.orientation.z = 0.0
         self._ref_pos_marker.pose.orientation.w = 1.0
 
-        # Load reference
-        self._reference = ref
-
         # Initialize CLF marker
-        self.clf_lambda, self.clf_angle = self._clf.compute_eig()
+        self.clf_lambda, self.clf_angle, _ = self._clf.compute_eig()
 
         self._clf_marker.header.frame_id = "base_frame"
         self._clf_marker.type = self._clf_marker.SPHERE
@@ -118,7 +115,7 @@ class GraphicalSimulation():
         self._clf_marker.pose.orientation.w = np.cos(-self.clf_angle/2)
 
         # Initialize CBF marker
-        self.cbf_lambda, self.cbf_angle = self._cbf.compute_eig()
+        self.cbf_lambda, self.cbf_angle, _ = self._cbf.compute_eig()
 
         self._cbf_marker.header.frame_id = "base_frame"
         self._cbf_marker.type = self._cbf_marker.SPHERE
@@ -148,31 +145,36 @@ class GraphicalSimulation():
         # Publishes Rviz graphical objects
         self.trajectory_publisher.publish(self._trajectory_marker)
 
-    def draw_reference(self, ref_point):        
+    def draw_reference(self, ref_point):
         if isinstance(ref_point,type(PointStamped())):
-            self._reference[0] = ref_point.point.x
-            self._reference[1] = ref_point.point.y
+            reference = np.array([ ref_point.point.x, ref_point.point.y ])
         else:
-            self._reference[0] = ref_point[0]
-            self._reference[1] = ref_point[1]
+            reference = np.array([ ref_point[0], ref_point[1] ])
 
-        self._ref_pos_marker.pose.position.x = self._reference[0]
-        self._ref_pos_marker.pose.position.y = self._reference[1]
+        self._ref_pos_marker.pose.position.x = reference[0]
+        self._ref_pos_marker.pose.position.y = reference[1]
 
         # Publishes Rviz graphical objects
         self.ref_publisher.publish(self._ref_pos_marker)
 
-    def draw_clf(self, point):
+    def draw_clf(self, clf, point):
+
+        clf_lambda, clf_angle, _ = clf.compute_eig()
 
         V_threshold = 0.01
         V_point = self._clf(point)
         if V_point > V_threshold:
-            bar_clf_lambda = self.clf_lambda/V_point
+            bar_clf_lambda = clf_lambda/V_point
         else:
-            bar_clf_lambda = self.clf_lambda/V_threshold
+            bar_clf_lambda = clf_lambda/V_threshold
 
         self._clf_marker.scale.x = 2*np.sqrt(1/bar_clf_lambda[0])
         self._clf_marker.scale.y = 2*np.sqrt(1/bar_clf_lambda[1])
+        self._clf_marker.pose.position.x = clf.critical_point[0]
+        self._clf_marker.pose.position.y = clf.critical_point[1]
+        self._clf_marker.pose.orientation.z = np.sin(-clf_angle/2)
+        self._clf_marker.pose.orientation.w = np.cos(-clf_angle/2)
+
         self.clf_publisher.publish(self._clf_marker)
 
     def draw_cbf(self):

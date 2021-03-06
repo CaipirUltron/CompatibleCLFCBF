@@ -1,5 +1,4 @@
 from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
-# from sage.symbolic.constants import Pi
 import rospy
 import math
 import numpy as np
@@ -52,7 +51,7 @@ try:
 
     # Initialize simulation object
     dynamicSimulation = SimulateDynamics(plant, initial_state)
-    graphicalSimulation = GraphicalSimulation(clf.critical_point, clf, cbf)
+    graphicalSimulation = GraphicalSimulation(clf, cbf)
 
     # Main loop
     rate = rospy.Rate(sim_freq)
@@ -63,14 +62,15 @@ try:
 
         # Control
         control = qp_controller.compute_control(state)
+        qp_controller.update_CLF_dynamics(np.array([-0.2,0.2]))
 
         # Send actuation commands 
         dynamicSimulation.send_control_inputs(control, dt)
 
         # Draw graphical simulation
         graphicalSimulation.draw_trajectory(state)
-        graphicalSimulation.draw_reference(clf.critical_point)
-        graphicalSimulation.draw_clf(state)
+        graphicalSimulation.draw_reference(qp_controller.clf.critical_point)
+        graphicalSimulation.draw_clf(qp_controller.clf, state)
         graphicalSimulation.draw_cbf()
 
         rate.sleep()

@@ -215,7 +215,7 @@ class QuadraticFunction(BuiltinFunction):
     def compute_eig(self):
         clf_lambda, clf_rot = np.linalg.eig(self.A)
         clf_angle = np.arctan2(clf_rot[0, 1], clf_rot[0, 0])
-        return clf_lambda, clf_angle
+        return clf_lambda, clf_angle, clf_rot
 
     def _eval_numpy_(self, vars):
         for i in range(self._dimension):

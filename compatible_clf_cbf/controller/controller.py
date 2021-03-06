@@ -6,22 +6,27 @@ from qpsolvers import solve_qp, solve_safer_qp
 from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier
 from compatible_clf_cbf.dynamic_simulation import SimulateDynamics
 
+
 class QPController():
     
-    def __init__(self, plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 100.0):
+    def __init__(self, plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 100.0, dt = 0.001):
 
         # Initialize plant
         self._plant = plant
 
         # Initialize active CLF
-        self.active_clf = clf
-        self.Hv = self.active_clf.hessian_matrix
-        self.x0 = self.active_clf.critical_point
+        self.clf = clf
+        self.Hv = self.clf.hessian_matrix
+        clf_eig, clf_angle, clf_rot = self.clf.compute_eig()
+        self.clf_eig = clf_eig
+        self.clf_angle = clf_angle
+        self.clf_rot = clf_rot
+        self.x0 = self.clf.critical_point
 
         # Initialize active CBF
-        self.active_cbf = cbf
-        self.Hh = self.active_cbf.hessian_matrix
-        self.p0 = self.active_cbf.critical_point
+        self.cbf = cbf
+        self.Hh = self.cbf.hessian_matrix
+        self.p0 = self.cbf.critical_point
 
         # Dimensions and system model initialization
         self.state_dim = self._plant.state_dim
@@ -41,30 +46,68 @@ class QPController():
         self.control = np.zeros(self.control_dim)
         self.delta = 0
 
-        # Initialize integrator subsystem for the CLF eigenvalues
-        f_clf_integrator, g_clf_integrator = list(), list()
-        clf_state_string, clf_ctrl_string = str(), str()
+        # Control sample time
+        self.ctrl_dt = dt
+
+        # Initialize dynamic subsystems
+        f_integrator, g_integrator = list(), list()
+        state_string, ctrl_string = str(), str()
         EYE = np.eye(self.state_dim)
         for k in range(self.state_dim):
-            f_clf_integrator.append('0')
-            g_clf_integrator.append(EYE[k,:])
-            clf_state_string = clf_state_string + 'lambdav' + str(k+1) + ', '
-            clf_ctrl_string = clf_ctrl_string + 'dlambdav' + str(k+1) + ', '
-        self.clf_integrator = AffineSystem(clf_state_string, clf_ctrl_string, f_clf_integrator, *g_clf_integrator)
+            f_integrator.append('0')
+            g_integrator.append(EYE[k,:])
+            state_string = state_string + 'lambda' + str(k+1) + ', '
+            ctrl_string = ctrl_string + 'dlambda' + str(k+1) + ', '
 
-        clf_eig, clf_angle = self.active_clf.compute_eig()
+        # Integrator sybsystem for the CLF eigenvalues
+        eig_integrator = AffineSystem(state_string, ctrl_string, f_integrator, *g_integrator)
 
-        self.clf_dynamics = SimulateDynamics(self.clf_integrator, clf_eig)
+        # Integrator sybsystem for the CLF eigenvectors (angles of main axes)
+        angle_integrator = AffineSystem('angle', 'dangle', ['0'], ['1'])
 
+        # Integrator sybsystem for the CLF critical point
+        critical_integrator = AffineSystem(state_string, ctrl_string, f_integrator, *g_integrator)
 
+        self.clf_dynamics = SimulateDynamics(eig_integrator, self.clf_eig)
+
+    # Receives a control and updates 
+    def update_CLF_dynamics(self, lambdav_ctrl):
+
+        self.clf_dynamics.send_control_inputs(lambdav_ctrl, self.ctrl_dt)
+
+        n = self.state_dim
+        Hv = np.zeros([n,n])
+        lambdav = self.clf_dynamics.state()
+
+        for k in range(len(lambdav)):
+            Hv = Hv + lambdav[k] * np.outer( self.clf_rot[:,k], self.clf_rot[:,k] )
+
+        self.update_clf(Hv = Hv)
+
+    # Updates the active CLF function
+    def update_clf(self, **kwargs):
+
+        for key in kwargs:
+            if key == 'Hv':
+                Hv = kwargs[key]
+                self.clf.set_hessian(Hv)
+            elif key == 'x0':
+                x0 = kwargs[key]
+                self.clf.set_critical(x0)
+
+    # Updates the active CBF function
+    def update_cbf(self, **kwargs):
+
+        for key in kwargs:
+            if key == 'Hh':
+                Hh = kwargs[key]
+                self.cbf.set_hessian(Hh)
+            elif key == 'p0':
+                p0 = kwargs[key]
+                self.cbf.set_critical(p0)
 
     # This function returns the QP-based control
     def compute_control(self, state):
-
-        # Updates the CLF Hessian
-        clf_eig = self.clf_dynamics.state()
-        Hv = QuadraticFunction.canonical2D(clf_eig, clf_angle)
-        self.active_clf.set_hessian(Hv)
 
         a_clf, b_clf = self.compute_Lyapunov_constraints(state)
         a_cbf, b_cbf = self.compute_barrier_constraints(state)
@@ -85,8 +128,8 @@ class QPController():
         g = self._plant.compute_g(state)
 
         # Lyapunov function and gradient
-        V = self.active_clf(state)
-        nablaV = self.active_clf.gradient(state)
+        V = self.clf(state)
+        nablaV = self.clf.gradient(state)
 
         LfV = nablaV.dot(f)
         LgV = g.T.dot(nablaV)
@@ -104,8 +147,8 @@ class QPController():
         g = self._plant.compute_g(state)
 
         # Barrier function and gradient
-        h = self.active_cbf(state)
-        nablah = self.active_cbf.gradient(state)
+        h = self.cbf(state)
+        nablah = self.cbf.gradient(state)
 
         Lfh = nablah.dot(f)
         Lgh = g.T.dot(nablah)
