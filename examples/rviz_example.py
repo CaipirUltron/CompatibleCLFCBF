@@ -24,21 +24,21 @@ try:
     plant = AffineSystem(state_string, control_string, f, *g)
 
     # Define initial state for plant simulation
-    x_init, y_init = -2.0, 5
+    x_init, y_init = 0.1, 5
     initial_state = np.array([x_init,y_init])
 
     # Create CLF
-    lambdav_x, lambdav_y = 1.0, 2.0
-    CLFangle = math.pi/4
-    x0 = np.array([1,0])
+    lambdav_x, lambdav_y = 3.0, 1.0
+    CLFangle = 0.0
+    x0 = np.array([0,0])
 
     CLFeigen = np.array([ lambdav_x , lambdav_y ])
     Hv = QuadraticFunction.canonical2D(CLFeigen, CLFangle)
     clf = QuadraticLyapunov(state_string, Hv, x0)
 
     # Create CBF
-    xaxis_length, yaxis_length = 1.0, 2.0
-    CBFangle = -math.pi/4
+    xaxis_length, yaxis_length = 2.0, 1.0
+    CBFangle = 0.0
     p0 = np.array([0,3])
 
     lambdah_x, lambdah_y = 1/xaxis_length**2, 1/yaxis_length**2
@@ -61,8 +61,8 @@ try:
         state = dynamicSimulation.state()
 
         # Control
+        qp_controller.update_CLF_dynamics(np.array([-0.5,0.5]))
         control = qp_controller.compute_control(state)
-        qp_controller.update_CLF_dynamics(np.array([-0.2,0.2]))
 
         # Send actuation commands 
         dynamicSimulation.send_control_inputs(control, dt)

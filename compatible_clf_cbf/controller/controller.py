@@ -1,7 +1,6 @@
 from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
 import numpy as np
-from numpy.linalg.linalg import det
-from scipy.optimize import linprog
+import scipy
 from qpsolvers import solve_qp, solve_safer_qp
 from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier
 from compatible_clf_cbf.dynamic_simulation import SimulateDynamics
@@ -16,6 +15,7 @@ class QPController():
 
         # Initialize active CLF
         self.clf = clf
+        self.ref_clf = clf
         self.Hv = self.clf.hessian_matrix
         clf_eig, clf_angle, clf_rot = self.clf.compute_eig()
         self.clf_eig = clf_eig
@@ -25,6 +25,7 @@ class QPController():
 
         # Initialize active CBF
         self.cbf = cbf
+        self.ref_cbf = cbf
         self.Hh = self.cbf.hessian_matrix
         self.p0 = self.cbf.critical_point
 
@@ -73,15 +74,17 @@ class QPController():
     # Receives a control and updates 
     def update_CLF_dynamics(self, lambdav_ctrl):
 
+        # Integrate CLF eigenvalue subsystem
         self.clf_dynamics.send_control_inputs(lambdav_ctrl, self.ctrl_dt)
 
+        # Get CLF eigenvalue state and compute updated hessian matrix
         n = self.state_dim
         Hv = np.zeros([n,n])
         lambdav = self.clf_dynamics.state()
-
         for k in range(len(lambdav)):
             Hv = Hv + lambdav[k] * np.outer( self.clf_rot[:,k], self.clf_rot[:,k] )
-
+        
+        # Update CLF hessian eigenvalues
         self.update_clf(Hv = Hv)
 
     # Updates the active CLF function
@@ -188,6 +191,12 @@ class QPController():
         W = np.zeros([n,n])
         self.pencil_char = np.zeros(n+1)
         
+        # Get the generalized Schur decomposition of the matrix pencil and compute the generalized eigenvalues
+        schurHv, schurHh, alpha, beta, Q, Z = scipy.linalg.ordqz(self.Hv, self.Hh)
+        for k in range(n):
+            self.pencil_char_roots = alpha/beta
+
+        # Assumption: Hv is invertible
         self.detHv = np.linalg.det(self.Hv)
         self.detHh = np.linalg.det(self.Hh)
         try:
@@ -197,10 +206,8 @@ class QPController():
             print(error)
             return
 
-        # Computes the pencil characteristic polynomial and its roots (pencil eigenvalues)
-        Hh_invHv = np.matmul(np.linalg.inv(self.Hh), self.Hv)
-        self.pencil_char_roots, _ = np.linalg.eig( Hh_invHv )
-        self.pencil_char = self.detHh * np.real(np.polynomial.polynomial.polyfromroots(self.pencil_char_roots))
+        # Computes the pencil characteristic polynomial
+        self.pencil_char = ( np.real(np.prod(self.pencil_char_roots))/self.detHv ) * np.real(np.polynomial.polynomial.polyfromroots(self.pencil_char_roots))
 
         # Main loop of the adapted Faddeev-LeVerrier algorithm for linear matrix pencils.
         # This computes the pencil adjugate expansion and the set of numerator vectors.

@@ -33,8 +33,8 @@ for k in range(np.size(basis,0)):
 eigHv, _ = np.linalg.eig(Hv)
 eigHh, _ = np.linalg.eig(Hh)
 
-print("Eigenvalues of Hv:" + str(eigHv))
-print("Eigenvalues of Hh:" + str(eigHh))
+# print("Eigenvalues of Hv:" + str(eigHv))
+# print("Eigenvalues of Hh:" + str(eigHh))
 
 rng = 10
 x0 = rng*( 2*np.random.rand(n) - np.ones(n) )
@@ -47,7 +47,11 @@ cbf = QuadraticBarrier(state_string, Hh, p0)
 qp_controller = QPController(plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0)
 
 print("Pencil eigenvalues:" + str(qp_controller.pencil_char_roots))
+
 print("det(H(\lambda)) = " + str(qp_controller.pencil_char))
 
-print("Zeros = " + str(qp_controller.num_roots))
-print("Poles = " + str(qp_controller.den_roots))
+# print("Zeros = " + str(qp_controller.num_roots))
+# print("Poles = " + str(qp_controller.den_roots))
+
+# print("Hv = " + str(clf.hessian()))
+# print("Hh = " + str(cbf.hessian()))
