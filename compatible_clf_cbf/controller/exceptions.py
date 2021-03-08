@@ -1,0 +1,3 @@
+
+class InvalidQP(Exception):
+    pass

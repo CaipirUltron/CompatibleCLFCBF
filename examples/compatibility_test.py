@@ -1,7 +1,7 @@
 import rospy
 import math
 import numpy as np
-from compatible_clf_cbf.controller import QPController
+from compatible_clf_cbf.controller import QPController, QuadraticProgram
 from compatible_clf_cbf.dynamic_simulation import SimulateDynamics
 from compatible_clf_cbf.graphical_simulation import GraphicalSimulation
 from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier, QuadraticFunction
@@ -44,7 +44,7 @@ clf = QuadraticLyapunov(state_string, Hv, x0)
 cbf = QuadraticBarrier(state_string, Hh, p0)
 
 # Create QP controller
-qp_controller = QPController(plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0)
+qp_controller = QPController(plant, clf, cbf, gamma = [1.0, 1.0], alpha = [1.0, 1.0], p = [10.0, 10.0])
 
 print("Pencil eigenvalues:" + str(qp_controller.pencil_char_roots))
 
@@ -55,3 +55,11 @@ print("det(H(\lambda)) = " + str(qp_controller.pencil_char))
 
 # print("Hv = " + str(clf.hessian()))
 # print("Hh = " + str(cbf.hessian()))
+
+P = np.eye(2)
+q = np.zeros(2)
+A = np.array([[1.0, 1.0]])
+b = np.array([-1.0])
+
+innerQP = QuadraticProgram(P=P, q=q)
+print("QP solution is " + str(innerQP.get_solution()))
