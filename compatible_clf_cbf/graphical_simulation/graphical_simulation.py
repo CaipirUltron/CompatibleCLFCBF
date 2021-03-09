@@ -1,31 +1,32 @@
 import rospy
+import tf2_ros
 import numpy as np
+
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
 
-from rospy.numpy_msg import numpy_msg
-from sympy.plotting import plot_implicit
-from visualization_msgs.msg import Marker, MarkerArray
-from geometry_msgs.msg import Point, Pose, PoseStamped, PolygonStamped, PointStamped, TransformStamped
-from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier
+from visualization_msgs.msg import Marker
+from geometry_msgs.msg import Point, PointStamped, TransformStamped
 
-import tf, tf2_ros
-import time
-from tf.transformations import quaternion_from_euler
 
 class SimulationMatplot():
 
-    def __init__(self, axes_lim, numpoints, logs, clf, cbf):
+    def __init__(self, axes_lim, numpoints, logs, clf, cbf, draw_level = False, draw_gradient = False):
+
+        self.draw_level = draw_level
+        self.draw_gradient = draw_gradient
 
         # Initialize plot objects
         self.fig = plt.gcf()
         self.ax = plt.axes(xlim=axes_lim[0:2], ylim=axes_lim[2:4])
         self.ax.set_title('CLF-CBF QP-based Control')
 
+        # Get logs
         self.state_log = logs["stateLog"]
         self.clf_log = logs["clfLog"]
-
         self.num_steps = len(self.state_log[0])
+
+        # Get point resolution for graphical objects
         self.numpoints = numpoints
 
         self.clf, self.cbf = clf, cbf
@@ -34,6 +35,8 @@ class SimulationMatplot():
         self.trajectory, = self.ax.plot([],[],lw=2)
         self.clf_level_set, = self.ax.plot([],[],'b',lw=1)
         self.cbf_level_set, = self.ax.plot([],[],'g',lw=1)
+        # self.clf_arrows = self.ax.quiver([0.0],[0.0],[0.1],[0.1],pivot='mid',color='b')
+        # self.cbf_arrows = self.ax.quiver([0.0],[0.0],[0.1],[0.1],pivot='mid',color='g')
 
         self.animation = None
 
@@ -56,13 +59,18 @@ class SimulationMatplot():
         Hv = self.clf.eigen2hessian(current_clf_state)
         self.clf.set_hessian(Hv)
         
-        V = self.clf(current_state)
-        xclf, yclf = self.clf.superlevel(V, self.numpoints)
-        self.clf_level_set.set_data(xclf, yclf)
+        if self.draw_level:
+            V = self.clf(current_state)
+            xclf, yclf, uclf, vclf = self.clf.superlevel(V, self.numpoints)
+            self.clf_level_set.set_data(xclf, yclf)
 
         h = self.cbf(current_state)
-        xcbf, ycbf = self.cbf.superlevel(0.0, self.numpoints)
+        xcbf, ycbf, ucbf, vcbf = self.cbf.superlevel(0.0, self.numpoints)
         self.cbf_level_set.set_data(xcbf, ycbf)
+
+        if self.draw_gradient:
+        # self.clf_arrows = self.ax.quiver(xclf, yclf, uclf, vclf, pivot='tail', color='b', scale=50.0, headlength=0.5, headwidth=1.0)
+            self.cbf_arrows = self.ax.quiver(xcbf, ycbf, ucbf, vcbf, pivot='tail', color='g', scale=50.0, headlength=0.5, headwidth=1.0)
 
         return self.trajectory, self.clf_level_set, self.cbf_level_set,
 

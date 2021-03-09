@@ -252,7 +252,13 @@ class QuadraticFunction(BuiltinFunction):
             x = p[0] + Q[0,0]*y1 + Q[0,1]*y2
             y = p[1] + Q[1,0]*y1 + Q[1,1]*y2
 
-            return x, y
+            u, v = np.zeros(numpoints), np.zeros(numpoints)
+            for k in range(numpoints):
+                gradient = self.gradient(np.array([x[k],y[k]]))
+                u[k] = gradient[0]
+                v[k] = gradient[1]
+
+            return x, y, u, v
 
         t = np.linspace(0, 2*math.pi, numpoints)
 
@@ -263,23 +269,23 @@ class QuadraticFunction(BuiltinFunction):
                 # convex
                 delta = C-self.height
                 if delta > 0:
-                    x, y = parameterize_ellipse(delta)
+                    x, y, u, v = parameterize_ellipse(delta)
                 else:
-                    x, y = [], []
+                    x, y, u, v = [], [], [], []
             else:
                 # concave
                 delta = self.height-C
                 if delta > 0:
-                    x, y = parameterize_ellipse(delta)
+                    x, y, u, v = parameterize_ellipse(delta)
                 else:
-                    x, y = [], []
+                    x, y = [], [], [], []
         elif eig[0]*eig[1] < 0:
             # hyperbola
-            x, y = [], []
+            x, y, u, v = [], [], [], []
         else:
-            x, y = [], []
+            x, y, u, v = [], [], [], []
 
-        return x, y
+        return x, y, u, v
 
     def _eval_numpy_(self, vars):
         for i in range(self._dimension):

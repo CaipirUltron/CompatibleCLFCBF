@@ -77,6 +77,6 @@ logs = {
 # Show animation -------------------------------------------------------------------
 print('Animating simulation...')
 axes_lim = (-6,6,-6,6)
-plotSim = SimulationMatplot(axes_lim, 40, logs, clf, cbf)
+plotSim = SimulationMatplot(axes_lim, 40, logs, clf, cbf, draw_level=True)
 plotSim.animate()
 plt.show()
