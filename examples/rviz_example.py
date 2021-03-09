@@ -29,7 +29,7 @@ try:
 
     # Create CLF
     lambdav_x, lambdav_y = 6.0, 1.0
-    CLFangle = math.pi/3
+    CLFangle = 0.0
     x0 = np.array([0,0])
 
     CLFeigen = np.array([ lambdav_x , lambdav_y ])
@@ -47,7 +47,7 @@ try:
     cbf = QuadraticBarrier(state_string, Hh, p0)
 
     # Create QP controller
-    qp_controller = QPController(plant, clf, cbf, gamma = [1.0, 1.0], alpha = [1.0, 1.0], p = [10.0, 10.0])
+    qp_controller = QPController(plant, clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 1.0], p = [10.0, 10.0])
 
     # Initialize simulation object
     dynamicSimulation = SimulateDynamics(plant, initial_state)
@@ -61,7 +61,9 @@ try:
         state = dynamicSimulation.state()
 
         # Control
-        qp_controller.update_clf_dynamics(np.array([-0.5,0.5]))
+        lambda_control, delta_pi = qp_controller.compute_lambda_control()
+        # print("CLF Control = "+str(lambda_control))
+        qp_controller.update_clf_dynamics(lambda_control)
         control, delta = qp_controller.compute_control(state)
 
         # Send actuation commands 

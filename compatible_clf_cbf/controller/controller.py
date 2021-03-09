@@ -49,16 +49,19 @@ class QuadraticProgram():
     # Set constraints of the type A x <= b
     def set_constraints(self, A, b):
 
-        if A.ndim != 2 or b.ndim != 1:
-            raise Exception('A must be a 2-dim array must b must be a 1-dim array.')
+        if b.ndim != 1:
+            raise Exception('b must be a 1-dim array.')
 
-        if A.shape[0] != len(b):
+        if A.ndim == 2 and A.shape[0] != len(b):
             raise Exception('A and b must have the same number of lines.')
 
         self.A = A
         self.b = b
         self.dimension = A.shape[0]
-        self.num_constraints = A.shape[1]
+        if A.ndim == 2:
+            self.num_constraints = A.shape[1]
+        else:
+            self.num_constraints = 1
 
     # Returns the solution of the configured QP.
     def get_solution(self):
@@ -153,13 +156,11 @@ class QPController():
             state_string = state_string + 'lambda' + str(k+1) + ', '
             ctrl_string = ctrl_string + 'dlambda' + str(k+1) + ', '
 
+        init_clf_eig = [ 1.0, 6.0 ]
+
         # Integrator sybsystem for the CLF eigenvalues
         eig_integrator = AffineSystem(state_string, ctrl_string, f_integrator, *g_integrator)
-        self.clf_dynamics = SimulateDynamics(eig_integrator, self.clf_eig)
-
-        #---------------------------------
-        # self.update_clf(Hv = np.diag([ 5.0, 1.0 ]))
-        #---------------------------------
+        self.clf_dynamics = SimulateDynamics(eig_integrator, init_clf_eig)
 
     # This function returns the inner QP control
     def compute_control(self, state):
@@ -263,14 +264,17 @@ class QPController():
         self.update_clf(Hv = Hv)
 
     # This function returns the outer QP control
-    def compute_lambdav_control(self):
+    def compute_lambda_control(self):
 
-        A_outer, b_outer = self.compute_rate_constraint()
+        a_clf_pi, b_clf_pi = self.compute_rate_constraint()
         # a_clf_pi, b_clf_pi = self.compute_outer_Lyapunov_constraint()
 
         # Stacking the CLF and CBF constraints
         # A_outer = np.vstack([a_clf_pi, a_cbf_pi])
         # b_outer = np.array([b_clf_pi, b_cbf_pi],dtype=float)
+
+        A_outer = a_clf_pi
+        b_outer = np.array([b_clf_pi],dtype=float)
 
         # Solve inner QP
         self.outerQP.set_constraints(A = A_outer,b = b_outer)

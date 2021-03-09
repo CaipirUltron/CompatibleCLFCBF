@@ -1,5 +1,4 @@
 
-from compatible_clf_cbf import dynamic_simulation
 import rospy
 import math
 import numpy as np
@@ -62,7 +61,8 @@ for step in range(0, num_steps):
     state = dynamicSimulation.state()
 
     # Control
-    qp_controller.update_clf_dynamics(np.array([-0.5,0.5]))
+    lambda_control, delta_pi = qp_controller.compute_lambda_control()
+    qp_controller.update_clf_dynamics(lambda_control)
     control, delta = qp_controller.compute_control(state)
 
     # Send actuation commands 
