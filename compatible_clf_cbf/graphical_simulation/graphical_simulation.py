@@ -1,7 +1,10 @@
 import rospy
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as anim
 
 from rospy.numpy_msg import numpy_msg
+from sympy.plotting import plot_implicit
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point, Pose, PoseStamped, PolygonStamped, PointStamped, TransformStamped
 from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier
@@ -10,8 +13,58 @@ import tf, tf2_ros
 import time
 from tf.transformations import quaternion_from_euler
 
-# Class for 2D simulations in Rviz
-class GraphicalSimulation():
+class SimulationMatplot():
+
+    def __init__(self, axes_lim, numpoints, state_log, clf, cbf):
+
+        # Initialize plot objects
+        self.fig = plt.gcf()
+        self.ax = plt.axes(xlim=axes_lim[0:2], ylim=axes_lim[2:4])
+        self.ax.set_title('QP-based Control')
+
+        self.state_log = state_log
+        self.num_steps = len(self.state_log[0])
+        self.numpoints = numpoints
+
+        self.clf, self.cbf = clf, cbf
+
+        # Initalize graphical objects
+        self.trajectory, = self.ax.plot([],[],lw=2)
+        self.clf_level_set, = self.ax.plot([],[],'b',lw=1)
+        self.cbf_level_set, = self.ax.plot([],[],'g',lw=1)
+
+        self.animation = None
+
+    def init(self):
+
+        self.trajectory.set_data([],[])
+        self.clf_level_set.set_data([],[])
+        self.cbf_level_set.set_data([],[])
+
+        return self.trajectory, self.clf_level_set, self.cbf_level_set
+
+    def update(self, i):
+
+        xdata, ydata = self.state_log[0][0:i], self.state_log[1][0:i]
+        self.trajectory.set_data(xdata, ydata)
+
+        current_state = np.array([self.state_log[0][i], self.state_log[1][i]])
+
+        V = self.clf(current_state)
+        xclf, yclf = self.clf.superlevel(V, self.numpoints)
+        self.clf_level_set.set_data(xclf, yclf)
+
+        h = self.cbf(current_state)
+        xcbf, ycbf = self.cbf.superlevel(0.0, self.numpoints)
+        self.cbf_level_set.set_data(xcbf, ycbf)
+
+        return self.trajectory, self.clf_level_set, self.cbf_level_set,
+
+    def animate(self):
+        self.animation = anim.FuncAnimation(self.fig, func=self.update, init_func=self.init, frames=self.num_steps, interval=20, repeat=False, blit=True)
+
+
+class SimulationRviz():
 
     def __init__(self, clf, cbf):
         
@@ -58,6 +111,17 @@ class GraphicalSimulation():
         self._cbf_marker = Marker()
 
         # Initialize robot position marker
+        self.set_state(np.zeros(2))
+
+        # Initialize reference marker
+        self.set_reference(np.zeros(2))
+
+        # Initialize CLF and CBF markers
+        self.set_clf(clf)
+        self.set_cbf(cbf)
+
+    def set_state(self, state):
+
         self._trajectory_marker.header.frame_id = "base_frame"
         self._trajectory_marker.type = self._trajectory_marker.LINE_STRIP
         self._trajectory_marker.action = self._trajectory_marker.ADD
@@ -66,15 +130,16 @@ class GraphicalSimulation():
         self._trajectory_marker.color.r = 0.0
         self._trajectory_marker.color.g = 0.5
         self._trajectory_marker.color.b = 1.0
-        self._trajectory_marker.pose.position.x = 0.0
-        self._trajectory_marker.pose.position.y = 0.0
+        self._trajectory_marker.pose.position.x = state[0]
+        self._trajectory_marker.pose.position.y = state[1]
         self._trajectory_marker.pose.position.z = 0.0
         self._trajectory_marker.pose.orientation.x = 0.0
         self._trajectory_marker.pose.orientation.y = 0.0
         self._trajectory_marker.pose.orientation.z = 0.0
         self._trajectory_marker.pose.orientation.w = 1.0
 
-        # Initialize reference marker
+    def set_reference(self, ref):
+
         self._ref_pos_marker.header.frame_id = "base_frame"
         self._ref_pos_marker.type = self._ref_pos_marker.SPHERE
         self._ref_pos_marker.action = self._ref_pos_marker.ADD
@@ -85,17 +150,17 @@ class GraphicalSimulation():
         self._ref_pos_marker.color.r = 1.0
         self._ref_pos_marker.color.g = 0.0
         self._ref_pos_marker.color.b = 0.0
-        self._ref_pos_marker.pose.position.x = 0.0
-        self._ref_pos_marker.pose.position.y = 0.0
+        self._ref_pos_marker.pose.position.x = ref[0]
+        self._ref_pos_marker.pose.position.y = ref[1]
         self._ref_pos_marker.pose.position.z = -0.1
         self._ref_pos_marker.pose.orientation.x = 0.0
         self._ref_pos_marker.pose.orientation.y = 0.0
         self._ref_pos_marker.pose.orientation.z = 0.0
         self._ref_pos_marker.pose.orientation.w = 1.0
 
-        # Initialize CLF marker
-        self.clf_lambda, self.clf_angle, _ = self._clf.compute_eig()
-
+    def set_clf(self, clf):
+        
+        self.clf_lambda, self.clf_angle, _ = clf.compute_eig()
         self._clf_marker.header.frame_id = "base_frame"
         self._clf_marker.type = self._clf_marker.SPHERE
         self._clf_marker.action = self._clf_marker.ADD
@@ -106,17 +171,17 @@ class GraphicalSimulation():
         self._clf_marker.color.r = 0.0
         self._clf_marker.color.g = 0.4
         self._clf_marker.color.b = 1.0
-        self._clf_marker.pose.position.x = self._clf.critical_point[0]
-        self._clf_marker.pose.position.y = self._clf.critical_point[1]
+        self._clf_marker.pose.position.x = clf.critical_point[0]
+        self._clf_marker.pose.position.y = clf.critical_point[1]
         self._clf_marker.pose.position.z = 0
         self._clf_marker.pose.orientation.x = 0.0
         self._clf_marker.pose.orientation.y = 0.0
         self._clf_marker.pose.orientation.z = np.sin(-self.clf_angle/2)
         self._clf_marker.pose.orientation.w = np.cos(-self.clf_angle/2)
 
-        # Initialize CBF marker
-        self.cbf_lambda, self.cbf_angle, _ = self._cbf.compute_eig()
+    def set_cbf(self, cbf):
 
+        self.cbf_lambda, self.cbf_angle, _ = cbf.compute_eig()
         self._cbf_marker.header.frame_id = "base_frame"
         self._cbf_marker.type = self._cbf_marker.SPHERE
         self._cbf_marker.action = self._clf_marker.ADD

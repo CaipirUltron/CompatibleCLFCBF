@@ -69,10 +69,10 @@ class QuadraticProgram():
     # Method for solving the configured QP using quadprog.
     def solve_QP(self):
 
-        # try:
+        try:
             self.last_solution = solve_qp(P=self.P, q=self.q, G=self.A, h=self.b, solver="quadprog")
-        # except Exception as error:
-        #     print(error)
+        except Exception as error:
+            print(error)
 
 
 class QPController():

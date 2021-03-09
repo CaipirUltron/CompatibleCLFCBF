@@ -1,1 +1,1 @@
-from .graphical_simulation import GraphicalSimulation
+from .graphical_simulation import SimulationMatplot, SimulationRviz

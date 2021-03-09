@@ -16,9 +16,24 @@ class SimulateDynamics:
         self.mODE = ode(self.dynamics).set_integrator('dopri5')
         self.mODE.set_initial_value(self._state)
 
+        self.state_log = []
+        for _ in range(0, self.n):
+            self.state_log.append([])
+
+        self.control_log = []
+        for _ in range(0, self.m):
+            self.control_log.append([])
+
     def send_control_inputs(self, control_input, dt):
+
         self.compute_dynamics(control_input)
         self._state = self.mODE.integrate(self.mODE.t+dt)
+
+        for state_dim in range(0, self.n):
+            self.state_log[state_dim].append(self._state[state_dim])
+
+        for ctrl_dim in range(0, self.n):
+            self.control_log[ctrl_dim].append(control_input[ctrl_dim])
 
         return self._state
 

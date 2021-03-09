@@ -1,12 +1,12 @@
-from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
+
 import rospy
 import math
 import numpy as np
 
 from compatible_clf_cbf.controller import QPController
 from compatible_clf_cbf.dynamic_simulation import SimulateDynamics
-from compatible_clf_cbf.graphical_simulation import GraphicalSimulation
-from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier
+from compatible_clf_cbf.graphical_simulation import SimulationRviz
+from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier, QuadraticFunction
 
 try:
     # Simulation parameters
@@ -28,8 +28,8 @@ try:
     initial_state = np.array([x_init,y_init])
 
     # Create CLF
-    lambdav_x, lambdav_y = 4.0, 1.0
-    CLFangle = 0.0
+    lambdav_x, lambdav_y = 6.0, 1.0
+    CLFangle = math.pi/3
     x0 = np.array([0,0])
 
     CLFeigen = np.array([ lambdav_x , lambdav_y ])
@@ -51,7 +51,7 @@ try:
 
     # Initialize simulation object
     dynamicSimulation = SimulateDynamics(plant, initial_state)
-    graphicalSimulation = GraphicalSimulation(clf, cbf)
+    graphicalSimulation = SimulationRviz(clf, cbf)
 
     # Main loop
     rate = rospy.Rate(sim_freq)

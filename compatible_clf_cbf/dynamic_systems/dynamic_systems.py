@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.core.function_base import linspace
 from sage.all import *
 from sage.combinat.sloane_functions import A109814
 from sage.symbolic.function import BuiltinFunction
@@ -217,12 +218,56 @@ class QuadraticFunction(BuiltinFunction):
         clf_angle = np.arctan2(clf_rot[0, 1], clf_rot[0, 0])
         return clf_lambda, clf_angle, clf_rot
 
+    # This function returns the corresponding C-level set of the quadratic function, if its 2-dim
+    def superlevel(self, C, numpoints):
+
+        if self._dimension != 2:
+            return
+
+        def parameterize_ellipse(delta):
+
+            y1 = np.sqrt(delta/eig[0])*np.sin(t)
+            y2 = np.sqrt(delta/eig[1])*np.cos(t)
+
+            p = self.critical_point
+            x = p[0] + Q[0,0]*y1 + Q[0,1]*y2
+            y = p[1] + Q[1,0]*y1 + Q[1,1]*y2
+
+            return x, y
+
+        t = np.linspace(0, 2*math.pi, numpoints)
+
+        eig, Q = np.linalg.eig(self.hessian_matrix)
+        if eig[0]*eig[1] > 0:
+            # ellipse
+            if eig[0]>0:
+                # convex
+                delta = C-self.height
+                if delta > 0:
+                    x, y = parameterize_ellipse(delta)
+                else:
+                    x, y = [], []
+            else:
+                # concave
+                delta = self.height-C
+                if delta > 0:
+                    x, y = parameterize_ellipse(delta)
+                else:
+                    x, y = [], []
+        elif eig[0]*eig[1] < 0:
+            # hyperbola
+            x, y = [], []
+        else:
+            x, y = [], []
+
+        return x, y
+
     def _eval_numpy_(self, vars):
         for i in range(self._dimension):
             self._var_dictionary[ self._var_str[i] ] = vars[i]
 
         return self._function(**self._var_dictionary)
-
+ 
     @staticmethod
     def symmetric_basis(n):
 
