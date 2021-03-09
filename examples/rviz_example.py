@@ -28,9 +28,9 @@ try:
     initial_state = np.array([x_init,y_init])
 
     # Create CLF
-    lambdav_x, lambdav_y = 6.0, 1.0
+    lambdav_x, lambdav_y = 1.6, 1.0
     CLFangle = 0.0
-    x0 = np.array([0,0])
+    x0 = np.array([3,0])
 
     CLFeigen = np.array([ lambdav_x , lambdav_y ])
     Hv = QuadraticFunction.canonical2D(CLFeigen, CLFangle)
@@ -38,8 +38,8 @@ try:
 
     # Create CBF
     xaxis_length, yaxis_length = 2.0, 1.0
-    CBFangle = 0.0
-    p0 = np.array([0,3])
+    CBFangle = math.pi/100
+    p0 = np.array([3,3])
 
     lambdah_x, lambdah_y = 1/xaxis_length**2, 1/yaxis_length**2
     CBFeigen = np.array([ lambdah_x , lambdah_y ])
@@ -65,6 +65,15 @@ try:
         # print("CLF Control = "+str(lambda_control))
         qp_controller.update_clf_dynamics(lambda_control)
         control, delta = qp_controller.compute_control(state)
+
+        # print("Numerator = " + str(qp_controller.num_poly))
+        # print("Pencil characteristic = " + str(qp_controller.pencil_char))
+
+        print("Numerator roots = " + str(qp_controller.num_poly))
+        print("Pencil eigenvalues:" + str(qp_controller.pencil_char_roots))
+        
+        print("Critical:" + str(qp_controller.critical_points))
+        print("Critical values:" + str(qp_controller.critical_values))
 
         # Send actuation commands 
         dynamicSimulation.send_control_inputs(control, dt)

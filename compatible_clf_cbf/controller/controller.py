@@ -156,7 +156,8 @@ class QPController():
             state_string = state_string + 'lambda' + str(k+1) + ', '
             ctrl_string = ctrl_string + 'dlambda' + str(k+1) + ', '
 
-        init_clf_eig = [ 1.0, 6.0 ]
+        #init_clf_eig = [ 6.0, 1.0 ]
+        init_clf_eig = self.clf_eig
 
         # Integrator sybsystem for the CLF eigenvalues
         eig_integrator = AffineSystem(state_string, ctrl_string, f_integrator, *g_integrator)
@@ -333,7 +334,7 @@ class QPController():
             return
 
         # Computes the pencil characteristic polynomial and denominator of f(\lambda)
-        self.pencil_char = ( np.real(np.prod(self.pencil_char_roots))/self.detHv ) * np.real(np.polynomial.polynomial.polyfromroots(self.pencil_char_roots))
+        self.pencil_char = ( self.detHv/np.real(np.prod(self.pencil_char_roots)) ) * np.real(np.polynomial.polynomial.polyfromroots(self.pencil_char_roots))
         self.den_poly = np.polymul(self.pencil_char, self.pencil_char)
 
         # This computes the pencil adjugate expansion and the set of numerator vectors by the adapted Faddeev-LeVerrier algorithm.
@@ -365,3 +366,19 @@ class QPController():
 
         # Computes f(0)
         self.f0 = self.num_poly[0]/pow(self.pencil_char[0],2)
+
+        # Computes critical points
+        dnum_poly = np.polynomial.polynomial.polyder(self.num_poly)
+        dpencil_char = np.polynomial.polynomial.polyder(self.pencil_char)
+
+        num_df = np.polysub( np.polymul(dnum_poly, self.pencil_char), 2*np.polymul(self.num_poly, dpencil_char) )
+        self.critical_points = np.polynomial.polynomial.polyroots(num_df)
+
+        num_critical = len(self.critical_points)
+        self.critical_values = []
+        for k in range(num_critical):
+            if self.critical_points[k].imag == 0.0:
+                num_value = np.polynomial.polynomial.polyval( self.critical_points[k], self.num_poly )
+                pencil_char_value = np.polynomial.polynomial.polyval( self.critical_points[k], self.pencil_char )
+                f_value = num_value/(pencil_char_value**2)
+                self.critical_values.append(f_value.real)
