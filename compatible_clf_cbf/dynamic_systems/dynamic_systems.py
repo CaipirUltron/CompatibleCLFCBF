@@ -123,7 +123,15 @@ class QuadraticFunction(BuiltinFunction):
                 elif type == 'factored':
                     self.type = 'factored'
 
+        # Set parameters
         self.set_param(A,b,c)
+
+        # Set eigenbasis for hessian matrix
+        _, _, Q = self.compute_eig()
+        self.eigen_basis = np.zeros([self._dimension, self._dimension, self._dimension])
+        for k in range(self._dimension):
+            self.eigen_basis[:][:][k] = np.outer( Q[:,k], Q[:,k] )
+
         self._gen_var_str()
         self._create_dictionary()
 
@@ -184,6 +192,17 @@ class QuadraticFunction(BuiltinFunction):
         else:
             self.set_param(self.hessian_matrix, self.critical_point, height)
 
+    # Returns hessian matrix from a given set of eigenvalues
+    def eigen2hessian(self, eigen):
+        if self._dimension != len(eigen):
+                raise Exception("Dimension mismatch.")
+
+        H = np.zeros(self._dimension)
+        for k in range(self._dimension):
+            H = H + eigen[k] * self.eigen_basis[:][:][k]
+
+        return H
+
     def _gen_var_str(self):
         self._var_str = list()
         for i in range(self._dimension):
@@ -214,9 +233,9 @@ class QuadraticFunction(BuiltinFunction):
         return np.array(self._hessian, dtype=float)
 
     def compute_eig(self):
-        clf_lambda, clf_rot = np.linalg.eig(self.A)
-        clf_angle = np.arctan2(clf_rot[0, 1], clf_rot[0, 0])
-        return clf_lambda, clf_angle, clf_rot
+        eigen, Q = np.linalg.eig(self.hessian_matrix)
+        angle = np.arctan2(Q[0, 1], Q[0, 0])
+        return eigen, angle, Q
 
     # This function returns the corresponding C-level set of the quadratic function, if its 2-dim
     def superlevel(self, C, numpoints):

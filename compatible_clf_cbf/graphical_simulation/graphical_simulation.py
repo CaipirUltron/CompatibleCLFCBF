@@ -15,14 +15,16 @@ from tf.transformations import quaternion_from_euler
 
 class SimulationMatplot():
 
-    def __init__(self, axes_lim, numpoints, state_log, clf, cbf):
+    def __init__(self, axes_lim, numpoints, logs, clf, cbf):
 
         # Initialize plot objects
         self.fig = plt.gcf()
         self.ax = plt.axes(xlim=axes_lim[0:2], ylim=axes_lim[2:4])
-        self.ax.set_title('QP-based Control')
+        self.ax.set_title('CLF-CBF QP-based Control')
 
-        self.state_log = state_log
+        self.state_log = logs["stateLog"]
+        self.clf_log = logs["clfLog"]
+
         self.num_steps = len(self.state_log[0])
         self.numpoints = numpoints
 
@@ -49,7 +51,11 @@ class SimulationMatplot():
         self.trajectory.set_data(xdata, ydata)
 
         current_state = np.array([self.state_log[0][i], self.state_log[1][i]])
+        current_clf_state = np.array([self.clf_log[0][i], self.clf_log[1][i]])
 
+        Hv = self.clf.eigen2hessian(current_clf_state)
+        self.clf.set_hessian(Hv)
+        
         V = self.clf(current_state)
         xclf, yclf = self.clf.superlevel(V, self.numpoints)
         self.clf_level_set.set_data(xclf, yclf)
@@ -227,7 +233,7 @@ class SimulationRviz():
         clf_lambda, clf_angle, _ = clf.compute_eig()
 
         V_threshold = 0.01
-        V_point = self._clf(point)
+        V_point = clf(point)
         if V_point > V_threshold:
             bar_clf_lambda = clf_lambda/V_point
         else:

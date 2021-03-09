@@ -38,8 +38,8 @@ Hv = QuadraticFunction.canonical2D(CLFeigen, CLFangle)
 clf = QuadraticLyapunov(state_string, Hv, x0)
 
 # Create CBF
-xaxis_length, yaxis_length = 1.0, 2.0
-CBFangle = math.pi/2
+xaxis_length, yaxis_length = 2.0, 1.0
+CBFangle = 0.0
 p0 = np.array([0,3])
 
 lambdah_x, lambdah_y = 1/xaxis_length**2, 1/yaxis_length**2
@@ -48,12 +48,12 @@ Hh = QuadraticFunction.canonical2D(CBFeigen, CBFangle)
 cbf = QuadraticBarrier(state_string, Hh, p0)
 
 # Create QP controller
-qp_controller = QPController(plant, clf, cbf, gamma = [1.0, 1.0], alpha = [1.0, 1.0], p = [10.0, 10.0])
+qp_controller = QPController(plant, clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 1.0], p = [10.0, 10.0], init_eig = [ 1.0, 6.0 ])
 
 # Initialize simulation object
 dynamicSimulation = SimulateDynamics(plant, initial_state)
 
-# Simulation loop
+# Simulation loop -------------------------------------------------------------------
 print('Running simulation...')
 for step in range(0, num_steps):
 
@@ -68,9 +68,15 @@ for step in range(0, num_steps):
     # Send actuation commands 
     dynamicSimulation.send_control_inputs(control, dt)
 
-# Show animation
+# Collect simulation logs ----------------------------------------------------------
+logs = {
+    "stateLog": dynamicSimulation.state_log,
+    "clfLog": qp_controller.clf_dynamics.state_log
+}
+
+# Show animation -------------------------------------------------------------------
 print('Animating simulation...')
 axes_lim = (-6,6,-6,6)
-plotSim = SimulationMatplot(axes_lim, 40, dynamicSimulation.state_log, clf, cbf)
+plotSim = SimulationMatplot(axes_lim, 40, logs, clf, cbf)
 plotSim.animate()
 plt.show()

@@ -80,7 +80,7 @@ class QuadraticProgram():
 
 class QPController():
     
-    def __init__(self, plant, clf, cbf, gamma = [1.0, 1.0], alpha = [1.0, 1.0], p = [10.0, 10.0], dt = 0.001):
+    def __init__(self, plant, clf, cbf, gamma = [1.0, 1.0], alpha = [1.0, 1.0], p = [10.0, 10.0], dt = 0.001, **kwargs):
 
         # Initialize plant
         self._plant = plant
@@ -88,10 +88,6 @@ class QPController():
         # Initialize active CLF
         self.clf = clf
         self.Hv = self.clf.hessian_matrix
-        clf_eig, clf_angle, clf_rot = self.clf.compute_eig()
-        self.clf_eig = clf_eig
-        self.clf_angle = clf_angle
-        self.clf_rot = clf_rot
         self.x0 = self.clf.critical_point
 
         # Initialize reference CLF
@@ -107,11 +103,13 @@ class QPController():
         self.state_dim = self._plant.state_dim
         self.control_dim = self._plant.control_dim
 
-        # Store eigenbasis for Hv
-        n = self.state_dim
-        self.eigen_basis = np.zeros([n, n, n])
-        for k in range(n):
-            self.eigen_basis[:][:][k] = np.outer( self.clf_rot[:,k], self.clf_rot[:,k] )
+        # Custom initial condition for CLF dynamics
+        self.init_lambdav, _, _ = self.clf.compute_eig()
+        for key in kwargs:
+            if key == 'init_eig':
+                self.init_lambdav = kwargs[key]
+                Hv = self.clf.eigen2hessian(self.init_lambdav)
+                self.update_clf(Hv = Hv)
 
         # Initialize Hessian CLF
         self.Vpi = 0.0
@@ -156,12 +154,9 @@ class QPController():
             state_string = state_string + 'lambda' + str(k+1) + ', '
             ctrl_string = ctrl_string + 'dlambda' + str(k+1) + ', '
 
-        #init_clf_eig = [ 6.0, 1.0 ]
-        init_clf_eig = self.clf_eig
-
         # Integrator sybsystem for the CLF eigenvalues
         eig_integrator = AffineSystem(state_string, ctrl_string, f_integrator, *g_integrator)
-        self.clf_dynamics = SimulateDynamics(eig_integrator, init_clf_eig)
+        self.clf_dynamics = SimulateDynamics(eig_integrator, self.init_lambdav)
 
     # This function returns the inner QP control
     def compute_control(self, state):
@@ -254,13 +249,10 @@ class QPController():
         # Integrate CLF eigenvalue subsystem
         self.clf_dynamics.send_control_inputs(lambdav_ctrl, self.ctrl_dt)
 
-        # Get CLF eigenvalue state and compute updated hessian matrix
-        n = self.state_dim
-        Hv = np.zeros([n,n])
+        # Get eigenvalue state and compute updated hessian matrix
         lambdav = self.clf_dynamics.state()
-        for k in range(len(lambdav)):
-            Hv = Hv + lambdav[k] * np.outer( self.clf_rot[:,k], self.clf_rot[:,k] )
-        
+        Hv = self.clf.eigen2hessian(lambdav)
+
         # Update CLF hessian eigenvalues
         self.update_clf(Hv = Hv)
 
@@ -298,7 +290,7 @@ class QPController():
         # Computes the gradient of the CLF for the outer subsystem
         self.nablaVpi = np.zeros(self.state_dim)
         for k in range(self.state_dim):
-            self.nablaVpi[k] = np.trace( np.matmul( deltaHv, self.eigen_basis[:][:][k]) )
+            self.nablaVpi[k] = np.trace( np.matmul( deltaHv, self.clf.eigen_basis[:][:][k]) )
 
         # CLF contraint for the outer QP 
         a_clf_pi = np.hstack( [ self.nablaVpi, -1.0 ])
