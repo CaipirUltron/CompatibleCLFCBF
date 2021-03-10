@@ -243,14 +243,32 @@ class QuadraticFunction(BuiltinFunction):
         if self._dimension != 2:
             return
 
-        def parameterize_ellipse(delta):
-
-            y1 = np.sqrt(delta/eig[0])*np.sin(t)
-            y2 = np.sqrt(delta/eig[1])*np.cos(t)
-
+        def change_variables(y1, y2):
             p = self.critical_point
             x = p[0] + Q[0,0]*y1 + Q[0,1]*y2
             y = p[1] + Q[1,0]*y1 + Q[1,1]*y2
+            return x, y
+
+        def parameterize_ellipse(delta):
+            y1 = np.sqrt(delta/eig[0])*np.sin(t)
+            y2 = np.sqrt(delta/eig[1])*np.cos(t)
+            return y1, y2
+
+        def parameterize_hyperbola(delta):
+            # y1 = np.sqrt(np.abs(delta/eig[0]))*(1/np.cos(t))
+            # y2 = np.sqrt(np.abs(delta/eig[1]))*np.tan(t)
+            y1 = np.sqrt(np.abs(delta/eig[0]))*np.cosh(t)
+            y2 = np.sqrt(np.abs(delta/eig[1]))*np.sinh(t)
+            return y1, y2
+
+        def parameterize(delta):
+
+            if level_type == 'ellipse':
+                y1, y2 = parameterize_ellipse(delta)
+            elif level_type == 'hyperbola':
+                y1, y2 = parameterize_hyperbola(delta)
+
+            x, y = change_variables(y1, y2)
 
             u, v = np.zeros(numpoints), np.zeros(numpoints)
             for k in range(numpoints):
@@ -260,28 +278,45 @@ class QuadraticFunction(BuiltinFunction):
 
             return x, y, u, v
 
-        t = np.linspace(0, 2*math.pi, numpoints)
+        t = np.linspace(-math.pi, math.pi, numpoints)
 
+        # Parameterize 
         eig, Q = np.linalg.eig(self.hessian_matrix)
         if eig[0]*eig[1] > 0:
             # ellipse
+            level_type = 'ellipse'
             if eig[0]>0:
                 # convex
                 delta = C-self.height
                 if delta > 0:
-                    x, y, u, v = parameterize_ellipse(delta)
+                    x, y, u, v = parameterize(delta)
                 else:
                     x, y, u, v = [], [], [], []
             else:
                 # concave
                 delta = self.height-C
                 if delta > 0:
-                    x, y, u, v = parameterize_ellipse(delta)
+                    x, y, u, v = parameterize(delta)
                 else:
-                    x, y = [], [], [], []
+                    x, y, u, v = [], [], [], []
         elif eig[0]*eig[1] < 0:
             # hyperbola
-            x, y, u, v = [], [], [], []
+            level_type = 'hyperbola'
+            bareig1 = eig[0]
+            if eig[0]>0:
+                # convex
+                delta = C-self.height
+                if delta > 0:
+                    x, y, u, v = parameterize(delta)
+                else:
+                    x, y, u, v = [], [], [], []
+            else:
+                # concave
+                delta = self.height-C
+                if delta > 0:
+                    x, y, u, v = parameterize(delta)
+                else:
+                    x, y, u, v = [], [], [], []
         else:
             x, y, u, v = [], [], [], []
 

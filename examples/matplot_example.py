@@ -25,12 +25,12 @@ control_string = 'u1, u2, '
 plant = AffineSystem(state_string, control_string, f, *g)
 
 # Define initial state for plant simulation
-x_init, y_init = 0.1, 5
+x_init, y_init = 3.1, 5
 initial_state = np.array([x_init,y_init])
 
 # Create CLF
-lambdav_x, lambdav_y = 6.0, 1.0
-CLFangle = 0.0
+lambdav_x, lambdav_y = 1.0, 2.0
+CLFangle = math.radians(45.0)
 x0 = np.array([0,0])
 
 CLFeigen = np.array([ lambdav_x , lambdav_y ])
@@ -39,8 +39,8 @@ clf = QuadraticLyapunov(state_string, Hv, x0)
 
 # Create CBF
 xaxis_length, yaxis_length = 2.0, 1.0
-CBFangle = 0.0
-p0 = np.array([0,3])
+CBFangle = math.radians(-45.0)
+p0 = np.array([3,3])
 
 lambdah_x, lambdah_y = 1/xaxis_length**2, 1/yaxis_length**2
 CBFeigen = np.array([ lambdah_x , lambdah_y ])
@@ -48,7 +48,8 @@ Hh = QuadraticFunction.canonical2D(CBFeigen, CBFangle)
 cbf = QuadraticBarrier(state_string, Hh, p0)
 
 # Create QP controller
-qp_controller = QPController(plant, clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 1.0], p = [10.0, 10.0], init_eig = [ 1.0, 6.0 ])
+init_eig = CLFeigen
+qp_controller = QPController(plant, clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 1.0], p = [10.0, 10.0], init_eig = init_eig)
 
 # Initialize simulation object
 dynamicSimulation = SimulateDynamics(plant, initial_state)

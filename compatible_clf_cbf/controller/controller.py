@@ -326,8 +326,9 @@ class QPController():
             return
 
         # Computes the pencil characteristic polynomial and denominator of f(\lambda)
-        self.pencil_char = ( self.detHv/np.real(np.prod(self.pencil_char_roots)) ) * np.real(np.polynomial.polynomial.polyfromroots(self.pencil_char_roots))
-        self.den_poly = np.polymul(self.pencil_char, self.pencil_char)
+        pencil_det = np.real(np.prod(self.pencil_char_roots))
+        self.pencil_char = ( self.detHv/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(self.pencil_char_roots))
+        self.den_poly = np.polynomial.polynomial.polymul(self.pencil_char, self.pencil_char)
 
         # This computes the pencil adjugate expansion and the set of numerator vectors by the adapted Faddeev-LeVerrier algorithm.
         D = np.zeros([n, n, n])
@@ -337,40 +338,54 @@ class QPController():
         Omega[0,:] = D[:][:][0].dot(self.v0)
 
         for k in range(1,n):
-                D[:][:][k] = Hv_inv * ( self.Hh * D[:][:][k-1] - self.pencil_char[k]*np.eye(n) )
-                Omega[k,:] = D[:][:][k].dot(self.v0)        
+            D[:][:][k] = np.matmul( Hv_inv, np.matmul(self.Hh, D[:][:][k-1]) - self.pencil_char[k]*np.eye(n) )
+            Omega[k,:] = D[:][:][k].dot(self.v0)
 
         # Computes the numerator polynomial
         W = np.zeros([n,n])
         for i in range(n):
             for j in range(n):
-                W[i,j] = self.Hh.dot(Omega[i,:]).dot(Omega[j,:])
+                W[i,j] = np.inner(self.Hh.dot(Omega[i,:]), Omega[j,:])
 
         EYE = np.eye(n)
-        self.num_poly = np.zeros(n+1)
+        self.num_poly = np.polynomial.polynomial.polyzero
         for k in range(n):
-            poly_term = np.polymul( W[:,k], EYE[k,:] )
-            self.num_poly = np.polyadd(self.num_poly, poly_term)
+            poly_term = np.polynomial.polynomial.polymul( W[:,k], EYE[:,k] )
+            self.num_poly = np.polynomial.polynomial.polyadd(self.num_poly, poly_term)
 
         # Computes polynomial roots
         self.num_roots = np.polynomial.polynomial.polyroots(self.num_poly)
         self.den_roots = np.polynomial.polynomial.polyroots(self.den_poly)
 
         # Computes f(0)
-        self.f0 = self.num_poly[0]/pow(self.pencil_char[0],2)
+        self.f0 = self.num_poly[0]/(self.pencil_char[0]**2)
 
         # Computes critical points
         dnum_poly = np.polynomial.polynomial.polyder(self.num_poly)
         dpencil_char = np.polynomial.polynomial.polyder(self.pencil_char)
 
-        num_df = np.polysub( np.polymul(dnum_poly, self.pencil_char), 2*np.polymul(self.num_poly, dpencil_char) )
-        self.critical_points = np.polynomial.polynomial.polyroots(num_df)
+        poly1 = np.polynomial.polynomial.polymul(dnum_poly, self.pencil_char)
+        poly2 = 2*np.polynomial.polynomial.polymul(self.num_poly, dpencil_char)
+        num_df = np.polynomial.polynomial.polysub( poly1, poly2 )
+        critical_points = np.polynomial.polynomial.polyroots(num_df)
+        self.critical_points = np.real(np.extract( critical_points.imag == 0.0, critical_points ))
 
         num_critical = len(self.critical_points)
         self.critical_values = []
         for k in range(num_critical):
-            if self.critical_points[k].imag == 0.0:
-                num_value = np.polynomial.polynomial.polyval( self.critical_points[k], self.num_poly )
-                pencil_char_value = np.polynomial.polynomial.polyval( self.critical_points[k], self.pencil_char )
-                f_value = num_value/(pencil_char_value**2)
-                self.critical_values.append(f_value.real)
+            num_value = np.polynomial.polynomial.polyval( self.critical_points[k], self.num_poly )
+            pencil_char_value = np.polynomial.polynomial.polyval( self.critical_points[k], self.pencil_char )
+            f_value = num_value/(pencil_char_value**2)
+            self.critical_values.append(f_value.real)
+
+    # Returns the values of f at t
+    def fvalues(self, t):
+
+        numpoints = len(t)
+        fvalues = np.zeros(numpoints)
+        for k in range(numpoints):
+            num_value = np.polynomial.polynomial.polyval( t[k], self.num_poly )
+            pencil_char_value = np.polynomial.polynomial.polyval( t[k], self.pencil_char )
+            fvalues[k] = num_value/(pencil_char_value**2)
+
+        return fvalues
