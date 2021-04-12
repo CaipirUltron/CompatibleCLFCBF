@@ -328,6 +328,39 @@ class QuadraticFunction(BuiltinFunction):
 
         return self._function(**self._var_dictionary)
  
+    # The input vector must be of length 3 or higher
+    @staticmethod
+    def vector2sym(vector):
+
+        dim = vector.shape[0]
+        if dim < 3:
+            raise Exception("The input vector must be of length 3 or higher.")
+
+        n = int((-1 + np.sqrt(1+8*dim))/2)
+        sym_basis = QuadraticFunction.symmetric_basis(n)
+        
+        M = np.zeros([n,n])
+        for k in range(dim):
+            M = M + sym_basis[k]*vector[k]
+        return M
+
+    @staticmethod
+    def sym2vector(M):
+
+        n = M.shape[0]
+        if n < 2:
+            raise Exception("The input matrix must be of size 2x2 or higher.")
+
+        sym_basis = QuadraticFunction.symmetric_basis(n)
+        dim = int((n*(n+1))/2)
+
+        vector = np.zeros(dim)
+        for k in range(dim):
+            list = np.nonzero(sym_basis[k])
+            i, j = list[0][0], list[1][0]
+            vector[k] = M[i][j]
+        return vector
+
     @staticmethod
     def symmetric_basis(n):
 

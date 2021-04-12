@@ -3,7 +3,6 @@ import rospy
 import math
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.animation as anim
 
 from compatible_clf_cbf.controller import QPController
 from compatible_clf_cbf.dynamic_simulation import SimulateDynamics
@@ -29,20 +28,19 @@ x_init, y_init = 3.1, 5
 initial_state = np.array([x_init,y_init])
 
 # Create CLF
-lambdav_x, lambdav_y = 1.0, 2.0
-CLFangle = math.radians(45.0)
 x0 = np.array([0,0])
-
+CLFangle = math.radians(-30.0)
+lambdav_x, lambdav_y = 4.0, 1.0
 CLFeigen = np.array([ lambdav_x , lambdav_y ])
 Hv = QuadraticFunction.canonical2D(CLFeigen, CLFangle)
 clf = QuadraticLyapunov(state_string, Hv, x0)
 
 # Create CBF
-xaxis_length, yaxis_length = 2.0, 1.0
-CBFangle = math.radians(-45.0)
-p0 = np.array([3,3])
-
-lambdah_x, lambdah_y = 1/xaxis_length**2, 1/yaxis_length**2
+# xaxis_length, yaxis_length = 10.0, 1.0
+# lambdah_x, lambdah_y = 1/xaxis_length**2, 1/yaxis_length**2
+p0 = np.array([1,2])
+CBFangle = math.radians(0.0)
+lambdah_x, lambdah_y = 1.0, 1.0
 CBFeigen = np.array([ lambdah_x , lambdah_y ])
 Hh = QuadraticFunction.canonical2D(CBFeigen, CBFangle)
 cbf = QuadraticBarrier(state_string, Hh, p0)
@@ -50,6 +48,20 @@ cbf = QuadraticBarrier(state_string, Hh, p0)
 # Create QP controller
 init_eig = CLFeigen
 qp_controller = QPController(plant, clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 1.0], p = [10.0, 10.0], init_eig = init_eig)
+
+# Show initial plot of f(\lambda)
+print("Pencil eigenvalues:" + str(qp_controller.pencil_char_roots))
+print("Critical:" + str(qp_controller.critical_points))
+print("Critical values:" + str(qp_controller.critical_values))
+
+# fig = plt.figure()
+# axes_lim = (0, 20.0, 0, 300.0)
+# ax = plt.axes(xlim=axes_lim[0:2], ylim=axes_lim[2:4])
+# ax.set_title('CLF-CBF QP-based Control')
+# lamb = np.arange(axes_lim[0], axes_lim[1], 0.01)
+# fvalues = qp_controller.fvalues(lamb)
+# ax.plot(lamb, fvalues, zorder=100, color='red')
+# plt.show()
 
 # Initialize simulation object
 dynamicSimulation = SimulateDynamics(plant, initial_state)

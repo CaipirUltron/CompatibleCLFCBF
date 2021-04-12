@@ -102,6 +102,7 @@ class QPController():
         # Dimensions and system model initialization
         self.state_dim = self._plant.state_dim
         self.control_dim = self._plant.control_dim
+        self.Sn_dim = ( self.state_dim * ( self.state_dim + 1 ) )/2
 
         # Custom initial condition for CLF dynamics
         self.init_lambdav, _, _ = self.clf.compute_eig()
@@ -148,18 +149,21 @@ class QPController():
         f_integrator, g_integrator = list(), list()
         state_string, ctrl_string = str(), str()
         EYE = np.eye(self.state_dim)
-        for k in range(self.state_dim):
+        for k in range(self.Sn_dim):
             f_integrator.append('0')
             g_integrator.append(EYE[k,:])
-            state_string = state_string + 'lambda' + str(k+1) + ', '
-            ctrl_string = ctrl_string + 'dlambda' + str(k+1) + ', '
+            state_string = state_string + 'pi' + str(k+1) + ', '
+            ctrl_string = ctrl_string + 'dpi' + str(k+1) + ', '
 
-        # Integrator sybsystem for the CLF eigenvalues
-        eig_integrator = AffineSystem(state_string, ctrl_string, f_integrator, *g_integrator)
-        self.clf_dynamics = SimulateDynamics(eig_integrator, self.init_lambdav)
+        # Integrator sybsystem for the CLF parameters
+        pi_integrator = AffineSystem(state_string, ctrl_string, f_integrator, *g_integrator)
+        self.clf_dynamics = SimulateDynamics(pi_integrator, self.init_lambdav)
 
     # This function returns the inner QP control
     def compute_control(self, state):
+
+        inner = np.inner( self.clf.gradient(state), self.cbf.gradient(state) )
+        # print("Inner product = "+str(inner))
 
         a_clf, b_clf = self.compute_clf_constraint(state)
         a_cbf, b_cbf = self.compute_cbf_constraint(state)
