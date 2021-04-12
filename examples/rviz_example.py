@@ -49,9 +49,12 @@ try:
     cbf = QuadraticBarrier(state_string, Hh, p0)
 
     # Create QP controller
-    # init_eig = [ 1.0, 10.0 ]   
-    init_eig = CLFeigen
-    qp_controller = QPController(plant, clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 1.0], p = [10.0, 10.0], init_eig = init_eig)
+    lambdav_x_init, lambdav_y_init = 1.0, 4.0
+    CLFangle_init = math.radians(30.0)
+    CLFeigen_init = np.array([ lambdav_x_init , lambdav_y_init ])
+    Hv_init = QuadraticFunction.canonical2D(CLFeigen_init, CLFangle_init)
+    init_piv = QuadraticFunction.sym2vector(Hv_init)
+    qp_controller = QPController(plant, clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 1.0], p = [10.0, 10.0], init_pi = init_piv)
 
     # Show initial plot of f(\lambda)
     print("Pencil eigenvalues:" + str(qp_controller.pencil_char_roots))
@@ -79,13 +82,12 @@ try:
         state = dynamicSimulation.state()
 
         # Control
-        lambda_control, delta_pi = qp_controller.compute_lambda_control()
-        qp_controller.update_clf_dynamics(lambda_control)
+        piv_control, delta_piv = qp_controller.compute_pi_control()
+        qp_controller.update_clf_dynamics(piv_control)
         control, delta = qp_controller.compute_control(state)
 
         nablaV = qp_controller.clf.gradient(state)
         nablah = qp_controller.cbf.gradient(state)
-        print("Inner product btw gradients:" + str(np.inner(nablaV,nablah)))
 
         # print("Pencil eigenvalues:" + str(qp_controller.pencil_char_roots))
         # print("Critical:" + str(qp_controller.critical_points))

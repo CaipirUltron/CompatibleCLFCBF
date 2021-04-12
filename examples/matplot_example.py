@@ -24,12 +24,12 @@ control_string = 'u1, u2, '
 plant = AffineSystem(state_string, control_string, f, *g)
 
 # Define initial state for plant simulation
-x_init, y_init = 3.1, 5
+x_init, y_init = 2.1, 5
 initial_state = np.array([x_init,y_init])
 
 # Create CLF
 x0 = np.array([0,0])
-CLFangle = math.radians(-30.0)
+CLFangle = math.radians(0.0)
 lambdav_x, lambdav_y = 4.0, 1.0
 CLFeigen = np.array([ lambdav_x , lambdav_y ])
 Hv = QuadraticFunction.canonical2D(CLFeigen, CLFangle)
@@ -38,7 +38,7 @@ clf = QuadraticLyapunov(state_string, Hv, x0)
 # Create CBF
 # xaxis_length, yaxis_length = 10.0, 1.0
 # lambdah_x, lambdah_y = 1/xaxis_length**2, 1/yaxis_length**2
-p0 = np.array([1,2])
+p0 = np.array([0,3])
 CBFangle = math.radians(0.0)
 lambdah_x, lambdah_y = 1.0, 1.0
 CBFeigen = np.array([ lambdah_x , lambdah_y ])
@@ -46,8 +46,12 @@ Hh = QuadraticFunction.canonical2D(CBFeigen, CBFangle)
 cbf = QuadraticBarrier(state_string, Hh, p0)
 
 # Create QP controller
-init_eig = CLFeigen
-qp_controller = QPController(plant, clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 1.0], p = [10.0, 10.0], init_eig = init_eig)
+lambdav_x_init, lambdav_y_init = 1.0, 4.0
+CLFangle_init = math.radians(30.0)
+CLFeigen_init = np.array([ lambdav_x_init , lambdav_y_init ])
+Hv_init = QuadraticFunction.canonical2D(CLFeigen_init, CLFangle_init)
+init_piv = QuadraticFunction.sym2vector(Hv_init)
+qp_controller = QPController(plant, clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 1.0], p = [10.0, 10.0], init_pi = init_piv)
 
 # Show initial plot of f(\lambda)
 print("Pencil eigenvalues:" + str(qp_controller.pencil_char_roots))
@@ -74,8 +78,8 @@ for step in range(0, num_steps):
     state = dynamicSimulation.state()
 
     # Control
-    lambda_control, delta_pi = qp_controller.compute_lambda_control()
-    qp_controller.update_clf_dynamics(lambda_control)
+    piv_control, delta_pi = qp_controller.compute_pi_control()
+    qp_controller.update_clf_dynamics(piv_control)
     control, delta = qp_controller.compute_control(state)
 
     # Send actuation commands 

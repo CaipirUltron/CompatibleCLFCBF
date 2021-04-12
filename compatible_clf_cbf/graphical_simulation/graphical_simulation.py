@@ -1,3 +1,4 @@
+from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
 import rospy
 import tf2_ros
 import numpy as np
@@ -54,9 +55,9 @@ class SimulationMatplot():
         self.trajectory.set_data(xdata, ydata)
 
         current_state = np.array([self.state_log[0][i], self.state_log[1][i]])
-        current_clf_state = np.array([self.clf_log[0][i], self.clf_log[1][i]])
+        current_pi_state = np.array([self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i]])
 
-        Hv = self.clf.eigen2hessian(current_clf_state)
+        Hv = QuadraticFunction.vector2sym(current_pi_state)
         self.clf.set_hessian(Hv)
         
         if self.draw_level:

@@ -102,14 +102,14 @@ class QPController():
         # Dimensions and system model initialization
         self.state_dim = self._plant.state_dim
         self.control_dim = self._plant.control_dim
-        self.Sn_dim = ( self.state_dim * ( self.state_dim + 1 ) )/2
+        self.Sn_dim = int(( self.state_dim * ( self.state_dim + 1 ) )/2)
 
         # Custom initial condition for CLF dynamics
-        self.init_lambdav, _, _ = self.clf.compute_eig()
+        self.init_piv = QuadraticFunction.sym2vector(self.Hv)
         for key in kwargs:
-            if key == 'init_eig':
-                self.init_lambdav = kwargs[key]
-                Hv = self.clf.eigen2hessian(self.init_lambdav)
+            if key == 'init_pi':
+                self.init_piv = kwargs[key]
+                Hv = QuadraticFunction.vector2sym(self.init_piv)
                 self.update_clf(Hv = Hv)
 
         # Initialize Hessian CLF
@@ -131,9 +131,9 @@ class QPController():
         self.innerQP = QuadraticProgram(P=P_inner, q=q_inner)
 
         # Parameters for outer QP controller
-        self.outer_QP_dim = self.state_dim + 1
+        self.outer_QP_dim = self.Sn_dim + 1
         P_outer = np.eye(self.outer_QP_dim)
-        P_outer[self.state_dim,self.state_dim] = p[1]
+        P_outer[self.Sn_dim,self.Sn_dim] = p[1]
         q_outer = np.zeros(self.outer_QP_dim)
         self.outerQP = QuadraticProgram(P=P_outer, q=q_outer)
 
@@ -148,7 +148,7 @@ class QPController():
         # Initialize dynamic subsystems
         f_integrator, g_integrator = list(), list()
         state_string, ctrl_string = str(), str()
-        EYE = np.eye(self.state_dim)
+        EYE = np.eye(self.Sn_dim)
         for k in range(self.Sn_dim):
             f_integrator.append('0')
             g_integrator.append(EYE[k,:])
@@ -157,7 +157,7 @@ class QPController():
 
         # Integrator sybsystem for the CLF parameters
         pi_integrator = AffineSystem(state_string, ctrl_string, f_integrator, *g_integrator)
-        self.clf_dynamics = SimulateDynamics(pi_integrator, self.init_lambdav)
+        self.clf_dynamics = SimulateDynamics(pi_integrator, self.init_piv)
 
     # This function returns the inner QP control
     def compute_control(self, state):
@@ -248,20 +248,20 @@ class QPController():
         self.compute_compatibility()
 
     # Receives a control and updates
-    def update_clf_dynamics(self, lambdav_ctrl):
+    def update_clf_dynamics(self, piv_ctrl):
 
         # Integrate CLF eigenvalue subsystem
-        self.clf_dynamics.send_control_inputs(lambdav_ctrl, self.ctrl_dt)
+        self.clf_dynamics.send_control_inputs(piv_ctrl, self.ctrl_dt)
 
         # Get eigenvalue state and compute updated hessian matrix
-        lambdav = self.clf_dynamics.state()
-        Hv = self.clf.eigen2hessian(lambdav)
+        pi_v = self.clf_dynamics.state()
+        Hv = QuadraticFunction.vector2sym(pi_v)
 
         # Update CLF hessian eigenvalues
         self.update_clf(Hv = Hv)
 
     # This function returns the outer QP control
-    def compute_lambda_control(self):
+    def compute_pi_control(self):
 
         a_clf_pi, b_clf_pi = self.compute_rate_constraint()
         # a_clf_pi, b_clf_pi = self.compute_outer_Lyapunov_constraint()
@@ -277,10 +277,10 @@ class QPController():
         self.outerQP.set_constraints(A = A_outer,b = b_outer)
         outerQP_sol = self.outerQP.get_solution()
 
-        self.last_lambdav_ctrl = outerQP_sol[0:self.state_dim,]
-        self.last_deltapi_ctrl = outerQP_sol[self.state_dim,]
+        self.last_piv_ctrl = outerQP_sol[0:self.Sn_dim,]
+        self.last_deltapi_ctrl = outerQP_sol[self.Sn_dim,]
 
-        return self.last_lambdav_ctrl, self.last_deltapi_ctrl
+        return self.last_piv_ctrl, self.last_deltapi_ctrl
 
     # This function implements the Lyapunov constraint for the outer subsystem
     def compute_rate_constraint(self):
@@ -289,12 +289,13 @@ class QPController():
         deltaHv = self.Hv - self.ref_Hv
 
         # Computes the CLF for the outer subsystem
-        self.Vpi = 0.5 * np.trace( np.matmul(deltaHv,deltaHv) )
+        self.Vpi = 0.5 * np.trace( np.matmul(deltaHv, deltaHv) )
 
         # Computes the gradient of the CLF for the outer subsystem
-        self.nablaVpi = np.zeros(self.state_dim)
-        for k in range(self.state_dim):
-            self.nablaVpi[k] = np.trace( np.matmul( deltaHv, self.clf.eigen_basis[:][:][k]) )
+        self.nablaVpi = np.zeros(self.Sn_dim)
+        sym_basis = QuadraticFunction.symmetric_basis(self.state_dim)
+        for k in range(self.Sn_dim):
+            self.nablaVpi[k] = np.trace( np.matmul( deltaHv, sym_basis[k]) )
 
         # CLF contraint for the outer QP 
         a_clf_pi = np.hstack( [ self.nablaVpi, -1.0 ])
