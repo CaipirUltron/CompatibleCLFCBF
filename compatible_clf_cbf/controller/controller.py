@@ -162,7 +162,7 @@ class QPController():
     # This function returns the inner QP control
     def compute_control(self, state):
 
-        inner = np.inner( self.clf.gradient(state), self.cbf.gradient(state) )
+        # inner = np.inner( self.clf.gradient(state), self.cbf.gradient(state) )
         # print("Inner product = "+str(inner))
 
         a_clf, b_clf = self.compute_clf_constraint(state)
@@ -264,7 +264,7 @@ class QPController():
     def compute_pi_control(self):
 
         a_clf_pi, b_clf_pi = self.compute_rate_constraint()
-        # a_clf_pi, b_clf_pi = self.compute_outer_Lyapunov_constraint()
+        # a_cbf_pi, b_cbf_pi = self.compute_compatibility_constraints()
 
         # Stacking the CLF and CBF constraints
         # A_outer = np.vstack([a_clf_pi, a_cbf_pi])
@@ -305,9 +305,6 @@ class QPController():
 
     # This function implements the Lyapunov constraint for the outer subsystem
     def compute_compatibility_constraints(self):
-
-        
-
         return
 
     # This function computes the polynomials of the rational compatibility funcion f(\lambda). It assumes an invertible Hv.
