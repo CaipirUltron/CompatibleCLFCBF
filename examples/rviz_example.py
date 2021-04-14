@@ -57,7 +57,7 @@ try:
     qp_controller = QPController(plant, clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 1.0], p = [10.0, 10.0], init_pi = init_piv)
 
     # Show initial plot of f(\lambda)
-    print("Pencil eigenvalues:" + str(qp_controller.pencil_char_roots))
+    print("Pencil eigenvalues:" + str(qp_controller.sigma_v) + ", " + str(qp_controller.sigma_h))
     print("Critical:" + str(qp_controller.critical_points))
     print("Critical values:" + str(qp_controller.critical_values))
 
@@ -89,9 +89,9 @@ try:
         nablaV = qp_controller.clf.gradient(state)
         nablah = qp_controller.cbf.gradient(state)
 
-        # print("Pencil eigenvalues:" + str(qp_controller.pencil_char_roots))
+        # print("Pencil eigenvalues:" + str(np.real(qp_controller.sigma_v)) + ", " + str(np.real(qp_controller.sigma_h)))
         # print("Critical:" + str(qp_controller.critical_points))
-        # print("Critical values:" + str(qp_controller.critical_values))
+        print("Critical values:" + str(qp_controller.critical_values))
 
         # Send actuation commands 
         dynamicSimulation.send_control_inputs(control, dt)

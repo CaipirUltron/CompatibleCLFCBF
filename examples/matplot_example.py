@@ -46,7 +46,7 @@ Hh = QuadraticFunction.canonical2D(CBFeigen, CBFangle)
 cbf = QuadraticBarrier(state_string, Hh, p0)
 
 # Create QP controller
-lambdav_x_init, lambdav_y_init = 1.0, 4.0
+lambdav_x_init, lambdav_y_init = -1.0, 4.0
 CLFangle_init = math.radians(30.0)
 CLFeigen_init = np.array([ lambdav_x_init , lambdav_y_init ])
 Hv_init = QuadraticFunction.canonical2D(CLFeigen_init, CLFangle_init)

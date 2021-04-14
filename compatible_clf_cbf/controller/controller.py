@@ -304,7 +304,10 @@ class QPController():
         return a_clf_pi, b_clf_pi
 
     # This function implements the Lyapunov constraint for the outer subsystem
-    def compute_compatibility_constraint(self):
+    def compute_compatibility_constraints(self):
+
+        
+
         return
 
     # This function computes the polynomials of the rational compatibility funcion f(\lambda). It assumes an invertible Hv.
@@ -318,6 +321,8 @@ class QPController():
         # Get the generalized Schur decomposition of the matrix pencil and compute the generalized eigenvalues
         schurHv, schurHh, alpha, beta, Q, Z = scipy.linalg.ordqz(self.Hv, self.Hh)
         for k in range(n):
+            self.sigma_v = alpha
+            self.sigma_h = beta
             self.pencil_char_roots = alpha/beta
 
         # Assumption: Hv is invertible
@@ -366,31 +371,39 @@ class QPController():
         self.f0 = self.num_poly[0]/(self.pencil_char[0]**2)
 
         # Computes critical points
-        dnum_poly = np.polynomial.polynomial.polyder(self.num_poly)
-        dpencil_char = np.polynomial.polynomial.polyder(self.pencil_char)
+        self.dnum_poly = np.polynomial.polynomial.polyder(self.num_poly)
+        self.dpencil_char = np.polynomial.polynomial.polyder(self.pencil_char)
 
-        poly1 = np.polynomial.polynomial.polymul(dnum_poly, self.pencil_char)
-        poly2 = 2*np.polynomial.polynomial.polymul(self.num_poly, dpencil_char)
+        poly1 = np.polynomial.polynomial.polymul(self.dnum_poly, self.pencil_char)
+        poly2 = 2*np.polynomial.polynomial.polymul(self.num_poly, self.dpencil_char)
         num_df = np.polynomial.polynomial.polysub( poly1, poly2 )
         critical_points = np.polynomial.polynomial.polyroots(num_df)
         self.critical_points = np.real(np.extract( critical_points.imag == 0.0, critical_points ))
 
-        num_critical = len(self.critical_points)
-        self.critical_values = []
-        for k in range(num_critical):
-            num_value = np.polynomial.polynomial.polyval( self.critical_points[k], self.num_poly )
-            pencil_char_value = np.polynomial.polynomial.polyval( self.critical_points[k], self.pencil_char )
-            f_value = num_value/(pencil_char_value**2)
-            self.critical_values.append(f_value.real)
+        self.critical_values = self.f_values(self.critical_points)
 
-    # Returns the values of f at t
-    def fvalues(self, t):
+    # Returns the values of f at args
+    def f_values(self, args):
 
-        numpoints = len(t)
+        numpoints = len(args)
         fvalues = np.zeros(numpoints)
         for k in range(numpoints):
-            num_value = np.polynomial.polynomial.polyval( t[k], self.num_poly )
-            pencil_char_value = np.polynomial.polynomial.polyval( t[k], self.pencil_char )
+            num_value = np.polynomial.polynomial.polyval( args[k], self.num_poly )
+            pencil_char_value = np.polynomial.polynomial.polyval( args[k], self.pencil_char )
             fvalues[k] = num_value/(pencil_char_value**2)
 
         return fvalues
+
+    # Returns the values of df at args
+    def df_values(self, args):
+        
+        numpoints = len(args)
+        dfvalues = np.zeros(numpoints)
+        for k in range(numpoints):
+            num_value = np.polynomial.polynomial.polyval( args[k], self.num_poly )
+            dnum_value = np.polynomial.polynomial.polyval( args[k], self.dnum_poly )
+            pencil_char_value = np.polynomial.polynomial.polyval( args[k], self.pencil_char )
+            dpencil_char_value = np.polynomial.polynomial.polyval( args[k], self.dpencil_char )
+            dfvalues[k] = dnum_value/(pencil_char_value**2) - 2*(num_value/(pencil_char_value**3))*dpencil_char_value
+
+        return dfvalues
