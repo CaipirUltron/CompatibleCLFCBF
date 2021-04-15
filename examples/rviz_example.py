@@ -30,7 +30,7 @@ try:
     initial_state = np.array([x_init,y_init])
 
     # Create CLF
-    lambdav_x, lambdav_y = 4.0, 1.0
+    lambdav_x, lambdav_y = 6.0, 1.0
     CLFangle = math.radians(0.0)
     x0 = np.array([0,0])
 
@@ -39,8 +39,8 @@ try:
     clf = QuadraticLyapunov(state_string, Hv, x0)
 
     # Create CBF
-    xaxis_length, yaxis_length = 1.0, 1.0
-    CBFangle = math.radians(0.0)
+    xaxis_length, yaxis_length = 4.0, 1.0
+    CBFangle = math.radians(15.0)
     p0 = np.array([0,3])
 
     lambdah_x, lambdah_y = 1/xaxis_length**2, 1/yaxis_length**2
@@ -49,8 +49,8 @@ try:
     cbf = QuadraticBarrier(state_string, Hh, p0)
 
     # Create QP controller
-    lambdav_x_init, lambdav_y_init = 1.0, 4.0
-    CLFangle_init = math.radians(30.0)
+    lambdav_x_init, lambdav_y_init = 6.0, 1.0
+    CLFangle_init = math.radians(0.0)
     CLFeigen_init = np.array([ lambdav_x_init , lambdav_y_init ])
     Hv_init = QuadraticFunction.canonical2D(CLFeigen_init, CLFangle_init)
     init_piv = QuadraticFunction.sym2vector(Hv_init)
@@ -91,7 +91,7 @@ try:
 
         # print("Pencil eigenvalues:" + str(np.real(qp_controller.sigma_v)) + ", " + str(np.real(qp_controller.sigma_h)))
         # print("Critical:" + str(qp_controller.critical_points))
-        print("Critical values:" + str(qp_controller.critical_values))
+        print("Compatibility values:" + str(qp_controller.h_gamma))
 
         # Send actuation commands 
         dynamicSimulation.send_control_inputs(control, dt)

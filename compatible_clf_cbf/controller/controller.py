@@ -122,6 +122,7 @@ class QPController():
         # Parameters for the inner and outer QPs
         self.gamma = gamma
         self.alpha = alpha
+        self.gamma_constraint = 2.0
 
         # Parameters for inner QP controller
         self.inner_QP_dim = self.control_dim + 1
@@ -141,6 +142,7 @@ class QPController():
         self.control = np.zeros(self.control_dim)
         self.delta = 0.0
         self.deltapi = 0.0
+        self.inner_gradients = 0.0
 
         # Control sample time
         self.ctrl_dt = dt
@@ -162,8 +164,7 @@ class QPController():
     # This function returns the inner QP control
     def compute_control(self, state):
 
-        # inner = np.inner( self.clf.gradient(state), self.cbf.gradient(state) )
-        # print("Inner product = "+str(inner))
+        self.inner_gradients = np.inner( self.clf.gradient(state), self.cbf.gradient(state) )
 
         a_clf, b_clf = self.compute_clf_constraint(state)
         a_cbf, b_cbf = self.compute_cbf_constraint(state)
@@ -264,14 +265,14 @@ class QPController():
     def compute_pi_control(self):
 
         a_clf_pi, b_clf_pi = self.compute_rate_constraint()
-        # a_cbf_pi, b_cbf_pi = self.compute_compatibility_constraints()
+        A_cbf_pi, b_cbf_pi = self.compute_compatibility_constraints()
 
         # Stacking the CLF and CBF constraints
-        # A_outer = np.vstack([a_clf_pi, a_cbf_pi])
-        # b_outer = np.array([b_clf_pi, b_cbf_pi],dtype=float)
+        A_outer = np.vstack([a_clf_pi, A_cbf_pi])
+        b_outer = np.array([b_clf_pi, b_cbf_pi],dtype=float)
 
-        A_outer = a_clf_pi
-        b_outer = np.array([b_clf_pi],dtype=float)
+        # A_outer = a_clf_pi
+        # b_outer = np.array([b_clf_pi],dtype=float)
 
         # Solve inner QP
         self.outerQP.set_constraints(A = A_outer,b = b_outer)
@@ -305,7 +306,40 @@ class QPController():
 
     # This function implements the Lyapunov constraint for the outer subsystem
     def compute_compatibility_constraints(self):
-        return
+
+        self.h_gamma = np.zeros(self.number_critical)
+        self.nabla_h_gamma = np.zeros([self.number_critical, self.Sn_dim])
+        for k in range(self.number_critical):
+            self.h_gamma[k] = ( self.critical_values - self.gamma_constraint )
+
+            H = self.compute_pencil( self.critical_points[k] )
+            H_inv = np.linalg.inv(H)
+            barH = np.matmul( H_inv, np.matmul( self.Hh, H_inv ) )
+            vec_nabla_f = 2 * barH.dot(self.v0)
+
+            sym_basis = QuadraticFunction.symmetric_basis(self.state_dim)
+            for i in range(self.Sn_dim):
+                v = self.compute_v_function( self.critical_points[k] )
+                vec_i = sym_basis[i].dot( v + self.p0 - self.x0 )
+                self.nabla_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
+
+        A_cbf_pi = -np.hstack([ self.nabla_h_gamma, np.zeros([self.number_critical,1]) ])
+        b_cbf_pi = self.h_gamma - 0.0 * self.inner_gradients * np.ones(self.number_critical)
+
+        return A_cbf_pi, b_cbf_pi
+
+    # This function returns the value of vector v(\lambda) = H(\lambda)^{-1} v0 at \lambda
+    def compute_v_function(self, lambda_var):
+
+        H = self.compute_pencil( lambda_var )
+        H_inv = np.linalg.inv(H)
+
+        return H_inv.dot(self.v0)
+
+    # This function returns the value of the matrix pencil H(\lambda) = \lambda Hh - Hv at \lambda
+    def compute_pencil(self, lambda_var):
+
+        return lambda_var * self.Hh - self.Hv
 
     # This function computes the polynomials of the rational compatibility funcion f(\lambda). It assumes an invertible Hv.
     def compute_compatibility(self):
@@ -375,9 +409,10 @@ class QPController():
         poly2 = 2*np.polynomial.polynomial.polymul(self.num_poly, self.dpencil_char)
         num_df = np.polynomial.polynomial.polysub( poly1, poly2 )
         critical_points = np.polynomial.polynomial.polyroots(num_df)
-        self.critical_points = np.real(np.extract( critical_points.imag == 0.0, critical_points ))
 
+        self.critical_points = np.real(np.extract( critical_points.imag == 0.0, critical_points ))
         self.critical_values = self.f_values(self.critical_points)
+        self.number_critical = len(self.critical_values)
 
     # Returns the values of f at args
     def f_values(self, args):

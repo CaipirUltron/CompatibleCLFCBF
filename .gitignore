@@ -128,3 +128,6 @@ dmypy.json
 .pyre/
 .idea/
 .vscode/
+
+#Custom tests
+numpy_tests.py
