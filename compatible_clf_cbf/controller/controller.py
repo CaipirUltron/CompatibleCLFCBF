@@ -122,7 +122,7 @@ class QPController():
         # Parameters for the inner and outer QPs
         self.gamma = gamma
         self.alpha = alpha
-        self.gamma_constraint = 2.0
+        self.gamma_constraint = 1.0
 
         # Parameters for inner QP controller
         self.inner_QP_dim = self.control_dim + 1
@@ -274,6 +274,9 @@ class QPController():
         # A_outer = a_clf_pi
         # b_outer = np.array([b_clf_pi],dtype=float)
 
+        A_outer = A_cbf_pi
+        b_outer = b_cbf_pi
+
         # Solve inner QP
         self.outerQP.set_constraints(A = A_outer,b = b_outer)
         outerQP_sol = self.outerQP.get_solution()
@@ -300,26 +303,26 @@ class QPController():
 
         # CLF contraint for the outer QP 
         a_clf_pi = np.hstack( [ self.nablaVpi, -1.0 ])
-        b_clf_pi = -self.gamma[1] * self.Vpi
+        b_clf_pi = -self.gamma[1] * self.Vpi + 0.0 * self.inner_gradients 
 
         return a_clf_pi, b_clf_pi
 
     # This function implements the Lyapunov constraint for the outer subsystem
     def compute_compatibility_constraints(self):
 
+        sym_basis = QuadraticFunction.symmetric_basis(self.state_dim)
         self.h_gamma = np.zeros(self.number_critical)
         self.nabla_h_gamma = np.zeros([self.number_critical, self.Sn_dim])
         for k in range(self.number_critical):
-            self.h_gamma[k] = ( self.critical_values - self.gamma_constraint )
+            self.h_gamma[k] = np.log( self.critical_values ) - self.gamma_constraint
 
+            v = self.compute_v_function( self.critical_points[k] )
             H = self.compute_pencil( self.critical_points[k] )
             H_inv = np.linalg.inv(H)
-            barH = np.matmul( H_inv, np.matmul( self.Hh, H_inv ) )
-            vec_nabla_f = 2 * barH.dot(self.v0)
+            Hprod = np.matmul( self.Hh, H_inv )
+            vec_nabla_f = 2 * (1/self.critical_values[k]) * Hprod.dot(v)
 
-            sym_basis = QuadraticFunction.symmetric_basis(self.state_dim)
             for i in range(self.Sn_dim):
-                v = self.compute_v_function( self.critical_points[k] )
                 vec_i = sym_basis[i].dot( v + self.p0 - self.x0 )
                 self.nabla_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
 

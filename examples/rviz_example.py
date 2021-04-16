@@ -12,7 +12,7 @@ from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, 
 
 try:
     # Simulation parameters
-    dt = .005
+    dt = .002
     sim_freq = 1/dt
     T = 20
 
@@ -30,7 +30,7 @@ try:
     initial_state = np.array([x_init,y_init])
 
     # Create CLF
-    lambdav_x, lambdav_y = 6.0, 1.0
+    lambdav_x, lambdav_y = 1.0, 4.0
     CLFangle = math.radians(0.0)
     x0 = np.array([0,0])
 
@@ -40,7 +40,7 @@ try:
 
     # Create CBF
     xaxis_length, yaxis_length = 4.0, 1.0
-    CBFangle = math.radians(15.0)
+    CBFangle = math.radians(0.0)
     p0 = np.array([0,3])
 
     lambdah_x, lambdah_y = 1/xaxis_length**2, 1/yaxis_length**2
@@ -49,7 +49,7 @@ try:
     cbf = QuadraticBarrier(state_string, Hh, p0)
 
     # Create QP controller
-    lambdav_x_init, lambdav_y_init = 6.0, 1.0
+    lambdav_x_init, lambdav_y_init = 4.0, 1.0
     CLFangle_init = math.radians(0.0)
     CLFeigen_init = np.array([ lambdav_x_init , lambdav_y_init ])
     Hv_init = QuadraticFunction.canonical2D(CLFeigen_init, CLFangle_init)
@@ -83,6 +83,9 @@ try:
 
         # Control
         piv_control, delta_piv = qp_controller.compute_pi_control()
+        
+        # piv_control = np.zeros(3)
+        
         qp_controller.update_clf_dynamics(piv_control)
         control, delta = qp_controller.compute_control(state)
 
