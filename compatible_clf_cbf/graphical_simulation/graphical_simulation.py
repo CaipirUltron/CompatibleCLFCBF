@@ -80,7 +80,6 @@ class SimulationMatplot():
 
 
 class SimulationRviz():
-
     def __init__(self, clf, cbf):
         
         # Initialize important class attributes

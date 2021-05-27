@@ -7,7 +7,9 @@ from sage.calculus.var import *
 
 
 class NonlinearSystem(BuiltinFunction):
-    
+    '''
+    Class for nonlinear system plant.
+    '''
     def __init__(self, state_str, control_str, *expressions):
         BuiltinFunction.__init__(self, 'Dynamic System', nargs=2)
 
@@ -65,11 +67,12 @@ class NonlinearSystem(BuiltinFunction):
 
 
 class AffineSystem(NonlinearSystem):
-
+    '''
+    Class for affine plant.
+    '''
     def __init__(self, state_str, control_str, f, *columns_g):
-
         NonlinearSystem.__init__(self, state_str, control_str)
-
+        
         f_array = []
         for i in range(len(f)):
             f_array.append(SR(f[i]))
@@ -105,26 +108,27 @@ class LinearSystem(NonlinearSystem):
 
 
 class QuadraticFunction(BuiltinFunction):
-
-    def __init__(self, var_str, A, b, c, *types):
+    '''
+    Class for quadratic function representing x'Ax + b'x + c
+                                            = 0.5 (x - p)'H(x-p) + height
+                                            = 0.5 x'Hx - 0.5 p'(H + H')x + 0.5 p'Hp + height
+    '''
+    def __init__(self, var_str, **kwargs):
         BuiltinFunction.__init__(self, 'Quadratic Function', nargs=1)
 
         self._var = vector(var(var_str+','))
         self._dimension = np.size(self._var)
 
-        # Configure type: 'default' = x'Ax + b'x + c
-        #                 'factored' = (x - b)'A(x-b) + c
-        if len(types) == 0:
-            self.type = 'default'
-        else:
-            for type in types:
-                if type == 'default':
-                    self.type = 'default'
-                elif type == 'factored':
-                    self.type = 'factored'
-
         # Set parameters
-        self.set_param(A,b,c)
+        self.A = np.zeros([self._dimension,self._dimension])
+        self.b = np.zeros(self._dimension)
+        self.c = 0.0
+
+        self.hessian_matrix = np.zeros([self._dimension,self._dimension])
+        self.critical_point = np.zeros(self._dimension)
+        self.height = 0.0
+
+        self.set_param(**kwargs)
 
         # Set eigenbasis for hessian matrix
         _, _, Q = self.compute_eig()
@@ -135,65 +139,39 @@ class QuadraticFunction(BuiltinFunction):
         self._gen_var_str()
         self._create_dictionary()
 
-    def set_param(self, A, b, c):
+    def set_param(self, **kwargs):
+        '''
+        Sets the Quadratic function parameters.
+        '''
+        for key in kwargs:
+            if key == "hessian":
+                self.hessian_matrix = kwargs[key]
+            if key == "critical":
+                self.critical_point = kwargs[key]
+            if key == "height":
+                self.height = kwargs[key]
 
-        if self.type == 'default':
-            self.A = A
-            self.b = b
-            self.c = c
-        else:
-            self.hessian_matrix = A
-            self.critical_point = b
-            self.height = c
-            self.A = self.hessian_matrix
-            self.b = -(self.hessian_matrix + self.hessian_matrix.T).dot(self.critical_point)
-            self.c = self.height + self.hessian_matrix.dot(self.critical_point).dot(self.critical_point)
+        self.A = 0.5 * self.hessian_matrix
+        self.b = - 0.5*( self.hessian_matrix + self.hessian_matrix.T ).dot( self.critical_point )
+        self.c = 0.5 * self.critical_point.dot( self.hessian_matrix.dot(self.critical_point) ) + self.height
+
+        for key in kwargs:
+            if key == "A":
+                self.A = kwargs[key]
+            if key == "b":
+                self.b = kwargs[key]
+            if key == "c":
+                self.c = kwargs[key]
 
         A_symb, b_symb = matrix(self.A), vector(self.b)
         self._function = self._var * ( A_symb * self._var ) + b_symb * self._var + self.c
         self._gradient = self._function.gradient()
         self._hessian = self._function.hessian()
 
-    # Define A, b, c for Quadratics of type 'default' = x'Ax + b'x + c
-    def set_A(self, A):
-        if self.type == 'factored':
-            return
-        else:
-            self.set_param(A, self.b, self.c)
-
-    def set_b(self, b):
-        if self.type == 'factored':
-            return
-        else:
-            self.set_param(self.A, b, self.c)
-
-    def set_c(self, c):
-        if self.type == 'factored':
-            return
-        else:
-            self.set_param(self.A, self.b, c)
-
-    # Define hessian, critical point and height for Quadratics of type 'factored' = (x - b)'A(x-b) + c
-    def set_hessian(self, H):
-        if self.type == 'default':
-            return
-        else:
-            self.set_param(H, self.critical_point, self.height)
-
-    def set_critical(self, x0):
-        if self.type == 'default':
-            return
-        else:
-            self.set_param(self.hessian_matrix, x0, self.height)
-
-    def set_height(self, height):
-        if self.type == 'default':
-            return
-        else:
-            self.set_param(self.hessian_matrix, self.critical_point, height)
-
-    # Returns hessian matrix from a given set of eigenvalues
     def eigen2hessian(self, eigen):
+        '''
+        Returns hessian matrix from a given set of eigenvalues
+        '''
         if self._dimension != len(eigen):
                 raise Exception("Dimension mismatch.")
 
@@ -232,14 +210,18 @@ class QuadraticFunction(BuiltinFunction):
     def hessian(self):
         return np.array(self._hessian, dtype=float)
 
+    def critical(self):
+        return self.critical_point
+
     def compute_eig(self):
-        eigen, Q = np.linalg.eig(self.hessian_matrix)
+        eigen, Q = np.linalg.eig(self.A)
         angle = np.arctan2(Q[0, 1], Q[0, 0])
         return eigen, angle, Q
 
-    # This function returns the corresponding C-level set of the quadratic function, if its 2-dim
     def superlevel(self, C, numpoints):
-
+        '''
+        This function returns the corresponding C-level set of the quadratic function, if its 2-dim.
+        '''
         if self._dimension != 2:
             return
 
@@ -262,14 +244,12 @@ class QuadraticFunction(BuiltinFunction):
             return y1, y2
 
         def parameterize(delta):
-
             if level_type == 'ellipse':
                 y1, y2 = parameterize_ellipse(delta)
             elif level_type == 'hyperbola':
                 y1, y2 = parameterize_hyperbola(delta)
 
             x, y = change_variables(y1, y2)
-
             u, v = np.zeros(numpoints), np.zeros(numpoints)
             for k in range(numpoints):
                 gradient = self.gradient(np.array([x[k],y[k]]))
@@ -302,7 +282,6 @@ class QuadraticFunction(BuiltinFunction):
         elif eig[0]*eig[1] < 0:
             # hyperbola
             level_type = 'hyperbola'
-            bareig1 = eig[0]
             if eig[0]>0:
                 # convex
                 delta = C-self.height
@@ -325,20 +304,18 @@ class QuadraticFunction(BuiltinFunction):
     def _eval_numpy_(self, vars):
         for i in range(self._dimension):
             self._var_dictionary[ self._var_str[i] ] = vars[i]
-
         return self._function(**self._var_dictionary)
- 
-    # The input vector must be of length 3 or higher
+
     @staticmethod
     def vector2sym(vector):
-
+        '''
+        Transforms numpy vector to corresponding symmetric matrix.
+        '''
         dim = vector.shape[0]
         if dim < 3:
             raise Exception("The input vector must be of length 3 or higher.")
-
         n = int((-1 + np.sqrt(1+8*dim))/2)
         sym_basis = QuadraticFunction.symmetric_basis(n)
-        
         M = np.zeros([n,n])
         for k in range(dim):
             M = M + sym_basis[k]*vector[k]
@@ -346,14 +323,14 @@ class QuadraticFunction(BuiltinFunction):
 
     @staticmethod
     def sym2vector(M):
-
+        '''
+        Stacks the cofficients of a symmetric matrix to a numpy vector.
+        '''
         n = M.shape[0]
         if n < 2:
             raise Exception("The input matrix must be of size 2x2 or higher.")
-
         sym_basis = QuadraticFunction.symmetric_basis(n)
         dim = int((n*(n+1))/2)
-
         vector = np.zeros(dim)
         for k in range(dim):
             list = np.nonzero(sym_basis[k])
@@ -363,9 +340,10 @@ class QuadraticFunction(BuiltinFunction):
 
     @staticmethod
     def symmetric_basis(n):
-
+        '''
+        Returns the canonical basis of the space of symmetric (n x n) matrices.
+        '''
         symm_basis = list()
-
         EYE = np.eye(n)
         for i in range(n):
             for j in range(i,n):
@@ -373,17 +351,22 @@ class QuadraticFunction(BuiltinFunction):
                     symm_basis.append(np.outer(EYE[:,i], EYE[:,j]))
                 else:
                     symm_basis.append(np.outer(EYE[:,i], EYE[:,j]) + np.outer(EYE[:,j], EYE[:,i]))
-
         return symm_basis
 
     @staticmethod
     def rot2D(theta):
+        '''
+        Standard 2D rotation matrix.
+        '''
         c, s = np.cos(theta), np.sin(theta)
         R = np.array(((c,-s),(s,c)))
         return R
 
     @staticmethod
     def canonical2D(eigen, theta):
+        '''
+        Returns the (2x2) symmetric matrix with eigenvalues eigen and eigenvector angle theta.
+        '''
         Diag = np.diag(eigen)
         R = QuadraticFunction.rot2D(theta)
         H = np.matmul(R, np.matmul(Diag, R.T))
@@ -391,12 +374,18 @@ class QuadraticFunction(BuiltinFunction):
 
 
 class QuadraticLyapunov(QuadraticFunction):
-
-    def __init__(self, var_str, H, x0):
-        QuadraticFunction.__init__(self, var_str, H, x0, 0.0, 'factored')
+    '''
+    Class for Quadratic Lyapunov functions.
+    '''
+    def __init__(self, var_str, **kwargs):
+        QuadraticFunction.__init__(self, var_str, **kwargs)
 
 
 class QuadraticBarrier(QuadraticFunction):
-
-    def __init__(self, var_str, H, x0):
-        QuadraticFunction.__init__(self, var_str, H, x0, -1.0, 'factored')
+    '''
+    Class for Quadratic barrier functions.
+    For positive definite Hessians, the unsafe set is described by the interior of an ellipsoid.
+    '''
+    def __init__(self, var_str, **kwargs):
+        QuadraticFunction.__init__(self, var_str, **kwargs)
+        self.set_param(height = -1)

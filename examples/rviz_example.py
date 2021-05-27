@@ -1,9 +1,5 @@
-
-import rospy
-import math
+import rospy, math
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.animation as anim
 
 from compatible_clf_cbf.controller import QPController
 from compatible_clf_cbf.dynamic_simulation import SimulateDynamics
@@ -11,90 +7,56 @@ from compatible_clf_cbf.graphical_simulation import SimulationRviz
 from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier, QuadraticFunction
 
 try:
-    # Simulation parameters
-    dt = .002
-    sim_freq = 1/dt
-    T = 20
+    # Configure and create 2D plant.
+    system = {
+        "f": ['0','0'],
+        "g": [['1','0'],['0','1']],
+        "state_string": 'x1, x2, ',
+        "control_string": 'u1, u2, ',
+        "initial_state": np.array([ 2.1, 5.0 ])
+    }
+    plant = AffineSystem(system["state_string"], system["control_string"], system["f"], *system["g"])
 
-    # Define 2D plant and initial state
-    f = ['0','0']
-    g1 = ['1','0']
-    g2 = ['0','1']
-    g = [g1,g2]
-    state_string = 'x1, x2, '
-    control_string = 'u1, u2, '
-    plant = AffineSystem(state_string, control_string, f, *g)
+    # Configure and create CLF.
+    clf_lambda_x, clf_lambda_y, clf_angle = 1.0, 6.0, math.radians(0.0)
+    clf_config = {
+        "Hv": QuadraticFunction.canonical2D(np.array([ clf_lambda_x , clf_lambda_y ]), clf_angle),
+        "x0": np.array([ 0, 0 ]),
+    }
+    clf = QuadraticLyapunov(system["state_string"], hessian = clf_config["Hv"], critical = clf_config["x0"])
 
-    # Define initial state for plant simulation
-    x_init, y_init = 2.1, 5
-    initial_state = np.array([x_init,y_init])
+    # Configure and create reference CLF.
+    ref_clf_lambda_x, ref_clf_lambda_y, ref_clf_angle = 6.0, 1.0, math.radians(0.0)
+    ref_clf_config = {
+        "Hv": QuadraticFunction.canonical2D(np.array([ ref_clf_lambda_x , ref_clf_lambda_y ]), ref_clf_angle),
+        "x0": np.array([ 0, 0 ]),
+    }
+    ref_clf = QuadraticLyapunov(system["state_string"], hessian = ref_clf_config["Hv"], critical = ref_clf_config["x0"])
 
-    # Create CLF
-    lambdav_x, lambdav_y = 1.0, 4.0
-    CLFangle = math.radians(0.0)
-    x0 = np.array([0,0])
+    # Configure and create CBF.
+    xaxis_length, yaxis_length, cbf_angle = 4.0, 1.0, math.radians(0.0)
+    cbf_config = {
+        "Hh": QuadraticFunction.canonical2D(np.array([ 1/xaxis_length**2, 1/yaxis_length**2 ]), cbf_angle),
+        "p0": np.array([ 0, 3 ])
+    }
+    cbf = QuadraticBarrier(system["state_string"], hessian = cbf_config["Hh"], critical = cbf_config["p0"])
 
-    CLFeigen = np.array([ lambdav_x , lambdav_y ])
-    Hv = QuadraticFunction.canonical2D(CLFeigen, CLFangle)
-    clf = QuadraticLyapunov(state_string, Hv, x0)
+    # Create QP controller.
+    qp_controller = QPController(plant, clf, ref_clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 1.0], p = [10.0, 10.0])
 
-    # Create CBF
-    xaxis_length, yaxis_length = 4.0, 1.0
-    CBFangle = math.radians(0.0)
-    p0 = np.array([0,3])
-
-    lambdah_x, lambdah_y = 1/xaxis_length**2, 1/yaxis_length**2
-    CBFeigen = np.array([ lambdah_x , lambdah_y ])
-    Hh = QuadraticFunction.canonical2D(CBFeigen, CBFangle)
-    cbf = QuadraticBarrier(state_string, Hh, p0)
-
-    # Create QP controller
-    lambdav_x_init, lambdav_y_init = 4.0, 1.0
-    CLFangle_init = math.radians(0.0)
-    CLFeigen_init = np.array([ lambdav_x_init , lambdav_y_init ])
-    Hv_init = QuadraticFunction.canonical2D(CLFeigen_init, CLFangle_init)
-    init_piv = QuadraticFunction.sym2vector(Hv_init)
-    qp_controller = QPController(plant, clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 1.0], p = [10.0, 10.0], init_pi = init_piv)
-
-    # Show initial plot of f(\lambda)
-    print("Pencil eigenvalues:" + str(qp_controller.sigma_v) + ", " + str(qp_controller.sigma_h))
-    print("Critical:" + str(qp_controller.critical_points))
-    print("Critical values:" + str(qp_controller.critical_values))
-
-    # fig = plt.figure()
-    # axes_lim = (0, 20.0, 0, 300.0)
-    # ax = plt.axes(xlim=axes_lim[0:2], ylim=axes_lim[2:4])
-    # ax.set_title('CLF-CBF QP-based Control')
-    # lamb = np.arange(axes_lim[0], axes_lim[1], 0.01)
-    # fvalues = qp_controller.fvalues(lamb)
-    # ax.plot(lamb, fvalues, zorder=100, color='red')
-    # plt.show()
-
-    # Initialize simulation object
-    dynamicSimulation = SimulateDynamics(plant, initial_state)
+    # Initialize simulation objects and main loop.
+    dynamicSimulation = SimulateDynamics(plant, system["initial_state"])
     graphicalSimulation = SimulationRviz(clf, cbf)
 
-    # Main loop
-    rate = rospy.Rate(sim_freq)
+    dt = .001
+    rate = rospy.Rate(1/dt)
     while not rospy.is_shutdown():
 
         # Get simulation state
         state = dynamicSimulation.state()
 
         # Control
-        piv_control, delta_piv = qp_controller.compute_pi_control()
-        
-        # piv_control = np.zeros(3)
-        
-        qp_controller.update_clf_dynamics(piv_control)
-        control, delta = qp_controller.compute_control(state)
-
-        nablaV = qp_controller.clf.gradient(state)
-        nablah = qp_controller.cbf.gradient(state)
-
-        # print("Pencil eigenvalues:" + str(np.real(qp_controller.sigma_v)) + ", " + str(np.real(qp_controller.sigma_h)))
-        # print("Critical:" + str(qp_controller.critical_points))
-        print("Compatibility values:" + str(qp_controller.h_gamma))
+        control = qp_controller.compute_control(state)
 
         # Send actuation commands 
         dynamicSimulation.send_control_inputs(control, dt)
