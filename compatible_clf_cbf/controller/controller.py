@@ -1,6 +1,6 @@
 from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
 import numpy as np
-import scipy
+import math, scipy
 import copy as cp
 from qpsolvers import solve_qp, solve_safer_qp
 from compatible_clf_cbf.dynamic_systems import AffineSystem
@@ -31,7 +31,6 @@ class QPController():
 
         # Parameters for the inner and outer QPs
         self.gamma, self.alpha = gamma, alpha
-        self.gamma_constraint = 0.1
 
         # Parameters for inner QP controller
         self.inner_QP_dim = self.control_dim + 1
@@ -65,29 +64,33 @@ class QPController():
         piv_init = QuadraticFunction.sym2vector(self.clf.hessian())
         self.clf_dynamics = SimulateDynamics(piv_integrator, piv_init)
 
-    def dist_collinear(self, state, type=1):
+    def collinear_norm(self, state):
+        '''
+        Method that returns the positive collinearity norm.
+        '''
+        nablaV = self.ref_clf.gradient(state)
+        nablah = self.cbf.gradient(state)
 
-        norm_gradient_clf = scipy.linalg.norm(self.clf.gradient(state))**2
-        norm_gradient_cbf = scipy.linalg.norm(self.cbf.gradient(state))**2
-
-        if type == 1:
-            inner_gradients = np.inner( self.clf.gradient(state), self.cbf.gradient(state) )/norm_gradient_cbf
-            nablaV = self.clf.gradient(state)
-        else:
-            inner_gradients = np.inner( self.ref_clf.gradient(state), self.cbf.gradient(state) )/norm_gradient_cbf
-            nablaV = self.ref_clf.gradient(state)
-
+        inner_gradients = np.inner( nablaV, nablah )
         if inner_gradients < 0:
-            D_parallel = scipy.linalg.norm(nablaV)
+            D_parallel = 1/(scipy.linalg.norm(nablaV)**2)
         else:
-            nabla_h = self.cbf.gradient(state)
-            Projection = np.eye(self.state_dim) - np.outer( nabla_h, nabla_h )/(scipy.linalg.norm(nabla_h)**2)
-            D_parallel = scipy.linalg.norm( Projection.dot(nablaV) )
+            Projection = np.eye(self.state_dim) - np.outer( nablah, nablah )/(scipy.linalg.norm(nablah)**2)
+            D_parallel = scipy.linalg.norm(Projection.dot(nablaV))/(scipy.linalg.norm(nablaV)**3)
+        return D_parallel
 
-        # print("Distance to collinearity = " + str(D_parallel))
-        # print("Inner product = " + str(inner_gradients))
-
-        return D_parallel, inner_gradients
+    def distance_Pplus(self, state):
+        '''
+        Method that returns the distance (physical) to the positive collinearity set.
+        '''
+        x, y = state[0], state[1]
+        p0 = self.cbf.critical()
+        x_cbf, y_cbf = p0[0], p0[1]
+        if y_cbf <= y:
+            D_col = abs( x - x_cbf )
+        else:
+            D_col = scipy.linalg.norm( state - p0 )
+        return D_col
 
     def compute_control(self, state):
         '''
@@ -113,7 +116,7 @@ class QPController():
         '''
         Sets the Lyapunov constraint for the inner loop controller.
         '''
-        D_parallel, inner_gradients = self.dist_collinear(state)
+        D_col = self.distance_Pplus(state)
 
         # Affine plant dynamics
         f = self._plant.compute_f(state)
@@ -129,7 +132,13 @@ class QPController():
 
         # CLF contraint for the QP
         a_clf = np.hstack( [ LgV, -1.0 ])
-        b_clf = -self.gamma[0] * V - LfV
+        # b_clf = -self.gamma[0] * V - LfV
+
+        rate = self.gamma[0] * SimulateDynamics.sat( D_col, 1.0 )
+        b_clf = - rate * V - LfV
+
+        # print("Dist. to col = " + str(D_col))
+        # print("Rate = " + str(rate))
 
         return a_clf, b_clf
 
@@ -169,14 +178,17 @@ class QPController():
         '''
         Computes the outer loop control.
         '''
-        a_clf_pi, b_clf_pi = self.compute_rate_constraint()
+        a_clf_pi, b_clf_pi = self.compute_rate_constraint(state)
         a_cbf_pi, b_cbf_pi = self.compute_compatibility_constraints(state)
 
-        # A_outer = np.vstack([a_clf_pi, a_cbf_pi])
-        # b_outer = np.array([b_clf_pi, b_cbf_pi],dtype=float)
+        A_outer = np.vstack([a_clf_pi, a_cbf_pi])
+        b_outer = np.array([b_clf_pi, b_cbf_pi],dtype=float)
 
-        A_outer = a_clf_pi
-        b_outer = np.array([b_clf_pi],dtype=float)
+        # A_outer = a_clf_pi
+        # b_outer = np.array([b_clf_pi],dtype=float)
+
+        # A_outer = a_cbf_pi
+        # b_outer = b_cbf_pi
 
         self.outerQP.set_constraints(A = A_outer,b = b_outer)
         outerQP_sol = self.outerQP.get_solution()
@@ -185,15 +197,17 @@ class QPController():
 
         ##################################### Turn off outer loop controller #####################################
         # piv_control = np.zeros(self.symmetric_dim)
+
         self.update_clf_dynamics(piv_control)
 
-    def compute_rate_constraint(self):
+    def compute_rate_constraint(self, state):
         '''
         Sets the Lyapunov constraint for the outer loop controller.
         '''
         deltaHv = self.clf.hessian() - self.ref_clf.hessian()
         self.Vpi = 0.5 * np.trace( np.matmul(deltaHv, deltaHv) )
-        print("Rate CLF = " + str(self.Vpi))
+
+        # print("Rate CLF = " + str(self.Vpi))
 
         for k in range(self.symmetric_dim):
             self.gradient_Vpi[k] = np.trace( np.matmul( deltaHv, self.sym_basis[k]) )
@@ -207,12 +221,16 @@ class QPController():
         '''
         Sets the barrier constraints for the outer loop controller, ensuring compatibility.
         '''
-        D_parallel, inner_gradients = self.dist_collinear(state)
+        col_norm = self.collinear_norm(state)
 
+        nablaV, nablah = self.clf.gradient(state), self.cbf.gradient(state)
+        inner_gradients = np.inner( nablaV, nablah )/(scipy.linalg.norm(nablah)**2)
+
+        gamma_constraint = 10.0
         h_gamma = np.zeros(self.number_critical)
         gradient_h_gamma = np.zeros([self.number_critical, self.symmetric_dim])
         for k in range(self.number_critical):
-            h_gamma[k] = np.log( self.critical_values ) - self.gamma_constraint
+            h_gamma[k] = np.log( self.critical_values ) - gamma_constraint
 
             v = self.compute_v_function( self.critical_points[k] )
             H = self.compute_pencil( self.critical_points[k] )
@@ -224,7 +242,10 @@ class QPController():
                 gradient_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
 
         a_cbf_pi = -np.hstack([ gradient_h_gamma, np.zeros([self.number_critical,1]) ])
-        b_cbf_pi = h_gamma - 1.0 * (inner_gradients/D_parallel) * np.ones(self.number_critical)
+        b_cbf_pi = h_gamma + col_norm * np.ones(self.number_critical)
+        # b_cbf_pi = h_gamma
+
+        print("Term = " + str(col_norm))
 
         return a_cbf_pi, b_cbf_pi
 

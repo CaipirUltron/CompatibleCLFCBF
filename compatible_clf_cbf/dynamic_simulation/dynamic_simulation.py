@@ -1,6 +1,8 @@
+import math
 import numpy as np
 from scipy.integrate import ode
 from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier
+
 
 class SimulateDynamics:
     def __init__(self, plant, initial_state):
@@ -47,3 +49,7 @@ class SimulateDynamics:
 
     def state(self):
         return self._state
+
+    @staticmethod
+    def sat(input, limit=math.pi):
+        return np.tanh(input*math.pi/limit)

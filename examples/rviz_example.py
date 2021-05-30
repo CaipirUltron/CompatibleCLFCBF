@@ -7,39 +7,46 @@ from compatible_clf_cbf.graphical_simulation import SimulationRviz
 from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier, QuadraticFunction
 
 try:
-    # Configure and create 2D plant.
+    ######################################### Configure and create 2D plant ####################################################
     system = {
         "f": ['0','0'],
         "g": [['1','0'],['0','1']],
         "state_string": 'x1, x2, ',
         "control_string": 'u1, u2, ',
-        "initial_state": np.array([ 2.1, 5.0 ])
+        "initial_state": np.array([ 2.0, 5.0 ])
     }
     plant = AffineSystem(system["state_string"], system["control_string"], system["f"], *system["g"])
+    ############################################################################################################################
 
-    # Configure and create CLF.
-    clf_lambda_x, clf_lambda_y, clf_angle = 1.0, 6.0, math.radians(0.0)
+
+    ############################################# Configure and create CLF #####################################################
+    clf_lambda_x, clf_lambda_y, clf_angle = 6.0, 1.0, math.radians(0.0)
     clf_config = {
         "Hv": QuadraticFunction.canonical2D(np.array([ clf_lambda_x , clf_lambda_y ]), clf_angle),
         "x0": np.array([ 0, 0 ]),
     }
     clf = QuadraticLyapunov(system["state_string"], hessian = clf_config["Hv"], critical = clf_config["x0"])
+    ############################################################################################################################
 
-    # Configure and create reference CLF.
+
+    ######################################## Configure and create reference CLF ################################################
     ref_clf_lambda_x, ref_clf_lambda_y, ref_clf_angle = 6.0, 1.0, math.radians(0.0)
     ref_clf_config = {
         "Hv": QuadraticFunction.canonical2D(np.array([ ref_clf_lambda_x , ref_clf_lambda_y ]), ref_clf_angle),
         "x0": np.array([ 0, 0 ]),
     }
     ref_clf = QuadraticLyapunov(system["state_string"], hessian = ref_clf_config["Hv"], critical = ref_clf_config["x0"])
+    ############################################################################################################################
 
-    # Configure and create CBF.
+
+    ############################################## Configure and create CBF ####################################################
     xaxis_length, yaxis_length, cbf_angle = 4.0, 1.0, math.radians(0.0)
     cbf_config = {
         "Hh": QuadraticFunction.canonical2D(np.array([ 1/xaxis_length**2, 1/yaxis_length**2 ]), cbf_angle),
         "p0": np.array([ 0, 3 ])
     }
     cbf = QuadraticBarrier(system["state_string"], hessian = cbf_config["Hh"], critical = cbf_config["p0"])
+    ############################################################################################################################
 
     # Create QP controller.
     qp_controller = QPController(plant, clf, ref_clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 1.0], p = [10.0, 10.0])
