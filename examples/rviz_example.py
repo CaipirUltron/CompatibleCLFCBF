@@ -13,7 +13,7 @@ try:
         "g": [['1','0'],['0','1']],
         "state_string": 'x1, x2, ',
         "control_string": 'u1, u2, ',
-        "initial_state": np.array([ 2.0, 5.0 ])
+        "initial_state": np.array([ 3.0, 6.0 ])
     }
     plant = AffineSystem(system["state_string"], system["control_string"], system["f"], *system["g"])
     ############################################################################################################################

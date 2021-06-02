@@ -73,10 +73,10 @@ class QPController():
 
         inner_gradients = np.inner( nablaV, nablah )
         if inner_gradients < 0:
-            D_parallel = 1/(scipy.linalg.norm(nablaV)**2)
+            D_parallel = 1/(scipy.linalg.norm(nablaV)**3)
         else:
             Projection = np.eye(self.state_dim) - np.outer( nablah, nablah )/(scipy.linalg.norm(nablah)**2)
-            D_parallel = scipy.linalg.norm(Projection.dot(nablaV))/(scipy.linalg.norm(nablaV)**3)
+            D_parallel = scipy.linalg.norm(Projection.dot(nablaV))/(scipy.linalg.norm(nablaV)**4)
         return D_parallel
 
     def distance_Pplus(self, state):
@@ -104,6 +104,9 @@ class QPController():
         # Stacking the CLF and CBF constraints
         A_inner = np.vstack([a_clf, a_cbf])
         b_inner = np.array([b_clf, b_cbf],dtype=float)
+
+        # A_inner = a_clf
+        # b_inner = np.array([b_clf],dtype=float)
 
         # Solve inner QP
         self.innerQP.set_constraints(A = A_inner,b = b_inner)
@@ -134,11 +137,11 @@ class QPController():
         a_clf = np.hstack( [ LgV, -1.0 ])
         # b_clf = -self.gamma[0] * V - LfV
 
-        rate = self.gamma[0] * SimulateDynamics.sat( D_col, 1.0 )
+        rate = self.gamma[0] * SimulateDynamics.sat( D_col, 10.0 )
         b_clf = - rate * V - LfV
 
         # print("Dist. to col = " + str(D_col))
-        # print("Rate = " + str(rate))
+        print("Rate = " + str(rate))
 
         return a_clf, b_clf
 
@@ -224,7 +227,7 @@ class QPController():
         col_norm = self.collinear_norm(state)
 
         nablaV, nablah = self.clf.gradient(state), self.cbf.gradient(state)
-        inner_gradients = np.inner( nablaV, nablah )/(scipy.linalg.norm(nablah)**2)
+        inner = np.inner( nablaV, nablah )/scipy.linalg.norm(nablaV)**2
 
         gamma_constraint = 10.0
         h_gamma = np.zeros(self.number_critical)
@@ -242,14 +245,20 @@ class QPController():
                 gradient_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
 
         a_cbf_pi = -np.hstack([ gradient_h_gamma, np.zeros([self.number_critical,1]) ])
-        b_cbf_pi = h_gamma + col_norm * np.ones(self.number_critical)
+
+        if inner >= 0:
+            b_cbf_pi = h_gamma
+        else:
+            b_cbf_pi = np.array(10000)
+
+        # b_cbf_pi = h_gamma - inner * np.ones(self.number_critical)
         # b_cbf_pi = h_gamma
 
-        print("Term = " + str(col_norm))
+        # print("Term = " + str(inner))
 
         return a_cbf_pi, b_cbf_pi
 
-    def compute_v_function(self, lambda_var):
+    def compute_v_function( self, lambda_var ):
         '''
         This function returns the value of vector v(lambda) = H(lambda)^{-1} v0 at
         '''
