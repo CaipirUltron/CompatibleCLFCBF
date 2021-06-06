@@ -214,7 +214,7 @@ class QuadraticFunction(BuiltinFunction):
         return self.critical_point
 
     def compute_eig(self):
-        eigen, Q = np.linalg.eig(self.A)
+        eigen, Q = np.linalg.eig(self.hessian())
         angle = np.arctan2(Q[0, 1], Q[0, 0])
         return eigen, angle, Q
 
@@ -388,4 +388,4 @@ class QuadraticBarrier(QuadraticFunction):
     '''
     def __init__(self, var_str, **kwargs):
         QuadraticFunction.__init__(self, var_str, **kwargs)
-        self.set_param(height = -1)
+        self.set_param(height = -0.5)

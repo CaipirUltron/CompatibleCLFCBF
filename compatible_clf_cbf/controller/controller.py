@@ -119,7 +119,8 @@ class QPController():
         '''
         Sets the Lyapunov constraint for the inner loop controller.
         '''
-        D_col = self.distance_Pplus(state)
+        dist = self.distance_to_invariance(state)
+        # print("Dist = " + str(dist))
 
         # Affine plant dynamics
         f = self._plant.compute_f(state)
@@ -135,13 +136,8 @@ class QPController():
 
         # CLF contraint for the QP
         a_clf = np.hstack( [ LgV, -1.0 ])
-        # b_clf = -self.gamma[0] * V - LfV
-
-        rate = self.gamma[0] * SimulateDynamics.sat( D_col, 10.0 )
-        b_clf = - rate * V - LfV
-
-        # print("Dist. to col = " + str(D_col))
-        print("Rate = " + str(rate))
+        b_clf = -self.gamma[0] * V - LfV
+        # b_clf = - self.gamma[0] * SimulateDynamics.sat( D_col, 10.0 ) * V - LfV
 
         return a_clf, b_clf
 
@@ -190,16 +186,13 @@ class QPController():
         # A_outer = a_clf_pi
         # b_outer = np.array([b_clf_pi],dtype=float)
 
-        # A_outer = a_cbf_pi
-        # b_outer = b_cbf_pi
-
         self.outerQP.set_constraints(A = A_outer,b = b_outer)
         outerQP_sol = self.outerQP.get_solution()
 
         piv_control = outerQP_sol[0:self.symmetric_dim,]
 
         ##################################### Turn off outer loop controller #####################################
-        # piv_control = np.zeros(self.symmetric_dim)
+        piv_control = np.zeros(self.symmetric_dim)
 
         self.update_clf_dynamics(piv_control)
 
@@ -209,8 +202,6 @@ class QPController():
         '''
         deltaHv = self.clf.hessian() - self.ref_clf.hessian()
         self.Vpi = 0.5 * np.trace( np.matmul(deltaHv, deltaHv) )
-
-        # print("Rate CLF = " + str(self.Vpi))
 
         for k in range(self.symmetric_dim):
             self.gradient_Vpi[k] = np.trace( np.matmul( deltaHv, self.sym_basis[k]) )
@@ -224,10 +215,8 @@ class QPController():
         '''
         Sets the barrier constraints for the outer loop controller, ensuring compatibility.
         '''
-        col_norm = self.collinear_norm(state)
-
         nablaV, nablah = self.clf.gradient(state), self.cbf.gradient(state)
-        inner = np.inner( nablaV, nablah )/scipy.linalg.norm(nablaV)**2
+        inner = np.inner( nablaV, nablah )        
 
         gamma_constraint = 10.0
         h_gamma = np.zeros(self.number_critical)
@@ -235,7 +224,7 @@ class QPController():
         for k in range(self.number_critical):
             h_gamma[k] = np.log( self.critical_values ) - gamma_constraint
 
-            v = self.compute_v_function( self.critical_points[k] )
+            v = self.compute_v( self.critical_points[k] )
             H = self.compute_pencil( self.critical_points[k] )
             H_inv = np.linalg.inv(H)
             Hprod = np.matmul( self.cbf.hessian(), H_inv )
@@ -245,20 +234,14 @@ class QPController():
                 gradient_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
 
         a_cbf_pi = -np.hstack([ gradient_h_gamma, np.zeros([self.number_critical,1]) ])
-
         if inner >= 0:
             b_cbf_pi = h_gamma
         else:
             b_cbf_pi = np.array(10000)
 
-        # b_cbf_pi = h_gamma - inner * np.ones(self.number_critical)
-        # b_cbf_pi = h_gamma
-
-        # print("Term = " + str(inner))
-
         return a_cbf_pi, b_cbf_pi
 
-    def compute_v_function( self, lambda_var ):
+    def compute_v( self, lambda_var ):
         '''
         This function returns the value of vector v(lambda) = H(lambda)^{-1} v0 at
         '''
@@ -289,8 +272,9 @@ class QPController():
 
         # Get the generalized Schur decomposition of the matrix pencil and compute the generalized eigenvalues
         schurHv, schurHh, alpha, beta, Q, Z = scipy.linalg.ordqz(Hv, Hh)
-        for k in range(n):
-            pencil_char_roots = alpha/beta
+        self.pencil_char_roots = alpha/beta
+
+        self.pencil_char_roots = np.real(np.extract( self.pencil_char_roots.imag == 0.0, self.pencil_char_roots ))
 
         # Assumption: Hv is invertible
         detHv = np.linalg.det(Hv)
@@ -302,8 +286,8 @@ class QPController():
             return
 
         # Computes the pencil characteristic polynomial and denominator of f(\lambda)
-        pencil_det = np.real(np.prod(pencil_char_roots))
-        self.pencil_char = ( detHv/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(pencil_char_roots))
+        pencil_det = np.real(np.prod(self.pencil_char_roots))
+        self.pencil_char = ( detHv/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(self.pencil_char_roots))
         self.den_poly = np.polynomial.polynomial.polymul(self.pencil_char, self.pencil_char)
 
         # This computes the pencil adjugate expansion and the set of numerator vectors by the adapted Faddeev-LeVerrier algorithm.
@@ -329,8 +313,37 @@ class QPController():
             self.num_poly = np.polynomial.polynomial.polyadd(self.num_poly, poly_term)
 
         # Computes polynomial roots
-        self.num_roots = np.polynomial.polynomial.polyroots(self.num_poly)
-        self.den_roots = np.polynomial.polynomial.polyroots(self.den_poly)
+        self.num_roots = np.real( np.polynomial.polynomial.polyroots(self.num_poly) )
+
+        # Filters repeated poles from pencil_char_roots and numerator_roots
+        threshold = 0.001
+        self.repeated = []
+        # deletion_i = []
+        # deletion_j = []
+        for i in range( len(self.pencil_char_roots) ):
+            for j in range( len(self.num_roots) ):
+                if (self.num_roots[j] - self.pencil_char_roots[i]) < threshold:
+                    # deletion_i.append(i)
+                    # deletion_j.append(j)
+                    if np.any(self.repeated == self.pencil_char_roots[i]):
+                            break
+                    else:
+                        self.repeated.append( self.pencil_char_roots[i] )
+        self.repeated = np.array( self.repeated )
+        # self.pencil_char_roots = np.delete(self.pencil_char_roots, deletion_i)
+        # self.num_roots = np.delete(self.num_roots, deletion_j)
+
+        # Compute equilibrium point
+        solution_poly = np.polynomial.polynomial.polysub( self.num_poly, self.den_poly )
+        solution_roots = np.polynomial.polynomial.polyroots(solution_poly)
+        solution_roots = np.real(np.extract( solution_roots.imag == 0.0, solution_roots ))
+        solution_roots = np.concatenate((solution_roots, self.repeated))
+        solution_roots = np.extract( solution_roots>0, solution_roots)
+
+        self.lambda_eq = np.min( solution_roots )
+        self.max_pencil_root = np.max(self.pencil_char_roots)
+        self.min_pencil_root = np.min(self.pencil_char_roots)
+        self.equilibrium_pt = self.compute_v( self.lambda_eq ) + p0
 
         # Computes f(0)
         f0 = self.num_poly[0]/(self.pencil_char[0]**2)
@@ -347,6 +360,28 @@ class QPController():
         self.critical_points = np.real(np.extract( self.critical_points.imag == 0.0, self.critical_points ))
         self.critical_values = self.f_values(self.critical_points)
         self.number_critical = len(self.critical_values)
+
+    def distance_to_invariance(self, state):
+
+        Hv, Hh = self.clf.hessian(), self.cbf.hessian()
+        x0, p0 = self.clf.critical(), self.cbf.critical()
+
+        v0 = Hv.dot( p0 - x0 )
+        v_bar = state - p0
+
+        P_dist_QP = np.array([[ 0.5 * v_bar.dot( np.matmul(Hh,Hh).dot(v_bar) ) ]])
+        q_dist_QP = np.array([ -0.5 * v_bar.dot( (np.matmul(Hh,Hv) + np.matmul(Hv,Hh)).dot(v_bar) ) - v0.dot( Hh.dot(v_bar) ) ])
+
+        # A_dist_QP = np.array([[1.0],[-1.0]])
+        # b_dist_QP = np.array([ self.lambda_eq, -self.min_pencil_root ])
+
+        A_dist_QP = np.array([[1.0]])
+        b_dist_QP = np.array([ self.lambda_eq ])
+
+        lambda_sol = solve_qp(P=P_dist_QP, q=q_dist_QP, G=A_dist_QP, h=b_dist_QP, solver="quadprog")
+        v_sol = self.compute_v( lambda_sol )
+        distance = scipy.linalg.norm(v_sol - v_bar)
+        return distance
 
     # Returns the values of f at args
     def f_values(self, args):

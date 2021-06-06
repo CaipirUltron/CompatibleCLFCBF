@@ -40,10 +40,10 @@ try:
 
 
     ############################################## Configure and create CBF ####################################################
-    xaxis_length, yaxis_length, cbf_angle = 4.0, 1.0, math.radians(0.0)
+    xaxis_length, yaxis_length, cbf_angle = 1.0, 1.0, math.radians(0.0)
     cbf_config = {
-        "Hh": QuadraticFunction.canonical2D(np.array([ 1/xaxis_length**2, 1/yaxis_length**2 ]), cbf_angle),
-        "p0": np.array([ 0, 3 ])
+        "Hh": QuadraticFunction.canonical2D(np.array([ 1/(xaxis_length**2), 1/(yaxis_length**2) ]), cbf_angle),
+        "p0": np.array([ 0, 3.0 ])
     }
     cbf = QuadraticBarrier(system["state_string"], hessian = cbf_config["Hh"], critical = cbf_config["p0"])
     ############################################################################################################################
@@ -55,7 +55,7 @@ try:
     dynamicSimulation = SimulateDynamics(plant, system["initial_state"])
     graphicalSimulation = SimulationRviz(clf, cbf)
 
-    dt = .001
+    dt = .005
     rate = rospy.Rate(1/dt)
     while not rospy.is_shutdown():
 

@@ -58,7 +58,7 @@ class SimulationMatplot():
         current_pi_state = np.array([self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i]])
 
         Hv = QuadraticFunction.vector2sym(current_pi_state)
-        self.clf.set_hessian(Hv)
+        self.clf.set_param(hessian=Hv)
         
         if self.draw_level:
             V = self.clf(current_state)
@@ -66,7 +66,7 @@ class SimulationMatplot():
             self.clf_level_set.set_data(xclf, yclf)
 
         h = self.cbf(current_state)
-        xcbf, ycbf, ucbf, vcbf = self.cbf.superlevel(0.0, self.numpoints)
+        xcbf, ycbf, ucbf, vcbf = self.cbf.superlevel(0.5, self.numpoints)
         self.cbf_level_set.set_data(xcbf, ycbf)
 
         if self.draw_gradient:
@@ -247,8 +247,8 @@ class SimulationRviz():
         else:
             bar_clf_lambda = clf_lambda/V_threshold
 
-        self._clf_marker.scale.x = 2*np.sqrt(1/bar_clf_lambda[0])
-        self._clf_marker.scale.y = 2*np.sqrt(1/bar_clf_lambda[1])
+        self._clf_marker.scale.x = 2*np.sqrt(2/bar_clf_lambda[0])
+        self._clf_marker.scale.y = 2*np.sqrt(2/bar_clf_lambda[1])
         self._clf_marker.pose.position.x = clf.critical_point[0]
         self._clf_marker.pose.position.y = clf.critical_point[1]
         self._clf_marker.pose.orientation.z = np.sin(-clf_angle/2)
