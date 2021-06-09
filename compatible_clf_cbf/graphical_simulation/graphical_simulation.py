@@ -103,6 +103,7 @@ class SimulationRviz():
         self.ref_publisher = rospy.Publisher('ref', Marker, queue_size=1)
         self.clf_publisher = rospy.Publisher('clf', Marker, queue_size=1)
         self.cbf_publisher = rospy.Publisher('cbf', Marker, queue_size=1)
+        self.branch0_publisher = rospy.Publisher('branch0', Marker, queue_size=1)
         self.branch1_publisher = rospy.Publisher('branch1', Marker, queue_size=1)
         self.branch2_publisher = rospy.Publisher('branch2', Marker, queue_size=1)
 
@@ -130,6 +131,7 @@ class SimulationRviz():
         self._cbf_marker = Marker()
 
         # Two branches of the hyperbola
+        self._branch0_marker = Marker()
         self._branch1_marker = Marker()
         self._branch2_marker = Marker()
 
@@ -142,6 +144,7 @@ class SimulationRviz():
         # Initialize CLF and CBF markers
         self.set_clf(clf)
         self.set_cbf(cbf)
+        self.set_invariance(self._branch0_marker)
         self.set_invariance(self._branch1_marker)
         self.set_invariance(self._branch2_marker)
 
@@ -297,7 +300,7 @@ class SimulationRviz():
         l2 = pencil_eig[1]
 
         res1 = (l2-l1)/self.num_invariance_points
-        res2 = (0.5*l2)/self.num_invariance_points
+        res2 = (4.0*l2 - l2)/self.num_invariance_points
 
         self._branch1_marker.points = []
         self._branch2_marker.points = []

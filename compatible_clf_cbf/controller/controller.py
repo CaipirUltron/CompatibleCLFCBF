@@ -91,7 +91,7 @@ class QPController():
         Sets the Lyapunov constraint for the inner loop controller.
         '''
         distance = self.distance_to_invariance(state)
-        print("Distance = " + str(distance))
+        # print("Distance = " + str(distance))
 
         # Affine plant dynamics
         f = self._plant.compute_f(state)
@@ -107,8 +107,12 @@ class QPController():
 
         # CLF contraint for the QP
         a_clf = np.hstack( [ LgV, -1.0 ])
-        convergence_rate = self.gamma[0] * SimulateDynamics.sat( distance, 10.0 )
-        b_clf = - convergence_rate* V - LfV
+        # convergence_rate = self.gamma[0]
+        if self.h_gamma >= 0: 
+            convergence_rate = self.gamma[0]
+        else:
+            convergence_rate = self.gamma[0] * SimulateDynamics.sat( distance, 10.0 )
+        b_clf = -convergence_rate * V - LfV
 
         return a_clf, b_clf
 
@@ -168,6 +172,9 @@ class QPController():
         '''
         Sets the Lyapunov constraint for the outer loop controller.
         '''
+        nablaV, nablah = self.clf.gradient(state), self.cbf.gradient(state)
+        inner = np.inner( nablaV, nablah )
+
         deltaHv = self.clf.hessian() - self.ref_clf.hessian()
         self.Vpi = 0.5 * np.trace( np.matmul(deltaHv, deltaHv) )
 
@@ -175,7 +182,11 @@ class QPController():
             self.gradient_Vpi[k] = np.trace( np.matmul( deltaHv, self.sym_basis[k]) )
 
         a_clf_pi = np.hstack( [ self.gradient_Vpi, -1.0 ])
-        b_clf_pi = -self.gamma[1] * self.Vpi
+
+        if inner <= 0:
+            b_clf_pi = -self.gamma[1] * self.Vpi
+        else:
+            b_clf_pi = math.inf
 
         return a_clf_pi, b_clf_pi
 
@@ -184,13 +195,21 @@ class QPController():
         Sets the barrier constraints for the outer loop controller, ensuring compatibility.
         '''
         nablaV, nablah = self.clf.gradient(state), self.cbf.gradient(state)
-        inner = np.inner( nablaV, nablah )        
+        inner = np.inner( nablaV, nablah )
+        distance = self.distance_to_invariance(state)
 
-        gamma_constraint = 10.0
-        h_gamma = np.zeros(self.number_critical)
+        # epsilon = 0.01
+        # if distance >= epsilon:
+        #     compatibility_rate = np.max([1/distance, 1])
+        # else:
+        #     compatibility_rate = (1/epsilon)
+        compatibility_rate = 10.0
+
+        gamma_constraint = 1.0
+        self.h_gamma = np.zeros(self.number_critical)
         gradient_h_gamma = np.zeros([self.number_critical, self.symmetric_dim])
         for k in range(self.number_critical):
-            h_gamma[k] = np.log( self.critical_values ) - gamma_constraint
+            self.h_gamma[k] = np.log( self.critical_values ) - gamma_constraint
 
             v = self.v_values( self.f_critical[k] )
             H = self.pencil_value( self.f_critical[k] )
@@ -203,9 +222,11 @@ class QPController():
 
         a_cbf_pi = -np.hstack([ gradient_h_gamma, np.zeros([self.number_critical,1]) ])
         if inner >= 0:
-            b_cbf_pi = h_gamma
+            b_cbf_pi = compatibility_rate*self.h_gamma
         else:
-            b_cbf_pi = np.array(10000)
+            b_cbf_pi = np.array(math.inf)
+
+        print(self.h_gamma)
 
         return a_cbf_pi, b_cbf_pi
 
@@ -281,6 +302,8 @@ class QPController():
         pencil_eig = self.pencil_dict["eigenvalues"]
         pencil_char = self.pencil_dict["characteristic_polynomial"]
 
+        # print("Pencil eigen = " + str(pencil_eig))
+
         # Compute denominator of f
         den_poly = np.polynomial.polynomial.polymul(pencil_char, pencil_char)
 
@@ -309,7 +332,6 @@ class QPController():
                 W[i,j] = np.inner(Hh.dot(self.Omega[i,:]), self.Omega[j,:])
 
         num_poly = np.polynomial.polynomial.polyzero
-        term1 = np.polynomial.polynomial.polyzero
         for k in range(n):
             poly_term = np.polynomial.polynomial.polymul( W[:,k], np.eye(n)[:,k] )
             num_poly = np.polynomial.polynomial.polyadd(num_poly, poly_term)
