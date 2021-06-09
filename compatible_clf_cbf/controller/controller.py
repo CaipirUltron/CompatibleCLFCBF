@@ -1,8 +1,7 @@
 from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
 import numpy as np
 import math, scipy
-import copy as cp
-from qpsolvers import solve_qp, solve_safer_qp
+from qpsolvers import solve_qp
 from compatible_clf_cbf.dynamic_systems import AffineSystem
 from compatible_clf_cbf.dynamic_simulation import SimulateDynamics
 
@@ -27,6 +26,9 @@ class QPController():
         self.gradient_Vpi = np.zeros(self.symmetric_dim)
 
         # Initialize compatibility function
+        self.eigen_threshold = 0.001
+        self.pencil_dict = {}
+        self.f_dict = {}
         self.compute_compatibility()
 
         # Parameters for the inner and outer QPs
@@ -64,34 +66,6 @@ class QPController():
         piv_init = QuadraticFunction.sym2vector(self.clf.hessian())
         self.clf_dynamics = SimulateDynamics(piv_integrator, piv_init)
 
-    def collinear_norm(self, state):
-        '''
-        Method that returns the positive collinearity norm.
-        '''
-        nablaV = self.ref_clf.gradient(state)
-        nablah = self.cbf.gradient(state)
-
-        inner_gradients = np.inner( nablaV, nablah )
-        if inner_gradients < 0:
-            D_parallel = 1/(scipy.linalg.norm(nablaV)**3)
-        else:
-            Projection = np.eye(self.state_dim) - np.outer( nablah, nablah )/(scipy.linalg.norm(nablah)**2)
-            D_parallel = scipy.linalg.norm(Projection.dot(nablaV))/(scipy.linalg.norm(nablaV)**4)
-        return D_parallel
-
-    def distance_Pplus(self, state):
-        '''
-        Method that returns the distance (physical) to the positive collinearity set.
-        '''
-        x, y = state[0], state[1]
-        p0 = self.cbf.critical()
-        x_cbf, y_cbf = p0[0], p0[1]
-        if y_cbf <= y:
-            D_col = abs( x - x_cbf )
-        else:
-            D_col = scipy.linalg.norm( state - p0 )
-        return D_col
-
     def compute_control(self, state):
         '''
         Computes the inner QP control.
@@ -105,9 +79,6 @@ class QPController():
         A_inner = np.vstack([a_clf, a_cbf])
         b_inner = np.array([b_clf, b_cbf],dtype=float)
 
-        # A_inner = a_clf
-        # b_inner = np.array([b_clf],dtype=float)
-
         # Solve inner QP
         self.innerQP.set_constraints(A = A_inner,b = b_inner)
         innerQP_sol = self.innerQP.get_solution()
@@ -119,8 +90,8 @@ class QPController():
         '''
         Sets the Lyapunov constraint for the inner loop controller.
         '''
-        dist = self.distance_to_invariance(state)
-        # print("Dist = " + str(dist))
+        distance = self.distance_to_invariance(state)
+        print("Distance = " + str(distance))
 
         # Affine plant dynamics
         f = self._plant.compute_f(state)
@@ -136,8 +107,8 @@ class QPController():
 
         # CLF contraint for the QP
         a_clf = np.hstack( [ LgV, -1.0 ])
-        b_clf = -self.gamma[0] * V - LfV
-        # b_clf = - self.gamma[0] * SimulateDynamics.sat( D_col, 10.0 ) * V - LfV
+        convergence_rate = self.gamma[0] * SimulateDynamics.sat( distance, 10.0 )
+        b_clf = - convergence_rate* V - LfV
 
         return a_clf, b_clf
 
@@ -183,16 +154,13 @@ class QPController():
         A_outer = np.vstack([a_clf_pi, a_cbf_pi])
         b_outer = np.array([b_clf_pi, b_cbf_pi],dtype=float)
 
-        # A_outer = a_clf_pi
-        # b_outer = np.array([b_clf_pi],dtype=float)
-
         self.outerQP.set_constraints(A = A_outer,b = b_outer)
         outerQP_sol = self.outerQP.get_solution()
 
         piv_control = outerQP_sol[0:self.symmetric_dim,]
 
-        ##################################### Turn off outer loop controller #####################################
-        piv_control = np.zeros(self.symmetric_dim)
+        ##################################### Uncomment to turn off outer loop controller #####################################
+        # piv_control = np.zeros(self.symmetric_dim)
 
         self.update_clf_dynamics(piv_control)
 
@@ -224,8 +192,8 @@ class QPController():
         for k in range(self.number_critical):
             h_gamma[k] = np.log( self.critical_values ) - gamma_constraint
 
-            v = self.compute_v( self.critical_points[k] )
-            H = self.compute_pencil( self.critical_points[k] )
+            v = self.v_values( self.f_critical[k] )
+            H = self.pencil_value( self.f_critical[k] )
             H_inv = np.linalg.inv(H)
             Hprod = np.matmul( self.cbf.hessian(), H_inv )
             vec_nabla_f = 2 * (1/self.critical_values[k]) * Hprod.dot(v)
@@ -241,42 +209,81 @@ class QPController():
 
         return a_cbf_pi, b_cbf_pi
 
-    def compute_v( self, lambda_var ):
+    def compute_pencil(self, Hv, Hh):
         '''
-        This function returns the value of vector v(lambda) = H(lambda)^{-1} v0 at
+        Given Hv and Hh, this method computes the generalized pencil eigenvalues and the pencil characteristic polynomial
         '''
-        Hv, x0, p0 = self.clf.hessian(), self.clf.critical(), self.cbf.critical()
-        v0 = Hv.dot( p0 - x0 )
+        # Get the generalized Schur decomposition of the matrix pencil and compute the generalized eigenvalues
+        schurHv, schurHh, alpha, beta, Q, Z = scipy.linalg.ordqz(Hv, Hh)
+        pencil_eig = alpha/beta
+        pencil_eig = np.sort( np.real(np.extract( pencil_eig.imag == 0.0, pencil_eig )) )
 
-        H = self.compute_pencil( lambda_var )
-        H_inv = np.linalg.inv(H)
-        return H_inv.dot(v0)
+        # Assumption: Hv is invertible => detHv != 0
+        detHv = np.linalg.det(Hv)
 
-    def compute_pencil(self, lambda_var):
-        '''
-        This function returns the value of the matrix pencil H(lambda) = lambda Hh - Hv
-        '''
-        Hv, Hh = self.clf.hessian(), self.cbf.hessian()
-        return lambda_var*Hh - Hv
+        # Computes the pencil characteristic polynomial and denominator of f(\lambda)
+        pencil_det = np.real(np.prod(pencil_eig))
+        pencil_char = ( detHv/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(pencil_eig))
 
-    # This function 
-    def compute_compatibility(self):
+        self.pencil_dict["eigenvalues"] = pencil_eig
+        self.pencil_dict["characteristic_polynomial"] = pencil_char
+
+    def compute_cost_polynomial(self, v_bar):
         '''
-        This function computes the polynomials of the rational compatibility funcion f(lambda). It assumes an invertible Hv.
+        Computes the polynomial cost functional for the P+ distance, returning its real critical points.
         '''
         n = self.state_dim
+        pencil_char = self.pencil_dict["characteristic_polynomial"]
+
+        W = np.zeros([n,n])
+        for i in range(n):
+            for j in range(n):
+                W[i,j] = np.inner(self.Omega[i,:], self.Omega[j,:])
+
+        term1 = np.polynomial.polynomial.polyzero
+        for k in range(n):
+            poly_term = np.polynomial.polynomial.polymul( W[:,k], np.eye(n)[:,k] )
+            term1 = np.polynomial.polynomial.polyadd(term1, poly_term)
+
+        yu = np.zeros(n)
+        for k in range(n):
+            yu[k] = np.inner( v_bar, self.Omega[k,:] )
+        term2 = -2*np.polynomial.polynomial.polymul( pencil_char, yu )
+
+        term3 = np.polynomial.polynomial.polymul( pencil_char, pencil_char )*(np.linalg.norm(v_bar)**2)
+
+        self.cost_polynomial = np.polynomial.polynomial.polyzero
+        self.cost_polynomial = np.polynomial.polynomial.polyadd( self.cost_polynomial, term1 )
+        self.cost_polynomial = np.polynomial.polynomial.polyadd( self.cost_polynomial, term2 )
+        self.cost_polynomial = np.polynomial.polynomial.polyadd( self.cost_polynomial, term3 )
+
+        self.dcost_polynomial = np.polynomial.polynomial.polyder( self.cost_polynomial )
+
+        critical = np.polynomial.polynomial.polyroots(self.dcost_polynomial)
+        critical = np.real( critical )
+        critical = np.sort(critical)
+
+        return critical
+
+    def compute_f(self):
+        '''
+        This method computes rational function f 
+        '''
+        n = self.state_dim
+
         # Similarity transformation
         Hv, Hh = self.clf.hessian(), self.cbf.hessian()
         x0, p0 = self.clf.critical(), self.cbf.critical()
         v0 = Hv.dot( p0 - x0 )
 
-        # Get the generalized Schur decomposition of the matrix pencil and compute the generalized eigenvalues
-        schurHv, schurHh, alpha, beta, Q, Z = scipy.linalg.ordqz(Hv, Hh)
-        self.pencil_char_roots = alpha/beta
+        # Compute the pencil
+        self.compute_pencil(Hv, Hh)
+        pencil_eig = self.pencil_dict["eigenvalues"]
+        pencil_char = self.pencil_dict["characteristic_polynomial"]
 
-        self.pencil_char_roots = np.real(np.extract( self.pencil_char_roots.imag == 0.0, self.pencil_char_roots ))
+        # Compute denominator of f
+        den_poly = np.polynomial.polynomial.polymul(pencil_char, pencil_char)
 
-        # Assumption: Hv is invertible
         detHv = np.linalg.det(Hv)
         try:
             Hv_inv = np.linalg.inv(Hv)
@@ -285,125 +292,154 @@ class QPController():
             print(error)
             return
 
-        # Computes the pencil characteristic polynomial and denominator of f(\lambda)
-        pencil_det = np.real(np.prod(self.pencil_char_roots))
-        self.pencil_char = ( detHv/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(self.pencil_char_roots))
-        self.den_poly = np.polynomial.polynomial.polymul(self.pencil_char, self.pencil_char)
-
         # This computes the pencil adjugate expansion and the set of numerator vectors by the adapted Faddeev-LeVerrier algorithm.
         D = np.zeros([n, n, n])
         D[:][:][0] = pow(-1,n-1) * Hv_adj
 
-        Omega = np.zeros([n,n])
-        Omega[0,:] = D[:][:][0].dot(v0)
-
+        self.Omega = np.zeros([n,n])
+        self.Omega[0,:] = D[:][:][0].dot(v0)
         for k in range(1,n):
-            D[:][:][k] = np.matmul( Hv_inv, np.matmul(Hh, D[:][:][k-1]) - self.pencil_char[k]*np.eye(n) )
-            Omega[k,:] = D[:][:][k].dot(v0)
+            D[:][:][k] = np.matmul( Hv_inv, np.matmul(Hh, D[:][:][k-1]) - pencil_char[k]*np.eye(n) )
+            self.Omega[k,:] = D[:][:][k].dot(v0)
 
         # Computes the numerator polynomial
         W = np.zeros([n,n])
         for i in range(n):
             for j in range(n):
-                W[i,j] = np.inner(Hh.dot(Omega[i,:]), Omega[j,:])
+                W[i,j] = np.inner(Hh.dot(self.Omega[i,:]), self.Omega[j,:])
 
-        self.num_poly = np.polynomial.polynomial.polyzero
+        num_poly = np.polynomial.polynomial.polyzero
+        term1 = np.polynomial.polynomial.polyzero
         for k in range(n):
             poly_term = np.polynomial.polynomial.polymul( W[:,k], np.eye(n)[:,k] )
-            self.num_poly = np.polynomial.polynomial.polyadd(self.num_poly, poly_term)
+            num_poly = np.polynomial.polynomial.polyadd(num_poly, poly_term)
 
         # Computes polynomial roots
-        self.num_roots = np.real( np.polynomial.polynomial.polyroots(self.num_poly) )
+        fzeros = np.real( np.polynomial.polynomial.polyroots(num_poly) )
 
-        # Filters repeated poles from pencil_char_roots and numerator_roots
-        threshold = 0.001
-        self.repeated = []
-        # deletion_i = []
-        # deletion_j = []
-        for i in range( len(self.pencil_char_roots) ):
-            for j in range( len(self.num_roots) ):
-                if (self.num_roots[j] - self.pencil_char_roots[i]) < threshold:
-                    # deletion_i.append(i)
-                    # deletion_j.append(j)
-                    if np.any(self.repeated == self.pencil_char_roots[i]):
+        # Filters repeated poles from pencil_eig and numerator_roots
+        repeated_poles = []
+        for i in range( len(pencil_eig) ):
+            for j in range( len(fzeros) ):
+                if np.absolute(fzeros[j] - pencil_eig[i]) < self.eigen_threshold:
+                    if np.any(repeated_poles == pencil_eig[i]):
                             break
                     else:
-                        self.repeated.append( self.pencil_char_roots[i] )
-        self.repeated = np.array( self.repeated )
-        # self.pencil_char_roots = np.delete(self.pencil_char_roots, deletion_i)
-        # self.num_roots = np.delete(self.num_roots, deletion_j)
+                        repeated_poles.append( pencil_eig[i] )
+        repeated_poles = np.array( repeated_poles )
 
-        # Compute equilibrium point
-        solution_poly = np.polynomial.polynomial.polysub( self.num_poly, self.den_poly )
-        solution_roots = np.polynomial.polynomial.polyroots(solution_poly)
-        solution_roots = np.real(np.extract( solution_roots.imag == 0.0, solution_roots ))
-        solution_roots = np.concatenate((solution_roots, self.repeated))
-        solution_roots = np.extract( solution_roots>0, solution_roots)
+        self.f_dict = {
+            "denominator": den_poly,
+            "numerator": num_poly,
+            "poles": pencil_eig,
+            "zeros": fzeros,
+            "repeated_poles": repeated_poles
+        }
 
-        self.lambda_eq = np.min( solution_roots )
-        self.max_pencil_root = np.max(self.pencil_char_roots)
-        self.min_pencil_root = np.min(self.pencil_char_roots)
-        self.equilibrium_pt = self.compute_v( self.lambda_eq ) + p0
+    def compute_equilibrium(self):
+        '''
+        Compute equilibrium solutions and equilibrium points.
+        '''
+        n = self.state_dim
 
-        # Computes f(0)
-        f0 = self.num_poly[0]/(self.pencil_char[0]**2)
+        p0 = self.cbf.critical()
+        solution_poly = np.polynomial.polynomial.polysub( self.f_dict["numerator"], self.f_dict["denominator"] )
+        
+        equilibrium_solutions = np.polynomial.polynomial.polyroots(solution_poly)
+        equilibrium_solutions = np.real(np.extract( equilibrium_solutions.imag == 0.0, equilibrium_solutions ))
+        equilibrium_solutions = np.concatenate((equilibrium_solutions, self.f_dict["repeated_poles"]))
 
-        # Computes critical points
-        self.dnum_poly = np.polynomial.polynomial.polyder(self.num_poly)
-        self.dpencil_char = np.polynomial.polynomial.polyder(self.pencil_char)
+        # Extract positive solutions and sort array
+        self.equilibrium_solutions = np.sort( np.extract( equilibrium_solutions > 0, equilibrium_solutions ) )
 
-        poly1 = np.polynomial.polynomial.polymul(self.dnum_poly, self.pencil_char)
-        poly2 = 2*np.polynomial.polynomial.polymul(self.num_poly, self.dpencil_char)
+        # Compute equilibrium points from equilibrium solutions
+        self.equilibrium_points = np.zeros([n,len(self.equilibrium_solutions)])
+        for k in range(len(self.equilibrium_solutions)):
+            if all(np.absolute(self.equilibrium_solutions[k] - self.pencil_dict["eigenvalues"]) > self.eigen_threshold ):
+                self.equilibrium_points[:,k] = self.v_values( self.equilibrium_solutions[k] ) + p0
+
+    def compute_f_critical(self):
+        '''
+        Computes critical points of f
+        '''
+        dnum_poly = np.polynomial.polynomial.polyder(self.f_dict["numerator"])
+        dpencil_char = np.polynomial.polynomial.polyder(self.pencil_dict["characteristic_polynomial"])
+
+        poly1 = np.polynomial.polynomial.polymul(dnum_poly, self.pencil_dict["characteristic_polynomial"])
+        poly2 = 2*np.polynomial.polynomial.polymul(self.f_dict["numerator"], dpencil_char)
         num_df = np.polynomial.polynomial.polysub( poly1, poly2 )
 
-        self.critical_points = np.polynomial.polynomial.polyroots(num_df)
-        self.critical_points = np.real(np.extract( self.critical_points.imag == 0.0, self.critical_points ))
-        self.critical_values = self.f_values(self.critical_points)
+        self.f_critical = np.polynomial.polynomial.polyroots(num_df)
+        self.f_critical = np.real(np.extract( self.f_critical.imag == 0.0, self.f_critical ))
+        self.critical_values = self.f_values(self.f_critical)
         self.number_critical = len(self.critical_values)
 
+    def compute_compatibility(self):
+        '''
+        This function computes the polynomials of the rational compatibility funcion f(lambda). It assumes an invertible Hv.
+        '''
+        self.compute_f()
+        self.compute_equilibrium()
+        self.compute_f_critical()
+
     def distance_to_invariance(self, state):
+        '''
+        This function computes the minimum distance from the state trajectory to the danger subset of P+.
+        The danger subset is the one at the open interval (lambda_1, lambda_n), that is, the interval that could contain stable equilibrium solutions.
+        '''
+        v_bar = state - self.cbf.critical()
+        pencil_eig = self.pencil_dict["eigenvalues"]
+        candidates = self.compute_cost_polynomial(v_bar)
+        
+        # Filters the solution candidates. Distance must be computed from a possibly stable equilibrium point.
+        valid_candidates = []
+        for candidate in candidates:
+            valid_interval = candidate > pencil_eig[0] and candidate < pencil_eig[1]
+            non_singular = all( np.absolute(pencil_eig - candidate) > self.eigen_threshold )
+            if valid_interval and non_singular:
+                valid_candidates.append( candidate )
 
-        Hv, Hh = self.clf.hessian(), self.cbf.hessian()
-        x0, p0 = self.clf.critical(), self.cbf.critical()
+        # Computes the best cost among the valid solution candidates
+        distance = math.inf
+        for c in valid_candidates:
+            c_cost = self.cost_value(c, v_bar)
+            if c_cost < distance:
+                distance = c_cost
 
-        v0 = Hv.dot( p0 - x0 )
-        v_bar = state - p0
-
-        P_dist_QP = np.array([[ 0.5 * v_bar.dot( np.matmul(Hh,Hh).dot(v_bar) ) ]])
-        q_dist_QP = np.array([ -0.5 * v_bar.dot( (np.matmul(Hh,Hv) + np.matmul(Hv,Hh)).dot(v_bar) ) - v0.dot( Hh.dot(v_bar) ) ])
-
-        # A_dist_QP = np.array([[1.0],[-1.0]])
-        # b_dist_QP = np.array([ self.lambda_eq, -self.min_pencil_root ])
-
-        A_dist_QP = np.array([[1.0]])
-        b_dist_QP = np.array([ self.lambda_eq ])
-
-        lambda_sol = solve_qp(P=P_dist_QP, q=q_dist_QP, G=A_dist_QP, h=b_dist_QP, solver="quadprog")
-        v_sol = self.compute_v( lambda_sol )
-        distance = scipy.linalg.norm(v_sol - v_bar)
         return distance
 
-    # Returns the values of f at args
     def f_values(self, args):
+        '''
+        Returns the values of f.
+        '''
         numpoints = len(args)
         fvalues = np.zeros(numpoints)
         for k in range(numpoints):
-            num_value = np.polynomial.polynomial.polyval( args[k], self.num_poly )
-            pencil_char_value = np.polynomial.polynomial.polyval( args[k], self.pencil_char )
+            num_value = np.polynomial.polynomial.polyval( args[k], self.f_dict["numerator"] )
+            pencil_char_value = np.polynomial.polynomial.polyval( args[k], self.pencil_dict["characteristic_polynomial"] )
             fvalues[k] = num_value/(pencil_char_value**2)
         return fvalues
 
-    # Returns the values of df at args
-    def df_values(self, args):
-        numpoints = len(args)
-        dfvalues = np.zeros(numpoints)
-        for k in range(numpoints):
-            num_value = np.polynomial.polynomial.polyval( args[k], self.num_poly )
-            dnum_value = np.polynomial.polynomial.polyval( args[k], self.dnum_poly )
-            pencil_char_value = np.polynomial.polynomial.polyval( args[k], self.pencil_char )
-            dpencil_char_value = np.polynomial.polynomial.polyval( args[k], self.dpencil_char )
-            dfvalues[k] = dnum_value/(pencil_char_value**2) - 2*(num_value/(pencil_char_value**3))*dpencil_char_value
-        return dfvalues
+    def v_values( self, lambda_var ):
+        '''
+        This function returns the value of vector v(lambda) = H(lambda)^{-1} v0
+        '''
+        Hv, x0, p0 = self.clf.hessian(), self.clf.critical(), self.cbf.critical()
+        v0 = Hv.dot( p0 - x0 )
+
+        H = self.pencil_value( lambda_var )
+        H_inv = np.linalg.inv(H)
+        return H_inv.dot(v0)
+
+    def cost_value(self, lambda_bar, v_bar):
+        return np.linalg.norm( self.v_values(lambda_bar) - v_bar )
+
+    def pencil_value(self, lambda_var):
+        '''
+        This function returns the value of the matrix pencil H(lambda) = lambda Hh - Hv
+        '''
+        Hv, Hh = self.clf.hessian(), self.cbf.hessian()
+        return lambda_var*Hh - Hv
 
 
 class QuadraticProgram():
@@ -426,9 +462,10 @@ class QuadraticProgram():
             self.b = None
         self.last_solution = None
 
-    # Set cost of the type x'Px + q'x 
     def set_cost(self, P, q):
-
+        '''
+        Set cost of the type x'Px + q'x 
+        '''
         if ( P.ndim != 2 or q.ndim != 1 ):
             raise Exception('P must be a 2-dim array and q must be a 1-dim array.')
         if P.shape[0] != P.shape[1]:
@@ -439,8 +476,10 @@ class QuadraticProgram():
         self.q = q
         self.dimension = len(q)
 
-    # Set constraints of the type A x <= b
     def set_constraints(self, A, b):
+        '''
+        Set constraints of the type A x <= b
+        '''
         if b.ndim != 1:
             raise Exception('b must be a 1-dim array.')
         if A.ndim == 2 and A.shape[0] != len(b):
@@ -453,13 +492,17 @@ class QuadraticProgram():
         else:
             self.num_constraints = 1
 
-    # Returns the solution of the configured QP.
     def get_solution(self):
+        '''
+        Returns the solution of the configured QP.
+        '''
         self.solve_QP()
         return self.last_solution
 
-    # Method for solving the configured QP using quadprog.
     def solve_QP(self):
+        '''
+        Method for solving the configured QP using quadprog.
+        '''
         try:
             self.last_solution = solve_qp(P=self.P, q=self.q, G=self.A, h=self.b, solver="quadprog")
         except Exception as error:

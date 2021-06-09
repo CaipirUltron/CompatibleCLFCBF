@@ -1,4 +1,3 @@
-from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
 import rospy
 import tf2_ros
 import numpy as np
@@ -8,6 +7,9 @@ import matplotlib.animation as anim
 
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import Point, PointStamped, TransformStamped
+
+from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
+from compatible_clf_cbf.controller import QPController
 
 
 class SimulationMatplot():
@@ -91,15 +93,18 @@ class SimulationRviz():
         rospy.loginfo("Starting graphical simulation...")
 
         self.ref_marker_size = 0.2
+        self.num_invariance_points = 50
 
         # ROS subscribers
-        click_subscriber = rospy.Subscriber("clicked_point", PointStamped, self.draw_reference)
+        # click_subscriber = rospy.Subscriber("clicked_point", PointStamped, self.draw_reference)
 
         # ROS Publishers
         self.trajectory_publisher = rospy.Publisher('trajectory', Marker, queue_size=1)
         self.ref_publisher = rospy.Publisher('ref', Marker, queue_size=1)
         self.clf_publisher = rospy.Publisher('clf', Marker, queue_size=1)
         self.cbf_publisher = rospy.Publisher('cbf', Marker, queue_size=1)
+        self.branch1_publisher = rospy.Publisher('branch1', Marker, queue_size=1)
+        self.branch2_publisher = rospy.Publisher('branch2', Marker, queue_size=1)
 
         # Setup base transform
         self.world_transform = TransformStamped()
@@ -124,6 +129,10 @@ class SimulationRviz():
         self._clf_marker = Marker()
         self._cbf_marker = Marker()
 
+        # Two branches of the hyperbola
+        self._branch1_marker = Marker()
+        self._branch2_marker = Marker()
+
         # Initialize robot position marker
         self.set_state(np.zeros(2))
 
@@ -133,6 +142,8 @@ class SimulationRviz():
         # Initialize CLF and CBF markers
         self.set_clf(clf)
         self.set_cbf(cbf)
+        self.set_invariance(self._branch1_marker)
+        self.set_invariance(self._branch2_marker)
 
     def set_state(self, state):
 
@@ -202,7 +213,7 @@ class SimulationRviz():
         self._cbf_marker.scale.x = 2*np.sqrt(1/self.cbf_lambda[0])
         self._cbf_marker.scale.y = 2*np.sqrt(1/self.cbf_lambda[1])
         self._cbf_marker.scale.z = 0.1
-        self._cbf_marker.color.a = 1.0
+        self._cbf_marker.color.a = 0.3
         self._cbf_marker.color.r = 0.0
         self._cbf_marker.color.g = 1.0
         self._cbf_marker.color.b = 0.0
@@ -213,6 +224,24 @@ class SimulationRviz():
         self._cbf_marker.pose.orientation.y = 0.0
         self._cbf_marker.pose.orientation.z = np.sin(-self.cbf_angle/2)
         self._cbf_marker.pose.orientation.w = np.cos(-self.cbf_angle/2)
+
+    def set_invariance(self, branch):
+
+        branch.header.frame_id = "base_frame"
+        branch.type = branch.LINE_STRIP
+        branch.action = branch.ADD
+        branch.scale.x = 0.02
+        branch.color.a = 1.0
+        branch.color.r = 1.0
+        branch.color.g = 0.0
+        branch.color.b = 0.0
+        branch.pose.position.x = 0.0
+        branch.pose.position.y = 0.0
+        branch.pose.position.z = 0.5
+        branch.pose.orientation.x = 0.0
+        branch.pose.orientation.y = 0.0
+        branch.pose.orientation.z = 0.0
+        branch.pose.orientation.w = 1.0
 
     def draw_trajectory(self, point):
         new_trajectory_point = Point()
@@ -225,6 +254,7 @@ class SimulationRviz():
         self.trajectory_publisher.publish(self._trajectory_marker)
 
     def draw_reference(self, ref_point):
+
         if isinstance(ref_point,type(PointStamped())):
             reference = np.array([ ref_point.point.x, ref_point.point.y ])
         else:
@@ -258,6 +288,33 @@ class SimulationRviz():
 
     def draw_cbf(self):
         self.cbf_publisher.publish(self._cbf_marker)
+
+    def draw_invariance(self, controller):
+
+        pencil_eig = controller.pencil_dict["eigenvalues"]
+
+        l1 = pencil_eig[0]
+        l2 = pencil_eig[1]
+
+        res1 = (l2-l1)/self.num_invariance_points
+        res2 = (0.5*l2)/self.num_invariance_points
+
+        self._branch1_marker.points = []
+        self._branch2_marker.points = []
+        for k in range(self.num_invariance_points):
+            l1 += res1
+            l2 += res2
+            if all( np.absolute( l1 - pencil_eig ) > controller.eigen_threshold ):
+                v = controller.v_values( l1 )
+                state = v + controller.cbf.critical()
+                self._branch1_marker.points.append( Point(x= state[0], y= state[1], z = 0.0) )
+            if all( np.absolute( l2 - pencil_eig ) > controller.eigen_threshold ):
+                v = controller.v_values( l2 )
+                state = v + controller.cbf.critical()
+                self._branch2_marker.points.append( Point(x= state[0], y= state[1], z = 0.0) )
+
+        self.branch1_publisher.publish(self._branch1_marker)        
+        self.branch2_publisher.publish(self._branch2_marker)        
 
     def get_reference(self):
         return self._reference
