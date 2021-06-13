@@ -50,6 +50,7 @@ class QPController():
 
         # Control sample time
         self.ctrl_dt = dt
+        self.h = 0.0
 
         # Initialize dynamic subsystems
         f_integrator, g_integrator = list(), list()
@@ -91,7 +92,7 @@ class QPController():
         Sets the Lyapunov constraint for the inner loop controller.
         '''
         distance = self.distance_to_invariance(state)
-        # print("Distance = " + str(distance))
+        print("Distance = " + str(distance))
 
         # Affine plant dynamics
         f = self._plant.compute_f(state)
@@ -107,11 +108,10 @@ class QPController():
 
         # CLF contraint for the QP
         a_clf = np.hstack( [ LgV, -1.0 ])
-        # convergence_rate = self.gamma[0]
         if self.h_gamma >= 0: 
             convergence_rate = self.gamma[0]
         else:
-            convergence_rate = self.gamma[0] * SimulateDynamics.sat( distance, 10.0 )
+            convergence_rate = self.gamma[0] * SimulateDynamics.sat( distance, 1.0 )
         b_clf = -convergence_rate * V - LfV
 
         return a_clf, b_clf
@@ -125,7 +125,7 @@ class QPController():
         g = self._plant.compute_g(state)
 
         # Barrier function and gradient
-        h = self.cbf(state)
+        self.h = self.cbf(state)
         nablah = self.cbf.gradient(state)
 
         Lfh = nablah.dot(f)
@@ -133,7 +133,7 @@ class QPController():
 
         # CBF contraint for the QP
         a_cbf = -np.hstack( [ Lgh, 0.0 ])
-        b_cbf = self.alpha[0] * h + Lfh
+        b_cbf = self.alpha[0] * self.h + Lfh
 
         return a_cbf, b_cbf
 
@@ -175,6 +175,8 @@ class QPController():
         nablaV, nablah = self.clf.gradient(state), self.cbf.gradient(state)
         inner = np.inner( nablaV, nablah )
 
+        # print("Inner = " + str(inner))
+
         deltaHv = self.clf.hessian() - self.ref_clf.hessian()
         self.Vpi = 0.5 * np.trace( np.matmul(deltaHv, deltaHv) )
 
@@ -183,7 +185,7 @@ class QPController():
 
         a_clf_pi = np.hstack( [ self.gradient_Vpi, -1.0 ])
 
-        if inner <= 0:
+        if inner <= 0 and self.h >= 1:
             b_clf_pi = -self.gamma[1] * self.Vpi
         else:
             b_clf_pi = math.inf
@@ -221,12 +223,10 @@ class QPController():
                 gradient_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
 
         a_cbf_pi = -np.hstack([ gradient_h_gamma, np.zeros([self.number_critical,1]) ])
-        if inner >= 0:
+        if inner >= 0 and self.h < 1:
             b_cbf_pi = compatibility_rate*self.h_gamma
         else:
             b_cbf_pi = np.array(math.inf)
-
-        print(self.h_gamma)
 
         return a_cbf_pi, b_cbf_pi
 
@@ -301,8 +301,6 @@ class QPController():
         self.compute_pencil(Hv, Hh)
         pencil_eig = self.pencil_dict["eigenvalues"]
         pencil_char = self.pencil_dict["characteristic_polynomial"]
-
-        # print("Pencil eigen = " + str(pencil_eig))
 
         # Compute denominator of f
         den_poly = np.polynomial.polynomial.polymul(pencil_char, pencil_char)
