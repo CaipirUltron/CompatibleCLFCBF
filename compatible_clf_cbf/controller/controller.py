@@ -26,7 +26,7 @@ class QPController():
         self.gradient_Vpi = np.zeros(self.symmetric_dim)
 
         # Initialize compatibility function
-        self.eigen_threshold = 0.001
+        self.eigen_threshold = 0.00001
         self.pencil_dict = {}
         self.f_dict = {}
         self.compute_compatibility()
@@ -91,8 +91,9 @@ class QPController():
         '''
         Sets the Lyapunov constraint for the inner loop controller.
         '''
+        # Computes the distance from the positive invariant set
         distance = self.distance_to_invariance(state)
-        print("Distance = " + str(distance))
+        # print("Distance = " + str(distance))
 
         # Affine plant dynamics
         f = self._plant.compute_f(state)
@@ -111,7 +112,7 @@ class QPController():
         if self.h_gamma >= 0: 
             convergence_rate = self.gamma[0]
         else:
-            convergence_rate = self.gamma[0] * SimulateDynamics.sat( distance, 1.0 )
+            convergence_rate = self.gamma[0] * SimulateDynamics.sat( distance, 10.0 )
         b_clf = -convergence_rate * V - LfV
 
         return a_clf, b_clf
@@ -172,23 +173,25 @@ class QPController():
         '''
         Sets the Lyapunov constraint for the outer loop controller.
         '''
-        nablaV, nablah = self.clf.gradient(state), self.cbf.gradient(state)
-        inner = np.inner( nablaV, nablah )
+        # Computes the inner product between gradients
+        inner = np.inner( self.clf.gradient(state), self.cbf.gradient(state) )
 
-        # print("Inner = " + str(inner))
+        # Computes the distance from the positive invariant set
+        distance = self.distance_to_invariance(state)
 
+        # Computes rate Lyapunov and gradient
         deltaHv = self.clf.hessian() - self.ref_clf.hessian()
         self.Vpi = 0.5 * np.trace( np.matmul(deltaHv, deltaHv) )
-
         for k in range(self.symmetric_dim):
             self.gradient_Vpi[k] = np.trace( np.matmul( deltaHv, self.sym_basis[k]) )
 
+        # Sets rate constraint
         a_clf_pi = np.hstack( [ self.gradient_Vpi, -1.0 ])
-
-        if inner <= 0 and self.h >= 1:
-            b_clf_pi = -self.gamma[1] * self.Vpi
-        else:
+        approaching_obstacle = inner >= 0 and distance < 0.1
+        if approaching_obstacle:
             b_clf_pi = math.inf
+        else:
+            b_clf_pi = -self.gamma[1] * self.Vpi
 
         return a_clf_pi, b_clf_pi
 
@@ -200,13 +203,10 @@ class QPController():
         inner = np.inner( nablaV, nablah )
         distance = self.distance_to_invariance(state)
 
-        # epsilon = 0.01
-        # if distance >= epsilon:
-        #     compatibility_rate = np.max([1/distance, 1])
-        # else:
-        #     compatibility_rate = (1/epsilon)
-        compatibility_rate = 10.0
+        # positive eigenvalues
+        
 
+        # h_gamma constraints
         gamma_constraint = 1.0
         self.h_gamma = np.zeros(self.number_critical)
         gradient_h_gamma = np.zeros([self.number_critical, self.symmetric_dim])
@@ -222,9 +222,11 @@ class QPController():
                 vec_i = self.sym_basis[i].dot( v + self.cbf.critical() - self.clf.critical() )
                 gradient_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
 
+        # Sets compatibility constraints
         a_cbf_pi = -np.hstack([ gradient_h_gamma, np.zeros([self.number_critical,1]) ])
-        if inner >= 0 and self.h < 1:
-            b_cbf_pi = compatibility_rate*self.h_gamma
+        approaching_obstacle = inner >= 0 and distance < 0.1
+        if approaching_obstacle:
+            b_cbf_pi = self.alpha[1]*self.h_gamma
         else:
             b_cbf_pi = np.array(math.inf)
 
@@ -238,6 +240,11 @@ class QPController():
         schurHv, schurHh, alpha, beta, Q, Z = scipy.linalg.ordqz(Hv, Hh)
         pencil_eig = alpha/beta
         pencil_eig = np.sort( np.real(np.extract( pencil_eig.imag == 0.0, pencil_eig )) )
+
+        alpha2 = np.diag( np.matmul( np.matmul(Q.T, Hv), Z) )
+        beta2 = np.diag( np.matmul( np.matmul(Q.T, Hh), Z) )
+
+        pencil_eig2 = np.sort( alpha2/beta2 )
 
         # Assumption: Hv is invertible => detHv != 0
         detHv = np.linalg.det(Hv)
@@ -411,15 +418,18 @@ class QPController():
         pencil_eig = self.pencil_dict["eigenvalues"]
         candidates = self.compute_cost_polynomial(v_bar)
         
+        # print(pencil_eig)
+
         # Filters the solution candidates. Distance must be computed from a possibly stable equilibrium point.
         valid_candidates = []
         for candidate in candidates:
-            valid_interval = candidate > pencil_eig[0] and candidate < pencil_eig[1]
+            valid_interval = candidate >= pencil_eig[0] and candidate <= pencil_eig[1]
             non_singular = all( np.absolute(pencil_eig - candidate) > self.eigen_threshold )
             if valid_interval and non_singular:
                 valid_candidates.append( candidate )
 
         # Computes the best cost among the valid solution candidates
+        print(valid_candidates)
         distance = math.inf
         for c in valid_candidates:
             c_cost = self.cost_value(c, v_bar)
