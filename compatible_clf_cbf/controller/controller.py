@@ -26,9 +26,13 @@ class QPController():
         self.gradient_Vpi = np.zeros(self.symmetric_dim)
 
         # Initialize compatibility function
-        self.eigen_threshold = 0.001
+        self.eigen_threshold = 0.00001
         self.pencil_dict = {}
         self.f_dict = {}
+        self.f_params_dict = {
+            "minimum_gap": 1.0,
+            "minimum_eigenvalue": 1.0,
+        }
         self.compute_compatibility()
 
         # Parameters for the inner and outer QPs
@@ -91,8 +95,9 @@ class QPController():
         '''
         Sets the Lyapunov constraint for the inner loop controller.
         '''
+        # Computes the distance from the positive invariant set
         distance = self.distance_to_invariance(state)
-        print("Distance = " + str(distance))
+        # print("Distance = " + str(distance))
 
         # Affine plant dynamics
         f = self._plant.compute_f(state)
@@ -172,23 +177,25 @@ class QPController():
         '''
         Sets the Lyapunov constraint for the outer loop controller.
         '''
-        nablaV, nablah = self.clf.gradient(state), self.cbf.gradient(state)
-        inner = np.inner( nablaV, nablah )
+        # Computes the inner product between gradients
+        inner = np.inner( self.clf.gradient(state), self.cbf.gradient(state) )
 
-        # print("Inner = " + str(inner))
+        # Computes the distance from the positive invariant set
+        distance = self.distance_to_invariance(state)
 
+        # Computes rate Lyapunov and gradient
         deltaHv = self.clf.hessian() - self.ref_clf.hessian()
         self.Vpi = 0.5 * np.trace( np.matmul(deltaHv, deltaHv) )
-
         for k in range(self.symmetric_dim):
             self.gradient_Vpi[k] = np.trace( np.matmul( deltaHv, self.sym_basis[k]) )
 
+        # Sets rate constraint
         a_clf_pi = np.hstack( [ self.gradient_Vpi, -1.0 ])
-
-        if inner <= 0 and self.h >= 1:
-            b_clf_pi = -self.gamma[1] * self.Vpi
-        else:
+        approaching_obstacle = inner >= 0 and distance < 0.1
+        if approaching_obstacle:
             b_clf_pi = math.inf
+        else:
+            b_clf_pi = -self.gamma[1] * self.Vpi
 
         return a_clf_pi, b_clf_pi
 
@@ -200,18 +207,15 @@ class QPController():
         inner = np.inner( nablaV, nablah )
         distance = self.distance_to_invariance(state)
 
-        # epsilon = 0.01
-        # if distance >= epsilon:
-        #     compatibility_rate = np.max([1/distance, 1])
-        # else:
-        #     compatibility_rate = (1/epsilon)
-        compatibility_rate = 10.0
+        # positive eigenvalues
+        pencil_eig = self.pencil_dict["eigenvalues"]
+        self.h_positive = np.min( pencil_eig ) - self.f_params_dict["minimum_eigenvalue"]
 
-        gamma_constraint = 1.0
+        # h_gamma constraints
         self.h_gamma = np.zeros(self.number_critical)
         gradient_h_gamma = np.zeros([self.number_critical, self.symmetric_dim])
         for k in range(self.number_critical):
-            self.h_gamma[k] = np.log( self.critical_values ) - gamma_constraint
+            self.h_gamma[k] = np.log( self.critical_values ) - self.f_params_dict["minimum_gap"]
 
             v = self.v_values( self.f_critical[k] )
             H = self.pencil_value( self.f_critical[k] )
@@ -222,9 +226,11 @@ class QPController():
                 vec_i = self.sym_basis[i].dot( v + self.cbf.critical() - self.clf.critical() )
                 gradient_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
 
+        # Sets compatibility constraints
         a_cbf_pi = -np.hstack([ gradient_h_gamma, np.zeros([self.number_critical,1]) ])
-        if inner >= 0 and self.h < 1:
-            b_cbf_pi = compatibility_rate*self.h_gamma
+        approaching_obstacle = inner >= 0 and distance < 0.1
+        if approaching_obstacle:
+            b_cbf_pi = self.alpha[1]*self.h_gamma
         else:
             b_cbf_pi = np.array(math.inf)
 
@@ -282,7 +288,7 @@ class QPController():
 
         critical = np.polynomial.polynomial.polyroots(self.dcost_polynomial)
         critical = np.real( critical )
-        critical = np.sort(critical)
+        critical = np.sort( critical )
 
         return critical
 
@@ -411,6 +417,8 @@ class QPController():
         pencil_eig = self.pencil_dict["eigenvalues"]
         candidates = self.compute_cost_polynomial(v_bar)
         
+        print(pencil_eig)
+
         # Filters the solution candidates. Distance must be computed from a possibly stable equilibrium point.
         valid_candidates = []
         for candidate in candidates:
