@@ -211,6 +211,8 @@ class QPController():
         pencil_eig = self.pencil_dict["eigenvalues"]
         self.h_positive = np.min( pencil_eig ) - self.f_params_dict["minimum_eigenvalue"]
 
+        # gradient_h_positive = ( 1/() )
+
         # h_gamma constraints
         self.h_gamma = np.zeros(self.number_critical)
         gradient_h_gamma = np.zeros([self.number_critical, self.symmetric_dim])

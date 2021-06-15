@@ -40,7 +40,7 @@ try:
 
 
     ############################################## Configure and create CBF ####################################################
-    xaxis_length, yaxis_length, cbf_angle = 3.0, 1.0, math.radians(40.0)
+    xaxis_length, yaxis_length, cbf_angle = 3.0, 1.0, math.radians(20.0)
     cbf_config = {
         "Hh": QuadraticFunction.canonical2D(np.array([ 1/(xaxis_length**2), 1/(yaxis_length**2) ]), cbf_angle),
         "p0": np.array([ 0, 3.0 ])
