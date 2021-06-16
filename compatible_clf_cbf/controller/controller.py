@@ -113,7 +113,7 @@ class QPController():
 
         # CLF contraint for the QP
         a_clf = np.hstack( [ LgV, -1.0 ])
-        if self.h_gamma >= 0: 
+        if self.h_gamma >= 0 and self.h_positive >= 0: 
             convergence_rate = self.gamma[0]
         else:
             convergence_rate = self.gamma[0] * SimulateDynamics.sat( distance, 1.0 )
@@ -161,7 +161,7 @@ class QPController():
         a_cbf_pi, b_cbf_pi = self.compute_compatibility_constraints(state)
 
         A_outer = np.vstack([a_clf_pi, a_cbf_pi])
-        b_outer = np.array([b_clf_pi, b_cbf_pi],dtype=float)
+        b_outer = np.hstack([b_clf_pi, b_cbf_pi])
 
         self.outerQP.set_constraints(A = A_outer,b = b_outer)
         outerQP_sol = self.outerQP.get_solution()
@@ -207,11 +207,20 @@ class QPController():
         inner = np.inner( nablaV, nablah )
         distance = self.distance_to_invariance(state)
 
-        # positive eigenvalues
+        # Constraint for keeping the eigenvalues positive
         pencil_eig = self.pencil_dict["eigenvalues"]
-        self.h_positive = np.min( pencil_eig ) - self.f_params_dict["minimum_eigenvalue"]
+        Q = self.pencil_dict["left_eigenvectors"]
+        Z = self.pencil_dict["right_eigenvectors"]
+        
+        # print("Eigen = " + str(pencil_eig))
 
-        # gradient_h_positive = ( 1/() )
+        Hh = self.cbf.hessian()
+        beta_0 = np.dot( Q[:,0], Hh.dot(Z[:,0]) )
+
+        self.h_positive = pencil_eig[0] - self.f_params_dict["minimum_eigenvalue"]
+        gradient_h_positive = np.zeros(self.symmetric_dim)
+        for i in range(self.symmetric_dim):
+            gradient_h_positive[i] = np.dot( Q[:,0], self.sym_basis[i].dot(Z[:,0]) ) / beta_0
 
         # h_gamma constraints
         self.h_gamma = np.zeros(self.number_critical)
@@ -229,12 +238,15 @@ class QPController():
                 gradient_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
 
         # Sets compatibility constraints
-        a_cbf_pi = -np.hstack([ gradient_h_gamma, np.zeros([self.number_critical,1]) ])
+        a_cbf_gamma = -np.hstack([ gradient_h_gamma, np.zeros([self.number_critical,1]) ])
+        a_cbf_positive = -np.hstack([ gradient_h_positive, 0.0 ])
+        a_cbf_pi = np.vstack([ a_cbf_gamma, a_cbf_positive ])
+
         approaching_obstacle = inner >= 0 and distance < 0.1
         if approaching_obstacle:
-            b_cbf_pi = self.alpha[1]*self.h_gamma
+            b_cbf_pi = np.hstack([ self.alpha[1]*self.h_gamma, self.alpha[1]*self.h_positive ])
         else:
-            b_cbf_pi = np.array(math.inf)
+            b_cbf_pi = np.array([ math.inf, math.inf ])
 
         return a_cbf_pi, b_cbf_pi
 
@@ -245,7 +257,8 @@ class QPController():
         # Get the generalized Schur decomposition of the matrix pencil and compute the generalized eigenvalues
         schurHv, schurHh, alpha, beta, Q, Z = scipy.linalg.ordqz(Hv, Hh)
         pencil_eig = alpha/beta
-        pencil_eig = np.sort( np.real(np.extract( pencil_eig.imag == 0.0, pencil_eig )) )
+        pencil_eig = np.real(np.extract( pencil_eig.imag == 0.0, pencil_eig ))
+        sorted_args = np.argsort(pencil_eig)
 
         # Assumption: Hv is invertible => detHv != 0
         detHv = np.linalg.det(Hv)
@@ -254,7 +267,9 @@ class QPController():
         pencil_det = np.real(np.prod(pencil_eig))
         pencil_char = ( detHv/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(pencil_eig))
 
-        self.pencil_dict["eigenvalues"] = pencil_eig
+        self.pencil_dict["eigenvalues"] = pencil_eig[sorted_args]
+        self.pencil_dict["left_eigenvectors"] = Q[:,sorted_args]
+        self.pencil_dict["right_eigenvectors"] = Z[:,sorted_args]
         self.pencil_dict["characteristic_polynomial"] = pencil_char
 
     def compute_cost_polynomial(self, v_bar):
@@ -269,18 +284,18 @@ class QPController():
             for j in range(n):
                 W[i,j] = np.inner(self.Omega[i,:], self.Omega[j,:])
 
+        # Terms for cost polynomial
         term1 = np.polynomial.polynomial.polyzero
         for k in range(n):
             poly_term = np.polynomial.polynomial.polymul( W[:,k], np.eye(n)[:,k] )
             term1 = np.polynomial.polynomial.polyadd(term1, poly_term)
-
         yu = np.zeros(n)
         for k in range(n):
             yu[k] = np.inner( v_bar, self.Omega[k,:] )
         term2 = -2*np.polynomial.polynomial.polymul( pencil_char, yu )
-
         term3 = np.polynomial.polynomial.polymul( pencil_char, pencil_char )*(np.linalg.norm(v_bar)**2)
 
+        # Compute the cost polynomial for the computation of critical points
         self.cost_polynomial = np.polynomial.polynomial.polyzero
         self.cost_polynomial = np.polynomial.polynomial.polyadd( self.cost_polynomial, term1 )
         self.cost_polynomial = np.polynomial.polynomial.polyadd( self.cost_polynomial, term2 )
@@ -288,11 +303,7 @@ class QPController():
 
         self.dcost_polynomial = np.polynomial.polynomial.polyder( self.cost_polynomial )
 
-        critical = np.polynomial.polynomial.polyroots(self.dcost_polynomial)
-        critical = np.real( critical )
-        critical = np.sort( critical )
-
-        return critical
+        return np.sort( np.real( np.polynomial.polynomial.polyroots(self.dcost_polynomial) ) )
 
     def compute_f(self):
         '''
@@ -368,8 +379,6 @@ class QPController():
         '''
         Compute equilibrium solutions and equilibrium points.
         '''
-        n = self.state_dim
-
         p0 = self.cbf.critical()
         solution_poly = np.polynomial.polynomial.polysub( self.f_dict["numerator"], self.f_dict["denominator"] )
         
@@ -381,7 +390,7 @@ class QPController():
         self.equilibrium_solutions = np.sort( np.extract( equilibrium_solutions > 0, equilibrium_solutions ) )
 
         # Compute equilibrium points from equilibrium solutions
-        self.equilibrium_points = np.zeros([n,len(self.equilibrium_solutions)])
+        self.equilibrium_points = np.zeros([self.state_dim,len(self.equilibrium_solutions)])
         for k in range(len(self.equilibrium_solutions)):
             if all(np.absolute(self.equilibrium_solutions[k] - self.pencil_dict["eigenvalues"]) > self.eigen_threshold ):
                 self.equilibrium_points[:,k] = self.v_values( self.equilibrium_solutions[k] ) + p0
@@ -419,8 +428,6 @@ class QPController():
         pencil_eig = self.pencil_dict["eigenvalues"]
         candidates = self.compute_cost_polynomial(v_bar)
         
-        print(pencil_eig)
-
         # Filters the solution candidates. Distance must be computed from a possibly stable equilibrium point.
         valid_candidates = []
         for candidate in candidates:
