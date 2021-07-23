@@ -1,4 +1,4 @@
-from setuptools import setup, find_namespace_packages
+from setuptools import setup, find_packages
 
 setup(name='compatible_clf_cbf',
       version='0.1',
@@ -6,5 +6,5 @@ setup(name='compatible_clf_cbf',
       url='https://github.com/CaipirUltron/CompatibleCLFCBF',
       author='Matheus Reis',
       license='GPLv3',
-      packages=find_namespace_packages(include=['compatible_clf_cbf.*']),
+      packages=find_packages(include=['compatible_clf_cbf.*']),
       zip_safe=False)
