@@ -97,7 +97,7 @@ class QPController():
         '''
         # Computes the distance from the positive invariant set
         distance = self.distance_to_invariance(state)
-        # print("Distance = " + str(distance))
+        print("Distance = " + str(distance))
 
         # Affine plant dynamics
         f = self._plant.compute_f(state)
@@ -190,8 +190,9 @@ class QPController():
             self.gradient_Vpi[k] = np.trace( np.matmul( deltaHv, self.sym_basis[k]) )
 
         # Sets rate constraint
-        a_clf_pi = np.hstack( [ self.gradient_Vpi, -1.0 ])
+        a_clf_pi = np.hstack( [ self.gradient_Vpi, -0.0 ])
         approaching_obstacle = inner >= 0 and distance < 0.1
+        # approaching_obstacle = inner >= 0
         if approaching_obstacle:
             b_clf_pi = math.inf
         else:
@@ -231,8 +232,7 @@ class QPController():
             v = self.v_values( self.f_critical[k] )
             H = self.pencil_value( self.f_critical[k] )
             H_inv = np.linalg.inv(H)
-            Hprod = np.matmul( self.cbf.hessian(), H_inv )
-            vec_nabla_f = 2 * (1/self.critical_values[k]) * Hprod.dot(v)
+            vec_nabla_f = 2 * (1/self.critical_values[k]) * np.matmul( self.cbf.hessian(), H_inv ).dot(v)
             for i in range(self.symmetric_dim):
                 vec_i = self.sym_basis[i].dot( v + self.cbf.critical() - self.clf.critical() )
                 gradient_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
@@ -243,6 +243,7 @@ class QPController():
         a_cbf_pi = np.vstack([ a_cbf_gamma, a_cbf_positive ])
 
         approaching_obstacle = inner >= 0 and distance < 0.1
+        # approaching_obstacle = inner >= 0
         if approaching_obstacle:
             b_cbf_pi = np.hstack([ self.alpha[1]*self.h_gamma, self.alpha[1]*self.h_positive ])
         else:
@@ -302,7 +303,6 @@ class QPController():
         self.cost_polynomial = np.polynomial.polynomial.polyadd( self.cost_polynomial, term3 )
 
         self.dcost_polynomial = np.polynomial.polynomial.polyder( self.cost_polynomial )
-
         return np.sort( np.real( np.polynomial.polynomial.polyroots(self.dcost_polynomial) ) )
 
     def compute_f(self):
@@ -366,6 +366,10 @@ class QPController():
                     else:
                         repeated_poles.append( pencil_eig[i] )
         repeated_poles = np.array( repeated_poles )
+
+        print("Poles = " + str(pencil_eig))
+        print("Zeros = " + str(fzeros))
+        print("Repeated poles = " + str(repeated_poles))
 
         self.f_dict = {
             "denominator": den_poly,
