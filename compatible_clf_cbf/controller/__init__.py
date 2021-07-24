@@ -1,2 +1,2 @@
-from .controller import QPController, QuadraticProgram
+from .controller import QPController
 from .exceptions import InvalidQP
