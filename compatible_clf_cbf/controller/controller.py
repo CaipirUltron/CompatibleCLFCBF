@@ -39,19 +39,15 @@ class QPController():
         # Parameters for the inner and outer QPs
         self.gamma, self.alpha = gamma, alpha
 
-        # Parameters for inner QP controller
-        self.inner_QP_dim = self.control_dim + 1
-        P_inner = np.eye(self.control_dim + 1)
-        P_inner[self.control_dim,self.control_dim] = p[0]
-        q_inner = np.zeros(self.control_dim + 1)
-        self.innerQP = QuadraticProgram(P=P_inner, q=q_inner)
+        # Parameters for QP controller based on the new theorem
+        self.QP_dim = self.control_dim + self.sym_basis + 1
+        P_u = np.eye(self.control_dim)
+        P_pi = np.eye(self.sym_basis)
+        P = np.diag([ P_u, p[0]*P_pi, p[1] ])
 
-        # Parameters for outer QP controller
-        self.outer_QP_dim = self.symmetric_dim + 1
-        P_outer = np.eye(self.outer_QP_dim)
-        P_outer[self.symmetric_dim,self.symmetric_dim] = p[1]
-        q_outer = np.zeros(self.outer_QP_dim)
-        self.outerQP = QuadraticProgram(P=P_outer, q=q_outer)
+        P[0:self.control_dim,self.control_dim] = p[0]
+        q = np.zeros(self.QP_dim)
+        self.QP = QuadraticProgram(P=P, q=q)
 
         # Control sample time
         self.ctrl_dt = dt
