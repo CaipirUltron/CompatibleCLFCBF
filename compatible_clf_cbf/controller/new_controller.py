@@ -7,7 +7,7 @@ from compatible_clf_cbf.dynamic_simulation import SimulateDynamics
 from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
 
 
-class QPController():
+class NewQPController():
     '''
     Class for the compatible QP controller.
     '''
@@ -41,13 +41,13 @@ class QPController():
 
         # Parameters for QP controller based on the new theorem
         self.QP_dim = self.control_dim + self.sym_basis + 1
-        P_u = np.eye(self.control_dim)
-        P_pi = np.eye(self.sym_basis)
-        P = np.diag([ P_u, p[0]*P_pi, p[1] ])
+        P = np.eye(self.QP_dim)
+        for i in range(0,self.sym_basis):
+            P[self.control_dim+i:self.control_dim+i] = p[0]
+        P[-1,-1] = p[1]
 
-        P[0:self.control_dim,self.control_dim] = p[0]
         q = np.zeros(self.QP_dim)
-        self.QP = QuadraticProgram(P=P, q=q)
+        self.QP = QuadraticProgram(P=P,q=q)
 
         # Control sample time
         self.ctrl_dt = dt
@@ -70,25 +70,25 @@ class QPController():
 
     def compute_control(self, state):
         '''
-        Computes the inner QP control.
+        Computes the QP solution.
         '''
-        self.compute_pi_control(state)
-
-        a_clf, b_clf = self.compute_clf_constraint(state)
-        a_cbf, b_cbf = self.compute_cbf_constraint(state)
+        a_clf, b_clf = self.get_clf_constraint(state)
+        a_cbf, b_cbf = self.get_cbf_constraint(state)
+        a_rate, b_rate = self.get_rate_constraint(state)
+        A_barriers, b_barriers = self.get_compatibility_constraints(state)
 
         # Stacking the CLF and CBF constraints
-        A_inner = np.vstack([a_clf, a_cbf])
-        b_inner = np.array([b_clf, b_cbf],dtype=float)
+        A = np.vstack([a_clf, a_cbf, a_rate, A_barriers])
+        b = np.array([b_clf, b_cbf, b_rate, b_barriers],dtype=float)
 
         # Solve inner QP
-        self.innerQP.set_constraints(A = A_inner,b = b_inner)
-        innerQP_sol = self.innerQP.get_solution()
-        control = innerQP_sol[0:self.control_dim,]
+        self.QP.set_constraints(A, b)
+        QP_sol = self.QP.get_solution()
+        control = QP_sol[0:self.control_dim,]
 
         return control
 
-    def compute_clf_constraint(self, state):
+    def get_clf_constraint(self, state):
         '''
         Sets the Lyapunov constraint for the inner loop controller.
         '''
@@ -118,9 +118,9 @@ class QPController():
 
         return a_clf, b_clf
 
-    def compute_cbf_constraint(self, state):
+    def get_cbf_constraint(self, state):
         '''
-        Sets the barrier constraint for the inner loop controller.
+        Sets the barrier constraint.
         '''
         # Affine plant dynamics
         f = self._plant.compute_f(state)
@@ -150,27 +150,7 @@ class QPController():
         self.clf.set_param(hessian = Hv)
         self.compute_compatibility()
 
-    def compute_pi_control(self, state):
-        '''
-        Computes the outer loop control.
-        '''
-        a_clf_pi, b_clf_pi = self.compute_rate_constraint(state)
-        a_cbf_pi, b_cbf_pi = self.compute_compatibility_constraints(state)
-
-        A_outer = np.vstack([a_clf_pi, a_cbf_pi])
-        b_outer = np.hstack([b_clf_pi, b_cbf_pi])
-
-        self.outerQP.set_constraints(A = A_outer,b = b_outer)
-        outerQP_sol = self.outerQP.get_solution()
-
-        piv_control = outerQP_sol[0:self.symmetric_dim,]
-
-        ##################################### Uncomment to turn off outer loop controller #####################################
-        # piv_control = np.zeros(self.symmetric_dim)
-
-        self.update_clf_dynamics(piv_control)
-
-    def compute_rate_constraint(self, state):
+    def get_rate_constraint(self, state):
         '''
         Sets the Lyapunov constraint for the outer loop controller.
         '''
@@ -197,7 +177,7 @@ class QPController():
 
         return a_clf_pi, b_clf_pi
 
-    def compute_compatibility_constraints(self, state):
+    def get_compatibility_constraints(self, state):
         '''
         Sets the barrier constraints for the outer loop controller, ensuring compatibility.
         '''

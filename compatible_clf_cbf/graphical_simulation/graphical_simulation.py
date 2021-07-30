@@ -9,7 +9,7 @@ from visualization_msgs.msg import Marker
 from geometry_msgs.msg import Point, PointStamped, TransformStamped
 
 from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
-from compatible_clf_cbf.controller import QPController
+from compatible_clf_cbf.controller import NominalQP
 
 
 class SimulationMatplot():
