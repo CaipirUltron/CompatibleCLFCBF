@@ -19,12 +19,12 @@ class NewQPController():
 
         self.state_dim = self._plant.state_dim
         self.control_dim = self._plant.control_dim
-        self.symmetric_dim = int(( self.state_dim * ( self.state_dim + 1 ) )/2)
+        self.sym_dim = int(( self.state_dim * ( self.state_dim + 1 ) )/2)
         self.sym_basis = QuadraticFunction.symmetric_basis(self.state_dim)
 
         # Initialize rate CLF
         self.Vpi = 0.0
-        self.gradient_Vpi = np.zeros(self.symmetric_dim)
+        self.gradient_Vpi = np.zeros(self.sym_dim)
 
         # Initialize compatibility function
         self.eigen_threshold = 0.00001
@@ -40,9 +40,9 @@ class NewQPController():
         self.gamma, self.alpha = gamma, alpha
 
         # Parameters for QP controller based on the new theorem
-        self.QP_dim = self.control_dim + self.sym_basis + 1
+        self.QP_dim = self.control_dim + self.sym_dim + 1
         P = np.eye(self.QP_dim)
-        for i in range(0,self.sym_basis):
+        for i in range(0,self.sym_dim):
             P[self.control_dim+i:self.control_dim+i] = p[0]
         P[-1,-1] = p[1]
 
@@ -56,8 +56,8 @@ class NewQPController():
         # Initialize dynamic subsystems
         f_integrator, g_integrator = list(), list()
         state_string, ctrl_string = str(), str()
-        EYE = np.eye(self.symmetric_dim)
-        for k in range(self.symmetric_dim):
+        EYE = np.eye(self.sym_dim)
+        for k in range(self.sym_dim):
             f_integrator.append('0')
             g_integrator.append(EYE[k,:])
             state_string = state_string + 'pi' + str(k+1) + ', '
@@ -78,8 +78,8 @@ class NewQPController():
         A_barriers, b_barriers = self.get_compatibility_constraints(state)
 
         # Stacking the CLF and CBF constraints
-        A = np.vstack([a_clf, a_cbf, a_rate, A_barriers])
-        b = np.array([b_clf, b_cbf, b_rate, b_barriers],dtype=float)
+        A = np.vstack([ a_clf, a_cbf, a_rate, A_barriers ])
+        b = np.hstack([ b_clf, b_cbf, b_rate, b_barriers ])
 
         # Solve inner QP
         self.QP.set_constraints(A, b)
@@ -92,10 +92,6 @@ class NewQPController():
         '''
         Sets the Lyapunov constraint for the inner loop controller.
         '''
-        # Computes the distance from the positive invariant set
-        distance = self.distance_to_invariance(state)
-        print("Distance = " + str(distance))
-
         # Affine plant dynamics
         f = self._plant.compute_f(state)
         g = self._plant.compute_g(state)
@@ -108,13 +104,15 @@ class NewQPController():
         LfV = nablaV.dot(f)
         LgV = g.T.dot(nablaV)
 
+        # Gradient w.r.t. pi
+        nablaV_pi = np.zeros(self.sym_dim)
+        delta_x = ( state - self.clf.critical_point ).reshape(self.state_dim,1)
+        for k in range(self.sym_dim):
+            nablaV_pi[k] = 0.5 * ( delta_x.T @ self.sym_basis[k] @ delta_x )[0,0]
+
         # CLF contraint for the QP
-        a_clf = np.hstack( [ LgV, -1.0 ])
-        if self.h_gamma >= 0 and self.h_positive >= 0: 
-            convergence_rate = self.gamma[0]
-        else:
-            convergence_rate = self.gamma[0] * SimulateDynamics.sat( distance, 1.0 )
-        b_clf = -convergence_rate * V - LfV
+        a_clf = np.hstack( [ LgV, nablaV_pi, 0.0 ])
+        b_clf = -self.gamma[0] * V - LfV
 
         return a_clf, b_clf
 
@@ -134,7 +132,7 @@ class NewQPController():
         Lgh = g.T.dot(nablah)
 
         # CBF contraint for the QP
-        a_cbf = -np.hstack( [ Lgh, 0.0 ])
+        a_cbf = -np.hstack( [ Lgh, np.zeros(self.sym_dim), 0.0 ])
         b_cbf = self.alpha[0] * self.h + Lfh
 
         return a_cbf, b_cbf
@@ -162,18 +160,13 @@ class NewQPController():
 
         # Computes rate Lyapunov and gradient
         deltaHv = self.clf.hessian() - self.ref_clf.hessian()
-        self.Vpi = 0.5 * np.trace( np.matmul(deltaHv, deltaHv) )
-        for k in range(self.symmetric_dim):
-            self.gradient_Vpi[k] = np.trace( np.matmul( deltaHv, self.sym_basis[k]) )
+        self.Vpi = 0.5 * np.trace( deltaHv @ deltaHv )
+        for k in range(self.sym_dim):
+            self.gradient_Vpi[k] = np.trace( deltaHv @ self.sym_basis[k] )
 
         # Sets rate constraint
-        a_clf_pi = np.hstack( [ self.gradient_Vpi, -0.0 ])
-        approaching_obstacle = inner >= 0 and distance < 0.1
-        # approaching_obstacle = inner >= 0
-        if approaching_obstacle:
-            b_clf_pi = math.inf
-        else:
-            b_clf_pi = -self.gamma[1] * self.Vpi
+        a_clf_pi = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vpi, -1.0 ])
+        b_clf_pi = -self.gamma[1] * self.Vpi
 
         return a_clf_pi, b_clf_pi
 
@@ -181,10 +174,6 @@ class NewQPController():
         '''
         Sets the barrier constraints for the outer loop controller, ensuring compatibility.
         '''
-        nablaV, nablah = self.clf.gradient(state), self.cbf.gradient(state)
-        inner = np.inner( nablaV, nablah )
-        distance = self.distance_to_invariance(state)
-
         # Constraint for keeping the eigenvalues positive
         pencil_eig = self.pencil_dict["eigenvalues"]
         Q = self.pencil_dict["left_eigenvectors"]
@@ -196,13 +185,13 @@ class NewQPController():
         beta_0 = np.dot( Q[:,0], Hh.dot(Z[:,0]) )
 
         self.h_positive = pencil_eig[0] - self.f_params_dict["minimum_eigenvalue"]
-        gradient_h_positive = np.zeros(self.symmetric_dim)
-        for i in range(self.symmetric_dim):
+        gradient_h_positive = np.zeros(self.sym_dim)
+        for i in range(self.sym_dim):
             gradient_h_positive[i] = np.dot( Q[:,0], self.sym_basis[i].dot(Z[:,0]) ) / beta_0
 
         # h_gamma constraints
         self.h_gamma = np.zeros(self.number_critical)
-        gradient_h_gamma = np.zeros([self.number_critical, self.symmetric_dim])
+        gradient_h_gamma = np.zeros([self.number_critical, self.sym_dim])
         for k in range(self.number_critical):
             self.h_gamma[k] = np.log( self.critical_values ) - self.f_params_dict["minimum_gap"]
 
@@ -210,21 +199,19 @@ class NewQPController():
             H = self.pencil_value( self.f_critical[k] )
             H_inv = np.linalg.inv(H)
             vec_nabla_f = 2 * (1/self.critical_values[k]) * np.matmul( self.cbf.hessian(), H_inv ).dot(v)
-            for i in range(self.symmetric_dim):
+            for i in range(self.sym_dim):
                 vec_i = self.sym_basis[i].dot( v + self.cbf.critical() - self.clf.critical() )
                 gradient_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
 
         # Sets compatibility constraints
-        a_cbf_gamma = -np.hstack([ gradient_h_gamma, np.zeros([self.number_critical,1]) ])
-        a_cbf_positive = -np.hstack([ gradient_h_positive, 0.0 ])
-        a_cbf_pi = np.vstack([ a_cbf_gamma, a_cbf_positive ])
+        a_cbf_gamma = -np.hstack([ np.zeros([self.number_critical, self.control_dim]), gradient_h_gamma, np.zeros([self.number_critical, 1]) ])
+        b_cbf_gamma = self.alpha[1]*self.h_gamma
 
-        approaching_obstacle = inner >= 0 and distance < 0.1
-        # approaching_obstacle = inner >= 0
-        if approaching_obstacle:
-            b_cbf_pi = np.hstack([ self.alpha[1]*self.h_gamma, self.alpha[1]*self.h_positive ])
-        else:
-            b_cbf_pi = np.array([ math.inf, math.inf ])
+        a_cbf_positive = -np.hstack([ np.zeros(self.control_dim), gradient_h_positive, 0.0 ])
+        b_cbf_positive = self.alpha[1]*self.h_positive
+
+        a_cbf_pi = np.vstack([ a_cbf_gamma, a_cbf_positive ])
+        b_cbf_pi = np.hstack([ b_cbf_gamma, b_cbf_positive ])
 
         return a_cbf_pi, b_cbf_pi
 

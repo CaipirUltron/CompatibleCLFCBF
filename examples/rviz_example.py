@@ -1,7 +1,7 @@
 import rospy, math
 import numpy as np
 
-from compatible_clf_cbf.controller import NominalQP
+from compatible_clf_cbf.controller import NominalQP, NewQPController
 from compatible_clf_cbf.dynamic_simulation import SimulateDynamics
 from compatible_clf_cbf.graphical_simulation import SimulationRviz
 from compatible_clf_cbf.dynamic_systems import AffineSystem, QuadraticLyapunov, QuadraticBarrier, QuadraticFunction
@@ -48,9 +48,10 @@ try:
     cbf = QuadraticBarrier(system["state_string"], hessian = cbf_config["Hh"], critical = cbf_config["p0"])
     ############################################################################################################################
 
-    # Create QP controller.
+    # Create QP controller
+    # qp_controller = NominalQP(plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0)
     # qp_controller = QPController(plant, clf, ref_clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 10.0], p = [10.0, 10.0])
-    qp_controller = NominalQP(plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0)
+    qp_controller = NewQPController(plant, clf, ref_clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 10.0], p = [10.0, 10.0])
 
     # Initialize simulation objects and main loop.
     dynamicSimulation = SimulateDynamics(plant, system["initial_state"])
