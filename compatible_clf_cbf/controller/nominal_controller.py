@@ -15,19 +15,20 @@ class NominalQP():
         self.control_dim = self._plant.control_dim
 
         # QP parameters
+        self.p = p
         self.gamma, self.alpha = gamma, alpha
         self.QP_dim = self.control_dim + 1
         P = np.eye(self.QP_dim)
-        P[self.control_dim,self.control_dim] = p
+        P[self.control_dim,self.control_dim] = self.p
         q = np.zeros(self.QP_dim)
         self.QP = QuadraticProgram(P=P, q=q)
 
-    def compute_control(self, state):
+    def get_control(self, state):
         '''
         Computes the QP control.
         '''
-        a_clf, b_clf = self.compute_clf_constraint(state)
-        a_cbf, b_cbf = self.compute_cbf_constraint(state)
+        a_clf, b_clf = self.get_clf_constraint(state)
+        a_cbf, b_cbf = self.get_cbf_constraint(state)
 
         # Stacking the CLF and CBF constraints
         A = np.vstack( [a_clf, a_cbf ])
@@ -40,7 +41,7 @@ class NominalQP():
 
         return control
 
-    def compute_clf_constraint(self, state):
+    def get_clf_constraint(self, state):
         '''
         Sets the Lyapunov constraint.
         '''
@@ -49,20 +50,20 @@ class NominalQP():
         g = self._plant.compute_g(state)
 
         # Lyapunov function and gradient
-        V = self.clf(state)
-        nablaV = self.clf.gradient(state)
+        self.V = self.clf(state)
+        self.nablaV = self.clf.gradient(state)
 
         # Lie derivatives
-        LfV = nablaV.dot(f)
-        LgV = g.T.dot(nablaV)
+        self.LfV = self.nablaV.dot(f)
+        self.LgV = g.T.dot(self.nablaV)
 
         # CLF contraint for the QP
-        a_clf = np.hstack( [ LgV, -1.0 ])
-        b_clf = -self.gamma * V - LfV
+        a_clf = np.hstack( [ self.LgV, -1.0 ])
+        b_clf = -self.gamma * self.V - self.LfV
 
         return a_clf, b_clf
 
-    def compute_cbf_constraint(self, state):
+    def get_cbf_constraint(self, state):
         '''
         Sets the barrier constraint.
         '''
@@ -71,14 +72,32 @@ class NominalQP():
         g = self._plant.compute_g(state)
 
         # Barrier function and gradient
-        h = self.cbf(state)
-        nablah = self.cbf.gradient(state)
+        self.h = self.cbf(state)
+        self.nablah = self.cbf.gradient(state)
 
-        Lfh = nablah.dot(f)
-        Lgh = g.T.dot(nablah)
+        self.Lfh = self.nablah.dot(f)
+        self.Lgh = g.T.dot(self.nablah)
 
         # CBF contraint for the QP
-        a_cbf = -np.hstack( [ Lgh, 0.0 ])
-        b_cbf = self.alpha * h + Lfh
+        a_cbf = -np.hstack( [ self.Lgh, 0.0 ])
+        b_cbf = self.alpha * self.h + self.Lfh
 
         return a_cbf, b_cbf
+
+    def get_lambda(self):
+        '''
+        Computes the KKT multipliers of the Optimization problem.
+        '''
+        LgV2 = self.LgV.dot(self.LgV)
+        Lgh2 = self.Lgh.dot(self.Lgh)
+        LgVLgh = self.LgV.dot(self.Lgh)
+
+        delta = LgVLgh**2 - ( (1/self.p) + LgV2 ) * Lgh2
+        
+        FV = self.LfV + self.gamma * self.V
+        Fh = self.Lfh + self.alpha * self.h
+        
+        lambda1 = (1/delta) * ( Fh * LgVLgh - FV * Lgh2 )
+        lambda2 = (1/delta) * ( Fh * ( (1/self.p) + LgV2 ) - FV * LgVLgh )
+
+        return lambda1, lambda2, delta

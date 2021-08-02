@@ -40,11 +40,12 @@ class NewQPController():
         self.gamma, self.alpha = gamma, alpha
 
         # Parameters for QP controller based on the new theorem
+        self.p = p
         self.QP_dim = self.control_dim + self.sym_dim + 1
         P = np.eye(self.QP_dim)
         for i in range(0,self.sym_dim):
-            P[self.control_dim+i:self.control_dim+i] = p[0]
-        P[-1,-1] = p[1]
+            P[self.control_dim+i,self.control_dim+i] = self.p[0]
+        P[-1,-1] = self.p[1]
 
         q = np.zeros(self.QP_dim)
         self.QP = QuadraticProgram(P=P,q=q)
@@ -68,7 +69,7 @@ class NewQPController():
         piv_init = QuadraticFunction.sym2vector(self.clf.hessian())
         self.clf_dynamics = SimulateDynamics(piv_integrator, piv_init)
 
-    def compute_control(self, state):
+    def get_control(self, state):
         '''
         Computes the QP solution.
         '''
@@ -78,15 +79,20 @@ class NewQPController():
         A_barriers, b_barriers = self.get_compatibility_constraints(state)
 
         # Stacking the CLF and CBF constraints
-        A = np.vstack([ a_clf, a_cbf, a_rate, A_barriers ])
-        b = np.hstack([ b_clf, b_cbf, b_rate, b_barriers ])
+        A1 = np.vstack([ a_clf, a_cbf, a_rate ])
+        b1 = np.array([ b_clf, b_cbf, b_rate ], dtype=float)
+
+        A = np.vstack([ A1, A_barriers ])
+        b = np.hstack([ b1, b_barriers ])
 
         # Solve inner QP
         self.QP.set_constraints(A, b)
         QP_sol = self.QP.get_solution()
-        control = QP_sol[0:self.control_dim,]
 
-        return control
+        u = QP_sol[0:self.control_dim]
+        u_pi = QP_sol[self.control_dim:self.control_dim+self.sym_dim]
+
+        return u, u_pi
 
     def get_clf_constraint(self, state):
         '''
@@ -97,22 +103,22 @@ class NewQPController():
         g = self._plant.compute_g(state)
 
         # Lyapunov function and gradient
-        V = self.clf(state)
-        nablaV = self.clf.gradient(state)
+        self.V = self.clf(state)
+        self.nablaV = self.clf.gradient(state)
 
         # Lie derivatives
-        LfV = nablaV.dot(f)
-        LgV = g.T.dot(nablaV)
+        self.LfV = self.nablaV.dot(f)
+        self.LgV = g.T.dot(self.nablaV)
 
         # Gradient w.r.t. pi
-        nablaV_pi = np.zeros(self.sym_dim)
+        self.nablaV_pi = np.zeros(self.sym_dim)
         delta_x = ( state - self.clf.critical_point ).reshape(self.state_dim,1)
         for k in range(self.sym_dim):
-            nablaV_pi[k] = 0.5 * ( delta_x.T @ self.sym_basis[k] @ delta_x )[0,0]
+            self.nablaV_pi[k] = 0.5 * ( delta_x.T @ self.sym_basis[k] @ delta_x )[0,0]
 
         # CLF contraint for the QP
-        a_clf = np.hstack( [ LgV, nablaV_pi, 0.0 ])
-        b_clf = -self.gamma[0] * V - LfV
+        a_clf = np.hstack( [ self.LgV, self.nablaV_pi, 0.0 ])
+        b_clf = -self.gamma[0] * self.V - self.LfV
 
         return a_clf, b_clf
 
@@ -126,16 +132,37 @@ class NewQPController():
 
         # Barrier function and gradient
         self.h = self.cbf(state)
-        nablah = self.cbf.gradient(state)
+        self.nablah = self.cbf.gradient(state)
 
-        Lfh = nablah.dot(f)
-        Lgh = g.T.dot(nablah)
+        self.Lfh = self.nablah.dot(f)
+        self.Lgh = g.T.dot(self.nablah)
 
         # CBF contraint for the QP
-        a_cbf = -np.hstack( [ Lgh, np.zeros(self.sym_dim), 0.0 ])
-        b_cbf = self.alpha[0] * self.h + Lfh
+        a_cbf = -np.hstack( [ self.Lgh, np.zeros(self.sym_dim), 0.0 ])
+        b_cbf = self.alpha[0] * self.h + self.Lfh
 
         return a_cbf, b_cbf
+
+    def get_lambda(self):
+        '''
+        Computes the KKT multipliers of the Optimization problem.
+        '''
+        LgV2 = self.LgV.dot(self.LgV)
+        Lgh2 = self.Lgh.dot(self.Lgh)
+        LgVLgh = self.LgV.dot(self.Lgh)
+        nablaVpi2 = self.nablaV_pi.dot(self.nablaV_pi)
+
+        # delta = LgVLgh**2 - ( (1/self.p[0])*nablaVpi2 + LgV2 )*Lgh2
+        delta = LgVLgh**2 - ( (1/self.p[0]) + LgV2 )*Lgh2
+
+        FV = self.LfV + self.gamma[0] * self.V
+        Fh = self.Lfh + self.alpha[0] * self.h
+        
+        lambda1 = (1/delta) * ( Fh * LgVLgh - FV * Lgh2 )
+        # lambda2 = (1/delta) * ( Fh * ( (1/self.p[0])*nablaVpi2 + LgV2 ) - FV * LgVLgh )
+        lambda2 = (1/delta) * ( Fh * ( (1/self.p[0]) + LgV2 ) - FV * LgVLgh )
+
+        return lambda1, lambda2
 
     def update_clf_dynamics(self, piv_ctrl):
         '''
@@ -152,17 +179,13 @@ class NewQPController():
         '''
         Sets the Lyapunov constraint for the outer loop controller.
         '''
-        # Computes the inner product between gradients
-        inner = np.inner( self.clf.gradient(state), self.cbf.gradient(state) )
-
-        # Computes the distance from the positive invariant set
-        distance = self.distance_to_invariance(state)
-
         # Computes rate Lyapunov and gradient
         deltaHv = self.clf.hessian() - self.ref_clf.hessian()
         self.Vpi = 0.5 * np.trace( deltaHv @ deltaHv )
         for k in range(self.sym_dim):
             self.gradient_Vpi[k] = np.trace( deltaHv @ self.sym_basis[k] )
+
+        print("Vpi = " + str(self.Vpi))
 
         # Sets rate constraint
         a_clf_pi = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vpi, -1.0 ])
@@ -179,8 +202,6 @@ class NewQPController():
         Q = self.pencil_dict["left_eigenvectors"]
         Z = self.pencil_dict["right_eigenvectors"]
         
-        # print("Eigen = " + str(pencil_eig))
-
         Hh = self.cbf.hessian()
         beta_0 = np.dot( Q[:,0], Hh.dot(Z[:,0]) )
 
@@ -203,12 +224,17 @@ class NewQPController():
                 vec_i = self.sym_basis[i].dot( v + self.cbf.critical() - self.clf.critical() )
                 gradient_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
 
+        lambda1, lambda2 = self.get_lambda()
+        term = 20*math.tanh(lambda2)/(np.linalg.norm(self.nablaV)**2)
+
+        print(term)
+
         # Sets compatibility constraints
         a_cbf_gamma = -np.hstack([ np.zeros([self.number_critical, self.control_dim]), gradient_h_gamma, np.zeros([self.number_critical, 1]) ])
-        b_cbf_gamma = self.alpha[1]*self.h_gamma
+        b_cbf_gamma = self.alpha[1]*self.h_gamma - term
 
         a_cbf_positive = -np.hstack([ np.zeros(self.control_dim), gradient_h_positive, 0.0 ])
-        b_cbf_positive = self.alpha[1]*self.h_positive
+        b_cbf_positive = self.alpha[1]*self.h_positive - term
 
         a_cbf_pi = np.vstack([ a_cbf_gamma, a_cbf_positive ])
         b_cbf_pi = np.hstack([ b_cbf_gamma, b_cbf_positive ])
@@ -331,9 +357,9 @@ class NewQPController():
                         repeated_poles.append( pencil_eig[i] )
         repeated_poles = np.array( repeated_poles )
 
-        print("Poles = " + str(pencil_eig))
-        print("Zeros = " + str(fzeros))
-        print("Repeated poles = " + str(repeated_poles))
+        # print("Poles = " + str(pencil_eig))
+        # print("Zeros = " + str(fzeros))
+        # print("Repeated poles = " + str(repeated_poles))
 
         self.f_dict = {
             "denominator": den_poly,

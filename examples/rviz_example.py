@@ -13,7 +13,7 @@ try:
         "g": [['1','0'],['0','1']],
         "state_string": 'x1, x2, ',
         "control_string": 'u1, u2, ',
-        "initial_state": np.array([ -5.0, 7.0 ])
+        "initial_state": np.array([ -10.0, 7.0 ])
     }
     plant = AffineSystem(system["state_string"], system["control_string"], system["f"], *system["g"])
     ############################################################################################################################
@@ -57,7 +57,7 @@ try:
     dynamicSimulation = SimulateDynamics(plant, system["initial_state"])
     graphicalSimulation = SimulationRviz(clf, cbf)
 
-    dt = .005
+    dt = .003
     rate = rospy.Rate(1/dt)
     while not rospy.is_shutdown():
 
@@ -65,17 +65,18 @@ try:
         state = dynamicSimulation.state()
 
         # Control
-        control = qp_controller.compute_control(state)
+        u_control, upi_control = qp_controller.get_control(state)
+        qp_controller.update_clf_dynamics(upi_control)
 
         # Send actuation commands 
-        dynamicSimulation.send_control_inputs(control, dt)
+        dynamicSimulation.send_control_inputs(u_control, dt)
 
         # Draw graphical simulation elements
         graphicalSimulation.draw_trajectory(state)
         graphicalSimulation.draw_reference(qp_controller.clf.critical_point)
         graphicalSimulation.draw_clf(qp_controller.clf, state)
         graphicalSimulation.draw_cbf()
-        # graphicalSimulation.draw_invariance(qp_controller)
+        graphicalSimulation.draw_invariance(qp_controller)
 
         rate.sleep()
 
