@@ -31,8 +31,8 @@ class NewQPController():
         self.pencil_dict = {}
         self.f_dict = {}
         self.f_params_dict = {
-            "minimum_gap": 1.0,
-            "minimum_eigenvalue": 1.0,
+            "minimum_gap": 0.5,
+            "minimum_eigenvalue": 0.1,
         }
         self.compute_compatibility()
 
@@ -53,6 +53,7 @@ class NewQPController():
         # Control sample time
         self.ctrl_dt = dt
         self.h = 0.0
+        self.u = np.zeros(self.control_dim)
 
         # Initialize dynamic subsystems
         f_integrator, g_integrator = list(), list()
@@ -89,10 +90,17 @@ class NewQPController():
         self.QP.set_constraints(A, b)
         QP_sol = self.QP.get_solution()
 
-        u = QP_sol[0:self.control_dim]
+        self.u = QP_sol[0:self.control_dim]
         u_pi = QP_sol[self.control_dim:self.control_dim+self.sym_dim]
 
-        return u, u_pi
+        approx = -self.Lgh.dot(self.u)
+        print("Component = " + str(approx))
+        if approx >= 0:
+            print("Approaching obstacle...")
+        else:
+            print("Avoiding obstacle...")
+
+        return self.u, u_pi
 
     def get_clf_constraint(self, state):
         '''
@@ -161,6 +169,7 @@ class NewQPController():
         lambda1 = (1/delta) * ( Fh * LgVLgh - FV * Lgh2 )
         # lambda2 = (1/delta) * ( Fh * ( (1/self.p[0])*nablaVpi2 + LgV2 ) - FV * LgVLgh )
         lambda2 = (1/delta) * ( Fh * ( (1/self.p[0]) + LgV2 ) - FV * LgVLgh )
+        # lambda2 = FV * LgVLgh - Fh * LgV2
 
         return lambda1, lambda2
 
@@ -185,7 +194,7 @@ class NewQPController():
         for k in range(self.sym_dim):
             self.gradient_Vpi[k] = np.trace( deltaHv @ self.sym_basis[k] )
 
-        print("Vpi = " + str(self.Vpi))
+        # print("Vpi = " + str(self.Vpi))
 
         # Sets rate constraint
         a_clf_pi = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vpi, -1.0 ])
@@ -225,16 +234,23 @@ class NewQPController():
                 gradient_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
 
         lambda1, lambda2 = self.get_lambda()
-        term = 20*math.tanh(lambda2)/(np.linalg.norm(self.nablaV)**2)
+        # term = 10*math.tanh(lambda2)/(np.linalg.norm(self.nablaV)**2)
+        term = self.Lgh.dot(self.u)/(np.linalg.norm(self.nablaV)**2)
 
-        print(term)
+        # print("Lambda2 = " + str(term))
 
         # Sets compatibility constraints
+        # l = self.Lgh.reshape(1,self.control_dim)
+        # for i in range(0, self.number_critical-1):
+        #     l = np.vstack([ l, self.Lgh ])
         a_cbf_gamma = -np.hstack([ np.zeros([self.number_critical, self.control_dim]), gradient_h_gamma, np.zeros([self.number_critical, 1]) ])
-        b_cbf_gamma = self.alpha[1]*self.h_gamma - term
+        # a_cbf_gamma = -np.hstack([ l, gradient_h_gamma, np.zeros([self.number_critical, 1]) ])
+        b_cbf_gamma = self.alpha[1]*self.h_gamma + term
+
 
         a_cbf_positive = -np.hstack([ np.zeros(self.control_dim), gradient_h_positive, 0.0 ])
-        b_cbf_positive = self.alpha[1]*self.h_positive - term
+        # a_cbf_positive = -np.hstack([ self.Lgh, gradient_h_positive, 0.0 ])
+        b_cbf_positive = self.alpha[1]*self.h_positive + term
 
         a_cbf_pi = np.vstack([ a_cbf_gamma, a_cbf_positive ])
         b_cbf_pi = np.hstack([ b_cbf_gamma, b_cbf_positive ])
