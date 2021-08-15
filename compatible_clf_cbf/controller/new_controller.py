@@ -93,13 +93,6 @@ class NewQPController():
         self.u = QP_sol[0:self.control_dim]
         u_pi = QP_sol[self.control_dim:self.control_dim+self.sym_dim]
 
-        approx = -self.Lgh.dot(self.u)
-        print("Component = " + str(approx))
-        if approx >= 0:
-            print("Approaching obstacle...")
-        else:
-            print("Avoiding obstacle...")
-
         return self.u, u_pi
 
     def get_clf_constraint(self, state):
@@ -151,28 +144,6 @@ class NewQPController():
 
         return a_cbf, b_cbf
 
-    def get_lambda(self):
-        '''
-        Computes the KKT multipliers of the Optimization problem.
-        '''
-        LgV2 = self.LgV.dot(self.LgV)
-        Lgh2 = self.Lgh.dot(self.Lgh)
-        LgVLgh = self.LgV.dot(self.Lgh)
-        nablaVpi2 = self.nablaV_pi.dot(self.nablaV_pi)
-
-        # delta = LgVLgh**2 - ( (1/self.p[0])*nablaVpi2 + LgV2 )*Lgh2
-        delta = LgVLgh**2 - ( (1/self.p[0]) + LgV2 )*Lgh2
-
-        FV = self.LfV + self.gamma[0] * self.V
-        Fh = self.Lfh + self.alpha[0] * self.h
-        
-        lambda1 = (1/delta) * ( Fh * LgVLgh - FV * Lgh2 )
-        # lambda2 = (1/delta) * ( Fh * ( (1/self.p[0])*nablaVpi2 + LgV2 ) - FV * LgVLgh )
-        lambda2 = (1/delta) * ( Fh * ( (1/self.p[0]) + LgV2 ) - FV * LgVLgh )
-        # lambda2 = FV * LgVLgh - Fh * LgV2
-
-        return lambda1, lambda2
-
     def update_clf_dynamics(self, piv_ctrl):
         '''
         Integrates the dynamic system for the CLF Hessian matrix.
@@ -193,8 +164,6 @@ class NewQPController():
         self.Vpi = 0.5 * np.trace( deltaHv @ deltaHv )
         for k in range(self.sym_dim):
             self.gradient_Vpi[k] = np.trace( deltaHv @ self.sym_basis[k] )
-
-        # print("Vpi = " + str(self.Vpi))
 
         # Sets rate constraint
         a_clf_pi = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vpi, -1.0 ])
@@ -233,29 +202,33 @@ class NewQPController():
                 vec_i = self.sym_basis[i].dot( v + self.cbf.critical() - self.clf.critical() )
                 gradient_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
 
-        lambda1, lambda2 = self.get_lambda()
-        # term = 10*math.tanh(lambda2)/(np.linalg.norm(self.nablaV)**2)
-        term = self.Lgh.dot(self.u)/(np.linalg.norm(self.nablaV)**2)
-
-        # print("Lambda2 = " + str(term))
+        # Applies selection function
+        if self.get_selection() >= 0:
+            term = 0.0
+        else:
+            term = -100
 
         # Sets compatibility constraints
-        # l = self.Lgh.reshape(1,self.control_dim)
-        # for i in range(0, self.number_critical-1):
-        #     l = np.vstack([ l, self.Lgh ])
         a_cbf_gamma = -np.hstack([ np.zeros([self.number_critical, self.control_dim]), gradient_h_gamma, np.zeros([self.number_critical, 1]) ])
-        # a_cbf_gamma = -np.hstack([ l, gradient_h_gamma, np.zeros([self.number_critical, 1]) ])
-        b_cbf_gamma = self.alpha[1]*self.h_gamma + term
-
+        b_cbf_gamma = self.alpha[1]*self.h_gamma - term
 
         a_cbf_positive = -np.hstack([ np.zeros(self.control_dim), gradient_h_positive, 0.0 ])
-        # a_cbf_positive = -np.hstack([ self.Lgh, gradient_h_positive, 0.0 ])
-        b_cbf_positive = self.alpha[1]*self.h_positive + term
+        b_cbf_positive = self.alpha[1]*self.h_positive - term
 
         a_cbf_pi = np.vstack([ a_cbf_gamma, a_cbf_positive ])
         b_cbf_pi = np.hstack([ b_cbf_gamma, b_cbf_positive ])
 
         return a_cbf_pi, b_cbf_pi
+
+    def get_selection(self):
+        '''
+        Computes the selection function: positive in the boundary convergence area, negative otherwise.
+        '''
+        LgV2 = self.LgV.dot(self.LgV)
+        Lgh2 = self.Lgh.dot(self.Lgh)
+        LgVLgh = self.LgV.dot(self.Lgh)
+                
+        return self.V * LgVLgh - self.h * ( math.sqrt(LgV2)*math.sqrt(Lgh2) + 1/self.p[0] )
 
     def compute_pencil(self, Hv, Hh):
         '''
@@ -278,38 +251,6 @@ class NewQPController():
         self.pencil_dict["left_eigenvectors"] = Q[:,sorted_args]
         self.pencil_dict["right_eigenvectors"] = Z[:,sorted_args]
         self.pencil_dict["characteristic_polynomial"] = pencil_char
-
-    def compute_cost_polynomial(self, v_bar):
-        '''
-        Computes the polynomial cost functional for the P+ distance, returning its real critical points.
-        '''
-        n = self.state_dim
-        pencil_char = self.pencil_dict["characteristic_polynomial"]
-
-        W = np.zeros([n,n])
-        for i in range(n):
-            for j in range(n):
-                W[i,j] = np.inner(self.Omega[i,:], self.Omega[j,:])
-
-        # Terms for cost polynomial
-        term1 = np.polynomial.polynomial.polyzero
-        for k in range(n):
-            poly_term = np.polynomial.polynomial.polymul( W[:,k], np.eye(n)[:,k] )
-            term1 = np.polynomial.polynomial.polyadd(term1, poly_term)
-        yu = np.zeros(n)
-        for k in range(n):
-            yu[k] = np.inner( v_bar, self.Omega[k,:] )
-        term2 = -2*np.polynomial.polynomial.polymul( pencil_char, yu )
-        term3 = np.polynomial.polynomial.polymul( pencil_char, pencil_char )*(np.linalg.norm(v_bar)**2)
-
-        # Compute the cost polynomial for the computation of critical points
-        self.cost_polynomial = np.polynomial.polynomial.polyzero
-        self.cost_polynomial = np.polynomial.polynomial.polyadd( self.cost_polynomial, term1 )
-        self.cost_polynomial = np.polynomial.polynomial.polyadd( self.cost_polynomial, term2 )
-        self.cost_polynomial = np.polynomial.polynomial.polyadd( self.cost_polynomial, term3 )
-
-        self.dcost_polynomial = np.polynomial.polynomial.polyder( self.cost_polynomial )
-        return np.sort( np.real( np.polynomial.polynomial.polyroots(self.dcost_polynomial) ) )
 
     def compute_f(self):
         '''
@@ -373,10 +314,6 @@ class NewQPController():
                         repeated_poles.append( pencil_eig[i] )
         repeated_poles = np.array( repeated_poles )
 
-        # print("Poles = " + str(pencil_eig))
-        # print("Zeros = " + str(fzeros))
-        # print("Repeated poles = " + str(repeated_poles))
-
         self.f_dict = {
             "denominator": den_poly,
             "numerator": num_poly,
@@ -429,32 +366,6 @@ class NewQPController():
         self.compute_equilibrium()
         self.compute_f_critical()
 
-    def distance_to_invariance(self, state):
-        '''
-        This function computes the minimum distance from the state trajectory to the danger subset of P+.
-        The danger subset is the one at the open interval (lambda_1, lambda_n), that is, the interval that could contain stable equilibrium solutions.
-        '''
-        v_bar = state - self.cbf.critical()
-        pencil_eig = self.pencil_dict["eigenvalues"]
-        candidates = self.compute_cost_polynomial(v_bar)
-        
-        # Filters the solution candidates. Distance must be computed from a possibly stable equilibrium point.
-        valid_candidates = []
-        for candidate in candidates:
-            valid_interval = candidate > pencil_eig[0] and candidate < pencil_eig[1]
-            non_singular = all( np.absolute(pencil_eig - candidate) > self.eigen_threshold )
-            if valid_interval and non_singular:
-                valid_candidates.append( candidate )
-
-        # Computes the best cost among the valid solution candidates
-        distance = math.inf
-        for c in valid_candidates:
-            c_cost = self.cost_value(c, v_bar)
-            if c_cost < distance:
-                distance = c_cost
-
-        return distance
-
     def f_values(self, args):
         '''
         Returns the values of f.
@@ -477,9 +388,6 @@ class NewQPController():
         H = self.pencil_value( lambda_var )
         H_inv = np.linalg.inv(H)
         return H_inv.dot(v0)
-
-    def cost_value(self, lambda_bar, v_bar):
-        return np.linalg.norm( self.v_values(lambda_bar) - v_bar )
 
     def pencil_value(self, lambda_var):
         '''
