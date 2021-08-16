@@ -50,10 +50,14 @@ class NewQPController():
         q = np.zeros(self.QP_dim)
         self.QP = QuadraticProgram(P=P,q=q)
 
-        # Control sample time
+        # Variable initialization
         self.ctrl_dt = dt
+        self.V = 0.0
         self.h = 0.0
         self.u = np.zeros(self.control_dim)
+        self.u_pi = np.zeros(self.sym_dim)
+        self.LgV = np.zeros(self.control_dim)
+        self.Lgh = np.zeros(self.control_dim)
 
         # Initialize dynamic subsystems
         f_integrator, g_integrator = list(), list()
@@ -91,9 +95,9 @@ class NewQPController():
         QP_sol = self.QP.get_solution()
 
         self.u = QP_sol[0:self.control_dim]
-        u_pi = QP_sol[self.control_dim:self.control_dim+self.sym_dim]
+        self.u_pi = QP_sol[self.control_dim:self.control_dim+self.sym_dim]
 
-        return self.u, u_pi
+        return self.u, self.u_pi
 
     def get_clf_constraint(self, state):
         '''
@@ -118,7 +122,9 @@ class NewQPController():
             self.nablaV_pi[k] = 0.5 * ( delta_x.T @ self.sym_basis[k] @ delta_x )[0,0]
 
         # CLF contraint for the QP
-        a_clf = np.hstack( [ self.LgV, self.nablaV_pi, 0.0 ])
+        delta = np.heaviside(float(self.get_selection()),0.0)
+        a_clf = np.hstack( [ self.LgV, self.nablaV_pi*delta, 0.0 ])
+        # b_clf = -self.gamma[0] * self.V - self.LfV - self.nablaV_pi.dot(self.u_pi)*( 1.0 - delta )
         b_clf = -self.gamma[0] * self.V - self.LfV
 
         return a_clf, b_clf
@@ -169,6 +175,8 @@ class NewQPController():
         a_clf_pi = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vpi, -1.0 ])
         b_clf_pi = -self.gamma[1] * self.Vpi
 
+        print("Vpi = " + str(self.Vpi))
+
         return a_clf_pi, b_clf_pi
 
     def get_compatibility_constraints(self, state):
@@ -208,6 +216,8 @@ class NewQPController():
         else:
             term = -100
 
+        print("Term = " + str(self.get_selection()))
+
         # Sets compatibility constraints
         a_cbf_gamma = -np.hstack([ np.zeros([self.number_critical, self.control_dim]), gradient_h_gamma, np.zeros([self.number_critical, 1]) ])
         b_cbf_gamma = self.alpha[1]*self.h_gamma - term
@@ -228,7 +238,7 @@ class NewQPController():
         Lgh2 = self.Lgh.dot(self.Lgh)
         LgVLgh = self.LgV.dot(self.Lgh)
                 
-        return self.V * LgVLgh - self.h * ( math.sqrt(LgV2)*math.sqrt(Lgh2) + 1/self.p[0] )
+        return self.V * LgVLgh - self.h * math.sqrt(LgV2)*math.sqrt(Lgh2)
 
     def compute_pencil(self, Hv, Hh):
         '''
@@ -344,7 +354,7 @@ class NewQPController():
 
     def compute_f_critical(self):
         '''
-        Computes critical points of f
+        Computes critical points of f.
         '''
         dnum_poly = np.polynomial.polynomial.polyder(self.f_dict["numerator"])
         dpencil_char = np.polynomial.polynomial.polyder(self.pencil_dict["characteristic_polynomial"])

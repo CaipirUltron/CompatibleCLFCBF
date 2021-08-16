@@ -13,7 +13,7 @@ try:
         "g": [['1','0'],['0','1']],
         "state_string": 'x1, x2, ',
         "control_string": 'u1, u2, ',
-        "initial_state": np.array([ -1.0, 7.0 ])
+        "initial_state": np.array([ -1.0, 5.0 ])
     }
     plant = AffineSystem(system["state_string"], system["control_string"], system["f"], *system["g"])
     ############################################################################################################################
@@ -40,7 +40,7 @@ try:
 
 
     ############################################## Configure and create CBF ####################################################
-    xaxis_length, yaxis_length, cbf_angle = 1.0, 1.0, math.radians(0.0)
+    xaxis_length, yaxis_length, cbf_angle = 3.0, 1.0, math.radians(30.0)
     cbf_config = {
         "Hh": QuadraticFunction.canonical2D(np.array([ 1/(xaxis_length**2), 1/(yaxis_length**2) ]), cbf_angle),
         "p0": np.array([ 0.0, 3.0 ])
@@ -51,13 +51,13 @@ try:
     # Create QP controller
     # qp_controller = NominalQP(plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0)
     # qp_controller = QPController(plant, clf, ref_clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 10.0], p = [10.0, 10.0])
-    qp_controller = NewQPController(plant, clf, ref_clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 10.0], p = [1.0, 5.0])
+    qp_controller = NewQPController(plant, clf, ref_clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 10.0], p = [1.0, 1.0])
 
     # Initialize simulation objects and main loop.
     dynamicSimulation = SimulateDynamics(plant, system["initial_state"])
     graphicalSimulation = SimulationRviz(clf, cbf)
 
-    dt = .002
+    dt = .004
     rate = rospy.Rate(1/dt)
     while not rospy.is_shutdown():
 
