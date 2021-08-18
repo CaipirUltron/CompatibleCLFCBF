@@ -239,6 +239,7 @@ class NewQPController():
         LgVLgh = self.LgV.dot(self.Lgh)
                 
         return self.V * LgVLgh - self.h * math.sqrt(LgV2)*math.sqrt(Lgh2)
+        # return self.V * LgVLgh
 
     def compute_pencil(self, Hv, Hh):
         '''
