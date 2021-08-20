@@ -2,8 +2,7 @@ import numpy as np
 import math, scipy
 
 from compatible_clf_cbf.quadratic_program import QuadraticProgram
-from compatible_clf_cbf.dynamic_systems import AffineSystem
-from compatible_clf_cbf.dynamic_simulation import SimulateDynamics
+from compatible_clf_cbf.dynamic_simulation import Integrator
 from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
 
 
@@ -14,11 +13,11 @@ class NewQPController():
     def __init__(self, plant, clf, ref_clf, cbf, gamma = [1.0, 1.0], alpha = [1.0, 1.0], p = [10.0, 10.0], dt = 0.001):
 
         # Dimensions and system model initialization
-        self._plant = plant
+        self.plant = plant
         self.clf, self.ref_clf, self.cbf = clf, ref_clf, cbf
 
-        self.state_dim = self._plant.state_dim
-        self.control_dim = self._plant.control_dim
+        self.state_dim = self.plant.n
+        self.control_dim = self.plant.m
         self.sym_dim = int(( self.state_dim * ( self.state_dim + 1 ) )/2)
         self.sym_basis = QuadraticFunction.symmetric_basis(self.state_dim)
 
@@ -70,18 +69,19 @@ class NewQPController():
             ctrl_string = ctrl_string + 'dpi' + str(k+1) + ', '
 
         # Integrator sybsystem for the CLF parameters
-        piv_integrator = AffineSystem(state_string, ctrl_string, f_integrator, *g_integrator)
+        # piv_integrator = AffineSystem(state_string, ctrl_string, f_integrator, *g_integrator)
         piv_init = QuadraticFunction.sym2vector(self.clf.hessian())
-        self.clf_dynamics = SimulateDynamics(piv_integrator, piv_init)
+        # self.clf_dynamics = SimulateDynamics(piv_integrator, piv_init)
+        self.clf_dynamics = Integrator(piv_init,np.zeros(len(piv_init)))
 
-    def get_control(self, state):
+    def get_control(self):
         '''
         Computes the QP solution.
         '''
-        a_clf, b_clf = self.get_clf_constraint(state)
-        a_cbf, b_cbf = self.get_cbf_constraint(state)
-        a_rate, b_rate = self.get_rate_constraint(state)
-        A_barriers, b_barriers = self.get_compatibility_constraints(state)
+        a_clf, b_clf = self.get_clf_constraint()
+        a_cbf, b_cbf = self.get_cbf_constraint()
+        a_rate, b_rate = self.get_rate_constraint()
+        A_barriers, b_barriers = self.get_compatibility_constraints()
 
         # Stacking the CLF and CBF constraints
         A1 = np.vstack([ a_clf, a_cbf, a_rate ])
@@ -99,13 +99,14 @@ class NewQPController():
 
         return self.u, self.u_pi
 
-    def get_clf_constraint(self, state):
+    def get_clf_constraint(self):
         '''
         Sets the Lyapunov constraint for the inner loop controller.
         '''
         # Affine plant dynamics
-        f = self._plant.compute_f(state)
-        g = self._plant.compute_g(state)
+        f = self.plant.get_f()
+        g = self.plant.get_g()
+        state = self.plant.get_state()
 
         # Lyapunov function and gradient
         self.V = self.clf(state)
@@ -129,13 +130,14 @@ class NewQPController():
 
         return a_clf, b_clf
 
-    def get_cbf_constraint(self, state):
+    def get_cbf_constraint(self):
         '''
         Sets the barrier constraint.
         '''
         # Affine plant dynamics
-        f = self._plant.compute_f(state)
-        g = self._plant.compute_g(state)
+        f = self.plant.get_f()
+        g = self.plant.get_g()
+        state = self.plant.get_state()
 
         # Barrier function and gradient
         self.h = self.cbf(state)
@@ -154,14 +156,15 @@ class NewQPController():
         '''
         Integrates the dynamic system for the CLF Hessian matrix.
         '''
-        self.clf_dynamics.send_control_inputs(piv_ctrl, self.ctrl_dt)
-        pi_v = self.clf_dynamics.state()
+        self.clf_dynamics.set_control(piv_ctrl)
+        self.clf_dynamics.actuate(self.ctrl_dt)
+        pi_v = self.clf_dynamics.get_state()
         Hv = QuadraticFunction.vector2sym(pi_v)
 
         self.clf.set_param(hessian = Hv)
         self.compute_compatibility()
 
-    def get_rate_constraint(self, state):
+    def get_rate_constraint(self):
         '''
         Sets the Lyapunov constraint for the outer loop controller.
         '''
@@ -179,7 +182,7 @@ class NewQPController():
 
         return a_clf_pi, b_clf_pi
 
-    def get_compatibility_constraints(self, state):
+    def get_compatibility_constraints(self):
         '''
         Sets the barrier constraints for the outer loop controller, ensuring compatibility.
         '''

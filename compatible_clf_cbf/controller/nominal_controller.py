@@ -8,11 +8,11 @@ class NominalQP():
     def __init__(self, plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0, dt = 0.001):
 
         # Dimensions and system model initialization
-        self._plant = plant
+        self.plant = plant
         self.clf, self.cbf = clf, cbf
 
-        self.state_dim = self._plant.state_dim
-        self.control_dim = self._plant.control_dim
+        self.state_dim = self.plant.n
+        self.control_dim = self.plant.m
 
         # QP parameters
         self.p = p
@@ -23,12 +23,12 @@ class NominalQP():
         q = np.zeros(self.QP_dim)
         self.QP = QuadraticProgram(P=P, q=q)
 
-    def get_control(self, state):
+    def get_control(self):
         '''
         Computes the QP control.
         '''
-        a_clf, b_clf = self.get_clf_constraint(state)
-        a_cbf, b_cbf = self.get_cbf_constraint(state)
+        a_clf, b_clf = self.get_clf_constraint()
+        a_cbf, b_cbf = self.get_cbf_constraint()
 
         # Stacking the CLF and CBF constraints
         A = np.vstack( [a_clf, a_cbf ])
@@ -41,13 +41,14 @@ class NominalQP():
 
         return control
 
-    def get_clf_constraint(self, state):
+    def get_clf_constraint(self):
         '''
         Sets the Lyapunov constraint.
         '''
         # Affine plant dynamics
-        f = self._plant.compute_f(state)
-        g = self._plant.compute_g(state)
+        f = self.plant.get_f()
+        g = self.plant.get_g()
+        state = self.plant.get_state()
 
         # Lyapunov function and gradient
         self.V = self.clf(state)
@@ -63,13 +64,14 @@ class NominalQP():
 
         return a_clf, b_clf
 
-    def get_cbf_constraint(self, state):
+    def get_cbf_constraint(self):
         '''
         Sets the barrier constraint.
         '''
         # Affine plant dynamics
-        f = self._plant.compute_f(state)
-        g = self._plant.compute_g(state)
+        f = self.plant.get_f()
+        g = self.plant.get_g()
+        state = self.plant.get_state()
 
         # Barrier function and gradient
         self.h = self.cbf(state)

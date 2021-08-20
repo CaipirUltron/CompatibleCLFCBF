@@ -1,1 +1,1 @@
-from .dynamic_simulation import SimulateDynamics
+from .dynamic_simulation import *

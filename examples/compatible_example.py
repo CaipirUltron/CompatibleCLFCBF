@@ -1,29 +1,30 @@
 import rospy
 
-from system_initialization import plant, clf, cbf, ref_clf, dynamicSimulation, graphicalSimulation, dt
+from system_initialization import plant, clf, cbf, ref_clf
 from compatible_clf_cbf.controller import NewQPController
+from compatible_clf_cbf.graphical_simulation import SimulationRviz
 
 try:
-    # Create QP controller
+    # Create QP controller and graphical simulation.
     qp_controller = NewQPController(plant, clf, ref_clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 10.0], p = [1.0, 1.0])
+    graphicalSimulation = SimulationRviz(plant, qp_controller.clf, cbf)
 
+    dt = 0.004
     rate = rospy.Rate(1/dt)
     while not rospy.is_shutdown():
 
-        # Get simulation state
-        state = dynamicSimulation.state()
-
         # Control
-        u_control, upi_control = qp_controller.get_control(state)
+        u_control, upi_control = qp_controller.get_control()
         qp_controller.update_clf_dynamics(upi_control)
 
-        # Send actuation commands 
-        dynamicSimulation.send_control_inputs(u_control, dt)
+        # Send actuation commands
+        plant.set_control(u_control) 
+        plant.actuate(dt)
 
         # Draw graphical simulation elements
-        graphicalSimulation.draw_trajectory(state)
+        graphicalSimulation.draw_trajectory()
         graphicalSimulation.draw_reference(qp_controller.clf.critical_point)
-        graphicalSimulation.draw_clf(qp_controller.clf, state)
+        graphicalSimulation.draw_clf()
         graphicalSimulation.draw_cbf()
         # graphicalSimulation.draw_invariance(qp_controller)
 

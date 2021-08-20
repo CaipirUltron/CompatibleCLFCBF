@@ -9,7 +9,6 @@ from visualization_msgs.msg import Marker
 from geometry_msgs.msg import Point, PointStamped, TransformStamped
 
 from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
-from compatible_clf_cbf.controller import NominalQP, NewQPController
 
 
 class SimulationMatplot():
@@ -82,9 +81,10 @@ class SimulationMatplot():
 
 
 class SimulationRviz():
-    def __init__(self, clf, cbf):
+    def __init__(self, plant, clf, cbf):
         
         # Initialize important class attributes
+        self._plant = plant
         self._clf = clf
         self._cbf = cbf
 
@@ -136,19 +136,19 @@ class SimulationRviz():
         self._branch2_marker = Marker()
 
         # Initialize robot position marker
-        self.set_state(np.zeros(2))
+        self.init_state(np.zeros(2))
 
         # Initialize reference marker
-        self.set_reference(np.zeros(2))
+        self.init_reference(np.zeros(2))
 
         # Initialize CLF and CBF markers
-        self.set_clf(clf)
-        self.set_cbf(cbf)
-        self.set_invariance(self._branch0_marker)
-        self.set_invariance(self._branch1_marker)
-        self.set_invariance(self._branch2_marker)
+        self.init_clf(clf)
+        self.init_cbf(cbf)
+        self.init_invariance(self._branch0_marker)
+        self.init_invariance(self._branch1_marker)
+        self.init_invariance(self._branch2_marker)
 
-    def set_state(self, state):
+    def init_state(self, state):
 
         self._trajectory_marker.header.frame_id = "base_frame"
         self._trajectory_marker.type = self._trajectory_marker.LINE_STRIP
@@ -166,7 +166,7 @@ class SimulationRviz():
         self._trajectory_marker.pose.orientation.z = 0.0
         self._trajectory_marker.pose.orientation.w = 1.0
 
-    def set_reference(self, ref):
+    def init_reference(self, ref):
 
         self._ref_pos_marker.header.frame_id = "base_frame"
         self._ref_pos_marker.type = self._ref_pos_marker.SPHERE
@@ -186,7 +186,7 @@ class SimulationRviz():
         self._ref_pos_marker.pose.orientation.z = 0.0
         self._ref_pos_marker.pose.orientation.w = 1.0
 
-    def set_clf(self, clf):
+    def init_clf(self, clf):
         
         self.clf_lambda, self.clf_angle, _ = clf.compute_eig()
         self._clf_marker.header.frame_id = "base_frame"
@@ -207,7 +207,7 @@ class SimulationRviz():
         self._clf_marker.pose.orientation.z = np.sin(-self.clf_angle/2)
         self._clf_marker.pose.orientation.w = np.cos(-self.clf_angle/2)
 
-    def set_cbf(self, cbf):
+    def init_cbf(self, cbf):
 
         self.cbf_lambda, self.cbf_angle, _ = cbf.compute_eig()
         self._cbf_marker.header.frame_id = "base_frame"
@@ -228,7 +228,7 @@ class SimulationRviz():
         self._cbf_marker.pose.orientation.z = np.sin(-self.cbf_angle/2)
         self._cbf_marker.pose.orientation.w = np.cos(-self.cbf_angle/2)
 
-    def set_invariance(self, branch):
+    def init_invariance(self, branch):
 
         branch.header.frame_id = "base_frame"
         branch.type = branch.LINE_STRIP
@@ -246,18 +246,22 @@ class SimulationRviz():
         branch.pose.orientation.z = 0.0
         branch.pose.orientation.w = 1.0
 
-    def draw_trajectory(self, point):
+    def draw_trajectory(self):
+        '''
+        Publishes state trajectory.
+        '''
+        state = self._plant.get_state()
         new_trajectory_point = Point()
-        new_trajectory_point.x = point[0]
-        new_trajectory_point.y = point[1]
+        new_trajectory_point.x = state[0]
+        new_trajectory_point.y = state[1]
         new_trajectory_point.z = 0
         self._trajectory_marker.points.append( new_trajectory_point )
-
-        # Publishes Rviz graphical objects
         self.trajectory_publisher.publish(self._trajectory_marker)
 
     def draw_reference(self, ref_point):
-
+        '''
+        Publishes reference position marker.
+        '''
         if isinstance(ref_point,type(PointStamped())):
             reference = np.array([ ref_point.point.x, ref_point.point.y ])
         else:
@@ -265,16 +269,17 @@ class SimulationRviz():
 
         self._ref_pos_marker.pose.position.x = reference[0]
         self._ref_pos_marker.pose.position.y = reference[1]
-
-        # Publishes Rviz graphical objects
         self.ref_publisher.publish(self._ref_pos_marker)
 
-    def draw_clf(self, clf, point):
-
-        clf_lambda, clf_angle, _ = clf.compute_eig()
+    def draw_clf(self):
+        '''
+        Publishes CLF in Rviz.
+        '''
+        clf_lambda, clf_angle, _ = self._clf.compute_eig()
+        state = self._plant.get_state()
 
         V_threshold = 0.01
-        V_point = clf(point)
+        V_point = self._clf(state)
         if V_point > V_threshold:
             bar_clf_lambda = clf_lambda/V_point
         else:
@@ -282,14 +287,17 @@ class SimulationRviz():
 
         self._clf_marker.scale.x = 2*np.sqrt(2/bar_clf_lambda[0])
         self._clf_marker.scale.y = 2*np.sqrt(2/bar_clf_lambda[1])
-        self._clf_marker.pose.position.x = clf.critical_point[0]
-        self._clf_marker.pose.position.y = clf.critical_point[1]
+        self._clf_marker.pose.position.x = self._clf.critical_point[0]
+        self._clf_marker.pose.position.y = self._clf.critical_point[1]
         self._clf_marker.pose.orientation.z = np.sin(-clf_angle/2)
         self._clf_marker.pose.orientation.w = np.cos(-clf_angle/2)
 
         self.clf_publisher.publish(self._clf_marker)
 
     def draw_cbf(self):
+        '''
+        Publishes CBF in Rviz.
+        '''
         self.cbf_publisher.publish(self._cbf_marker)
 
     def draw_invariance(self, controller):

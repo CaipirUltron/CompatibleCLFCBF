@@ -1,9 +1,6 @@
 import numpy as np
-from numpy.core.function_base import linspace
 from sage.all import *
-from sage.combinat.sloane_functions import A109814
 from sage.symbolic.function import BuiltinFunction
-from sage.calculus.var import *
 
 
 class NonlinearSystem(BuiltinFunction):
@@ -97,6 +94,7 @@ class AffineSystem(NonlinearSystem):
         for i in range(self.state_dim):
             self._var_dictionary[ self._state_str[i] ] = state[i]
         return np.array(self._g(**self._var_dictionary),dtype=float)
+
 
 class LinearSystem(NonlinearSystem):
 
