@@ -1,4 +1,4 @@
-import rospy, math
+import math
 import numpy as np
 
 from compatible_clf_cbf.dynamic_simulation import Integrator

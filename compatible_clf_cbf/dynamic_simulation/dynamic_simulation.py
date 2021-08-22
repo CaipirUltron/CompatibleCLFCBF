@@ -75,6 +75,7 @@ class DynamicSystem(ABC):
     def dynamics(self):
         pass
 
+
 class AffineSystem(DynamicSystem):
     '''
     General class for an affine system dx = f(x) + g(x) u.
@@ -129,3 +130,17 @@ class Integrator(AffineSystem):
 
     def g(self):
         self._g = np.eye(self.n)
+
+
+class LinearSystem(AffineSystem):
+
+    def __init__(self, initial_state, initial_control, A, B):
+        super().__init__(initial_state, initial_control)
+        self._A = A
+        self._B = B
+
+    def f(self):
+        self._f = self._A @ self._state
+
+    def g(self):
+        self._g = self._B
