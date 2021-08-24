@@ -51,8 +51,8 @@ class NominalQP():
         state = self.plant.get_state()
 
         # Lyapunov function and gradient
-        self.V = self.clf(state)
-        self.nablaV = self.clf.gradient(state)
+        self.V = self.clf.evaluate(state)
+        self.nablaV = self.clf.get_gradient()
 
         # Lie derivatives
         self.LfV = self.nablaV.dot(f)
@@ -74,8 +74,8 @@ class NominalQP():
         state = self.plant.get_state()
 
         # Barrier function and gradient
-        self.h = self.cbf(state)
-        self.nablah = self.cbf.gradient(state)
+        self.h = self.cbf.evaluate(state)
+        self.nablah = self.cbf.get_gradient()
 
         self.Lfh = self.nablah.dot(f)
         self.Lgh = g.T.dot(self.nablah)

@@ -2,8 +2,7 @@ import numpy as np
 import math, scipy
 
 from compatible_clf_cbf.quadratic_program import QuadraticProgram
-from compatible_clf_cbf.dynamic_simulation import Integrator
-from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
+from compatible_clf_cbf.dynamic_systems import Quadratic, Integrator
 
 
 class NewQPController():
@@ -19,7 +18,7 @@ class NewQPController():
         self.state_dim = self.plant.n
         self.control_dim = self.plant.m
         self.sym_dim = int(( self.state_dim * ( self.state_dim + 1 ) )/2)
-        self.sym_basis = QuadraticFunction.symmetric_basis(self.state_dim)
+        self.sym_basis = Quadratic.symmetric_basis(self.state_dim)
 
         # Initialize rate CLF
         self.Vpi = 0.0
@@ -69,9 +68,7 @@ class NewQPController():
             ctrl_string = ctrl_string + 'dpi' + str(k+1) + ', '
 
         # Integrator sybsystem for the CLF parameters
-        # piv_integrator = AffineSystem(state_string, ctrl_string, f_integrator, *g_integrator)
-        piv_init = QuadraticFunction.sym2vector(self.clf.hessian())
-        # self.clf_dynamics = SimulateDynamics(piv_integrator, piv_init)
+        piv_init = Quadratic.sym2vector(self.clf.get_hessian())
         self.clf_dynamics = Integrator(piv_init,np.zeros(len(piv_init)))
 
     def get_control(self):
@@ -109,8 +106,8 @@ class NewQPController():
         state = self.plant.get_state()
 
         # Lyapunov function and gradient
-        self.V = self.clf(state)
-        self.nablaV = self.clf.gradient(state)
+        self.V = self.clf.evaluate(state)
+        self.nablaV = self.clf.get_gradient()
 
         # Lie derivatives
         self.LfV = self.nablaV.dot(f)
@@ -118,7 +115,7 @@ class NewQPController():
 
         # Gradient w.r.t. pi
         self.nablaV_pi = np.zeros(self.sym_dim)
-        delta_x = ( state - self.clf.critical_point ).reshape(self.state_dim,1)
+        delta_x = ( state - self.clf.get_critical() ).reshape(self.state_dim,1)
         for k in range(self.sym_dim):
             self.nablaV_pi[k] = 0.5 * ( delta_x.T @ self.sym_basis[k] @ delta_x )[0,0]
 
@@ -140,8 +137,8 @@ class NewQPController():
         state = self.plant.get_state()
 
         # Barrier function and gradient
-        self.h = self.cbf(state)
-        self.nablah = self.cbf.gradient(state)
+        self.h = self.cbf.evaluate(state)
+        self.nablah = self.cbf.get_gradient()
 
         self.Lfh = self.nablah.dot(f)
         self.Lgh = g.T.dot(self.nablah)
@@ -159,7 +156,7 @@ class NewQPController():
         self.clf_dynamics.set_control(piv_ctrl)
         self.clf_dynamics.actuate(self.ctrl_dt)
         pi_v = self.clf_dynamics.get_state()
-        Hv = QuadraticFunction.vector2sym(pi_v)
+        Hv = Quadratic.vector2sym(pi_v)
 
         self.clf.set_param(hessian = Hv)
         self.compute_compatibility()
@@ -169,7 +166,7 @@ class NewQPController():
         Sets the Lyapunov constraint for the outer loop controller.
         '''
         # Computes rate Lyapunov and gradient
-        deltaHv = self.clf.hessian() - self.ref_clf.hessian()
+        deltaHv = self.clf.get_hessian() - self.ref_clf.get_hessian()
         self.Vpi = 0.5 * np.trace( deltaHv @ deltaHv )
         for k in range(self.sym_dim):
             self.gradient_Vpi[k] = np.trace( deltaHv @ self.sym_basis[k] )
@@ -191,7 +188,7 @@ class NewQPController():
         Q = self.pencil_dict["left_eigenvectors"]
         Z = self.pencil_dict["right_eigenvectors"]
         
-        Hh = self.cbf.hessian()
+        Hh = self.cbf.get_hessian()
         beta_0 = np.dot( Q[:,0], Hh.dot(Z[:,0]) )
 
         self.h_positive = pencil_eig[0] - self.f_params_dict["minimum_eigenvalue"]
@@ -208,9 +205,9 @@ class NewQPController():
             v = self.v_values( self.f_critical[k] )
             H = self.pencil_value( self.f_critical[k] )
             H_inv = np.linalg.inv(H)
-            vec_nabla_f = 2 * (1/self.critical_values[k]) * np.matmul( self.cbf.hessian(), H_inv ).dot(v)
+            vec_nabla_f = 2 * (1/self.critical_values[k]) * np.matmul( self.cbf.get_hessian(), H_inv ).dot(v)
             for i in range(self.sym_dim):
-                vec_i = self.sym_basis[i].dot( v + self.cbf.critical() - self.clf.critical() )
+                vec_i = self.sym_basis[i].dot( v + self.cbf.get_critical() - self.clf.get_critical() )
                 gradient_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
 
         # Applies selection function
@@ -273,9 +270,9 @@ class NewQPController():
         n = self.state_dim
 
         # Similarity transformation
-        Hv, Hh = self.clf.hessian(), self.cbf.hessian()
-        x0, p0 = self.clf.critical(), self.cbf.critical()
-        v0 = Hv.dot( p0 - x0 )
+        Hv, Hh = self.clf.get_hessian(), self.cbf.get_hessian()
+        x0, p0 = self.clf.get_critical(), self.cbf.get_critical()
+        v0 = Hv @ ( p0 - x0 )
 
         # Compute the pencil
         self.compute_pencil(Hv, Hh)
@@ -340,7 +337,7 @@ class NewQPController():
         '''
         Compute equilibrium solutions and equilibrium points.
         '''
-        p0 = self.cbf.critical()
+        p0 = self.cbf.get_critical()
         solution_poly = np.polynomial.polynomial.polysub( self.f_dict["numerator"], self.f_dict["denominator"] )
         
         equilibrium_solutions = np.polynomial.polynomial.polyroots(solution_poly)
@@ -396,7 +393,7 @@ class NewQPController():
         '''
         This function returns the value of vector v(lambda) = H(lambda)^{-1} v0
         '''
-        Hv, x0, p0 = self.clf.hessian(), self.clf.critical(), self.cbf.critical()
+        Hv, x0, p0 = self.clf.get_hessian(), self.clf.get_critical(), self.cbf.get_critical()
         v0 = Hv.dot( p0 - x0 )
 
         H = self.pencil_value( lambda_var )
@@ -407,5 +404,5 @@ class NewQPController():
         '''
         This function returns the value of the matrix pencil H(lambda) = lambda Hh - Hv
         '''
-        Hv, Hh = self.clf.hessian(), self.cbf.hessian()
+        Hv, Hh = self.clf.get_hessian(), self.cbf.get_hessian()
         return lambda_var*Hh - Hv

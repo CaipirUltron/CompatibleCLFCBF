@@ -8,8 +8,7 @@ import matplotlib.animation as anim
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import Point, PointStamped, TransformStamped
 
-from compatible_clf_cbf.dynamic_systems.dynamic_systems import QuadraticFunction
-
+from compatible_clf_cbf.dynamic_systems import Quadratic
 
 class SimulationMatplot():
 
@@ -58,7 +57,7 @@ class SimulationMatplot():
         current_state = np.array([self.state_log[0][i], self.state_log[1][i]])
         current_pi_state = np.array([self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i]])
 
-        Hv = QuadraticFunction.vector2sym(current_pi_state)
+        Hv = Quadratic.vector2sym(current_pi_state)
         self.clf.set_param(hessian=Hv)
         
         if self.draw_level:
@@ -279,7 +278,7 @@ class SimulationRviz():
         state = self._plant.get_state()
 
         V_threshold = 0.01
-        V_point = self._clf(state)
+        V_point = self._clf.evaluate(state)
         if V_point > V_threshold:
             bar_clf_lambda = clf_lambda/V_point
         else:

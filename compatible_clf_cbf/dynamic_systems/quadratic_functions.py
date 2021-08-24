@@ -7,15 +7,45 @@ class Function(ABC):
     '''
     Abstract implementation of general class for scalar functions.
     '''
-    def __init__(self, init_value):
+    def __init__(self, init_value=0.0):
         self.set_value(init_value)
+        self._function = 0.0
+        if self._dim > 1:
+            self._gradient = np.zeros(self._dim)
+            self._hessian = np.zeros([self._dim,self._dim])
+        else:
+            self._gradient = 0.0
+            self._hessian = 0.0
 
-    def set_value(self, var_value):
-        self._dim = len(var_value)
-        self._var = var_value
+    def set_value(self, value):
+        if isinstance(value, list):
+            self._dim = len(value)
+            self._var = np.array(value)
+        else:
+            self._dim = 1
+            self._var = value
+
+    def compute(self):
         self.function()
         self.gradient()
         self.hessian()
+
+    def evaluate(self, value):
+        self.set_value(value)
+        self.compute()
+        return self._function
+
+    def get_value(self):
+        return self._var
+
+    def get_fvalue(self):
+        return self._function
+
+    def get_gradient(self):
+        return self._gradient
+
+    def get_hessian(self):
+        return self._hessian
 
     @abstractmethod
     def function(self):
@@ -34,16 +64,20 @@ class Quadratic(Function):
     '''
     Class for quadratic function representing x'Ax + b'x + c = 0.5 (x - p)'H(x-p) + height = 0.5 x'Hx - 0.5 p'(H + H')x + 0.5 p'Hp + height
     '''
-    def __init__(self, init_value, **kwargs):
-        super().__init__(init_value)
+    def __init__(self, init_value=0.0, **kwargs):
 
         # Set parameters
-        self.A = np.zeros([self._dim,self._dim])
-        self.b = np.zeros(self._dim)
-        self.c = 0.0
+        super().__init__(init_value)
 
-        self.hessian_matrix = np.zeros([self._dim,self._dim])
-        self.critical_point = np.zeros(self._dim)
+        if self._dim > 1:
+            self.A = np.zeros([self._dim,self._dim])
+            self.b = np.zeros(self._dim)
+            self.critical_point = np.zeros(self._dim)
+        else:
+            self.A = 0.0
+            self.b = 0.0
+            self.critical_point = 0.0
+        self.c = 0.0
         self.height = 0.0
 
         self.set_param(**kwargs)
@@ -60,15 +94,15 @@ class Quadratic(Function):
         '''
         for key in kwargs:
             if key == "hessian":
-                self.hessian_matrix = kwargs[key]
+                self._hessian = np.array(kwargs[key])
             if key == "critical":
-                self.critical_point = kwargs[key]
+                self.critical_point = np.array(kwargs[key])
             if key == "height":
                 self.height = kwargs[key]
 
-        self.A = 0.5 * self.hessian_matrix
-        self.b = - 0.5*( self.hessian_matrix + self.hessian_matrix.T ).dot( self.critical_point )
-        self.c = 0.5 * self.critical_point.dot( self.hessian_matrix.dot(self.critical_point) ) + self.height
+        self.A = 0.5 * self._hessian
+        self.b = - 0.5*( self._hessian + self._hessian.T ) @ self.critical_point
+        self.c = 0.5 * self.critical_point @ ( self._hessian @ self.critical_point ) + self.height
 
         for key in kwargs:
             if key == "A":
@@ -109,30 +143,11 @@ class Quadratic(Function):
 
         return H
 
-    def function(self, *vars):
-        if len(vars) == 0:
-            return self._function
-        else:
-            for i in range(self._dim):
-                self._var_dictionary[ self._var_str[i] ] = vars[0][i]
-            return self._function(**self._var_dictionary)
-
-    def gradient(self, *vars):
-        if len(vars) == 0:
-            return self._gradient
-        else:
-            for i in range(self._dim):
-                self._var_dictionary[ self._var_str[i] ] = vars[0][i]
-            return np.array(self._gradient(**self._var_dictionary),dtype=float)
-
-    def hessian(self):
-        return np.array(self._hessian, dtype=float)
-
-    def critical(self):
+    def get_critical(self):
         return self.critical_point
 
     def compute_eig(self):
-        eigen, Q = np.linalg.eig(self.hessian())
+        eigen, Q = np.linalg.eig(self.get_hessian())
         angle = np.arctan2(Q[0, 1], Q[0, 0])
         return eigen, angle, Q
 
@@ -179,7 +194,7 @@ class Quadratic(Function):
         t = np.linspace(-math.pi, math.pi, numpoints)
 
         # Parameterize 
-        eig, Q = np.linalg.eig(self.hessian_matrix)
+        eig, Q = np.linalg.eig(self._hessian)
         if eig[0]*eig[1] > 0:
             # ellipse
             level_type = 'ellipse'
@@ -219,11 +234,6 @@ class Quadratic(Function):
 
         return x, y, u, v
 
-    def _eval_numpy_(self, vars):
-        for i in range(self._dim):
-            self._var_dictionary[ self._var_str[i] ] = vars[i]
-        return self._function(**self._var_dictionary)
-
     @staticmethod
     def vector2sym(vector):
         '''
@@ -233,7 +243,7 @@ class Quadratic(Function):
         if dim < 3:
             raise Exception("The input vector must be of length 3 or higher.")
         n = int((-1 + np.sqrt(1+8*dim))/2)
-        sym_basis = QuadraticFunction.symmetric_basis(n)
+        sym_basis = Quadratic.symmetric_basis(n)
         M = np.zeros([n,n])
         for k in range(dim):
             M = M + sym_basis[k]*vector[k]
@@ -247,7 +257,7 @@ class Quadratic(Function):
         n = M.shape[0]
         if n < 2:
             raise Exception("The input matrix must be of size 2x2 or higher.")
-        sym_basis = QuadraticFunction.symmetric_basis(n)
+        sym_basis = Quadratic.symmetric_basis(n)
         dim = int((n*(n+1))/2)
         vector = np.zeros(dim)
         for k in range(dim):
@@ -286,24 +296,24 @@ class Quadratic(Function):
         Returns the (2x2) symmetric matrix with eigenvalues eigen and eigenvector angle theta.
         '''
         Diag = np.diag(eigen)
-        R = QuadraticFunction.rot2D(theta)
-        H = np.matmul(R, np.matmul(Diag, R.T))
+        R = Quadratic.rot2D(theta)
+        H = R @ Diag @ R.T
         return H
 
 
-class QuadraticLyapunov(QuadraticFunction):
+class QuadraticLyapunov(Quadratic):
     '''
     Class for Quadratic Lyapunov functions.
     '''
-    def __init__(self, var_str, **kwargs):
-        QuadraticFunction.__init__(self, var_str, **kwargs)
+    def __init__(self, init_value=0.0, **kwargs):
+        Quadratic.__init__(self, init_value, **kwargs)
+        self.set_param(height = 0.0)
 
-
-class QuadraticBarrier(QuadraticFunction):
+class QuadraticBarrier(Quadratic):
     '''
     Class for Quadratic barrier functions.
     For positive definite Hessians, the unsafe set is described by the interior of an ellipsoid.
     '''
-    def __init__(self, var_str, **kwargs):
-        QuadraticFunction.__init__(self, var_str, **kwargs)
+    def __init__(self, init_value=0.0, **kwargs):
+        Quadratic.__init__(self, init_value, **kwargs)
         self.set_param(height = -0.5)
