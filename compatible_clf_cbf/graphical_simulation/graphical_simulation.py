@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
 
-from visualization_msgs.msg import Marker
+from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point, PointStamped, TransformStamped
 
 from compatible_clf_cbf.dynamic_systems import Quadratic
@@ -100,8 +100,10 @@ class SimulationRviz():
         # ROS Publishers
         self.trajectory_publisher = rospy.Publisher('trajectory', Marker, queue_size=1)
         self.ref_publisher = rospy.Publisher('ref', Marker, queue_size=1)
-        self.clf_publisher = rospy.Publisher('clf', Marker, queue_size=1)
-        self.cbf_publisher = rospy.Publisher('cbf', Marker, queue_size=1)
+
+        self.clf_publisher = rospy.Publisher('clf', MarkerArray, queue_size=1)
+        self.cbf_publisher = rospy.Publisher('cbf', MarkerArray, queue_size=1)
+
         self.branch0_publisher = rospy.Publisher('branch0', Marker, queue_size=1)
         self.branch1_publisher = rospy.Publisher('branch1', Marker, queue_size=1)
         self.branch2_publisher = rospy.Publisher('branch2', Marker, queue_size=1)
@@ -124,15 +126,23 @@ class SimulationRviz():
         self.world_tf_broadcaster.sendTransform(self.world_transform)
 
         # Setup rviz graphical objects
-        self._trajectory_marker = Marker()
-        self._ref_pos_marker = Marker()
-        self._clf_marker = Marker()
-        self._cbf_marker = Marker()
+        self.trajectory_marker = Marker()
+        self.ref_pos_marker = Marker()
+
+        self.clf_markers = MarkerArray()
+        self.clf_markers.markers.append( Marker() )
+        self.clf_markers.markers.append( Marker() )
+        self.clf_markers.markers.append( Marker() )
+
+        self.cbf_markers = MarkerArray()
+        self.cbf_markers.markers.append( Marker() )
+        self.cbf_markers.markers.append( Marker() )
+        self.cbf_markers.markers.append( Marker() )
 
         # Two branches of the hyperbola
-        self._branch0_marker = Marker()
-        self._branch1_marker = Marker()
-        self._branch2_marker = Marker()
+        self.branch0_marker = Marker()
+        self.branch1_marker = Marker()
+        self.branch2_marker = Marker()
 
         # Initialize robot position marker
         self.init_state(np.zeros(2))
@@ -141,115 +151,88 @@ class SimulationRviz():
         self.init_reference(np.zeros(2))
 
         # Initialize CLF and CBF markers
-        self.init_clf(clf)
-        self.init_cbf(cbf)
-        self.init_invariance(self._branch0_marker)
-        self.init_invariance(self._branch1_marker)
-        self.init_invariance(self._branch2_marker)
+        self.init_clf()
+        self.init_cbf()
+        self.init_invariance(self.branch0_marker)
+        self.init_invariance(self.branch1_marker)
+        self.init_invariance(self.branch2_marker)
 
     def init_state(self, state):
 
-        self._trajectory_marker.header.frame_id = "base_frame"
-        self._trajectory_marker.type = self._trajectory_marker.LINE_STRIP
-        self._trajectory_marker.action = self._trajectory_marker.ADD
-        self._trajectory_marker.scale.x = 0.05
-        self._trajectory_marker.color.a = 1.0
-        self._trajectory_marker.color.r = 0.0
-        self._trajectory_marker.color.g = 0.5
-        self._trajectory_marker.color.b = 1.0
-        self._trajectory_marker.pose.position.x = state[0]
-        self._trajectory_marker.pose.position.y = state[1]
-        self._trajectory_marker.pose.position.z = 0.0
-        self._trajectory_marker.pose.orientation.x = 0.0
-        self._trajectory_marker.pose.orientation.y = 0.0
-        self._trajectory_marker.pose.orientation.z = 0.0
-        self._trajectory_marker.pose.orientation.w = 1.0
+        self.trajectory_marker.header.frame_id = "base_frame"
+        self.trajectory_marker.type = Marker.LINE_STRIP
+        self.trajectory_marker.action = Marker.ADD
+        self.trajectory_marker.scale.x = 0.05
+        self.trajectory_marker.color.a = 1.0
+        self.trajectory_marker.color.r = 0.0
+        self.trajectory_marker.color.g = 0.5
+        self.trajectory_marker.color.b = 1.0
+        self.trajectory_marker.pose.position.x = state[0]
+        self.trajectory_marker.pose.position.y = state[1]
+        self.trajectory_marker.pose.position.z = 0.0
+        self.trajectory_marker.pose.orientation.x = 0.0
+        self.trajectory_marker.pose.orientation.y = 0.0
+        self.trajectory_marker.pose.orientation.z = 0.0
+        self.trajectory_marker.pose.orientation.w = 1.0
 
     def init_reference(self, ref):
 
-        self._ref_pos_marker.header.frame_id = "base_frame"
-        self._ref_pos_marker.type = self._ref_pos_marker.SPHERE
-        self._ref_pos_marker.action = self._ref_pos_marker.ADD
-        self._ref_pos_marker.scale.x = self.ref_marker_size
-        self._ref_pos_marker.scale.y = self.ref_marker_size
-        self._ref_pos_marker.scale.z = 0.1
-        self._ref_pos_marker.color.a = 1.0
-        self._ref_pos_marker.color.r = 1.0
-        self._ref_pos_marker.color.g = 0.0
-        self._ref_pos_marker.color.b = 0.0
-        self._ref_pos_marker.pose.position.x = ref[0]
-        self._ref_pos_marker.pose.position.y = ref[1]
-        self._ref_pos_marker.pose.position.z = -0.1
-        self._ref_pos_marker.pose.orientation.x = 0.0
-        self._ref_pos_marker.pose.orientation.y = 0.0
-        self._ref_pos_marker.pose.orientation.z = 0.0
-        self._ref_pos_marker.pose.orientation.w = 1.0
+        self.ref_pos_marker.header.frame_id = "base_frame"
+        self.ref_pos_marker.type = Marker.SPHERE
+        self.ref_pos_marker.action = Marker.ADD
+        self.ref_pos_marker.scale.x = self.ref_marker_size
+        self.ref_pos_marker.scale.y = self.ref_marker_size
+        self.ref_pos_marker.scale.z = 0.1
+        self.ref_pos_marker.color.a = 1.0
+        self.ref_pos_marker.color.r = 1.0
+        self.ref_pos_marker.color.g = 0.0
+        self.ref_pos_marker.color.b = 0.0
+        self.ref_pos_marker.pose.position.x = ref[0]
+        self.ref_pos_marker.pose.position.y = ref[1]
+        self.ref_pos_marker.pose.position.z = -0.1
+        self.ref_pos_marker.pose.orientation.x = 0.0
+        self.ref_pos_marker.pose.orientation.y = 0.0
+        self.ref_pos_marker.pose.orientation.z = 0.0
+        self.ref_pos_marker.pose.orientation.w = 1.0
 
-    def init_clf(self, clf):
-        
-        self.clf_lambda, self.clf_angle, _ = clf.compute_eig()
-        critical_pt = self._clf.get_critical()
+    def init_clf(self):
+        '''
+        Initialize CLF markers.
+        '''
+        clf_color = [ 0.0, 0.4, 1.0 ]
+        for k in range(3):
+            self.clf_markers.markers[k].id = k
+            self.clf_markers.markers[k].header.frame_id = "base_frame"
+            self.clf_markers.markers[k].type = Marker.LINE_STRIP
+            self.clf_markers.markers[k].scale.x = 0.05
+            self.clf_markers.markers[k].color.a = 1.0
+            self.clf_markers.markers[k].color.r = clf_color[0]
+            self.clf_markers.markers[k].color.g = clf_color[1]
+            self.clf_markers.markers[k].color.b = clf_color[2]
+            self.clf_markers.markers[k].pose.position.z = 0.0
 
-        # self._clf_marker.header.frame_id = "base_frame"
-        # self._clf_marker.type = self._clf_marker.SPHERE
-        # self._clf_marker.action = self._clf_marker.ADD
-        # self._clf_marker.scale.x = 2*np.sqrt(1/self.clf_lambda[0])
-        # self._clf_marker.scale.y = 2*np.sqrt(1/self.clf_lambda[1])
-        # self._clf_marker.scale.z = -0.5
-        # self._clf_marker.color.a = 0.3
-        # self._clf_marker.color.r = 0.0
-        # self._clf_marker.color.g = 0.4
-        # self._clf_marker.color.b = 1.0
-        # self._clf_marker.pose.position.x = clf.critical_point[0]
-        # self._clf_marker.pose.position.y = clf.critical_point[1]
-        # self._clf_marker.pose.position.z = 0
-        # self._clf_marker.pose.orientation.x = 0.0
-        # self._clf_marker.pose.orientation.y = 0.0
-        # self._clf_marker.pose.orientation.z = np.sin(-self.clf_angle/2)
-        # self._clf_marker.pose.orientation.w = np.cos(-self.clf_angle/2)
 
-        self._clf_marker.header.frame_id = "base_frame"
-        self._clf_marker.type = self._clf_marker.LINE_STRIP
-        self._clf_marker.action = self._clf_marker.ADD
-        self._clf_marker.scale.x = 0.02
-        self._clf_marker.color.a = 1.0
-        self._clf_marker.color.r = 0.0
-        self._clf_marker.color.g = 0.4
-        self._clf_marker.color.b = 1.0
-        self._clf_marker.pose.position.x = critical_pt[0]
-        self._clf_marker.pose.position.y = critical_pt[1]
-        self._clf_marker.pose.position.z = 0.0
-        self._clf_marker.pose.orientation.x = 0.0
-        self._clf_marker.pose.orientation.y = 0.0
-        self._clf_marker.pose.orientation.z = np.sin(-self.clf_angle/2)
-        self._clf_marker.pose.orientation.w = np.cos(-self.clf_angle/2)
-
-    def init_cbf(self, cbf):
-
-        self.cbf_lambda, self.cbf_angle, _ = cbf.compute_eig()
-        self._cbf_marker.header.frame_id = "base_frame"
-        self._cbf_marker.type = self._cbf_marker.SPHERE
-        self._cbf_marker.action = self._clf_marker.ADD
-        self._cbf_marker.scale.x = 2*np.sqrt(1/self.cbf_lambda[0])
-        self._cbf_marker.scale.y = 2*np.sqrt(1/self.cbf_lambda[1])
-        self._cbf_marker.scale.z = 0.1
-        self._cbf_marker.color.a = 0.3
-        self._cbf_marker.color.r = 0.0
-        self._cbf_marker.color.g = 1.0
-        self._cbf_marker.color.b = 0.0
-        self._cbf_marker.pose.position.x = self._cbf.critical_point[0]
-        self._cbf_marker.pose.position.y = self._cbf.critical_point[1]
-        self._cbf_marker.pose.position.z = 0
-        self._cbf_marker.pose.orientation.x = 0.0
-        self._cbf_marker.pose.orientation.y = 0.0
-        self._cbf_marker.pose.orientation.z = np.sin(-self.cbf_angle/2)
-        self._cbf_marker.pose.orientation.w = np.cos(-self.cbf_angle/2)
+    def init_cbf(self):
+        '''
+        Initialize CBF markers.
+        '''
+        cbf_color = [ 0.0, 1.0, 0.0 ]
+        for k in range(3):
+            self.cbf_markers.markers[k].id = k
+            self.cbf_markers.markers[k].header.frame_id = "base_frame"
+            self.cbf_markers.markers[k].type = Marker.LINE_STRIP
+            self.cbf_markers.markers[k].scale.x = 0.05
+            self.cbf_markers.markers[k].color.a = 1.0
+            self.cbf_markers.markers[k].color.r = cbf_color[0]
+            self.cbf_markers.markers[k].color.g = cbf_color[1]
+            self.cbf_markers.markers[k].color.b = cbf_color[2]
+            self.clf_markers.markers[k].pose.position.z = 0.1
 
     def init_invariance(self, branch):
 
         branch.header.frame_id = "base_frame"
-        branch.type = branch.LINE_STRIP
-        branch.action = branch.ADD
+        branch.type = Marker.LINE_STRIP
+        branch.action = Marker.ADD
         branch.scale.x = 0.02
         branch.color.a = 1.0
         branch.color.r = 1.0
@@ -272,8 +255,8 @@ class SimulationRviz():
         new_trajectory_point.x = state[0]
         new_trajectory_point.y = state[1]
         new_trajectory_point.z = 0
-        self._trajectory_marker.points.append( new_trajectory_point )
-        self.trajectory_publisher.publish(self._trajectory_marker)
+        self.trajectory_marker.points.append( new_trajectory_point )
+        self.trajectory_publisher.publish(self.trajectory_marker)
 
     def draw_reference(self, ref_point):
         '''
@@ -284,22 +267,24 @@ class SimulationRviz():
         else:
             reference = np.array([ ref_point[0], ref_point[1] ])
 
-        self._ref_pos_marker.pose.position.x = reference[0]
-        self._ref_pos_marker.pose.position.y = reference[1]
-        self.ref_publisher.publish(self._ref_pos_marker)
+        self.ref_pos_marker.pose.position.x = reference[0]
+        self.ref_pos_marker.pose.position.y = reference[1]
+        self.ref_publisher.publish(self.ref_pos_marker)
 
     def draw_clf(self):
         '''
-        Publishes CLF in Rviz.
+        Publishes CLF markers in Rviz.
         '''
-        self.draw_conic( self._clf, [ 0.0, 0.4, 1.0 ] )
-        self.clf_publisher.publish(self._clf_marker)
+        clf_value = self._clf.get_fvalue()
+        self.draw_conic( self._clf, clf_value, self.clf_markers )
+        self.clf_publisher.publish( self.clf_markers )
 
     def draw_cbf(self):
         '''
         Publishes CBF in Rviz.
         '''
-        self.cbf_publisher.publish(self._cbf_marker)
+        self.draw_conic( self._cbf, 0.0, self.cbf_markers )
+        self.cbf_publisher.publish( self.cbf_markers )
 
     def draw_invariance(self, controller):
 
@@ -332,55 +317,58 @@ class SimulationRviz():
         return self._reference
 
     @staticmethod
-    def draw_conic(quadratic, color, num_points=100):
+    def draw_conic(quadratic, quadratic_level, marker_array, num_points=50):
         '''
         Draws a conic section of a given quadratic function, using an Rviz Marker.
+        Receives a quadratic function and a list of markers ( marker[0] - ellipse, marker[1] - hyperbola (branch 1), marker[2] (branch 2) ).
         '''
         eigs, angle, Q = quadratic.compute_eig()
         critical_pt = quadratic.get_critical()
+        height = quadratic.get_height()
 
-        marker = Marker()
-        marker.header.frame_id = "base_frame"
-        marker.type = marker.LINE_STRIP
-        marker.action = marker.ADD
-        marker.scale.x = 0.02
-        marker.color.a = 1.0
-        marker.color.r = color[0]
-        marker.color.g = color[1]
-        marker.color.b = color[2]
+        ellipse_marker = marker_array.markers[0]
+        hyperbola_marker1 = marker_array.markers[1]
+        hyperbola_marker2 = marker_array.markers[2]
 
-        marker.pose.position.x = critical_pt[0]
-        marker.pose.position.y = critical_pt[1]
-        marker.pose.position.z = 0.0
-        
-        marker.pose.orientation.x = 0.0
-        marker.pose.orientation.y = 0.0
-        marker.pose.orientation.z = np.sin(-angle/2)
-        marker.pose.orientation.w = np.cos(-angle/2)
+        ellipse_marker.pose.position.x = critical_pt[0]
+        ellipse_marker.pose.position.y = critical_pt[1]
+        ellipse_marker.pose.orientation.z = np.sin(-angle/2)
+        ellipse_marker.pose.orientation.w = np.cos(-angle/2)
 
-        f_threshold = 0.01
-        f_point = quadratic.get_fvalue()
-        if f_point > f_threshold:
-            bar_eigs = eigs/f_point
-        else:
-            bar_eigs = eigs/f_threshold
+        hyperbola_marker1.pose.position.x = critical_pt[0]
+        hyperbola_marker1.pose.position.y = critical_pt[1]
+        hyperbola_marker1.pose.orientation.z = np.sin(-angle/2)
+        hyperbola_marker1.pose.orientation.w = np.cos(-angle/2)
 
-        scale_x = np.sign(bar_eigs[0])*np.sqrt(2/np.abs(bar_eigs[0]))
-        scale_y = np.sign(bar_eigs[1])*np.sqrt(2/np.abs(bar_eigs[1]))
+        hyperbola_marker2.pose.position.x = critical_pt[0]
+        hyperbola_marker2.pose.position.y = critical_pt[1]
+        hyperbola_marker2.pose.orientation.z = np.sin(-angle/2)
+        hyperbola_marker2.pose.orientation.w = np.cos(-angle/2)
+
+        scale_x = np.sqrt((2/np.abs(eigs[0])*np.abs(quadratic_level - height)))
+        scale_y = np.sqrt((2/np.abs(eigs[1])*np.abs(quadratic_level - height)))
         
         res = 2*math.pi/num_points
-        if bar_eigs[0]*bar_eigs[1] > 0:
-            marker.points = []
+        if eigs[0]*eigs[1] > 0:
+            ellipse_marker.action = Marker.ADD
+            hyperbola_marker1.action = Marker.DELETE
+            hyperbola_marker2.action = Marker.DELETE
+
+            ellipse_marker.points = []
             for k in range(num_points+1):
-                point = np.array([scale_x*np.cos(k*res), scale_y*np.sin(k*res)])
-                marker.points.append( Point(x=point[0], y=point[1], z = 0.0) )
+                ellipse_point = np.array([ scale_x*np.cos(k*res), scale_y*np.sin(k*res) ])
+                ellipse_marker.points.append( Point(x=ellipse_point[0], y=ellipse_point[1], z = 0.0) )
         else:
-            marker1 = marker.copy()
-            marker2 = marker.copy()
-            marker1.points = []
-            marker2.points = []
+            ellipse_marker.action = Marker.DELETE
+
+            hyperbola_marker1.points = []
+            hyperbola_marker2.points = []
             for k in range(num_points+1):
-                point1 = np.array( [ scale_x*np.cosh(k*res), scale_y*np.sinh(k*res)] )
-                point2 = np.array( [-scale_x*np.cosh(k*res), scale_y*np.sinh(k*res)] )
-                marker1.points.append( Point(x=point1[0], y=point1[1], z = 0.0) )
-                marker2.points.append( Point(x=point2[0], y=point2[1], z = 0.0) )
+                if eigs[0] < 0:
+                    hyperbola_point1 = np.array( [ scale_x*np.cosh(k*res), scale_y*np.sinh(k*res)] )
+                    hyperbola_point2 = np.array( [-scale_x*np.cosh(k*res), scale_y*np.sinh(k*res)] )
+                else:
+                    hyperbola_point1 = np.array( [ scale_y*np.cosh(k*res), scale_x*np.sinh(k*res)] )
+                    hyperbola_point2 = np.array( [-scale_y*np.cosh(k*res), scale_x*np.sinh(k*res)] )
+                hyperbola_marker1.points.append( Point(x=hyperbola_point1[0], y=hyperbola_point1[1], z = 0.0) )
+                hyperbola_marker2.points.append( Point(x=hyperbola_point2[0], y=hyperbola_point2[1], z = 0.0) )

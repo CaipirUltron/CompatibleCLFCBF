@@ -175,7 +175,7 @@ class NewQPController():
         a_clf_pi = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vpi, -1.0 ])
         b_clf_pi = -self.gamma[1] * self.Vpi
 
-        print("Vpi = " + str(self.Vpi))
+        # print("Vpi = " + str(self.Vpi))
 
         return a_clf_pi, b_clf_pi
 
@@ -216,7 +216,7 @@ class NewQPController():
         else:
             term = -100
 
-        print("Term = " + str(self.get_selection()))
+        # print("Term = " + str(self.get_selection()))
 
         # Sets compatibility constraints
         a_cbf_gamma = -np.hstack([ np.zeros([self.number_critical, self.control_dim]), gradient_h_gamma, np.zeros([self.number_critical, 1]) ])

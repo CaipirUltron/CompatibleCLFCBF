@@ -146,6 +146,9 @@ class Quadratic(Function):
     def get_critical(self):
         return self.critical_point
 
+    def get_height(self):
+        return self.height
+
     def compute_eig(self):
         eigen, Q = np.linalg.eig(self.get_hessian())
         angle = np.arctan2(Q[0, 1], Q[0, 0])

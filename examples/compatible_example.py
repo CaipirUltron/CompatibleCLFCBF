@@ -16,6 +16,8 @@ try:
         # Control
         u_control, upi_control = qp_controller.get_control()
         qp_controller.update_clf_dynamics(upi_control)
+        
+        print(cbf.get_fvalue())
 
         # Send actuation commands
         plant.set_control(u_control) 
