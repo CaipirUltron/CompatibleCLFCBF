@@ -363,12 +363,12 @@ class SimulationRviz():
 
             hyperbola_marker1.points = []
             hyperbola_marker2.points = []
-            for k in range(num_points+1):
+            for k in range(-num_points,num_points):
                 if eigs[0] < 0:
+                    hyperbola_point1 = np.array( [ scale_x*np.sinh(k*res),  scale_y*np.cosh(k*res)] )
+                    hyperbola_point2 = np.array( [ scale_x*np.sinh(k*res), -scale_y*np.cosh(k*res)] )
+                else:
                     hyperbola_point1 = np.array( [ scale_x*np.cosh(k*res), scale_y*np.sinh(k*res)] )
                     hyperbola_point2 = np.array( [-scale_x*np.cosh(k*res), scale_y*np.sinh(k*res)] )
-                else:
-                    hyperbola_point1 = np.array( [ scale_y*np.cosh(k*res), scale_x*np.sinh(k*res)] )
-                    hyperbola_point2 = np.array( [-scale_y*np.cosh(k*res), scale_x*np.sinh(k*res)] )
                 hyperbola_marker1.points.append( Point(x=hyperbola_point1[0], y=hyperbola_point1[1], z = 0.0) )
                 hyperbola_marker2.points.append( Point(x=hyperbola_point2[0], y=hyperbola_point2[1], z = 0.0) )
