@@ -132,7 +132,7 @@ class Quadratic(Function):
 
     def eigen2hessian(self, eigen):
         '''
-        Returns hessian matrix from a given set of eigenvalues
+        Returns hessian matrix from a given set of eigenvalues.
         '''
         if self._dim != len(eigen):
             raise Exception("Dimension mismatch.")

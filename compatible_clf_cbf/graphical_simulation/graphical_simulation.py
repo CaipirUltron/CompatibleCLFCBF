@@ -1,4 +1,4 @@
-import rospy
+import math, rospy
 import tf2_ros
 import numpy as np
 
@@ -92,7 +92,7 @@ class SimulationRviz():
         rospy.loginfo("Starting graphical simulation...")
 
         self.ref_marker_size = 0.2
-        self.num_invariance_points = 50
+        self.num_points = 100
 
         # ROS subscribers
         # click_subscriber = rospy.Subscriber("clicked_point", PointStamped, self.draw_reference)
@@ -188,19 +188,37 @@ class SimulationRviz():
     def init_clf(self, clf):
         
         self.clf_lambda, self.clf_angle, _ = clf.compute_eig()
+        critical_pt = self._clf.get_critical()
+
+        # self._clf_marker.header.frame_id = "base_frame"
+        # self._clf_marker.type = self._clf_marker.SPHERE
+        # self._clf_marker.action = self._clf_marker.ADD
+        # self._clf_marker.scale.x = 2*np.sqrt(1/self.clf_lambda[0])
+        # self._clf_marker.scale.y = 2*np.sqrt(1/self.clf_lambda[1])
+        # self._clf_marker.scale.z = -0.5
+        # self._clf_marker.color.a = 0.3
+        # self._clf_marker.color.r = 0.0
+        # self._clf_marker.color.g = 0.4
+        # self._clf_marker.color.b = 1.0
+        # self._clf_marker.pose.position.x = clf.critical_point[0]
+        # self._clf_marker.pose.position.y = clf.critical_point[1]
+        # self._clf_marker.pose.position.z = 0
+        # self._clf_marker.pose.orientation.x = 0.0
+        # self._clf_marker.pose.orientation.y = 0.0
+        # self._clf_marker.pose.orientation.z = np.sin(-self.clf_angle/2)
+        # self._clf_marker.pose.orientation.w = np.cos(-self.clf_angle/2)
+
         self._clf_marker.header.frame_id = "base_frame"
-        self._clf_marker.type = self._clf_marker.SPHERE
+        self._clf_marker.type = self._clf_marker.LINE_STRIP
         self._clf_marker.action = self._clf_marker.ADD
-        self._clf_marker.scale.x = 2*np.sqrt(1/self.clf_lambda[0])
-        self._clf_marker.scale.y = 2*np.sqrt(1/self.clf_lambda[1])
-        self._clf_marker.scale.z = -0.5
-        self._clf_marker.color.a = 0.3
+        self._clf_marker.scale.x = 0.02
+        self._clf_marker.color.a = 1.0
         self._clf_marker.color.r = 0.0
         self._clf_marker.color.g = 0.4
         self._clf_marker.color.b = 1.0
-        self._clf_marker.pose.position.x = clf.critical_point[0]
-        self._clf_marker.pose.position.y = clf.critical_point[1]
-        self._clf_marker.pose.position.z = 0
+        self._clf_marker.pose.position.x = critical_pt[0]
+        self._clf_marker.pose.position.y = critical_pt[1]
+        self._clf_marker.pose.position.z = 0.0
         self._clf_marker.pose.orientation.x = 0.0
         self._clf_marker.pose.orientation.y = 0.0
         self._clf_marker.pose.orientation.z = np.sin(-self.clf_angle/2)
@@ -274,23 +292,7 @@ class SimulationRviz():
         '''
         Publishes CLF in Rviz.
         '''
-        clf_lambda, clf_angle, _ = self._clf.compute_eig()
-        state = self._plant.get_state()
-
-        V_threshold = 0.01
-        V_point = self._clf.evaluate(state)
-        if V_point > V_threshold:
-            bar_clf_lambda = clf_lambda/V_point
-        else:
-            bar_clf_lambda = clf_lambda/V_threshold
-
-        self._clf_marker.scale.x = 2*np.sqrt(2/bar_clf_lambda[0])
-        self._clf_marker.scale.y = 2*np.sqrt(2/bar_clf_lambda[1])
-        self._clf_marker.pose.position.x = self._clf.critical_point[0]
-        self._clf_marker.pose.position.y = self._clf.critical_point[1]
-        self._clf_marker.pose.orientation.z = np.sin(-clf_angle/2)
-        self._clf_marker.pose.orientation.w = np.cos(-clf_angle/2)
-
+        self.draw_conic( self._clf, [ 0.0, 0.4, 1.0 ] )
         self.clf_publisher.publish(self._clf_marker)
 
     def draw_cbf(self):
@@ -306,12 +308,12 @@ class SimulationRviz():
         l1 = pencil_eig[0]
         l2 = pencil_eig[1]
 
-        res1 = (l2-l1)/self.num_invariance_points
-        res2 = (4.0*l2 - l2)/self.num_invariance_points
+        res1 = (l2-l1)/self.num_points
+        res2 = (4.0*l2 - l2)/self.num_points
 
         self._branch1_marker.points = []
         self._branch2_marker.points = []
-        for k in range(self.num_invariance_points):
+        for k in range(self.num_points):
             l1 += res1
             l2 += res2
             if all( np.absolute( l1 - pencil_eig ) > controller.eigen_threshold ):
@@ -328,3 +330,57 @@ class SimulationRviz():
 
     def get_reference(self):
         return self._reference
+
+    @staticmethod
+    def draw_conic(quadratic, color, num_points=100):
+        '''
+        Draws a conic section of a given quadratic function, using an Rviz Marker.
+        '''
+        eigs, angle, Q = quadratic.compute_eig()
+        critical_pt = quadratic.get_critical()
+
+        marker = Marker()
+        marker.header.frame_id = "base_frame"
+        marker.type = marker.LINE_STRIP
+        marker.action = marker.ADD
+        marker.scale.x = 0.02
+        marker.color.a = 1.0
+        marker.color.r = color[0]
+        marker.color.g = color[1]
+        marker.color.b = color[2]
+
+        marker.pose.position.x = critical_pt[0]
+        marker.pose.position.y = critical_pt[1]
+        marker.pose.position.z = 0.0
+        
+        marker.pose.orientation.x = 0.0
+        marker.pose.orientation.y = 0.0
+        marker.pose.orientation.z = np.sin(-angle/2)
+        marker.pose.orientation.w = np.cos(-angle/2)
+
+        f_threshold = 0.01
+        f_point = quadratic.get_fvalue()
+        if f_point > f_threshold:
+            bar_eigs = eigs/f_point
+        else:
+            bar_eigs = eigs/f_threshold
+
+        scale_x = np.sign(bar_eigs[0])*np.sqrt(2/np.abs(bar_eigs[0]))
+        scale_y = np.sign(bar_eigs[1])*np.sqrt(2/np.abs(bar_eigs[1]))
+        
+        res = 2*math.pi/num_points
+        if bar_eigs[0]*bar_eigs[1] > 0:
+            marker.points = []
+            for k in range(num_points+1):
+                point = np.array([scale_x*np.cos(k*res), scale_y*np.sin(k*res)])
+                marker.points.append( Point(x=point[0], y=point[1], z = 0.0) )
+        else:
+            marker1 = marker.copy()
+            marker2 = marker.copy()
+            marker1.points = []
+            marker2.points = []
+            for k in range(num_points+1):
+                point1 = np.array( [ scale_x*np.cosh(k*res), scale_y*np.sinh(k*res)] )
+                point2 = np.array( [-scale_x*np.cosh(k*res), scale_y*np.sinh(k*res)] )
+                marker1.points.append( Point(x=point1[0], y=point1[1], z = 0.0) )
+                marker2.points.append( Point(x=point2[0], y=point2[1], z = 0.0) )

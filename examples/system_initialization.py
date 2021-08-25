@@ -9,7 +9,7 @@ plant = Integrator(initial_state, initial_control = np.zeros(2))
 ############################################################################################################################
 
 ############################################# Configure and create CLF #####################################################
-clf_lambda_x, clf_lambda_y, clf_angle = 6.0, 1.0, math.radians(0.0)
+clf_lambda_x, clf_lambda_y, clf_angle = -6.0, 1.0, math.radians(0.0)
 clf_params = {
     "Hv": Quadratic.canonical2D([ clf_lambda_x , clf_lambda_y ], clf_angle),
     "x0": [ 0.0, 0.0 ],
