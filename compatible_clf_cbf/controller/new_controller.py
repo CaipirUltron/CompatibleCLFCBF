@@ -98,7 +98,7 @@ class NewQPController():
 
     def get_clf_constraint(self):
         '''
-        Sets the Lyapunov constraint for the inner loop controller.
+        Sets the Lyapunov constraint.
         '''
         # Affine plant dynamics
         f = self.plant.get_f()
@@ -163,7 +163,7 @@ class NewQPController():
 
     def get_rate_constraint(self):
         '''
-        Sets the Lyapunov constraint for the outer loop controller.
+        Sets the Lyapunov rate constraint.
         '''
         # Computes rate Lyapunov and gradient
         deltaHv = self.clf.get_hessian() - self.ref_clf.get_hessian()
@@ -181,54 +181,60 @@ class NewQPController():
 
     def get_compatibility_constraints(self):
         '''
-        Sets the barrier constraints for the outer loop controller, ensuring compatibility.
+        Sets the barrier constraints for compatibility.
         '''
-        # Constraint for keeping the eigenvalues positive
-        pencil_eig = self.pencil_dict["eigenvalues"]
-        Q = self.pencil_dict["left_eigenvectors"]
-        Z = self.pencil_dict["right_eigenvectors"]
         
-        Hh = self.cbf.get_hessian()
-        beta_0 = np.dot( Q[:,0], Hh.dot(Z[:,0]) )
 
-        self.h_positive = pencil_eig[0] - self.f_params_dict["minimum_eigenvalue"]
-        gradient_h_positive = np.zeros(self.sym_dim)
-        for i in range(self.sym_dim):
-            gradient_h_positive[i] = np.dot( Q[:,0], self.sym_basis[i].dot(Z[:,0]) ) / beta_0
+    # def get_compatibility_constraints(self):
+    #     '''
+    #     Sets the barrier constraints for the outer loop controller, ensuring compatibility.
+    #     '''
+    #     # Constraint for keeping the eigenvalues positive
+    #     pencil_eig = self.pencil_dict["eigenvalues"]
+    #     Q = self.pencil_dict["left_eigenvectors"]
+    #     Z = self.pencil_dict["right_eigenvectors"]
+        
+    #     Hh = self.cbf.get_hessian()
+    #     beta_0 = np.dot( Q[:,0], Hh.dot(Z[:,0]) )
 
-        # h_gamma constraints
-        self.h_gamma = np.zeros(self.number_critical)
-        gradient_h_gamma = np.zeros([self.number_critical, self.sym_dim])
-        for k in range(self.number_critical):
-            self.h_gamma[k] = np.log( self.critical_values ) - self.f_params_dict["minimum_gap"]
+    #     self.h_positive = pencil_eig[0] - self.f_params_dict["minimum_eigenvalue"]
+    #     gradient_h_positive = np.zeros(self.sym_dim)
+    #     for i in range(self.sym_dim):
+    #         gradient_h_positive[i] = np.dot( Q[:,0], self.sym_basis[i].dot(Z[:,0]) ) / beta_0
 
-            v = self.v_values( self.f_critical[k] )
-            H = self.pencil_value( self.f_critical[k] )
-            H_inv = np.linalg.inv(H)
-            vec_nabla_f = 2 * (1/self.critical_values[k]) * np.matmul( self.cbf.get_hessian(), H_inv ).dot(v)
-            for i in range(self.sym_dim):
-                vec_i = self.sym_basis[i].dot( v + self.cbf.get_critical() - self.clf.get_critical() )
-                gradient_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
+    #     # h_gamma constraints
+    #     self.h_gamma = np.zeros(self.number_critical)
+    #     gradient_h_gamma = np.zeros([self.number_critical, self.sym_dim])
+    #     for k in range(self.number_critical):
+    #         self.h_gamma[k] = np.log( self.critical_values ) - self.f_params_dict["minimum_gap"]
 
-        # Applies selection function
-        if self.get_selection() >= 0:
-            term = 0.0
-        else:
-            term = -100
+    #         v = self.v_values( self.f_critical[k] )
+    #         H = self.pencil_value( self.f_critical[k] )
+    #         H_inv = np.linalg.inv(H)
+    #         vec_nabla_f = 2 * (1/self.critical_values[k]) * np.matmul( self.cbf.get_hessian(), H_inv ).dot(v)
+    #         for i in range(self.sym_dim):
+    #             vec_i = self.sym_basis[i].dot( v + self.cbf.get_critical() - self.clf.get_critical() )
+    #             gradient_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
 
-        # print("Term = " + str(self.get_selection()))
+    #     # Applies selection function
+    #     if self.get_selection() >= 0:
+    #         term = 0.0
+    #     else:
+    #         term = -100
 
-        # Sets compatibility constraints
-        a_cbf_gamma = -np.hstack([ np.zeros([self.number_critical, self.control_dim]), gradient_h_gamma, np.zeros([self.number_critical, 1]) ])
-        b_cbf_gamma = self.alpha[1]*self.h_gamma - term
+    #     # print("Term = " + str(self.get_selection()))
 
-        a_cbf_positive = -np.hstack([ np.zeros(self.control_dim), gradient_h_positive, 0.0 ])
-        b_cbf_positive = self.alpha[1]*self.h_positive - term
+    #     # Sets compatibility constraints
+    #     a_cbf_gamma = -np.hstack([ np.zeros([self.number_critical, self.control_dim]), gradient_h_gamma, np.zeros([self.number_critical, 1]) ])
+    #     b_cbf_gamma = self.alpha[1]*self.h_gamma - term
 
-        a_cbf_pi = np.vstack([ a_cbf_gamma, a_cbf_positive ])
-        b_cbf_pi = np.hstack([ b_cbf_gamma, b_cbf_positive ])
+    #     a_cbf_positive = -np.hstack([ np.zeros(self.control_dim), gradient_h_positive, 0.0 ])
+    #     b_cbf_positive = self.alpha[1]*self.h_positive - term
 
-        return a_cbf_pi, b_cbf_pi
+    #     a_cbf_pi = np.vstack([ a_cbf_gamma, a_cbf_positive ])
+    #     b_cbf_pi = np.hstack([ b_cbf_gamma, b_cbf_positive ])
+
+    #     return a_cbf_pi, b_cbf_pi
 
     def get_selection(self):
         '''
