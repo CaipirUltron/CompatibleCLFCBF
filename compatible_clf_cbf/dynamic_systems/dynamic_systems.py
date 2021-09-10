@@ -50,7 +50,7 @@ class DynamicSystem(ABC):
         for state_dim in range(0, self.n):
             self.state_log[state_dim].append(self._state[state_dim])
 
-        for ctrl_dim in range(0, self.n):
+        for ctrl_dim in range(0, self.m):
             self.control_log[ctrl_dim].append(self._control[ctrl_dim])
 
     def get_flow(self, t):
@@ -133,7 +133,9 @@ class Integrator(AffineSystem):
 
 
 class LinearSystem(AffineSystem):
-
+    '''
+    Implements a linear system dx = A x + B u.
+    '''
     def __init__(self, initial_state, initial_control, A, B):
         super().__init__(initial_state, initial_control)
         self._A = A
@@ -144,3 +146,27 @@ class LinearSystem(AffineSystem):
 
     def g(self):
         self._g = self._B
+
+
+class Unicycle(AffineSystem):
+    '''
+    Implements the unicycle dynamics: dx = v cos(phi), dy = v sin(phi), dphi = omega.
+    State and control are given by [x, y, z] and [v, omega], respectively.
+    '''
+    def __init__(self, initial_state, initial_control):
+        if len(initial_state) != 3:
+            raise Exception('State dimension is different from 3.')
+        if len(initial_control) != 2:
+            raise Exception('Control dimension is different from 3.')
+        super().__init__(initial_state, initial_control)
+        self.f()
+        self.g()
+
+    def f(self):
+        self._f = np.zeros(self.n)
+
+    def g(self):
+        x = self._state[0]
+        y = self._state[1]
+        phi = self._state[2]
+        self._g = np.array([[ np.cos(phi), 0.0 ],[ np.sin(phi), 0.0 ],[0.0, 1.0]])
