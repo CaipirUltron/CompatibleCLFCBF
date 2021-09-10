@@ -165,8 +165,8 @@ class SimulationRviz():
         self.trajectory_marker.scale.x = 0.05
         self.trajectory_marker.color.a = 1.0
         self.trajectory_marker.color.r = 0.0
-        self.trajectory_marker.color.g = 0.5
-        self.trajectory_marker.color.b = 1.0
+        self.trajectory_marker.color.g = 0.0
+        self.trajectory_marker.color.b = 0.0
         self.trajectory_marker.pose.position.x = state[0]
         self.trajectory_marker.pose.position.y = state[1]
         self.trajectory_marker.pose.position.z = 0.0
