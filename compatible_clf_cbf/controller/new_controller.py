@@ -28,9 +28,8 @@ class NewQPController():
         self.eigen_threshold = 0.00001
         self.pencil_dict = {}
         self.f_dict = {}
-        self.f_params_dict = {
-            "minimum_gap": 0.5,
-            "minimum_eigenvalue": 0.1,
+        self.params_dict = {
+            "curvature_gap": 0.05,
         }
         self.compute_compatibility()
 
@@ -178,12 +177,75 @@ class NewQPController():
         # print("Vpi = " + str(self.Vpi))
 
         return a_clf_pi, b_clf_pi
+    
+    def get_dir_curv_V(self, z):
+        '''
+        Gets the curvature of V.
+        '''
+        return ( 1/np.linalg.norm(self.clf.get_gradient()) ) * z.T @ self.clf.get_hessian() @ z
 
+    def get_dir_curv_h(self, z):
+        '''
+        Gets the curvature of h.
+        '''
+        return ( 1/np.linalg.norm(self.cbf.get_gradient()) ) * z.T @ self.cbf.get_hessian() @ z
+
+    def projection(self, v):
+        '''
+        Compute projection operator.
+        '''
+        if np.linalg.norm(v) <= 0.001:
+            raise Exception("Vector cannot be null.")
+        n = np.size(v)
+        unit_v = v/np.linalg.norm(v)
+        P = np.eye(n) - np.outer(unit_v, unit_v)
+
+        return P
+
+    def get_opti_curv_dir(self):
+        '''
+        Gets the optimal direction for increasing curvature.
+        '''
+        Ph = self.projection( self.cbf.get_gradient() )
+        Hh = self.cbf.get_hessian()
+        e, V = np.linalg.eig( Ph @ Hh )
+        max_index = np.argmax(e)
+
+        return V[:,max_index]
+    
     def get_compatibility_constraints(self):
         '''
         Sets the barrier constraints for compatibility.
         '''
+        z = self.get_opti_curv_dir()
+        kv = self.get_dir_curv_V(z)
+        kh = self.get_dir_curv_h(z)
+        gradV = self.cbf.get_gradient()
+        gradh = self.cbf.get_gradient()
+
+        delta_curvature = kh - kv
+        self.h_compatibility = delta_curvature - self.params_dict["curvature_gap"]
+        print(self.h_compatibility)
+
+        state = self.plant.get_state()
+        min_clf = self.clf.get_critical()
+
+        gradient_h_compatibility = np.zeros(self.sym_dim)
+        gradV_norm = np.linalg.norm(gradV)
+        for i in range(self.sym_dim):
+            gradient_h_compatibility[i] = ( kv/gradV_norm**2 ) * gradV.T @ self.sym_basis[i] @ (state - min_clf) - (1/gradV_norm) * z @ self.sym_basis[i] @ z
         
+        # Applies selection function
+        if self.get_selection() >= 0:
+            term = 0.0
+        else:
+            term = -100
+
+        # Sets compatibility constraints
+        a_cbf_pi = -np.hstack([ np.zeros(self.control_dim), gradient_h_compatibility, 0.0 ])
+        b_cbf_pi = self.alpha[1]*self.h_compatibility - term
+
+        return a_cbf_pi, b_cbf_pi
 
     # def get_compatibility_constraints(self):
     #     '''
@@ -244,8 +306,8 @@ class NewQPController():
         Lgh2 = self.Lgh.dot(self.Lgh)
         LgVLgh = self.LgV.dot(self.Lgh)
                 
-        return self.V * LgVLgh - self.h * math.sqrt(LgV2)*math.sqrt(Lgh2)
-        # return self.V * LgVLgh
+        # return self.V * LgVLgh - self.h * math.sqrt(LgV2)*math.sqrt(Lgh2)
+        return self.V * LgVLgh
 
     def compute_pencil(self, Hv, Hh):
         '''
