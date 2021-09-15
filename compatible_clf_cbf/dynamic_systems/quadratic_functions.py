@@ -154,12 +154,18 @@ class Quadratic(Function):
         angle = np.arctan2(Q[0, 1], Q[0, 0])
         return eigen, angle, Q
 
-    def superlevel(self, C, numpoints):
+    def superlevel(self, level, num_points):
         '''
-        This function returns the corresponding C-level set of the quadratic function, if its 2-dim.
+        This function returns the corresponding level set of the quadratic function, if its 2-dim.
         '''
         if self._dim != 2:
-            return
+            Exception("Quadratic function is not two-dimensional.")
+
+        eigs, Q = np.linalg.eig(self.get_hessian())
+        height = self.get_height()
+
+        scale_x = np.sqrt((2/np.abs(eigs[0])*np.abs(level - height)))
+        scale_y = np.sqrt((2/np.abs(eigs[1])*np.abs(level - height)))
 
         def change_variables(y1, y2):
             p = self.critical_point
@@ -167,82 +173,139 @@ class Quadratic(Function):
             y = p[1] + Q[1,0]*y1 + Q[1,1]*y2
             return x, y
 
-        def parameterize_ellipse(delta):
-            y1 = np.sqrt(delta/eig[0])*np.sin(t)
-            y2 = np.sqrt(delta/eig[1])*np.cos(t)
-            return y1, y2
+        def compute_grad_pts(x1, x2):
+            u, v = np.zeros(num_points), np.zeros(num_points)
+            for k in range(num_points):
+                self.evaluate([x1[k],x2[k]])
+                gradient = self.get_gradient()
+                u[k], v[k] = gradient[0], gradient[1]
+            return u, v
 
-        def parameterize_hyperbola(delta):
-            # y1 = np.sqrt(np.abs(delta/eig[0]))*(1/np.cos(t))
-            # y2 = np.sqrt(np.abs(delta/eig[1]))*np.tan(t)
-            y1 = np.sqrt(np.abs(delta/eig[0]))*np.cosh(t)
-            y2 = np.sqrt(np.abs(delta/eig[1]))*np.sinh(t)
-            return y1, y2
-
-        def parameterize(delta):
-            if level_type == 'ellipse':
-                y1, y2 = parameterize_ellipse(delta)
-            elif level_type == 'hyperbola':
-                y1, y2 = parameterize_hyperbola(delta)
-
-            x, y = change_variables(y1, y2)
-            u, v = np.zeros(numpoints), np.zeros(numpoints)
-            for k in range(numpoints):
-                gradient = self.gradient(np.array([x[k],y[k]]))
-                u[k] = gradient[0]
-                v[k] = gradient[1]
-
-            return x, y, u, v
-
-        t = np.linspace(-math.pi, math.pi, numpoints)
-
-        # Parameterize 
-        eig, Q = np.linalg.eig(self._hessian)
-        if eig[0]*eig[1] > 0:
+        t = np.linspace(-math.pi, math.pi, num_points)
+        if eigs[0]*eigs[1] > 0:
             # ellipse
-            level_type = 'ellipse'
-            if eig[0]>0:
-                # convex
-                delta = C-self.height
-                if delta > 0:
-                    x, y, u, v = parameterize(delta)
-                else:
-                    x, y, u, v = [], [], [], []
-            else:
-                # concave
-                delta = self.height-C
-                if delta > 0:
-                    x, y, u, v = parameterize(delta)
-                else:
-                    x, y, u, v = [], [], [], []
-        elif eig[0]*eig[1] < 0:
-            # hyperbola
-            level_type = 'hyperbola'
-            if eig[0]>0:
-                # convex
-                delta = C-self.height
-                if delta > 0:
-                    x, y, u, v = parameterize(delta)
-                else:
-                    x, y, u, v = [], [], [], []
-            else:
-                # concave
-                delta = self.height-C
-                if delta > 0:
-                    x, y, u, v = parameterize(delta)
-                else:
-                    x, y, u, v = [], [], [], []
-        else:
-            x, y, u, v = [], [], [], []
+            y1, y2 = scale_x*np.cos(t), scale_y*np.sin(t)
+            x1, x2 = change_variables( y1, y2 )
+            u, v = compute_grad_pts( x1, x2 )
 
-        return x, y, u, v
+            x1, x2 = [x1, 0.0], [x2, 0.0]
+            u, v = [u, 0.0], [v, 0.0]
+        else:
+            # hyperbola
+            if eigs[0] < 0:
+                hyper1_y1, hyper1_y2 = scale_x*np.sinh(t), scale_y*np.cosh(t)
+                hyper2_y1, hyper2_y2 = scale_x*np.sinh(t), -scale_y*np.cosh(t)
+            else:
+                hyper1_y1, hyper1_y2 = scale_x*np.cosh(t), scale_y*np.sinh(t)
+                hyper2_y1, hyper2_y2 = -scale_x*np.cosh(t), scale_y*np.sinh(t)
+
+            hyper1_x1, hyper1_x2 = change_variables(hyper1_y1, hyper1_y2)
+            hyper1_u, hyper1_v = compute_grad_pts( hyper1_x1, hyper1_x2 )
+
+            hyper2_x1, hyper2_x2 = change_variables(hyper2_y1, hyper2_y2)
+            hyper2_u, hyper2_v = compute_grad_pts( hyper2_x1, hyper2_x2 )
+
+            x1 = [hyper1_x1, hyper2_x1]
+            x2 = [hyper1_x2, hyper2_x2]
+
+            u = [hyper1_u, hyper2_u]
+            v = [hyper1_v, hyper2_v]
+
+        return x1, x2, u, v
+
+
+    # def superlevel(self, C, numpoints):
+    #     '''
+    #     This function returns the corresponding C-level set of the quadratic function, if its 2-dim.
+    #     '''
+    #     if self._dim != 2:
+    #         return
+
+    #     def change_variables(y1, y2):
+    #         p = self.critical_point
+    #         x = p[0] + Q[0,0]*y1 + Q[0,1]*y2
+    #         y = p[1] + Q[1,0]*y1 + Q[1,1]*y2
+    #         return x, y
+
+    #     def parameterize_ellipse(delta):
+    #         y1 = np.sqrt(delta/eig[0])*np.sin(t)
+    #         y2 = np.sqrt(delta/eig[1])*np.cos(t)
+    #         return y1, y2
+
+    #         np.sqrt((2/np.abs(eigs[0])*np.abs(quadratic_level - height)))
+
+    #     def parameterize_hyperbola(delta):
+    #         # y1 = np.sqrt(np.abs(delta/eig[0]))*(1/np.cos(t))
+    #         # y2 = np.sqrt(np.abs(delta/eig[1]))*np.tan(t)
+    #         y1 = np.sqrt(np.abs(delta/eig[0]))*np.cosh(t)
+    #         y2 = np.sqrt(np.abs(delta/eig[1]))*np.sinh(t)
+    #         return y1, y2
+
+    #     def parameterize(delta):
+    #         if level_type == 'ellipse':
+    #             y1, y2 = parameterize_ellipse(delta)
+    #         elif level_type == 'hyperbola':
+    #             y1, y2 = parameterize_hyperbola(delta)
+
+    #         x, y = change_variables(y1, y2)
+    #         u, v = np.zeros(numpoints), np.zeros(numpoints)
+    #         for k in range(numpoints):
+    #             self.evaluate([x[k],y[k]])
+    #             gradient = self.get_gradient()
+    #             u[k] = gradient[0]
+    #             v[k] = gradient[1]
+
+    #         return x, y, u, v
+
+    #     t = np.linspace(-math.pi, math.pi, numpoints)
+
+    #     # Parameterize 
+    #     eig, Q = np.linalg.eig(self._hessian)
+    #     if eig[0]*eig[1] > 0:
+    #         # ellipse
+    #         level_type = 'ellipse'
+    #         if eig[0]>0:
+    #             # convex
+    #             delta = C-self.height
+    #             if delta > 0:
+    #                 x, y, u, v = parameterize(delta)
+    #             else:
+    #                 x, y, u, v = [], [], [], []
+    #         else:
+    #             # concave
+    #             delta = self.height-C
+    #             if delta > 0:
+    #                 x, y, u, v = parameterize(delta)
+    #             else:
+    #                 x, y, u, v = [], [], [], []
+    #     elif eig[0]*eig[1] < 0:
+    #         # hyperbola
+    #         level_type = 'hyperbola'
+    #         if eig[0]>0:
+    #             # convex
+    #             delta = C-self.height
+    #             if delta > 0:
+    #                 x, y, u, v = parameterize(delta)
+    #             else:
+    #                 x, y, u, v = [], [], [], []
+    #         else:
+    #             # concave
+    #             delta = self.height-C
+    #             if delta > 0:
+    #                 x, y, u, v = parameterize(delta)
+    #             else:
+    #                 x, y, u, v = [], [], [], []
+    #     else:
+    #         x, y, u, v = [], [], [], []
+
+    #     return x, y, u, v
 
     @staticmethod
     def vector2sym(vector):
         '''
         Transforms numpy vector to corresponding symmetric matrix.
         '''
-        dim = vector.shape[0]
+        dim = len(vector)
         if dim < 3:
             raise Exception("The input vector must be of length 3 or higher.")
         n = int((-1 + np.sqrt(1+8*dim))/2)

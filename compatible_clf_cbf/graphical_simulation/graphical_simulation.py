@@ -34,8 +34,10 @@ class SimulationMatplot():
 
         # Initalize graphical objects
         self.trajectory, = self.ax.plot([],[],lw=2)
-        self.clf_level_set, = self.ax.plot([],[],'b',lw=1)
-        self.cbf_level_set, = self.ax.plot([],[],'g',lw=1)
+        self.clf_level_set1, = self.ax.plot([],[],'b',lw=1)
+        self.clf_level_set2, = self.ax.plot([],[],'b',lw=1)
+        self.cbf_level_set1, = self.ax.plot([],[],'g',lw=1)
+        self.cbf_level_set2, = self.ax.plot([],[],'g',lw=1)
         # self.clf_arrows = self.ax.quiver([0.0],[0.0],[0.1],[0.1],pivot='mid',color='b')
         # self.cbf_arrows = self.ax.quiver([0.0],[0.0],[0.1],[0.1],pivot='mid',color='g')
 
@@ -44,36 +46,42 @@ class SimulationMatplot():
     def init(self):
 
         self.trajectory.set_data([],[])
-        self.clf_level_set.set_data([],[])
-        self.cbf_level_set.set_data([],[])
 
-        return self.trajectory, self.clf_level_set, self.cbf_level_set
+        self.clf_level_set1.set_data([],[])
+        self.clf_level_set2.set_data([],[])
+
+        self.cbf_level_set1.set_data([],[])
+        self.cbf_level_set2.set_data([],[])
+
+        return self.trajectory, self.clf_level_set1, self.clf_level_set2, self.cbf_level_set1, self.cbf_level_set2
 
     def update(self, i):
 
         xdata, ydata = self.state_log[0][0:i], self.state_log[1][0:i]
         self.trajectory.set_data(xdata, ydata)
 
-        current_state = np.array([self.state_log[0][i], self.state_log[1][i]])
-        current_pi_state = np.array([self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i]])
+        current_state = [self.state_log[0][i], self.state_log[1][i]]
+        current_pi_state = [self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i]]
 
         Hv = Quadratic.vector2sym(current_pi_state)
         self.clf.set_param(hessian=Hv)
         
         if self.draw_level:
-            V = self.clf(current_state)
+            V = self.clf.evaluate(current_state)
             xclf, yclf, uclf, vclf = self.clf.superlevel(V, self.numpoints)
-            self.clf_level_set.set_data(xclf, yclf)
+            self.clf_level_set1.set_data(xclf[0], yclf[0])
+            self.clf_level_set2.set_data(xclf[1], yclf[1])
 
-        h = self.cbf(current_state)
-        xcbf, ycbf, ucbf, vcbf = self.cbf.superlevel(0.5, self.numpoints)
-        self.cbf_level_set.set_data(xcbf, ycbf)
+        # h = self.cbf.evaluate(current_state)
+        xcbf, ycbf, ucbf, vcbf = self.cbf.superlevel(0.0, self.numpoints)
+        self.cbf_level_set1.set_data(xcbf[0], ycbf[0])
+        self.cbf_level_set2.set_data(xcbf[1], ycbf[1])
 
         if self.draw_gradient:
         # self.clf_arrows = self.ax.quiver(xclf, yclf, uclf, vclf, pivot='tail', color='b', scale=50.0, headlength=0.5, headwidth=1.0)
             self.cbf_arrows = self.ax.quiver(xcbf, ycbf, ucbf, vcbf, pivot='tail', color='g', scale=50.0, headlength=0.5, headwidth=1.0)
 
-        return self.trajectory, self.clf_level_set, self.cbf_level_set,
+        return self.trajectory, self.clf_level_set1, self.clf_level_set2, self.cbf_level_set1, self.cbf_level_set2
 
     def animate(self):
         self.animation = anim.FuncAnimation(self.fig, func=self.update, init_func=self.init, frames=self.num_steps, interval=20, repeat=False, blit=True)
@@ -210,7 +218,6 @@ class SimulationRviz():
             self.clf_markers.markers[k].color.g = clf_color[1]
             self.clf_markers.markers[k].color.b = clf_color[2]
             self.clf_markers.markers[k].pose.position.z = 0.0
-
 
     def init_cbf(self):
         '''
