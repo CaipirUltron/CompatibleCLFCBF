@@ -11,8 +11,8 @@ qp_controller = NewQPController(plant, clf, ref_clf, cbf, gamma = [1.0, 10.0], a
 
 try:
     # Simulation loop -------------------------------------------------------------------
-    dt = .002
-    T = 10
+    dt = .005
+    T = 20
     num_steps = int(T/dt)
     print('Running simulation...')
     for step in range(0, num_steps):
@@ -36,6 +36,6 @@ except:
 # Show animation -------------------------------------------------------------------
 print('Animating simulation...')
 axes_lim = (-6,6,-6,6)
-plotSim = SimulationMatplot(axes_lim, 40, logs, clf, cbf, draw_level=True)
+plotSim = SimulationMatplot(axes_lim, 80, logs, clf, cbf, draw_level=True)
 plotSim.animate()
 plt.show()

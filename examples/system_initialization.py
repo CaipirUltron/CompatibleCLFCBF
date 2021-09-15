@@ -4,7 +4,7 @@ import numpy as np
 from compatible_clf_cbf.dynamic_systems import Quadratic, QuadraticLyapunov, QuadraticBarrier, Integrator
 
 ######################################### Configure and create 2D plant ####################################################
-initial_state = [-5.0, 5.0]
+initial_state = [5.0, 5.0]
 plant = Integrator(initial_state, initial_control = np.zeros(2))
 ############################################################################################################################
 
@@ -27,9 +27,9 @@ ref_clf = QuadraticLyapunov(init_value = initial_state, hessian = ref_clf_params
 ############################################################################################################################
 
 ############################################## Configure and create CBF ####################################################
-xaxis_length, yaxis_length, cbf_angle = 4.0, 1.0, math.radians(0.0)
+xaxis_length, yaxis_length, cbf_angle = 1.0, 2.0, math.radians(30.0)
 cbf_params = {
-    "Hh": Quadratic.canonical2D([ 1/(xaxis_length**2), 1/(yaxis_length**2) ], cbf_angle),
+    "Hh": Quadratic.canonical2D([ 1/(xaxis_length**2), -1/(yaxis_length**2) ], cbf_angle),
     "p0": [ 0.0, 3.0 ]
 }
 cbf = QuadraticBarrier(init_value = initial_state, hessian = cbf_params["Hh"], critical = cbf_params["p0"])
