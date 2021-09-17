@@ -16,7 +16,7 @@ max_flambda = 50
 phi_var = np.linspace(-math.pi, math.pi, num_points)
 
 fig = plt.figure()
-axes_lim = (-math.pi, math.pi, min_flambda, max_flambda)
+axes_lim = (-math.pi/2, math.pi/2, min_flambda, max_flambda)
 ax = plt.axes(xlim=axes_lim[0:2], ylim=axes_lim[2:4])
 ax.set_title('polar f-function for the CLF-CBF pair')
 

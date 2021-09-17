@@ -38,6 +38,13 @@ class SimulationMatplot():
         self.clf_level_set2, = self.ax.plot([],[],'b',lw=1)
         self.cbf_level_set1, = self.ax.plot([],[],'g',lw=1)
         self.cbf_level_set2, = self.ax.plot([],[],'g',lw=1)
+
+        clf_crit = self.clf.get_critical()
+        cbf_crit = self.cbf.get_critical()
+
+        self.clf_crit, = self.ax.plot(clf_crit[0], clf_crit[1], 'bo--', linewidth=1, markersize=2)
+        self.cbf_crit, = self.ax.plot(cbf_crit[0], cbf_crit[1], 'go--', linewidth=1, markersize=2)
+
         # self.clf_arrows = self.ax.quiver([0.0],[0.0],[0.1],[0.1],pivot='mid',color='b')
         # self.cbf_arrows = self.ax.quiver([0.0],[0.0],[0.1],[0.1],pivot='mid',color='g')
 
@@ -53,7 +60,7 @@ class SimulationMatplot():
         self.cbf_level_set1.set_data([],[])
         self.cbf_level_set2.set_data([],[])
 
-        return self.trajectory, self.clf_level_set1, self.clf_level_set2, self.cbf_level_set1, self.cbf_level_set2
+        return self.trajectory, self.clf_level_set1, self.clf_level_set2, self.cbf_level_set1, self.cbf_level_set2, self.clf_crit, self.cbf_crit
 
     def update(self, i):
 
@@ -81,7 +88,7 @@ class SimulationMatplot():
         # self.clf_arrows = self.ax.quiver(xclf, yclf, uclf, vclf, pivot='tail', color='b', scale=50.0, headlength=0.5, headwidth=1.0)
             self.cbf_arrows = self.ax.quiver(xcbf, ycbf, ucbf, vcbf, pivot='tail', color='g', scale=50.0, headlength=0.5, headwidth=1.0)
 
-        return self.trajectory, self.clf_level_set1, self.clf_level_set2, self.cbf_level_set1, self.cbf_level_set2
+        return self.trajectory, self.clf_level_set1, self.clf_level_set2, self.cbf_level_set1, self.cbf_level_set2, self.clf_crit, self.cbf_crit
 
     def animate(self):
         self.animation = anim.FuncAnimation(self.fig, func=self.update, init_func=self.init, frames=self.num_steps, interval=20, repeat=False, blit=True)

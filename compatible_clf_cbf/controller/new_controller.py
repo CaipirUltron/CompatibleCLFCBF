@@ -98,7 +98,7 @@ class NewQPController():
 
     def get_clf_constraint(self):
         '''
-        Sets the Lyapunov constraint for the inner loop controller.
+        Sets the Lyapunov constraint.
         '''
         # Affine plant dynamics
         f = self.plant.get_f()
@@ -123,7 +123,8 @@ class NewQPController():
         delta = np.heaviside(float(self.get_selection()),0.0)
         a_clf = np.hstack( [ self.LgV, self.nablaV_pi*delta, 0.0 ])
         # b_clf = -self.gamma[0] * self.V - self.LfV - self.nablaV_pi.dot(self.u_pi)*( 1.0 - delta )
-        b_clf = -self.gamma[0] * self.V - self.LfV
+        # b_clf = - self.gamma[0] * np.abs(self.V) - self.LfV
+        b_clf = - self.gamma[0] * self.V - self.LfV
 
         return a_clf, b_clf
 
