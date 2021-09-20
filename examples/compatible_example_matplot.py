@@ -19,7 +19,7 @@ try:
 
         # Control
         u_control, upi_control = qp_controller.get_control()
-        upi_control = np.zeros(3)
+        # upi_control = np.zeros(3)
         qp_controller.update_clf_dynamics(upi_control)
 
         # Send actuation commands

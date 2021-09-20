@@ -29,8 +29,8 @@ class NewQPController():
         self.pencil_dict = {}
         self.f_dict = {}
         self.f_params_dict = {
-            "minimum_gap": 0.5,
-            "minimum_eigenvalue": 0.1,
+            "minimum_gap": 0.0,
+            "minimum_eigenvalue": 0.0,
         }
         self.compute_compatibility()
 
@@ -123,8 +123,7 @@ class NewQPController():
         delta = np.heaviside(float(self.get_selection()),0.0)
         a_clf = np.hstack( [ self.LgV, self.nablaV_pi*delta, 0.0 ])
         # b_clf = -self.gamma[0] * self.V - self.LfV - self.nablaV_pi.dot(self.u_pi)*( 1.0 - delta )
-        # b_clf = - self.gamma[0] * np.abs(self.V) - self.LfV
-        b_clf = - self.gamma[0] * self.V - self.LfV
+        b_clf = - self.gamma[0] * np.abs(self.V) - self.LfV
 
         return a_clf, b_clf
 

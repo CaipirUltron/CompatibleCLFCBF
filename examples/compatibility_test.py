@@ -27,9 +27,11 @@ ax.plot(phi_var, fvalues, zorder=100, color='red')
 x1, y1 = [-math.pi/2, -math.pi/2], [min_flambda-100, max_flambda+100]
 x2, y2 = [math.pi/2, math.pi/2], [min_flambda-100, max_flambda+100]
 x3, y3 = [-math.pi-1, math.pi+1], [1, 1]
+x4, y4 = [-math.pi-1, math.pi+1], [-1, -1]
 
 ax.plot(x1, y1, '--', x2, y2, '--', color='black')
 ax.plot(x3, y3, '--', color='green')
+ax.plot(x4, y4, '--', color='green')
 
 plt.grid()
 plt.show()
