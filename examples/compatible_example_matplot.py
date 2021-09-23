@@ -9,33 +9,34 @@ from compatible_clf_cbf.graphical_simulation import SimulationMatplot
 # Create QP controller and graphical simulation.
 qp_controller = NewQPController(plant, clf, ref_clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 10.0], p = [1.0, 1.0])
 
-try:
-    # Simulation loop -------------------------------------------------------------------
-    dt = .005
-    T = 20
-    num_steps = int(T/dt)
-    print('Running simulation...')
-    for step in range(0, num_steps):
 
-        # Control
-        u_control, upi_control = qp_controller.get_control()
-        # upi_control = np.zeros(3)
-        qp_controller.update_clf_dynamics(upi_control)
+# Simulation loop -------------------------------------------------------------------
+dt = .005
+T = 20
+num_steps = int(T/dt)
+print('Running simulation...')
+for step in range(0, num_steps):
 
-        # Send actuation commands
-        plant.set_control(u_control) 
-        plant.actuate(dt)
+    # Control
+    u_control, upi_control = qp_controller.get_control()
+    # upi_control = np.zeros(3)
+    qp_controller.update_clf_dynamics(upi_control)
 
-        # print("CLF = " + str(qp_controller.V))
-        # print("Barrier = " + str(qp_controller.h))
+    # Send actuation commands
+    plant.set_control(u_control) 
+    plant.actuate(dt)
 
-        # Collect simulation logs ----------------------------------------------------------
-        logs = {
-            "stateLog": plant.state_log,
-            "clfLog": qp_controller.clf_dynamics.state_log
-        }
-except:
-    pass
+    # print("CLF = " + str(qp_controller.V))
+    # print("Rate CLF = " + str(qp_controller.Vpi))
+
+    # print("Compatibility Barrier 1 = " + str(qp_controller.h_gamma1))
+    # print("Compatibility Barrier 2 = " + str(qp_controller.h_gamma2))
+
+    # Collect simulation logs ----------------------------------------------------------
+    logs = {
+        "stateLog": plant.state_log,
+        "clfLog": qp_controller.clf_dynamics.state_log
+    }
 
 # Show animation -------------------------------------------------------------------
 print('Animating simulation...')

@@ -29,8 +29,8 @@ class NewQPController():
         self.pencil_dict = {}
         self.f_dict = {}
         self.f_params_dict = {
-            "minimum_gap": 0.0,
-            "minimum_eigenvalue": 0.0,
+            "epsilon": 0.1,
+            "Kappa": 100
         }
         self.compute_compatibility()
 
@@ -163,7 +163,7 @@ class NewQPController():
 
     def get_rate_constraint(self):
         '''
-        Sets the Lyapunov constraint for the outer loop controller.
+        Sets the Lyapunov rate constraint.
         '''
         # Computes rate Lyapunov and gradient
         deltaHv = self.clf.get_hessian() - self.ref_clf.get_hessian()
@@ -181,65 +181,103 @@ class NewQPController():
 
     def get_compatibility_constraints(self):
         '''
-        Sets the barrier constraints for the outer loop controller, ensuring compatibility.
+        Sets the barrier constraints for compatibility.
         '''
-        # Constraint for keeping the eigenvalues positive
+        self.h_gamma1, gradient_h_gamma1 = self.first_compatibility_barrier()
+        self.h_gamma2, gradient_h_gamma2 = self.second_compatibility_barrier()
+
+        # Applies selection function
+        if self.get_selection() >= 0:
+            kappa_term = 0.0
+        else:
+            kappa_term = self.f_params_dict["Kappa"]
+
+        # Sets compatibility constraints
+        a_cbf_gamma1 = -np.hstack([ np.zeros([self.number_critical, self.control_dim]), gradient_h_gamma1, np.zeros([self.number_critical, 1]) ])
+        b_cbf_gamma1 = self.alpha[1]*self.h_gamma1 + kappa_term*np.ones(self.number_critical)
+
+        a_cbf_gamma2 = -np.hstack([ np.zeros([self.state_dim, self.control_dim]), gradient_h_gamma2, np.zeros([self.state_dim, 1]) ])
+        b_cbf_gamma2 = self.alpha[1]*self.h_gamma2
+
+        a_cbf_pi = np.vstack([ a_cbf_gamma1, a_cbf_gamma2 ])
+        b_cbf_pi = np.hstack([ b_cbf_gamma1, b_cbf_gamma2 ])
+
+        return a_cbf_pi, b_cbf_pi
+
+    def first_compatibility_barrier(self):
+        '''
+        Computes first compatibility barrier constraint, for keeping the critical values of f below 1.
+        '''
         pencil_eig = self.pencil_dict["eigenvalues"]
         Q = self.pencil_dict["left_eigenvectors"]
         Z = self.pencil_dict["right_eigenvectors"]
         
         Hh = self.cbf.get_hessian()
-        beta_0 = np.dot( Q[:,0], Hh.dot(Z[:,0]) )
 
-        self.h_positive = pencil_eig[0] - self.f_params_dict["minimum_eigenvalue"]
-        gradient_h_positive = np.zeros(self.sym_dim)
-        for i in range(self.sym_dim):
-            gradient_h_positive[i] = np.dot( Q[:,0], self.sym_basis[i].dot(Z[:,0]) ) / beta_0
-
-        # h_gamma constraints
-        self.h_gamma = np.zeros(self.number_critical)
-        gradient_h_gamma = np.zeros([self.number_critical, self.sym_dim])
+        # First barrier
+        self.h_gamma1 = np.zeros(self.number_critical)
+        gradient_h_gamma1 = np.zeros([self.number_critical, self.sym_dim])
         for k in range(self.number_critical):
-            self.h_gamma[k] = np.log( self.critical_values ) - self.f_params_dict["minimum_gap"]
+
+            index, = np.where(pencil_eig<=self.f_critical[k])
+            closest_eig_index = len(pencil_eig[index])-1
+
+            beta_k = np.dot( Q[:,closest_eig_index], Hh.dot(Z[:,closest_eig_index]) )
+            epsilon = self.f_params_dict["epsilon"]
+            self.h_gamma1[k] = beta_k * np.log( self.critical_values[k] * np.exp( -np.tanh(beta_k) * epsilon ) )
 
             v = self.v_values( self.f_critical[k] )
             H = self.pencil_value( self.f_critical[k] )
             H_inv = np.linalg.inv(H)
-            vec_nabla_f = 2 * (1/self.critical_values[k]) * np.matmul( self.cbf.get_hessian(), H_inv ).dot(v)
+            vec_nabla_f = 2 * beta_k * (1/self.critical_values[k]) * np.matmul( Hh, H_inv ).dot(v)
             for i in range(self.sym_dim):
                 vec_i = self.sym_basis[i].dot( v + self.cbf.get_critical() - self.clf.get_critical() )
-                gradient_h_gamma[k,i] = vec_nabla_f.dot(vec_i)
+                gradient_h_gamma1[k,i] = vec_nabla_f.dot(vec_i)
 
-        # Applies selection function
-        if self.get_selection() >= 0:
-            term = 0.0
-        else:
-            term = -100
+        return self.h_gamma1, gradient_h_gamma1
 
-        # print("Term = " + str(self.get_selection()))
+    def second_compatibility_barrier(self):
+        '''
+        Computes second compatibility barrier constraint, for positive-type eigenvalues left and negative-type eigenvalues right on the f-function.
+        '''
+        polar_pencil_eigs = self.pencil_dict["polar_eigenvalues"]
+        Q = self.pencil_dict["left_eigenvectors"]
+        Z = self.pencil_dict["right_eigenvectors"]
+        
+        Hh = self.cbf.get_hessian()
+        mode = self.get_mode()
 
-        # Sets compatibility constraints
-        a_cbf_gamma = -np.hstack([ np.zeros([self.number_critical, self.control_dim]), gradient_h_gamma, np.zeros([self.number_critical, 1]) ])
-        b_cbf_gamma = self.alpha[1]*self.h_gamma - term
+        # Second barrier
+        self.h_gamma2 = np.zeros(self.state_dim)
+        gradient_h_gamma2 = np.zeros([self.state_dim, self.sym_dim])
+        for k in range(self.state_dim):
+            beta_k = np.dot( Q[:,k], Hh.dot(Z[:,k]) )
+            self.h_gamma2[k] = mode * beta_k * polar_pencil_eigs[k]
 
-        a_cbf_positive = -np.hstack([ np.zeros(self.control_dim), gradient_h_positive, 0.0 ])
-        b_cbf_positive = self.alpha[1]*self.h_positive - term
+            for i in range(self.sym_dim):
+                L_i = self.sym_basis[i]
+                gradient_h_gamma2[k,i] = mode * np.cos(polar_pencil_eigs[k]) * ( Q[:,k].T @ L_i @ Z[:,k] ) 
 
-        a_cbf_pi = np.vstack([ a_cbf_gamma, a_cbf_positive ])
-        b_cbf_pi = np.hstack([ b_cbf_gamma, b_cbf_positive ])
+        return self.h_gamma2, gradient_h_gamma2
 
-        return a_cbf_pi, b_cbf_pi
+    def get_mode(self):
+        '''
+        Computes the operation mode for a general n-th order system (for now, only for second order systems - determinant suffices).
+        Positive for definite barrier Hessian, negative otherwise.
+        '''
+        Hh = self.cbf.get_hessian()
+        return np.linalg.det(Hh)
 
     def get_selection(self):
         '''
-        Computes the selection function: positive in the boundary convergence area, negative otherwise.
+        Computes the selection function: positive when is necessary to compatibilize, negative otherwise.
         '''
         LgV2 = self.LgV.dot(self.LgV)
         Lgh2 = self.Lgh.dot(self.Lgh)
         LgVLgh = self.LgV.dot(self.Lgh)
                 
-        return self.V * LgVLgh - self.h * math.sqrt(LgV2)*math.sqrt(Lgh2)
-        # return self.V * LgVLgh
+        return self.get_mode() * ( self.V * LgVLgh - self.h * math.sqrt(LgV2)*math.sqrt(Lgh2) )
+        # return self.get_mode() * LgVLgh
 
     def compute_pencil(self, Hv, Hh):
         '''
@@ -259,6 +297,7 @@ class NewQPController():
         pencil_char = ( detHv/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(pencil_eig))
 
         self.pencil_dict["eigenvalues"] = pencil_eig[sorted_args]
+        self.pencil_dict["polar_eigenvalues"] = np.arctan(pencil_eig[sorted_args])
         self.pencil_dict["left_eigenvectors"] = Q[:,sorted_args]
         self.pencil_dict["right_eigenvectors"] = Z[:,sorted_args]
         self.pencil_dict["characteristic_polynomial"] = pencil_char
