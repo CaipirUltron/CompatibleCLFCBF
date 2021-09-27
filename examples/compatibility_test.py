@@ -8,7 +8,9 @@ from compatible_clf_cbf.controller import NewQPController
 # Create QP controller
 qp_controller = NewQPController(plant, clf, ref_clf, cbf)
 
-print("Pencil eigenvalues:" + str(np.arctan(qp_controller.pencil_dict["eigenvalues"])))
+print("Polar eigenvalues:" + str(qp_controller.pencil_dict["polar_eigenvalues"]))
+# print("Alpha = " + str(qp_controller.pencil_dict["alpha"]))
+# print("Beta = " + str(qp_controller.pencil_dict["beta"]))
 
 num_points = 100000
 min_flambda = -50

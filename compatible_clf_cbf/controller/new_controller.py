@@ -24,12 +24,15 @@ class NewQPController():
         self.Vpi = 0.0
         self.gradient_Vpi = np.zeros(self.sym_dim)
 
-        # Initialize compatibility function
-        self.eigen_threshold = 0.00001
+        # Initialize compatibility function parameters
+        self.eigen_threshold = 0.000001
+        self.schurHv = np.zeros([self.state_dim,self.state_dim])
+        self.schurHh = np.zeros([self.state_dim,self.state_dim])
+        self.Q = np.zeros([self.state_dim,self.state_dim])
+        self.Z = np.zeros([self.state_dim,self.state_dim])
         self.pencil_dict = {}
-        self.f_dict = {}
         self.f_params_dict = {
-            "epsilon": 0.1,
+            "epsilon": 0.2,
             "Kappa": 100
         }
         self.compute_compatibility()
@@ -175,8 +178,6 @@ class NewQPController():
         a_clf_pi = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vpi, -1.0 ])
         b_clf_pi = -self.gamma[1] * self.Vpi
 
-        # print("Vpi = " + str(self.Vpi))
-
         return a_clf_pi, b_clf_pi
 
     def get_compatibility_constraints(self):
@@ -193,8 +194,8 @@ class NewQPController():
             kappa_term = self.f_params_dict["Kappa"]
 
         # Sets compatibility constraints
-        a_cbf_gamma1 = -np.hstack([ np.zeros([self.number_critical, self.control_dim]), gradient_h_gamma1, np.zeros([self.number_critical, 1]) ])
-        b_cbf_gamma1 = self.alpha[1]*self.h_gamma1 + kappa_term*np.ones(self.number_critical)
+        a_cbf_gamma1 = -np.hstack([ np.zeros([self.num_positive_critical, self.control_dim]), gradient_h_gamma1, np.zeros([self.num_positive_critical, 1]) ])
+        b_cbf_gamma1 = self.alpha[1]*self.h_gamma1 + kappa_term*np.ones(self.num_positive_critical)
 
         a_cbf_gamma2 = -np.hstack([ np.zeros([self.state_dim, self.control_dim]), gradient_h_gamma2, np.zeros([self.state_dim, 1]) ])
         b_cbf_gamma2 = self.alpha[1]*self.h_gamma2
@@ -206,33 +207,26 @@ class NewQPController():
 
     def first_compatibility_barrier(self):
         '''
-        Computes first compatibility barrier constraint, for keeping the critical values of f below 1.
+        Computes first compatibility barrier constraint, for keeping the critical values of f above/below 1.
         '''
-        pencil_eig = self.pencil_dict["eigenvalues"]
-        Q = self.pencil_dict["left_eigenvectors"]
-        Z = self.pencil_dict["right_eigenvectors"]
-        
-        Hh = self.cbf.get_hessian()
+        # Get mode (convex or concave)
+        mode = self.get_mode()
 
         # First barrier
-        self.h_gamma1 = np.zeros(self.number_critical)
-        gradient_h_gamma1 = np.zeros([self.number_critical, self.sym_dim])
-        for k in range(self.number_critical):
+        self.h_gamma1 = np.zeros(self.num_positive_critical)
+        gradient_h_gamma1 = np.zeros([self.num_positive_critical, self.sym_dim])
+        for k in range(self.num_positive_critical):
 
-            index, = np.where(pencil_eig<=self.f_critical[k])
-            closest_eig_index = len(pencil_eig[index])-1
+            # Barrier function
+            self.h_gamma1[k] = mode * ( self.positive_critical_values[k] - np.exp( np.tanh(mode) * self.f_params_dict["epsilon"] ) )
 
-            beta_k = np.dot( Q[:,closest_eig_index], Hh.dot(Z[:,closest_eig_index]) )
-            epsilon = self.f_params_dict["epsilon"]
-            self.h_gamma1[k] = beta_k * np.log( self.critical_values[k] * np.exp( -np.tanh(beta_k) * epsilon ) )
-
-            v = self.v_values( self.f_critical[k] )
-            H = self.pencil_value( self.f_critical[k] )
-            H_inv = np.linalg.inv(H)
-            vec_nabla_f = 2 * beta_k * (1/self.critical_values[k]) * np.matmul( Hh, H_inv ).dot(v)
+            # Barrier function gradient
+            v = self.v_values( self.positive_f_critical[k] )
+            H = self.pencil_value( self.positive_f_critical[k] )
+            vec_nabla_f = 2 * mode * ( np.linalg.inv(H) @ self.cbf.get_hessian() ) @ v
             for i in range(self.sym_dim):
-                vec_i = self.sym_basis[i].dot( v + self.cbf.get_critical() - self.clf.get_critical() )
-                gradient_h_gamma1[k,i] = vec_nabla_f.dot(vec_i)
+                vec_i = self.sym_basis[i] @ ( v + self.cbf.get_critical() - self.clf.get_critical() )
+                gradient_h_gamma1[k,i] = vec_nabla_f.T @ vec_i
 
         return self.h_gamma1, gradient_h_gamma1
 
@@ -240,23 +234,24 @@ class NewQPController():
         '''
         Computes second compatibility barrier constraint, for positive-type eigenvalues left and negative-type eigenvalues right on the f-function.
         '''
-        polar_pencil_eigs = self.pencil_dict["polar_eigenvalues"]
-        Q = self.pencil_dict["left_eigenvectors"]
-        Z = self.pencil_dict["right_eigenvectors"]
-        
-        Hh = self.cbf.get_hessian()
         mode = self.get_mode()
+
+        Hv = self.clf.get_hessian()
+        eig_Hv, V = np.linalg.eig(Hv)
+
+        print("Eig Hv = " + str(eig_Hv))
 
         # Second barrier
         self.h_gamma2 = np.zeros(self.state_dim)
         gradient_h_gamma2 = np.zeros([self.state_dim, self.sym_dim])
         for k in range(self.state_dim):
-            beta_k = np.dot( Q[:,k], Hh.dot(Z[:,k]) )
-            self.h_gamma2[k] = mode * beta_k * polar_pencil_eigs[k]
 
+            # Barrier function
+            self.h_gamma2[k] = mode * eig_Hv[k]
+
+            # Barrier function gradient
             for i in range(self.sym_dim):
-                L_i = self.sym_basis[i]
-                gradient_h_gamma2[k,i] = mode * np.cos(polar_pencil_eigs[k]) * ( Q[:,k].T @ L_i @ Z[:,k] ) 
+                gradient_h_gamma2[k,i] = mode * ( V[:,k].T @ self.sym_basis[i] @ V[:,k] )
 
         return self.h_gamma2, gradient_h_gamma2
 
@@ -276,18 +271,47 @@ class NewQPController():
         Lgh2 = self.Lgh.dot(self.Lgh)
         LgVLgh = self.LgV.dot(self.Lgh)
                 
-        return self.get_mode() * ( self.V * LgVLgh - self.h * math.sqrt(LgV2)*math.sqrt(Lgh2) )
-        # return self.get_mode() * LgVLgh
+        # return self.get_mode() * ( self.V * LgVLgh - self.h * math.sqrt(LgV2)*math.sqrt(Lgh2) )
+        return self.get_mode() * LgVLgh
+
+    def compute_eigenvalues(self):
+        '''
+        Computes pencil eigenvalues from Schur decomposition.
+        '''
+        alpha = np.diag(self.schurHv)
+        beta = np.diag(self.schurHh)
+        eigenvalues = alpha/beta
+        sorted_args = np.argsort(eigenvalues)
+
+        return eigenvalues, alpha, beta, sorted_args
+
+    # def compute_eigenvectors(self, eigenvalues):
+    #     '''
+    #     Computes pencil eigenvectors from Schur decomposition. Left/right eigenvectors are the same due to the pencil symmetry.
+    #     '''
+    #     m = 0
+    #     Eigenvectors = np.zeros([self.state_dim, self.state_dim])
+    #     Hv, Hh = self.clf.get_hessian(), self.cbf.get_hessian()
+    #     for eig in eigenvalues:
+    #         for k in range(self.state_dim):
+    #             if eig == (self.Z[:,k].T @ Hv @ self.Z[:,k]) / (self.Z[:,k].T @ Hh @ self.Z[:,k]) :
+    #                 Eigenvectors[:,m] = self.Z[:,k]
+    #                 m+=1
+    #                 break
+    #             if eig == (self.Q[:,k].T @ Hv @ self.Q[:,k]) / (self.Q[:,k].T @ Hh @ self.Q[:,k]) :
+    #                 Eigenvectors[:,m] = self.Q[:,k]
+    #                 m+=1
+    #                 break
+        
+    #     return Eigenvectors
 
     def compute_pencil(self, Hv, Hh):
         '''
         Given Hv and Hh, this method computes the generalized pencil eigenvalues and the pencil characteristic polynomial
         '''
-        # Get the generalized Schur decomposition of the matrix pencil and compute the generalized eigenvalues
-        schurHv, schurHh, alpha, beta, Q, Z = scipy.linalg.ordqz(Hv, Hh)
-        pencil_eig = alpha/beta
-        pencil_eig = np.real(np.extract( pencil_eig.imag == 0.0, pencil_eig ))
-        sorted_args = np.argsort(pencil_eig)
+        self.schurHv, self.schurHh, alpha, beta, self.Q, self.Z = scipy.linalg.ordqz(Hv, Hh)
+        pencil_eig, alpha, beta, sorted_args = self.compute_eigenvalues()
+        # Eigenvectors = self.compute_eigenvectors(pencil_eig)
 
         # Assumption: Hv is invertible => detHv != 0
         detHv = np.linalg.det(Hv)
@@ -297,9 +321,9 @@ class NewQPController():
         pencil_char = ( detHv/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(pencil_eig))
 
         self.pencil_dict["eigenvalues"] = pencil_eig[sorted_args]
+        self.pencil_dict["alpha"] = alpha[sorted_args]
+        self.pencil_dict["beta"] = beta[sorted_args]
         self.pencil_dict["polar_eigenvalues"] = np.arctan(pencil_eig[sorted_args])
-        self.pencil_dict["left_eigenvectors"] = Q[:,sorted_args]
-        self.pencil_dict["right_eigenvectors"] = Z[:,sorted_args]
         self.pencil_dict["characteristic_polynomial"] = pencil_char
 
     def compute_f(self):
@@ -407,6 +431,12 @@ class NewQPController():
         self.f_critical = np.real(np.extract( self.f_critical.imag == 0.0, self.f_critical ))
         self.critical_values = self.f_values(self.f_critical)
         self.number_critical = len(self.critical_values)
+
+        # Get positive critical points
+        index, = np.where(self.f_critical > 0)
+        self.positive_f_critical = self.f_critical[index]
+        self.positive_critical_values = self.critical_values[index]
+        self.num_positive_critical = len(self.positive_f_critical)
 
     def compute_compatibility(self):
         '''
