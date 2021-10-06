@@ -33,7 +33,9 @@ class NewQPController():
         self.pencil_dict = {}
         self.f_params_dict = {
             "epsilon": 0.2,
-            "Kappa": 100
+            "epsilon2": 0.0,
+            # "minimum_CLF_eigenvalue": 0.0,
+            "Kappa": 100,
         }
         self.compute_compatibility()
 
@@ -186,6 +188,7 @@ class NewQPController():
         '''
         self.h_gamma1, gradient_h_gamma1 = self.first_compatibility_barrier()
         self.h_gamma2, gradient_h_gamma2 = self.second_compatibility_barrier()
+        # self.h_gamma3, gradient_h_gamma3 = self.third_compatibility_barrier()
 
         # Applies selection function
         if self.get_selection() >= 0:
@@ -196,12 +199,23 @@ class NewQPController():
         # Sets compatibility constraints
         a_cbf_gamma1 = -np.hstack([ np.zeros([self.num_positive_critical, self.control_dim]), gradient_h_gamma1, np.zeros([self.num_positive_critical, 1]) ])
         b_cbf_gamma1 = self.alpha[1]*self.h_gamma1 + kappa_term*np.ones(self.num_positive_critical)
+        # b_cbf_gamma1 = self.alpha[1]*self.h_gamma1
 
-        a_cbf_gamma2 = -np.hstack([ np.zeros([self.state_dim, self.control_dim]), gradient_h_gamma2, np.zeros([self.state_dim, 1]) ])
+        a_cbf_gamma2 = -np.hstack([ np.zeros([3, self.control_dim]), gradient_h_gamma2, np.zeros([3,1]) ])
+        # a_cbf_gamma2 = -np.hstack([ np.zeros(self.control_dim), gradient_h_gamma2, 0.0 ])
         b_cbf_gamma2 = self.alpha[1]*self.h_gamma2
+
+        # a_cbf_gamma3 = -np.hstack([ np.zeros(self.control_dim), gradient_h_gamma3, 0.0 ])
+        # b_cbf_gamma3 = self.alpha[1]*self.h_gamma3
+
+        # a_cbf_pi = a_cbf_gamma1
+        # b_cbf_pi = b_cbf_gamma1
 
         a_cbf_pi = np.vstack([ a_cbf_gamma1, a_cbf_gamma2 ])
         b_cbf_pi = np.hstack([ b_cbf_gamma1, b_cbf_gamma2 ])
+
+        # a_cbf_pi = np.vstack([ a_cbf_gamma1, a_cbf_gamma2, a_cbf_gamma3 ])
+        # b_cbf_pi = np.hstack([ b_cbf_gamma1, b_cbf_gamma2, b_cbf_gamma3 ])
 
         return a_cbf_pi, b_cbf_pi
 
@@ -233,27 +247,80 @@ class NewQPController():
     def second_compatibility_barrier(self):
         '''
         Computes second compatibility barrier constraint, for positive-type eigenvalues left and negative-type eigenvalues right on the f-function.
+        Currently, it is in the form of a Matrix Barrier Function.
         '''
+        # Get mode (convex or concave)
         mode = self.get_mode()
 
+        # Matrix barrier function (MBF)
         Hv = self.clf.get_hessian()
-        eig_Hv, V = np.linalg.eig(Hv)
+        self.MCBF = mode * ( Hv - np.heaviside(-mode,0.0) * self.f_params_dict["epsilon2"] * np.eye(self.state_dim) )
+        eig_mbf, Q_mbf = np.linalg.eig(Hv)
 
-        print("Eig Hv = " + str(eig_Hv))
+        # print("Eigenvalues of Hv = " + str(eig_mbf))
 
-        # Second barrier
-        self.h_gamma2 = np.zeros(self.state_dim)
-        gradient_h_gamma2 = np.zeros([self.state_dim, self.sym_dim])
-        for k in range(self.state_dim):
+        # Barrier functions for enforcing Sylvester's criterion
+        self.first_minor = self.MCBF[0,0]
+        self.second_minor = self.MCBF[1,1]
+        self.third_minor = np.linalg.det(self.MCBF)
 
-            # Barrier function
-            self.h_gamma2[k] = mode * eig_Hv[k]
+        # Barrier function gradients
+        grad_first_minor = np.zeros(self.sym_dim)
+        grad_second_minor = np.zeros(self.sym_dim)
+        grad_third_minor = np.zeros(self.sym_dim)
+        for i in range(self.sym_dim):
+            grad_first_minor[i] = mode * self.sym_basis[i][0,0]
+            grad_second_minor[i] = mode * self.sym_basis[i][1,1]
+            grad_third_minor[i] = (Q_mbf[:,0].T @ self.sym_basis[i] @ Q_mbf[:,0]) * eig_mbf[1] + (Q_mbf[:,1].T @ self.sym_basis[i] @ Q_mbf[:,1]) * eig_mbf[0]
 
-            # Barrier function gradient
-            for i in range(self.sym_dim):
-                gradient_h_gamma2[k,i] = mode * ( V[:,k].T @ self.sym_basis[i] @ V[:,k] )
+        self.h_gamma2 = np.array([ self.first_minor, self.second_minor, self.third_minor ]) - np.array([0.0, 0.0, 0.0])
+        gradient_h_gamma2 = np.vstack([ grad_first_minor, grad_second_minor, grad_third_minor ])
 
         return self.h_gamma2, gradient_h_gamma2
+
+    # def second_compatibility_barrier(self):
+    #     '''
+    #     Computes second compatibility barrier constraint, for positive-type eigenvalues left and negative-type eigenvalues right on the f-function.
+    #     '''
+    #     mode = self.get_mode()
+
+    #     Hv = self.clf.get_hessian()
+    #     eigHv, V = np.linalg.eig(Hv)
+
+    #     # Second barrier
+    #     self.h_gamma2 = np.zeros(self.state_dim)
+    #     gradient_h_gamma2 = np.zeros([self.state_dim, self.sym_dim])
+    #     for k in range(self.state_dim):
+
+    #         # Barrier function
+    #         self.h_gamma2[k] = mode * ( eigHv[k] - np.tanh(mode) * self.f_params_dict["minimum_CLF_eigenvalue"] )
+
+    #         # Barrier function gradient
+    #         for i in range(self.sym_dim):
+    #             gradient_h_gamma2[k,i] = mode * ( V[:,k].T @ self.sym_basis[i] @ V[:,k] )
+
+    #     max_index = np.argmax(eigHv)
+    #     self.h_gamma2 = self.h_gamma2[1]
+    #     gradient_h_gamma2 = gradient_h_gamma2[1,:]
+
+    #     return self.h_gamma2, gradient_h_gamma2
+
+    # def third_compatibility_barrier(self):
+    #     '''
+    #     Computes third compatibility barrier constraint, for positive-type eigenvalues left and negative-type eigenvalues right on the f-function.
+    #     '''
+    #     Hv = self.clf.get_hessian()
+    #     eigHv, V = np.linalg.eig(Hv)
+
+    #     # Third barrier function
+    #     self.h_gamma3 = eigHv[0] * eigHv[1]
+
+    #     # Third barrier function gradient
+    #     gradient_h_gamma3 = np.zeros(self.sym_dim)
+    #     for i in range(self.sym_dim):
+    #         gradient_h_gamma3[i] = (V[:,0].T @ self.sym_basis[i] @ V[:,0]) * eigHv[1] + (V[:,1].T @ self.sym_basis[i] @ V[:,1]) * eigHv[0]
+
+    #     return self.h_gamma3, gradient_h_gamma3
 
     def get_mode(self):
         '''
@@ -266,13 +333,25 @@ class NewQPController():
     def get_selection(self):
         '''
         Computes the selection function: positive when is necessary to compatibilize, negative otherwise.
-        '''
-        LgV2 = self.LgV.dot(self.LgV)
-        Lgh2 = self.Lgh.dot(self.Lgh)
-        LgVLgh = self.LgV.dot(self.Lgh)
-                
+        Currently, we use a geometric method based on the relative position of the CLF-CBF.
+        '''                
         # return self.get_mode() * ( self.V * LgVLgh - self.h * math.sqrt(LgV2)*math.sqrt(Lgh2) )
-        return self.get_mode() * LgVLgh
+        # return self.get_mode() * LgVLgh
+
+        state = self.plant.get_state()
+
+        eig_cbf, Q_cbf = np.linalg.eig(self.cbf.get_hessian())
+        x0 = self.clf.get_critical()
+        p0 = self.cbf.get_critical()
+
+        # Computes the normal vector defining the separatrix plane
+        max_index = np.argmax(eig_cbf)
+        if (Q_cbf[:,max_index] @ (x0 - p0)) >= 0:
+            normal_vector = -Q_cbf[:,max_index]
+        else:
+            normal_vector = Q_cbf[:,max_index]
+
+        return normal_vector @ ( state - p0 )
 
     def compute_eigenvalues(self):
         '''
