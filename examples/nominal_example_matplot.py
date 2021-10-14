@@ -1,31 +1,38 @@
-import rospy
+import math
+import numpy as np
+import matplotlib.pyplot as plt
 
 from system_initialization import plant, clf, cbf
 from compatible_clf_cbf.controller import NominalQP
 from compatible_clf_cbf.graphical_simulation import SimulationMatplot
 
-try:
-    # Create QP controller and graphical simulation.
-    qp_controller = NominalQP(plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0)
-    graphicalSimulation = SimulationMatplot(plant, qp_controller.clf, cbf)
+# Create QP controller and graphical simulation.
+dt = .005
+qp_controller = NominalQP(plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0)
 
-    dt = 0.004
-    rate = rospy.Rate(1/dt)
-    while not rospy.is_shutdown():
+# Simulation loop -------------------------------------------------------------------
+T = 20
+num_steps = int(T/dt)
+print('Running simulation...')
+for step in range(0, num_steps):
 
-        # Control
-        u_control = qp_controller.get_control()
+    # Control
+    u_control = qp_controller.get_control()
+    qp_controller.update_clf_dynamics(np.zeros(3))
 
-        # Send actuation commands 
-        plant.set_control(u_control) 
-        plant.actuate(dt)
+    # Send actuation commands 
+    plant.set_control(u_control) 
+    plant.actuate(dt)
 
-        # Draw graphical simulation elements
-        graphicalSimulation.draw_trajectory()
-        graphicalSimulation.draw_clf()
-        graphicalSimulation.draw_cbf()
+    # Collect simulation logs ----------------------------------------------------------
+    logs = {
+        "stateLog": plant.state_log,
+        "clfLog": qp_controller.clf_dynamics.state_log
+    }
 
-        rate.sleep()
-
-except rospy.ROSInterruptException:
-    pass
+# Show animation -------------------------------------------------------------------
+print('Animating simulation...')
+axes_lim = (-6,6,-6,6)
+plotSim = SimulationMatplot(axes_lim, 80, logs, clf, cbf, draw_level=True)
+plotSim.animate()
+plt.show()

@@ -1,15 +1,16 @@
 import math
 import numpy as np
 
-from compatible_clf_cbf.dynamic_systems import Quadratic, QuadraticLyapunov, QuadraticBarrier, Integrator
+from compatible_clf_cbf.dynamic_systems import Quadratic, QuadraticLyapunov, QuadraticBarrier, Integrator, LinearSystem
 
 ######################################### Configure and create 2D plant ####################################################
 initial_state = [-2.0, 5.0]
-plant = Integrator(initial_state, initial_control = np.zeros(2))
+# plant = Integrator(initial_state, initial_control = np.zeros(2))
+plant = LinearSystem(initial_state, initial_control = np.zeros(2), A = np.zeros([2,2]), B = np.diag([1,1]))
 ############################################################################################################################
 
 ############################################# Configure and create CLF #####################################################
-clf_lambda_x, clf_lambda_y, clf_angle = 5.0, 1.0, math.radians(3.0)
+clf_lambda_x, clf_lambda_y, clf_angle = 5.0, 1.0, math.radians(0.0)
 clf_params = {
     "Hv": Quadratic.canonical2D([ clf_lambda_x , clf_lambda_y ], clf_angle),
     "x0": [ 0.0, 0.0 ] }

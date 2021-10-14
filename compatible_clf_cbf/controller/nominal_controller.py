@@ -1,5 +1,6 @@
 import numpy as np
 from compatible_clf_cbf.quadratic_program import QuadraticProgram
+from compatible_clf_cbf.dynamic_systems import Quadratic, Integrator
 
 class NominalQP():
     '''
@@ -22,6 +23,11 @@ class NominalQP():
         P[self.control_dim,self.control_dim] = self.p
         q = np.zeros(self.QP_dim)
         self.QP = QuadraticProgram(P=P, q=q)
+
+        # Integrator sybsystem for the CLF parameters
+        piv_init = Quadratic.sym2vector(self.clf.get_hessian())
+        self.clf_dynamics = Integrator(piv_init,np.zeros(len(piv_init)))
+        self.ctrl_dt = dt
 
     def get_control(self):
         '''
@@ -85,6 +91,17 @@ class NominalQP():
         b_cbf = self.alpha * self.h + self.Lfh
 
         return a_cbf, b_cbf
+
+    def update_clf_dynamics(self, piv_ctrl):
+        '''
+        Integrates the dynamic system for the CLF Hessian matrix.
+        '''
+        self.clf_dynamics.set_control(piv_ctrl)
+        self.clf_dynamics.actuate(self.ctrl_dt)
+        pi_v = self.clf_dynamics.get_state()
+        Hv = Quadratic.vector2sym(pi_v)
+
+        self.clf.set_param(hessian = Hv)
 
     def get_lambda(self):
         '''

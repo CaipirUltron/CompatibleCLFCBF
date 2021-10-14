@@ -29,8 +29,8 @@ for step in range(0, num_steps):
     print("CBF = " + str(qp_controller.h))
     # print("Rate CLF = " + str(qp_controller.Vpi))
 
-    print("Compatibility Barrier 1 = " + str(qp_controller.h_gamma1))
-    print("Compatibility Barrier 2 = " + str(qp_controller.h_gamma2))
+    # print("Compatibility Barrier 1 = " + str(qp_controller.h_gamma1))
+    # print("Compatibility Barrier 2 = " + str(qp_controller.h_gamma2))
     # print("Compatibility Barrier 3 = " + str(qp_controller.h_gamma3))
 
     # Collect simulation logs ----------------------------------------------------------
