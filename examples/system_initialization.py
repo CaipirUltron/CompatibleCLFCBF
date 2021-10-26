@@ -31,7 +31,7 @@ ref_clf = QuadraticLyapunov(init_value = initial_state, hessian = ref_clf_params
 #     "Hh": Quadratic.canonical2D([ 1/(xaxis_length**2), 1/(yaxis_length**2) ], cbf_angle),
 #     "p0": [ 0.0, 3.0 ]
 # }
-cbf_lambda_x, cbf_lambda_y, cbf_angle = 1.0, 2.0, math.radians(30.0)
+cbf_lambda_x, cbf_lambda_y, cbf_angle = 1.0, 5.0, math.radians(0.0)
 cbf_params = {
     "Hh": Quadratic.canonical2D([ cbf_lambda_x , cbf_lambda_y ], cbf_angle),
     "p0": [ 0.0, 3.0 ] }

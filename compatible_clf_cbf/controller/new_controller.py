@@ -32,7 +32,7 @@ class NewQPController():
         self.Z = np.zeros([self.state_dim,self.state_dim])
         self.pencil_dict = {}
         self.f_params_dict = {
-            "epsilon": 0.2,
+            "epsilon": 0.5,
             "epsilon2": 0.0,
             # "minimum_CLF_eigenvalue": 0.0,
             "Kappa": 100,
@@ -40,25 +40,28 @@ class NewQPController():
         self.compute_compatibility()
 
         # Parameters for the inner and outer QPs
-        self.gamma, self.alpha = gamma, alpha
+        self.gamma, self.alpha, self.p = gamma, alpha, p
 
-        # Parameters for QP controller based on the new theorem
-        self.p = p
-        self.QP_dim = self.control_dim + self.sym_dim + 1
-        P = np.eye(self.QP_dim)
-        for i in range(0,self.sym_dim):
-            P[self.control_dim+i,self.control_dim+i] = self.p[0]
-        P[-1,-1] = self.p[1]
+        # Parameters for the first QP controller:
+        self.QP1_dim = self.control_dim + 1
+        P1 = np.eye(self.QP1_dim)
+        P1[-1,-1] = self.p[0]
+        q1 = np.zeros(self.QP1_dim)
+        self.QP1 = QuadraticProgram(P=P1,q=q1)
 
-        q = np.zeros(self.QP_dim)
-        self.QP = QuadraticProgram(P=P,q=q)
+        # Parameters for the second QP controller:
+        self.QP2_dim = self.sym_dim + 1
+        P2 = np.eye(self.QP2_dim)
+        P2[-1,-1] = self.p[1]
+        q2 = np.zeros(self.QP2_dim)
+        self.QP2 = QuadraticProgram(P=P2,q=q2)
 
         # Variable initialization
         self.ctrl_dt = dt
         self.V = 0.0
         self.h = 0.0
         self.u = np.zeros(self.control_dim)
-        self.u_pi = np.zeros(self.sym_dim)
+        self.u_v = np.zeros(self.sym_dim)
         self.LgV = np.zeros(self.control_dim)
         self.Lgh = np.zeros(self.control_dim)
 
@@ -78,28 +81,27 @@ class NewQPController():
 
     def get_control(self):
         '''
-        Computes the QP solution.
+        Computes the solution of the inner QP.
         '''
+        # Configure inner QP
         a_clf, b_clf = self.get_clf_constraint()
         a_cbf, b_cbf = self.get_cbf_constraint()
-        a_rate, b_rate = self.get_rate_constraint()
-        A_barriers, b_barriers = self.get_compatibility_constraints()
 
-        # Stacking the CLF and CBF constraints
-        A1 = np.vstack([ a_clf, a_cbf, a_rate ])
-        b1 = np.array([ b_clf, b_cbf, b_rate ], dtype=float)
-
-        A = np.vstack([ A1, A_barriers ])
-        b = np.hstack([ b1, b_barriers ])
+        # Adds boundary stability constraint in case the CBF is indefinite
+        if (self.get_mode() <= 0) and (self.get_region() >= 0):
+            a_boundary_stable, b_boundary_stable = self.get_boundary_stability_constraint()
+            A1 = np.vstack([ a_clf, a_cbf, a_boundary_stable ])
+            b1 = np.array([ b_clf, b_cbf, b_boundary_stable ], dtype=float)
+        else:
+            A1 = np.vstack([ a_clf, a_cbf ])
+            b1 = np.array([ b_clf, b_cbf ], dtype=float)
 
         # Solve inner QP
-        self.QP.set_constraints(A, b)
-        QP_sol = self.QP.get_solution()
+        self.QP1.set_constraints(A1, b1)
+        QP1_sol = self.QP1.get_solution()
 
-        self.u = QP_sol[0:self.control_dim]
-        self.u_pi = QP_sol[self.control_dim:self.control_dim+self.sym_dim]
-
-        return self.u, self.u_pi
+        self.u = QP1_sol[0:self.control_dim]
+        return self.u
 
     def get_clf_constraint(self):
         '''
@@ -124,11 +126,17 @@ class NewQPController():
         for k in range(self.sym_dim):
             self.nablaV_pi[k] = 0.5 * ( delta_x.T @ self.sym_basis[k] @ delta_x )[0,0]
 
-        # CLF contraint for the QP
-        delta = np.heaviside(float(self.get_selection()),0.0)
-        a_clf = np.hstack( [ self.LgV, self.nablaV_pi*delta, 0.0 ])
-        # b_clf = -self.gamma[0] * self.V - self.LfV - self.nablaV_pi.dot(self.u_pi)*( 1.0 - delta )
-        b_clf = - self.gamma[0] * np.abs(self.V) - self.LfV
+        # Introduces instability in case the CBF is indefinite
+        if (self.get_mode() <= 0) and (self.get_region() >= 0):
+            eta = -1
+        else:
+            eta = +1
+
+        # CLF constraint for the first QP
+        # delta = np.heaviside(float(self.get_region()),0.0)
+        a_clf = np.hstack([ eta*self.LgV, -1.0 ])
+        # b_clf = - self.gamma[0] * self.V - eta*( self.LfV + self.nablaV_pi @ self.u_v )
+        b_clf = - self.gamma[0] * self.V - eta*self.LfV
 
         return a_clf, b_clf
 
@@ -149,10 +157,51 @@ class NewQPController():
         self.Lgh = g.T.dot(self.nablah)
 
         # CBF contraint for the QP
-        a_cbf = -np.hstack( [ self.Lgh, np.zeros(self.sym_dim), 0.0 ])
+        a_cbf = -np.hstack([ self.Lgh, 0.0 ])
         b_cbf = self.alpha[0] * self.h + self.Lfh
 
         return a_cbf, b_cbf
+
+    def get_boundary_stability_constraint(self):
+        '''
+        Sets the constraint for boundary stability in case the CBF is indefinite.
+        '''
+        # Affine plant dynamics
+        f = self.plant.get_f()
+        g = self.plant.get_g()
+
+        # Barrier function gradient
+        self.nablah = self.cbf.get_gradient()
+
+        self.Lfh = self.nablah.dot(f)
+        self.Lgh = g.T.dot(self.nablah)
+
+        # Boundary stability constraint for the first QP
+        a_boundary_stable = np.hstack([ self.Lgh, -1.0 ])
+        b_boundary_stable = -self.Lfh
+
+        return a_boundary_stable, b_boundary_stable
+
+    def get_clf_control(self):
+        '''
+        Computes the solution of the outer QP.
+        '''
+        # Adds rate or barrier constraint, depending on the region
+        a_rate, b_rate = self.get_rate_constraint()
+        if (self.get_region() >= 0):
+            a_barriers, b_barriers = self.get_compatibility_constraints()
+            A2 = np.vstack([ a_rate, a_barriers ])
+            b2 = np.hstack([ b_rate, b_barriers ])
+        else:
+            A2 = a_rate
+            b2 = np.array([b_rate],dtype=float)
+
+        # Solve outer QP
+        self.QP2.set_constraints(A2, b2)
+        QP2_sol = self.QP2.get_solution()
+        self.u_v = QP2_sol[0:self.sym_dim]
+
+        return self.u_v
 
     def update_clf_dynamics(self, piv_ctrl):
         '''
@@ -177,7 +226,7 @@ class NewQPController():
             self.gradient_Vpi[k] = np.trace( deltaHv @ self.sym_basis[k] )
 
         # Sets rate constraint
-        a_clf_pi = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vpi, -1.0 ])
+        a_clf_pi = np.hstack( [ self.gradient_Vpi, -1.0 ])
         b_clf_pi = -self.gamma[1] * self.Vpi
 
         return a_clf_pi, b_clf_pi
@@ -191,28 +240,30 @@ class NewQPController():
         # self.h_gamma3, gradient_h_gamma3 = self.third_compatibility_barrier()
 
         # Applies selection function
-        if self.get_selection() >= 0:
+        if self.get_region() >= 0:
             kappa_term = 0.0
         else:
             kappa_term = self.f_params_dict["Kappa"]
 
         # Sets compatibility constraints
-        a_cbf_gamma1 = -np.hstack([ np.zeros([self.num_positive_critical, self.control_dim]), gradient_h_gamma1, np.zeros([self.num_positive_critical, 1]) ])
-        b_cbf_gamma1 = self.alpha[1]*self.h_gamma1 + kappa_term*np.ones(self.num_positive_critical)
-        # b_cbf_gamma1 = self.alpha[1]*self.h_gamma1
+        a_cbf_gamma1 = -np.hstack([ gradient_h_gamma1, np.zeros([self.num_positive_critical, 1]) ])
+        b_cbf_gamma1 = self.alpha[1]*self.h_gamma1
 
-        a_cbf_gamma2 = -np.hstack([ np.zeros([3, self.control_dim]), gradient_h_gamma2, np.zeros([3,1]) ])
-        # a_cbf_gamma2 = -np.hstack([ np.zeros(self.control_dim), gradient_h_gamma2, 0.0 ])
+        # b_cbf_gamma1 = self.alpha[1]*self.h_gamma1 + kappa_term*np.ones(self.num_positive_critical)
+
+        a_cbf_gamma2 = -np.hstack([ gradient_h_gamma2, np.zeros([3,1]) ])
         b_cbf_gamma2 = self.alpha[1]*self.h_gamma2
+
+        # a_cbf_gamma2 = -np.hstack([ np.zeros(self.control_dim), gradient_h_gamma2, 0.0 ])
 
         # a_cbf_gamma3 = -np.hstack([ np.zeros(self.control_dim), gradient_h_gamma3, 0.0 ])
         # b_cbf_gamma3 = self.alpha[1]*self.h_gamma3
 
-        # a_cbf_pi = a_cbf_gamma1
-        # b_cbf_pi = b_cbf_gamma1
+        a_cbf_pi = a_cbf_gamma1
+        b_cbf_pi = b_cbf_gamma1
 
-        a_cbf_pi = np.vstack([ a_cbf_gamma1, a_cbf_gamma2 ])
-        b_cbf_pi = np.hstack([ b_cbf_gamma1, b_cbf_gamma2 ])
+        # a_cbf_pi = np.vstack([ a_cbf_gamma1, a_cbf_gamma2 ])
+        # b_cbf_pi = np.hstack([ b_cbf_gamma1, b_cbf_gamma2 ])
 
         # a_cbf_pi = np.vstack([ a_cbf_gamma1, a_cbf_gamma2, a_cbf_gamma3 ])
         # b_cbf_pi = np.hstack([ b_cbf_gamma1, b_cbf_gamma2, b_cbf_gamma3 ])
@@ -330,9 +381,9 @@ class NewQPController():
         Hh = self.cbf.get_hessian()
         return np.linalg.det(Hh)
 
-    def get_selection(self):
+    def get_region(self):
         '''
-        Computes the selection function: positive when is necessary to compatibilize, negative otherwise.
+        Computes the region function: positive when is necessary to compatibilize, negative otherwise.
         Currently, we use a geometric method based on the relative position of the CLF-CBF.
         '''                
         # return self.get_mode() * ( self.V * LgVLgh - self.h * math.sqrt(LgV2)*math.sqrt(Lgh2) )
