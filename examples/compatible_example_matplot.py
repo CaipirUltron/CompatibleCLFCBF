@@ -7,7 +7,7 @@ from compatible_clf_cbf.controller import NewQPController
 from compatible_clf_cbf.graphical_simulation import SimulationMatplot
 
 # Create QP controller and graphical simulation.
-dt = .002
+dt = .003
 qp_controller = NewQPController(plant, clf, ref_clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 10.0], p = [1.0, 1.0], dt = dt)
 
 # Simulation loop -------------------------------------------------------------------
@@ -16,11 +16,8 @@ num_steps = int(T/dt)
 print('Running simulation...')
 for step in range(0, num_steps):
 
-    # Plant control
-    u_control = qp_controller.get_control()
-
-    # CLF control
-    upi_control = qp_controller.get_clf_control()
+    # Control
+    u_control, upi_control = qp_controller.get_control()
     # upi_control = np.zeros(3)
 
     # Send actuation commands
