@@ -18,11 +18,14 @@ class NewQPController():
         self.state_dim = self.plant.n
         self.control_dim = self.plant.m
         self.sym_dim = int(( self.state_dim * ( self.state_dim + 1 ) )/2)
+        self.skewsym_dim = int(( self.state_dim * ( self.state_dim - 1 ) )/2)
         self.sym_basis = Quadratic.symmetric_basis(self.state_dim)
+        self.skewsym_basis = Quadratic.skewsymmetric_basis(self.state_dim)
 
         # Initialize rate CLF
         self.Vpi = 0.0
         self.gradient_Vpi = np.zeros(self.sym_dim)
+        self.gradient_Vrot = np.zeros(self.skewsym_dim)
 
         # Initialize compatibility function parameters
         self.eigen_threshold = 0.000001
@@ -217,26 +220,50 @@ class NewQPController():
 
         return a_clf_pi, b_clf_pi
 
-    # def get_rotation_constraints(self):
-    #     '''
-    #     Sets the Lyapunov rotation constraint.
-    #     '''
-    #     # Computes rate Lyapunov and gradient
-    #     Hv = self.clf.get_hessian()
-    #     Hh = self.cbf.get_hessian()
+    def get_rotation_constraint(self):
+        '''
+        Sets the Lyapunov rotation constraint.
+        '''
+        # Computes rate Lyapunov and gradient
+        Hv = self.clf.get_hessian()
+        Hh = self.cbf.get_hessian()
 
-    #     eigv, Qv = np.linalg.eig(Hv)
-    #     eigh, Qh = np.linalg.eig(Hh)
+        eigv, Qv = np.linalg.eig(Hv)
+        eigh, Qh = np.linalg.eig(Hh)
 
-    #     Qtilde = Qh.T @ Qv - np.eye(self.state_dim)
+        Qtilde = Qh.T @ Qv - np.eye(self.state_dim)
 
-    #     self.Vrot = 0.5 * np.trace( Qtilde.T @ Qtilde )
-    #     for k in range(self.sym_dim):
-    #         self.gradient_Vpi[k] = np.trace( deltaHv @ self.sym_basis[k] )
+        matrices1 = list()
+        for k in range(self.sym_dim):
+            matrices1.append( Qv @ self.sym_basis[k] @ Qv.T )
 
-    #     # Sets rate constraint
-    #     a_clf_pi = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vpi, -1.0, 0.0 ])
-    #     b_clf_pi = -self.gamma[1] * self.Vpi
+        A = np.zeros([self.skewsym_dim, self.sym_dim])
+        for i in range(self.skewsym_dim):
+            for j in range(i,self.sym_dim):
+                if i != j:
+                    A[i,j] = matrices1[j][i,j]
+
+        matrices2 = list()
+        for k in range(self.skewsym_dim):
+            matrices2.append( self.skewsym_basis[k] @ np.diag(eigv) - np.diag(eigv) @ self.skewsym_basis[k] )
+
+        B = np.zeros([self.skewsym_dim, self.skewsym_dim])
+
+
+        for i in range(self.state_dim):
+            for j in range(i,self.state_dim):
+                if i != j:
+
+
+        np.where()
+
+        self.Vrot = 0.5 * np.trace( Qtilde.T @ Qtilde )
+        for k in range(self.sym_dim):
+            self.gradient_Vrot[k] = np.trace( Qtilde @ self.skewsym_basis[k] )
+
+        # Sets rate constraint
+        a_clf_rot = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vrot, -1.0, 0.0 ])
+        b_clf_rot = -self.gamma[1] * self.Vrot
 
     def get_compatibility_constraints(self):
         '''

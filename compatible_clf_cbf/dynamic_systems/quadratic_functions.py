@@ -250,15 +250,28 @@ class Quadratic(Function):
         '''
         Returns the canonical basis of the space of symmetric (n x n) matrices.
         '''
-        symm_basis = list()
+        sym_basis = list()
         EYE = np.eye(n)
         for i in range(n):
             for j in range(i,n):
                 if i == j:
-                    symm_basis.append(np.outer(EYE[:,i], EYE[:,j]))
+                    sym_basis.append(np.outer(EYE[:,i], EYE[:,j]))
                 else:
-                    symm_basis.append(np.outer(EYE[:,i], EYE[:,j]) + np.outer(EYE[:,j], EYE[:,i]))
-        return symm_basis
+                    sym_basis.append(np.outer(EYE[:,i], EYE[:,j]) + np.outer(EYE[:,j], EYE[:,i]))
+        return sym_basis
+
+    @staticmethod
+    def skewsymmetric_basis(n):
+        '''
+        Returns the canonical basis of the space of skew-symmetric (n x n) matrices.
+        '''
+        sym_basis = list()
+        EYE = np.eye(n)
+        for i in range(n):
+            for j in range(i,n):
+                if i != j:
+                    sym_basis.append( ((-1)**(i+j))*(np.outer(EYE[:,i], EYE[:,j])-np.outer(EYE[:,j], EYE[:,i])) )
+        return sym_basis
 
     @staticmethod
     def rot2D(theta):
