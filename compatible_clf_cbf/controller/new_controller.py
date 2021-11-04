@@ -35,7 +35,7 @@ class NewQPController():
         self.Z = np.zeros([self.state_dim,self.state_dim])
         self.pencil_dict = {}
         self.f_params_dict = {
-            "epsilon": 0.2,
+            "epsilon": 0.6,
             "epsilon2": 0.01,
             # "minimum_CLF_eigenvalue": 0.0,
             "Kappa": 100,
@@ -89,6 +89,7 @@ class NewQPController():
         a_boundary_stable, b_boundary_stable = self.get_boundary_stability_constraint()
 
         a_rate, b_rate = self.get_rate_constraint()
+        a_clf_rot, b_clf_rot = self.get_rotation_constraint()
         a_barriers, b_barriers = self.get_compatibility_constraints()
 
         A = np.vstack([ a_clf, a_cbf, a_rate ])
@@ -233,37 +234,34 @@ class NewQPController():
 
         Qtilde = Qh.T @ Qv - np.eye(self.state_dim)
 
-        matrices1 = list()
-        for k in range(self.sym_dim):
-            matrices1.append( Qv @ self.sym_basis[k] @ Qv.T )
-
+        # Compute transformation from angular velocities to parameter derivatives
+        l = 0
         A = np.zeros([self.skewsym_dim, self.sym_dim])
-        for i in range(self.skewsym_dim):
-            for j in range(i,self.sym_dim):
-                if i != j:
-                    A[i,j] = matrices1[j][i,j]
-
-        matrices2 = list()
-        for k in range(self.skewsym_dim):
-            matrices2.append( self.skewsym_basis[k] @ np.diag(eigv) - np.diag(eigv) @ self.skewsym_basis[k] )
-
         B = np.zeros([self.skewsym_dim, self.skewsym_dim])
-
-
         for i in range(self.state_dim):
-            for j in range(i,self.state_dim):
-                if i != j:
-
-
-        np.where()
+            for j in range(i+1,self.state_dim):
+                for k in range(self.sym_dim):
+                    left_matrix = Qv @ self.sym_basis[k] @ Qv.T
+                    A[l,k] = left_matrix[i,j]
+                for k in range(self.skewsym_dim):
+                    right_matrix = self.skewsym_basis[k] @ np.diag(eigv) - np.diag(eigv) @ self.skewsym_basis[k]
+                    B[l,k] = right_matrix[i,j]
+                l = l + 1
 
         self.Vrot = 0.5 * np.trace( Qtilde.T @ Qtilde )
-        for k in range(self.sym_dim):
-            self.gradient_Vrot[k] = np.trace( Qtilde @ self.skewsym_basis[k] )
+
+        # print("Vrot = " + str(self.Vrot))
+
+        gradient_Vrot_omega = np.zeros(self.skewsym_dim)
+        for k in range(self.skewsym_dim):
+            gradient_Vrot_omega[k] = -np.trace( Qtilde @ self.skewsym_basis[k] )
+        self.gradient_Vrot = gradient_Vrot_omega @ (np.linalg.inv(B) @ A)
 
         # Sets rate constraint
-        a_clf_rot = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vrot, -1.0, 0.0 ])
+        a_clf_rot = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vrot, 0.0, 0.0 ])
         b_clf_rot = -self.gamma[1] * self.Vrot
+
+        return a_clf_rot, b_clf_rot
 
     def get_compatibility_constraints(self):
         '''

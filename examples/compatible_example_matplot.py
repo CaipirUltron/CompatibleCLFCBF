@@ -7,7 +7,7 @@ from compatible_clf_cbf.controller import NewQPController
 from compatible_clf_cbf.graphical_simulation import SimulationMatplot
 
 # Create QP controller and graphical simulation.
-dt = .003
+dt = .002
 qp_controller = NewQPController(plant, clf, ref_clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 10.0], p = [1.0, 1.0], dt = dt)
 
 # Simulation loop -------------------------------------------------------------------
@@ -26,7 +26,7 @@ for step in range(0, num_steps):
     plant.actuate(dt)
 
     # print("CLF = " + str(qp_controller.V))
-    print("CBF = " + str(qp_controller.h))
+    # print("CBF = " + str(qp_controller.h))
     # print("Rate CLF = " + str(qp_controller.Vpi))
 
     # print("Compatibility Barrier 1 = " + str(qp_controller.h_gamma1))
