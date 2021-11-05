@@ -274,6 +274,17 @@ class Quadratic(Function):
         return sym_basis
 
     @staticmethod
+    def hat(omega):
+        '''
+        Returns the skew-symmetric matrix corresponding to the omega vector array.
+        '''
+        n = len(omega)
+        basis = Quadratic.skewsymmetric_basis(n)
+        omega_hat = np.zeros([n,n])
+        for k in range(len(basis)):
+            omega_hat = omega_hat + omega[k]*basis[k]
+
+    @staticmethod
     def rot2D(theta):
         '''
         Standard 2D rotation matrix.

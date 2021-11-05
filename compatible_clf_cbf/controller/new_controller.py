@@ -97,8 +97,8 @@ class NewQPController():
 
         # Adds compatibility constraints in case the trajectory is above the obstacle
         if (self.get_region() >= 0):
-            A = np.vstack([ A, a_barriers ])
-            b = np.hstack([ b, b_barriers ])
+            A = np.vstack([ A, a_clf_rot ])
+            b = np.hstack([ b, b_clf_rot ])
             # Adds boundary stability constraint in case the CBF is indefinite
             if (self.get_mode() <= 0):
                 A = np.vstack([ A, a_boundary_stable ])
@@ -227,12 +227,7 @@ class NewQPController():
         '''
         # Computes rate Lyapunov and gradient
         Hv = self.clf.get_hessian()
-        Hh = self.cbf.get_hessian()
-
         eigv, Qv = np.linalg.eig(Hv)
-        eigh, Qh = np.linalg.eig(Hh)
-
-        Qtilde = Qh.T @ Qv - np.eye(self.state_dim)
 
         # Compute transformation from angular velocities to parameter derivatives
         l = 0
@@ -248,14 +243,23 @@ class NewQPController():
                     B[l,k] = right_matrix[i,j]
                 l = l + 1
 
-        self.Vrot = 0.5 * np.trace( Qtilde.T @ Qtilde )
+        x0 = self.clf.get_critical()
+        p0 = self.cbf.get_critical()
+        delta = p0 - x0
+        delta = delta/np.linalg.norm(delta)
 
-        # print("Vrot = " + str(self.Vrot))
+        imax = np.argmax( Qv.T @ delta )
+        self.Vrot = 0.5*( 1 - ( Qv[:,imax].T @ delta )**2 )
+
+        print("Vrot = " + str(self.Vrot))
 
         gradient_Vrot_omega = np.zeros(self.skewsym_dim)
         for k in range(self.skewsym_dim):
-            gradient_Vrot_omega[k] = -np.trace( Qtilde @ self.skewsym_basis[k] )
+            QvSk = Qv @ self.skewsym_basis[k]
+            gradient_Vrot_omega[k] = - ( Qv[:,imax].T @ delta)*( delta.T @ QvSk[:,imax] )
         self.gradient_Vrot = gradient_Vrot_omega @ (np.linalg.inv(B) @ A)
+
+        print("Gradient Vrot = " + str(self.gradient_Vrot))
 
         # Sets rate constraint
         a_clf_rot = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vrot, 0.0, 0.0 ])

@@ -16,14 +16,14 @@ try:
 
         # Control
         u_control, upi_control = qp_controller.get_control()
-        upi_control = np.zeros(3)
+        # upi_control = np.zeros(3)
         qp_controller.update_clf_dynamics(upi_control)
         
         # Send actuation commands
         plant.set_control(u_control) 
         plant.actuate(dt)
 
-        print("CBF = " + str(qp_controller.h))
+        # print("CBF = " + str(qp_controller.h))
 
         # print("Compatibility Barrier 1 = " + str(qp_controller.h_gamma1))
         # print("Compatibility Barrier 2 = " + str(qp_controller.h_gamma2))
