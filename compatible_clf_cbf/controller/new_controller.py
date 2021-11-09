@@ -35,7 +35,7 @@ class NewQPController():
         self.Z = np.zeros([self.state_dim,self.state_dim])
         self.pencil_dict = {}
         self.f_params_dict = {
-            "epsilon": 0.6,
+            "epsilon": 4.2,
             "epsilon2": 0.01,
             # "minimum_CLF_eigenvalue": 0.0,
             "Kappa": 100,
@@ -89,16 +89,19 @@ class NewQPController():
         a_boundary_stable, b_boundary_stable = self.get_boundary_stability_constraint()
 
         a_rate, b_rate = self.get_rate_constraint()
-        a_clf_rot, b_clf_rot = self.get_rotation_constraint()
+        a_clf_rot, b_clf_rot = self.get_fix_rot_constraints()
         a_barriers, b_barriers = self.get_compatibility_constraints()
 
-        A = np.vstack([ a_clf, a_cbf, a_rate ])
-        b = np.array([ b_clf, b_cbf, b_rate ], dtype=float)
+        A = np.vstack([ a_clf, a_cbf ])
+        b = np.array([ b_clf, b_cbf ], dtype=float)
+
+        Aeq = a_clf_rot
+        beq = b_clf_rot
 
         # Adds compatibility constraints in case the trajectory is above the obstacle
         if (self.get_region() >= 0):
-            A = np.vstack([ A, a_clf_rot ])
-            b = np.hstack([ b, b_clf_rot ])
+            A = np.vstack([ A, a_barriers ])
+            b = np.hstack([ b, b_barriers ])
             # Adds boundary stability constraint in case the CBF is indefinite
             if (self.get_mode() <= 0):
                 A = np.vstack([ A, a_boundary_stable ])
@@ -106,6 +109,7 @@ class NewQPController():
 
         # Solve QP
         self.QP.set_constraints(A, b)
+        self.QP.set_eq_constraints(Aeq, beq)
         QP_sol = self.QP.get_solution()
 
         self.u = QP_sol[0:self.control_dim]
@@ -144,10 +148,10 @@ class NewQPController():
 
         # CLF constraint for the first QP
         delta = np.heaviside(float(self.get_region()),0.0)
-        a_clf = np.hstack([ eta*self.LgV, eta*delta*self.nablaV_pi, 0.0, 0.0 ])
+        a_clf = np.hstack([ eta*self.LgV, eta*delta*self.nablaV_pi, -1.0, 0.0 ])
         # a_clf = np.hstack([ eta*self.LgV, np.zeros(self.sym_dim), -1.0, 0.0 ])
         # b_clf = - self.gamma[0] * self.V - eta*( self.LfV + self.nablaV_pi @ self.u_v )
-        b_clf = - self.gamma[0] * self.V - eta*self.LfV
+        b_clf = - self.gamma[0]*self.V - eta*self.LfV
 
         return a_clf, b_clf
 
@@ -221,11 +225,10 @@ class NewQPController():
 
         return a_clf_pi, b_clf_pi
 
-    def get_rotation_constraint(self):
+    def compute_rot_Jacobian(self):
         '''
-        Sets the Lyapunov rotation constraint.
+        Computes the rotational Jacobian.
         '''
-        # Computes rate Lyapunov and gradient
         Hv = self.clf.get_hessian()
         eigv, Qv = np.linalg.eig(Hv)
 
@@ -243,6 +246,28 @@ class NewQPController():
                     B[l,k] = right_matrix[i,j]
                 l = l + 1
 
+        return np.linalg.inv(B) @ A
+
+    def get_fix_rot_constraints(self):
+        '''
+        Gets the constraint for fixing CLF rotation.
+        '''
+        Jacobian_pi_omega = self.compute_rot_Jacobian()
+
+        a_clf_rot = np.hstack( [ np.zeros([self.skewsym_dim, self.control_dim]), Jacobian_pi_omega, np.zeros([self.skewsym_dim, 2]) ])
+        b_clf_rot = np.zeros(self.skewsym_dim)
+
+        return a_clf_rot, b_clf_rot
+
+    def get_rotation_constraints(self):
+        '''
+        Gets the rotational constraint.
+        '''
+        Hv = self.clf.get_hessian()
+        eigv, Qv = np.linalg.eig(Hv)
+        Jacobian_pi_omega = self.compute_rot_Jacobian()
+
+        # Computes rate Lyapunov and gradient
         x0 = self.clf.get_critical()
         p0 = self.cbf.get_critical()
         delta = p0 - x0
@@ -251,15 +276,11 @@ class NewQPController():
         imax = np.argmax( Qv.T @ delta )
         self.Vrot = 0.5*( 1 - ( Qv[:,imax].T @ delta )**2 )
 
-        print("Vrot = " + str(self.Vrot))
-
         gradient_Vrot_omega = np.zeros(self.skewsym_dim)
         for k in range(self.skewsym_dim):
             QvSk = Qv @ self.skewsym_basis[k]
             gradient_Vrot_omega[k] = - ( Qv[:,imax].T @ delta)*( delta.T @ QvSk[:,imax] )
-        self.gradient_Vrot = gradient_Vrot_omega @ (np.linalg.inv(B) @ A)
-
-        print("Gradient Vrot = " + str(self.gradient_Vrot))
+        self.gradient_Vrot = gradient_Vrot_omega @ Jacobian_pi_omega
 
         # Sets rate constraint
         a_clf_rot = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vrot, 0.0, 0.0 ])

@@ -4,7 +4,7 @@ import numpy as np
 from compatible_clf_cbf.dynamic_systems import Quadratic, QuadraticLyapunov, QuadraticBarrier, Integrator, LinearSystem
 
 ######################################### Configure and create 2D plant ####################################################
-initial_state = [-2.0, 5.0]
+initial_state = [-3.0, 5.0]
 # plant = Integrator(initial_state, initial_control = np.zeros(2))
 plant = LinearSystem(initial_state, initial_control = np.zeros(2), A = np.zeros([2,2]), B = np.diag([1,1]))
 ############################################################################################################################

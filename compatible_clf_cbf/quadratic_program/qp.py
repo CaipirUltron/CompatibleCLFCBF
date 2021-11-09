@@ -12,13 +12,21 @@ class QuadraticProgram():
                 A = kwargs[key]
             elif key == 'b':
                 b = kwargs[key]
+            elif key == 'Aeq':
+                Aeq = kwargs[key]
+            elif key == 'beq':
+                beq = kwargs[key]
         if 'P' in locals() and 'q' in locals():
             self.set_cost(P,q)
         if 'A' in locals() and 'b' in locals():
             self.set_constraints(A,b)
+        if 'Aeq' in locals() and 'beq' in locals():
+            self.set_eq_constraints(Aeq,beq)
         else:
             self.A = None
             self.b = None
+            self.Aeq = None
+            self.beq = None
         self.last_solution = None
 
     def set_cost(self, P, q):
@@ -51,6 +59,22 @@ class QuadraticProgram():
         else:
             self.num_constraints = 1
 
+    def set_eq_constraints(self, Aeq, beq):
+        '''
+        Set constraints of the type A x == b
+        '''
+        if beq.ndim != 1:
+            raise Exception('beq must be a 1-dim array.')
+        if Aeq.ndim == 2 and Aeq.shape[0] != len(beq):
+            raise Exception('Aeq and beq must have the same number of lines.')
+        self.Aeq = Aeq
+        self.beq = beq
+        # self.dimension = Aeq.shape[0]
+        if Aeq.ndim == 2:
+            self.num_eq_constraints = Aeq.shape[1]
+        else:
+            self.num_eq_constraints = 1
+
     def get_solution(self):
         '''
         Returns the solution of the configured QP.
@@ -63,6 +87,6 @@ class QuadraticProgram():
         Method for solving the configured QP using quadprog.
         '''
         try:
-            self.last_solution = solve_qp(P=self.P, q=self.q, G=self.A, h=self.b, solver="quadprog")
+            self.last_solution = solve_qp(P=self.P, q=self.q, G=self.A, h=self.b, A=self.Aeq, b=self.beq, solver="quadprog")
         except Exception as error:
             print(error)
