@@ -35,10 +35,8 @@ class NewQPController():
         self.Z = np.zeros([self.state_dim,self.state_dim])
         self.pencil_dict = {}
         self.f_params_dict = {
-            "epsilon": 4.2,
-            "epsilon2": 0.01,
-            # "minimum_CLF_eigenvalue": 0.0,
-            "Kappa": 100,
+            "epsilon": 1.2,
+            "min_CLF_eigenvalue": 0.1,
         }
         self.compute_compatibility()
 
@@ -92,24 +90,32 @@ class NewQPController():
         a_clf_rot, b_clf_rot = self.get_fix_rot_constraints()
         a_barriers, b_barriers = self.get_compatibility_constraints()
 
-        A = np.vstack([ a_clf, a_cbf ])
-        b = np.array([ b_clf, b_cbf ], dtype=float)
-
-        Aeq = a_clf_rot
-        beq = b_clf_rot
+        A_nominal = np.vstack([ a_clf, a_cbf ])
+        b_nominal = np.array([ b_clf, b_cbf ], dtype=float)
 
         # Adds compatibility constraints in case the trajectory is above the obstacle
         if (self.get_region() >= 0):
-            A = np.vstack([ A, a_barriers ])
-            b = np.hstack([ b, b_barriers ])
+            A = np.vstack([ A_nominal, a_barriers ])
+            b = np.hstack([ b_nominal, b_barriers ])
             # Adds boundary stability constraint in case the CBF is indefinite
             if (self.get_mode() <= 0):
-                A = np.vstack([ A, a_boundary_stable ])
-                b = np.hstack([ b, b_boundary_stable ])
+                A = np.vstack([ A_nominal, a_boundary_stable ])
+                b = np.hstack([ b_nominal, b_boundary_stable ])
+        else:
+            A = np.vstack([ A_nominal, a_rate ])
+            b = np.hstack([ b_nominal, b_rate ])
+
+        # Initializes constraints ('cleans' the QP)
+        self.QP.initialize()
+
+        # Sets the inequality constraints
+        self.QP.set_constraints(A, b)
+
+        # Sets the equality constraints (in case compatibility is needed)
+        if (self.get_region() >= 0):
+            self.QP.set_eq_constraints(a_clf_rot, b_clf_rot)
 
         # Solve QP
-        self.QP.set_constraints(A, b)
-        self.QP.set_eq_constraints(Aeq, beq)
         QP_sol = self.QP.get_solution()
 
         self.u = QP_sol[0:self.control_dim]
@@ -147,10 +153,7 @@ class NewQPController():
             eta = +1
 
         # CLF constraint for the first QP
-        delta = np.heaviside(float(self.get_region()),0.0)
-        a_clf = np.hstack([ eta*self.LgV, eta*delta*self.nablaV_pi, -1.0, 0.0 ])
-        # a_clf = np.hstack([ eta*self.LgV, np.zeros(self.sym_dim), -1.0, 0.0 ])
-        # b_clf = - self.gamma[0] * self.V - eta*( self.LfV + self.nablaV_pi @ self.u_v )
+        a_clf = np.hstack([ eta*self.LgV, 0*eta*self.nablaV_pi, -1.0, 0.0 ])
         b_clf = - self.gamma[0]*self.V - eta*self.LfV
 
         return a_clf, b_clf
@@ -219,72 +222,29 @@ class NewQPController():
         for k in range(self.sym_dim):
             self.gradient_Vpi[k] = np.trace( deltaHv @ self.sym_basis[k] )
 
+        # print("Vpi = " + str(self.Vpi))
+
         # Sets rate constraint
-        a_clf_pi = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vpi, -1.0, 0.0 ])
+        a_clf_pi = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vpi, 0.0, -1.0 ])
         b_clf_pi = -self.gamma[1] * self.Vpi
 
         return a_clf_pi, b_clf_pi
 
-    def compute_rot_Jacobian(self):
+    def get_fix_rot_constraints(self):
         '''
-        Computes the rotational Jacobian.
+        Sets the constraint for fixing the pencil eigenvectors.
         '''
-        Hv = self.clf.get_hessian()
-        eigv, Qv = np.linalg.eig(Hv)
-
-        # Compute transformation from angular velocities to parameter derivatives
         l = 0
-        A = np.zeros([self.skewsym_dim, self.sym_dim])
-        B = np.zeros([self.skewsym_dim, self.skewsym_dim])
+        Jacobian_pi_omega = np.zeros([self.skewsym_dim, self.sym_dim])
         for i in range(self.state_dim):
             for j in range(i+1,self.state_dim):
                 for k in range(self.sym_dim):
-                    left_matrix = Qv @ self.sym_basis[k] @ Qv.T
-                    A[l,k] = left_matrix[i,j]
-                for k in range(self.skewsym_dim):
-                    right_matrix = self.skewsym_basis[k] @ np.diag(eigv) - np.diag(eigv) @ self.skewsym_basis[k]
-                    B[l,k] = right_matrix[i,j]
+                    left_matrix = self.Q.T @ self.sym_basis[k] @ self.Z
+                    Jacobian_pi_omega[l,k] = left_matrix[i,j]
                 l = l + 1
-
-        return np.linalg.inv(B) @ A
-
-    def get_fix_rot_constraints(self):
-        '''
-        Gets the constraint for fixing CLF rotation.
-        '''
-        Jacobian_pi_omega = self.compute_rot_Jacobian()
 
         a_clf_rot = np.hstack( [ np.zeros([self.skewsym_dim, self.control_dim]), Jacobian_pi_omega, np.zeros([self.skewsym_dim, 2]) ])
         b_clf_rot = np.zeros(self.skewsym_dim)
-
-        return a_clf_rot, b_clf_rot
-
-    def get_rotation_constraints(self):
-        '''
-        Gets the rotational constraint.
-        '''
-        Hv = self.clf.get_hessian()
-        eigv, Qv = np.linalg.eig(Hv)
-        Jacobian_pi_omega = self.compute_rot_Jacobian()
-
-        # Computes rate Lyapunov and gradient
-        x0 = self.clf.get_critical()
-        p0 = self.cbf.get_critical()
-        delta = p0 - x0
-        delta = delta/np.linalg.norm(delta)
-
-        imax = np.argmax( Qv.T @ delta )
-        self.Vrot = 0.5*( 1 - ( Qv[:,imax].T @ delta )**2 )
-
-        gradient_Vrot_omega = np.zeros(self.skewsym_dim)
-        for k in range(self.skewsym_dim):
-            QvSk = Qv @ self.skewsym_basis[k]
-            gradient_Vrot_omega[k] = - ( Qv[:,imax].T @ delta)*( delta.T @ QvSk[:,imax] )
-        self.gradient_Vrot = gradient_Vrot_omega @ Jacobian_pi_omega
-
-        # Sets rate constraint
-        a_clf_rot = np.hstack( [ np.zeros(self.control_dim), self.gradient_Vrot, 0.0, 0.0 ])
-        b_clf_rot = -self.gamma[1] * self.Vrot
 
         return a_clf_rot, b_clf_rot
 
@@ -294,36 +254,16 @@ class NewQPController():
         '''
         self.h_gamma1, gradient_h_gamma1 = self.first_compatibility_barrier()
         self.h_gamma2, gradient_h_gamma2 = self.second_compatibility_barrier()
-        # self.h_gamma3, gradient_h_gamma3 = self.third_compatibility_barrier()
-
-        # Applies selection function
-        if self.get_region() >= 0:
-            kappa_term = 0.0
-        else:
-            kappa_term = self.f_params_dict["Kappa"]
 
         # Sets compatibility constraints
         a_cbf_gamma1 = -np.hstack([ np.zeros([self.num_positive_critical, self.control_dim]), gradient_h_gamma1, np.zeros([self.num_positive_critical, 2]) ])
         b_cbf_gamma1 = self.alpha[1]*self.h_gamma1
 
-        # b_cbf_gamma1 = self.alpha[1]*self.h_gamma1 + kappa_term*np.ones(self.num_positive_critical)
-
         a_cbf_gamma2 = -np.hstack([ np.zeros([3, self.control_dim]), gradient_h_gamma2, np.zeros([3,2]) ])
         b_cbf_gamma2 = self.alpha[1]*self.h_gamma2
 
-        # a_cbf_gamma2 = -np.hstack([ np.zeros(self.control_dim), gradient_h_gamma2, 0.0 ])
-
-        # a_cbf_gamma3 = -np.hstack([ np.zeros(self.control_dim), gradient_h_gamma3, 0.0 ])
-        # b_cbf_gamma3 = self.alpha[1]*self.h_gamma3
-
-        # a_cbf_pi = a_cbf_gamma1
-        # b_cbf_pi = b_cbf_gamma1
-
         a_cbf_pi = np.vstack([ a_cbf_gamma1, a_cbf_gamma2 ])
         b_cbf_pi = np.hstack([ b_cbf_gamma1, b_cbf_gamma2 ])
-
-        # a_cbf_pi = np.vstack([ a_cbf_gamma1, a_cbf_gamma2, a_cbf_gamma3 ])
-        # b_cbf_pi = np.hstack([ b_cbf_gamma1, b_cbf_gamma2, b_cbf_gamma3 ])
 
         return a_cbf_pi, b_cbf_pi
 
@@ -359,7 +299,7 @@ class NewQPController():
         '''
         # Matrix barrier function (MBF)
         Hv = self.clf.get_hessian()
-        self.MCBF = Hv - self.f_params_dict["epsilon2"] * np.eye(self.state_dim)
+        self.MCBF = Hv - self.f_params_dict["min_CLF_eigenvalue"] * np.eye(self.state_dim)
         eig_mbf, Q_mbf = np.linalg.eig(Hv)
 
         # print("Eigenvalues of Hv = " + str(eig_mbf))
@@ -383,50 +323,6 @@ class NewQPController():
 
         return self.h_gamma2, gradient_h_gamma2
 
-    # def second_compatibility_barrier(self):
-    #     '''
-    #     Computes second compatibility barrier constraint, for positive-type eigenvalues left and negative-type eigenvalues right on the f-function.
-    #     '''
-    #     mode = self.get_mode()
-
-    #     Hv = self.clf.get_hessian()
-    #     eigHv, V = np.linalg.eig(Hv)
-
-    #     # Second barrier
-    #     self.h_gamma2 = np.zeros(self.state_dim)
-    #     gradient_h_gamma2 = np.zeros([self.state_dim, self.sym_dim])
-    #     for k in range(self.state_dim):
-
-    #         # Barrier function
-    #         self.h_gamma2[k] = mode * ( eigHv[k] - np.tanh(mode) * self.f_params_dict["minimum_CLF_eigenvalue"] )
-
-    #         # Barrier function gradient
-    #         for i in range(self.sym_dim):
-    #             gradient_h_gamma2[k,i] = mode * ( V[:,k].T @ self.sym_basis[i] @ V[:,k] )
-
-    #     max_index = np.argmax(eigHv)
-    #     self.h_gamma2 = self.h_gamma2[1]
-    #     gradient_h_gamma2 = gradient_h_gamma2[1,:]
-
-    #     return self.h_gamma2, gradient_h_gamma2
-
-    # def third_compatibility_barrier(self):
-    #     '''
-    #     Computes third compatibility barrier constraint, for positive-type eigenvalues left and negative-type eigenvalues right on the f-function.
-    #     '''
-    #     Hv = self.clf.get_hessian()
-    #     eigHv, V = np.linalg.eig(Hv)
-
-    #     # Third barrier function
-    #     self.h_gamma3 = eigHv[0] * eigHv[1]
-
-    #     # Third barrier function gradient
-    #     gradient_h_gamma3 = np.zeros(self.sym_dim)
-    #     for i in range(self.sym_dim):
-    #         gradient_h_gamma3[i] = (V[:,0].T @ self.sym_basis[i] @ V[:,0]) * eigHv[1] + (V[:,1].T @ self.sym_basis[i] @ V[:,1]) * eigHv[0]
-
-    #     return self.h_gamma3, gradient_h_gamma3
-
     def get_mode(self):
         '''
         Computes the operation mode for a general n-th order system (for now, only for second order systems - determinant suffices).
@@ -440,9 +336,6 @@ class NewQPController():
         Computes the region function: positive when is necessary to compatibilize, negative otherwise.
         Currently, we use a geometric method based on the relative position of the CLF-CBF.
         '''                
-        # return self.get_mode() * ( self.V * LgVLgh - self.h * math.sqrt(LgV2)*math.sqrt(Lgh2) )
-        # return self.get_mode() * LgVLgh
-
         state = self.plant.get_state()
 
         eig_cbf, Q_cbf = np.linalg.eig(self.cbf.get_hessian())
@@ -469,33 +362,17 @@ class NewQPController():
 
         return eigenvalues, alpha, beta, sorted_args
 
-    # def compute_eigenvectors(self, eigenvalues):
-    #     '''
-    #     Computes pencil eigenvectors from Schur decomposition. Left/right eigenvectors are the same due to the pencil symmetry.
-    #     '''
-    #     m = 0
-    #     Eigenvectors = np.zeros([self.state_dim, self.state_dim])
-    #     Hv, Hh = self.clf.get_hessian(), self.cbf.get_hessian()
-    #     for eig in eigenvalues:
-    #         for k in range(self.state_dim):
-    #             if eig == (self.Z[:,k].T @ Hv @ self.Z[:,k]) / (self.Z[:,k].T @ Hh @ self.Z[:,k]) :
-    #                 Eigenvectors[:,m] = self.Z[:,k]
-    #                 m+=1
-    #                 break
-    #             if eig == (self.Q[:,k].T @ Hv @ self.Q[:,k]) / (self.Q[:,k].T @ Hh @ self.Q[:,k]) :
-    #                 Eigenvectors[:,m] = self.Q[:,k]
-    #                 m+=1
-    #                 break
-        
-    #     return Eigenvectors
-
     def compute_pencil(self, Hv, Hh):
         '''
-        Given Hv and Hh, this method computes the generalized pencil eigenvalues and the pencil characteristic polynomial
+        Given Hv and Hh, this method computes the generalized pencil eigenvalues and the pencil characteristic polynomial.
         '''
         self.schurHv, self.schurHh, alpha, beta, self.Q, self.Z = scipy.linalg.ordqz(Hv, Hh)
+
         pencil_eig, alpha, beta, sorted_args = self.compute_eigenvalues()
-        # Eigenvectors = self.compute_eigenvectors(pencil_eig)
+
+        # print("Q = " + str(self.Q))
+        # print("Z = " + str(self.Z))
+        # print("Pencil eig = " + str(pencil_eig))
 
         # Assumption: Hv is invertible => detHv != 0
         detHv = np.linalg.det(Hv)
@@ -512,7 +389,7 @@ class NewQPController():
 
     def compute_f(self):
         '''
-        This method computes rational function f 
+        This method computes rational function f.
         '''
         n = self.state_dim
 

@@ -7,14 +7,18 @@ from compatible_clf_cbf.controller import NominalQP
 from compatible_clf_cbf.graphical_simulation import SimulationMatplot
 
 # Create QP controller and graphical simulation.
-dt = .005
+dt = .002
 qp_controller = NominalQP(plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0)
 
 # Simulation loop -------------------------------------------------------------------
 T = 20
 num_steps = int(T/dt)
+time = np.zeros(num_steps)
 print('Running simulation...')
 for step in range(0, num_steps):
+
+    # Simulation time
+    time[step] = step*dt
 
     # Control
     u_control = qp_controller.get_control()
@@ -26,6 +30,7 @@ for step in range(0, num_steps):
 
     # Collect simulation logs ----------------------------------------------------------
     logs = {
+        "time": time,
         "stateLog": plant.state_log,
         "clfLog": qp_controller.clf_dynamics.state_log
     }

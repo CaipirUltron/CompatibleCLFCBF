@@ -68,6 +68,9 @@ class NominalQP():
         a_clf = np.hstack( [ self.LgV, -1.0 ])
         b_clf = -self.gamma * self.V - self.LfV
 
+        self.h = self.cbf.evaluate(state)
+        self.nablah = self.cbf.get_gradient()
+
         return a_clf, b_clf
 
     def get_cbf_constraint(self):

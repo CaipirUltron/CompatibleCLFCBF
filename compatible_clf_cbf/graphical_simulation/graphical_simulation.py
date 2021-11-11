@@ -23,6 +23,7 @@ class SimulationMatplot():
         self.ax.set_title('CLF-CBF QP-based Control')
 
         # Get logs
+        self.time = logs["time"]
         self.state_log = logs["stateLog"]
         self.clf_log = logs["clfLog"]
         self.num_steps = len(self.state_log[0])
@@ -33,6 +34,7 @@ class SimulationMatplot():
         self.clf, self.cbf = clf, cbf
 
         # Initalize graphical objects
+        self.time_text = self.ax.text(axes_lim[1]-2.5, axes_lim[3]-1, str("Time = "))
         self.trajectory, = self.ax.plot([],[],lw=2)
         self.clf_level_set1, = self.ax.plot([],[],'b',lw=1)
         self.clf_level_set2, = self.ax.plot([],[],'b',lw=1)
@@ -52,6 +54,7 @@ class SimulationMatplot():
 
     def init(self):
 
+        self.time_text.text = str("Time = ")
         self.trajectory.set_data([],[])
 
         self.clf_level_set1.set_data([],[])
@@ -67,12 +70,14 @@ class SimulationMatplot():
         xdata, ydata = self.state_log[0][0:i], self.state_log[1][0:i]
         self.trajectory.set_data(xdata, ydata)
 
+        current_time = np.around(self.time[i], decimals = 2)
         current_state = [self.state_log[0][i], self.state_log[1][i]]
         current_pi_state = [self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i]]
 
+        self.time_text.set_text("Time = " + str(current_time) + "s")
+
         Hv = Quadratic.vector2sym(current_pi_state)
         self.clf.set_param(hessian=Hv)
-        
         if self.draw_level:
             V = self.clf.evaluate(current_state)
             xclf, yclf, uclf, vclf = self.clf.superlevel(V, self.numpoints)
@@ -88,7 +93,7 @@ class SimulationMatplot():
         # self.clf_arrows = self.ax.quiver(xclf, yclf, uclf, vclf, pivot='tail', color='b', scale=50.0, headlength=0.5, headwidth=1.0)
             self.cbf_arrows = self.ax.quiver(xcbf, ycbf, ucbf, vcbf, pivot='tail', color='g', scale=50.0, headlength=0.5, headwidth=1.0)
 
-        return self.trajectory, self.clf_level_set1, self.clf_level_set2, self.cbf_level_set1, self.cbf_level_set2, self.clf_crit, self.cbf_crit
+        return self.time_text, self.trajectory, self.clf_level_set1, self.clf_level_set2, self.cbf_level_set1, self.cbf_level_set2, self.clf_crit, self.cbf_crit
 
     def animate(self):
         self.animation = anim.FuncAnimation(self.fig, func=self.update, init_func=self.init, frames=self.num_steps, interval=20, repeat=False, blit=True)

@@ -23,11 +23,17 @@ class QuadraticProgram():
         if 'Aeq' in locals() and 'beq' in locals():
             self.set_eq_constraints(Aeq,beq)
         else:
-            self.A = None
-            self.b = None
-            self.Aeq = None
-            self.beq = None
+            self.initialize()
         self.last_solution = None
+
+    def initialize(self):
+        '''
+        Initializes QP with no constraints.
+        '''
+        self.A = None
+        self.b = None
+        self.Aeq = None
+        self.beq = None
 
     def set_cost(self, P, q):
         '''
