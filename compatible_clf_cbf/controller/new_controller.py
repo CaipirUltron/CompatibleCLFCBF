@@ -41,18 +41,21 @@ class NewQPController():
         self.compute_compatibility()
 
         # Parameters for the inner and outer QPs
-        self.gamma, self.alpha = gamma, alpha
+        self.gamma, self.alpha, self.p = gamma, alpha, p
 
-        # Parameters for QP controller based on the new theorem
-        self.p = p
-        self.QP_dim = self.control_dim + self.sym_dim + 1 + 1
-        P = np.eye(self.QP_dim)
-        for i in range(0,self.sym_dim):
-            P[self.control_dim+i,self.control_dim+i] = self.p[0]
-        P[-1,-1] = self.p[1]
-        P[-2,-2] = self.p[1]
-        q = np.zeros(self.QP_dim)
-        self.QP = QuadraticProgram(P=P,q=q)
+        # Parameters for the inner QP controller (QP1)
+        self.QP1_dim = self.control_dim + 1
+        P1 = np.eye(self.QP1_dim)
+        P1[-1,-1] = self.p[0]
+        q1 = np.zeros(self.QP1_dim)
+        self.QP1 = QuadraticProgram(P=P1,q=q1)
+
+        # Parameters for the outer QP controller (QP2)
+        self.QP2_dim = self.sym_dim + 1
+        P2 = np.eye(self.QP2_dim)
+        P2[-1,-1] = self.p[1]
+        q2 = np.zeros(self.QP2_dim)
+        self.QP2 = QuadraticProgram(P=P2,q=q2)
 
         # Variable initialization
         self.ctrl_dt = dt
