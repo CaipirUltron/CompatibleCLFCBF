@@ -20,11 +20,11 @@ for step in range(0, num_steps):
     # Simulation time
     time[step] = step*dt
 
-    # Control
-    u_control, upi_control = qp_controller.get_control()
-    # upi_control = np.zeros(3)
+    # Inner loop control
+    u_control = qp_controller.get_control()
 
-    print("CLF = " + str(qp_controller.V))
+    # Outer loop control
+    upi_control = qp_controller.get_clf_control()
 
     # Send actuation commands
     qp_controller.update_clf_dynamics(upi_control)

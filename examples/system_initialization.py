@@ -26,14 +26,14 @@ ref_clf = QuadraticLyapunov(init_value = initial_state, hessian = ref_clf_params
 ############################################################################################################################
 
 ############################################## Configure and create CBF ####################################################
-# xaxis_length, yaxis_length, cbf_angle = 3.0, 1.0, math.radians(30.0)
-# cbf_params = {
-#     "Hh": Quadratic.canonical2D([ 1/(xaxis_length**2), 1/(yaxis_length**2) ], cbf_angle),
-#     "p0": [ 0.0, 3.0 ]
-# }
-cbf_lambda_x, cbf_lambda_y, cbf_angle = 1.0, 5.0, math.radians(30.0)
+xaxis_length, yaxis_length, cbf_angle = 3.0, 1.0, math.radians(30.0)
 cbf_params = {
-    "Hh": Quadratic.canonical2D([ cbf_lambda_x , cbf_lambda_y ], cbf_angle),
-    "p0": [ 0.0, 3.0 ] }
+    "Hh": Quadratic.canonical2D([ 1/(xaxis_length**2), 1/(yaxis_length**2) ], cbf_angle),
+    "p0": [ 0.0, 3.0 ]
+}
+# cbf_lambda_x, cbf_lambda_y, cbf_angle = 1.0, 5.0, math.radians(30.0)
+# cbf_params = {
+#     "Hh": Quadratic.canonical2D([ cbf_lambda_x , cbf_lambda_y ], cbf_angle),
+#     "p0": [ 0.0, 3.0 ] }
 cbf = QuadraticBarrier(init_value = initial_state, hessian = cbf_params["Hh"], critical = cbf_params["p0"])
 ############################################################################################################################
