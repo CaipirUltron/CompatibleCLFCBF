@@ -11,6 +11,8 @@ qp_controller = NewQPController(plant, clf, ref_clf, cbf)
 print("Polar eigenvalues:" + str(qp_controller.pencil_dict["polar_eigenvalues"]))
 print("Critical pts:" + str(np.arctan(qp_controller.f_critical)))
 print("f at critical pts:" + str(np.arctan(qp_controller.critical_values)))
+print("f at critical pts:" + str(np.arctan(qp_controller.critical_values)))
+print("f-function zeros:" + str(np.arctan(qp_controller.f_dict["zeros"])))
 
 # print("Alpha = " + str(qp_controller.pencil_dict["alpha"]))
 # print("Beta = " + str(qp_controller.pencil_dict["beta"]))

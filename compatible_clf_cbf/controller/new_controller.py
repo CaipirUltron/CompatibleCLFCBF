@@ -35,8 +35,8 @@ class NewQPController():
         self.Z = np.zeros([self.state_dim,self.state_dim])
         self.pencil_dict = {}
         self.f_params_dict = {
-            "epsilon": 1.2,
-            "min_CLF_eigenvalue": 0.5,
+            "epsilon": 1.8,
+            "min_CLF_eigenvalue": 0.1,
         }
         self.compute_compatibility()
 
@@ -89,13 +89,16 @@ class NewQPController():
         a_cbf, b_cbf = self.get_cbf_constraint()
         a_boundary_stable, b_boundary_stable = self.get_boundary_stability_constraint()
 
+        A = np.vstack([ a_clf, a_cbf ])
+        b = np.array([ b_clf, b_cbf ], dtype=float)
+
         # Adds boundary stability constraint in case the CBF is indefinite
         if (self.get_mode() >= 0):
-            A_inner = np.vstack([ a_clf, a_cbf ])
-            b_inner = np.array([ b_clf, b_cbf ], dtype=float)
+            A_inner = A
+            b_inner = b
         else:
-            A_inner = np.vstack([ a_boundary_stable, a_cbf ])
-            b_inner = np.hstack([ b_boundary_stable, b_cbf ])
+            A_inner = np.vstack([ A, a_boundary_stable ])
+            b_inner = np.hstack([ b, b_boundary_stable ])
 
         # Solve inner loop QP
         self.QP1.initialize()
@@ -296,6 +299,9 @@ class NewQPController():
                 vec_i = self.sym_basis[i] @ ( v + self.cbf.get_critical() - self.clf.get_critical() )
                 gradient_h_gamma1[k,i] = vec_nabla_f.T @ vec_i
 
+        # print("h_barrier = " + str(self.h_gamma1))
+        # print("gradient h_barrier = " + str(gradient_h_gamma1))
+
         return self.h_gamma1, gradient_h_gamma1
 
     def second_compatibility_barrier(self):
@@ -308,7 +314,8 @@ class NewQPController():
         self.MCBF = Hv - self.f_params_dict["min_CLF_eigenvalue"] * np.eye(self.state_dim)
         eig_mbf, Q_mbf = np.linalg.eig(Hv)
 
-        print("Eigenvalues of Hv = " + str(eig_mbf))
+        # print("Eigenvalues of Hv = " + str(eig_mbf))
+        # print("Eigenvectors of Hv = " + str(Q_mbf))
 
         # Barrier functions for enforcing Sylvester's criterion
         self.first_minor = self.MCBF[0,0]
