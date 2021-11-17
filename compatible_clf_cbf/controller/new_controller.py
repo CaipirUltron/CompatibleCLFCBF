@@ -1,5 +1,6 @@
 import numpy as np
-import math, scipy
+import scipy
+from scipy import signal
 
 from compatible_clf_cbf.quadratic_program import QuadraticProgram
 from compatible_clf_cbf.dynamic_systems import Quadratic, Integrator
@@ -114,7 +115,8 @@ class NewQPController():
         '''
         # Adds rate or barrier constraint, depending on the region
         a_rate, b_rate = self.get_rate_constraint()
-        a_clf_rot, b_clf_rot = self.get_fix_rot_constraints()
+        a_clf_residue, b_clf_residue = self.get_residue_constraints()
+        a_clf_rot, b_clf_rot = self.get_pencil_eigenvector_constraints()
         a_cbf_pi, b_cbf_pi = self.get_compatibility_constraints()
 
         # Adds compatibility constraints in case the trajectory is above the obstacle
@@ -122,6 +124,10 @@ class NewQPController():
         if (self.get_region() >= 0):
             A_outer = a_cbf_pi
             b_outer = b_cbf_pi
+            
+            # Aeq = np.vstack( [ a_clf_rot, a_clf_residue ])
+            # beq = np.hstack( [ b_clf_rot, b_clf_residue ])
+
             self.QP2.set_eq_constraints(a_clf_rot, b_clf_rot)
         else:
             A_outer = a_rate
@@ -239,7 +245,21 @@ class NewQPController():
 
         return a_clf_pi, b_clf_pi
 
-    def get_fix_rot_constraints(self):
+    def get_residue_constraints(self):
+        '''
+        Sets the constraint for fixing the f-function residues.
+        '''
+        Jacobian = np.zeros([self.state_dim, self.sym_dim])
+        for i in range(self.state_dim):
+            for j in range(self.sym_dim):
+                Jacobian[i,j] = (self.cbf.get_critical() - self.clf.get_critical()).T @ self.sym_basis[j] @ self.pencil_dict["eigenvectors"][:,i]
+
+        a_clf_residue = np.hstack( [ Jacobian, np.zeros([self.state_dim, 1]) ])
+        b_clf_residue = np.zeros(self.state_dim)
+
+        return a_clf_residue, b_clf_residue
+
+    def get_pencil_eigenvector_constraints(self):
         '''
         Sets the constraint for fixing the pencil eigenvectors.
         '''
@@ -380,12 +400,19 @@ class NewQPController():
         Given Hv and Hh, this method computes the generalized pencil eigenvalues and the pencil characteristic polynomial.
         '''
         self.schurHv, self.schurHh, alpha, beta, self.Q, self.Z = scipy.linalg.ordqz(Hv, Hh)
-
         pencil_eig, alpha, beta, sorted_args = self.compute_eigenvalues()
 
-        # print("Q = " + str(self.Q))
-        # print("Z = " + str(self.Z))
+        # Compute the pencil eigenvectors
+        pencil_eigenvectors = np.zeros([self.state_dim,self.state_dim])
+        for k in range(len(pencil_eig)):
+            eig, Q = np.linalg.eig( pencil_eig[k]*Hh - Hv )
+            for i in range(len(eig)):
+                if np.abs(eig[i]) <= 0.000001:
+                    pencil_eigenvectors[:,k] = Q[:,i]
+                    break
+
         # print("Pencil eig = " + str(pencil_eig))
+        # print("Pencil eigenvectors = " + str(pencil_eigenvectors[:,1]))
 
         # Assumption: Hv is invertible => detHv != 0
         detHv = np.linalg.det(Hv)
@@ -395,6 +422,7 @@ class NewQPController():
         pencil_char = ( detHv/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(pencil_eig))
 
         self.pencil_dict["eigenvalues"] = pencil_eig[sorted_args]
+        self.pencil_dict["eigenvectors"] = pencil_eigenvectors[sorted_args]
         self.pencil_dict["alpha"] = alpha[sorted_args]
         self.pencil_dict["beta"] = beta[sorted_args]
         self.pencil_dict["polar_eigenvalues"] = np.arctan(pencil_eig[sorted_args])
@@ -418,6 +446,8 @@ class NewQPController():
 
         # Compute denominator of f
         den_poly = np.polynomial.polynomial.polymul(pencil_char, pencil_char)
+
+        print(den_poly)
 
         detHv = np.linalg.det(Hv)
         try:
@@ -448,6 +478,18 @@ class NewQPController():
             poly_term = np.polynomial.polynomial.polymul( W[:,k], np.eye(n)[:,k] )
             num_poly = np.polynomial.polynomial.polyadd(num_poly, poly_term)
 
+        residues, poles, k = signal.residue( np.flip(num_poly), np.flip(den_poly), tol=0.001, rtype='avg' )
+
+        print( self.pencil_dict["eigenvectors"][:,0].T @ v0 )
+        print( self.pencil_dict["eigenvectors"][:,1].T @ v0 )
+
+        print("Residues = " + str(residues))
+
+        # print("Eig = " + str(self.pencil_dict["eigenvalues"]))
+
+        print("Poles = " + str(poles))
+        # print(k)
+
         # Computes polynomial roots
         fzeros = np.real( np.polynomial.polynomial.polyroots(num_poly) )
 
@@ -467,7 +509,8 @@ class NewQPController():
             "numerator": num_poly,
             "poles": pencil_eig,
             "zeros": fzeros,
-            "repeated_poles": repeated_poles
+            "repeated_poles": repeated_poles,
+            "residues": residues,
         }
 
     def compute_equilibrium(self):

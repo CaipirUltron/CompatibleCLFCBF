@@ -26,7 +26,7 @@ for step in range(0, num_steps):
     # Outer loop control
     upi_control = qp_controller.get_clf_control()
 
-    print("f-function zeros:" + str(np.arctan(qp_controller.f_dict["zeros"])))
+    # print("f-function zeros:" + str(np.arctan(qp_controller.f_dict["zeros"])))
 
     # Send actuation commands
     qp_controller.update_clf_dynamics(upi_control)
