@@ -408,11 +408,9 @@ class NewQPController():
             eig, Q = np.linalg.eig( pencil_eig[k]*Hh - Hv )
             for i in range(len(eig)):
                 if np.abs(eig[i]) <= 0.000001:
-                    pencil_eigenvectors[:,k] = Q[:,i]
+                    normalization_const = 1/np.sqrt(Q[:,i].T @ Hh @ Q[:,i])
+                    pencil_eigenvectors[:,k] = normalization_const * Q[:,i]
                     break
-
-        # print("Pencil eig = " + str(pencil_eig))
-        # print("Pencil eigenvectors = " + str(pencil_eigenvectors[:,1]))
 
         # Assumption: Hv is invertible => detHv != 0
         detHv = np.linalg.det(Hv)
@@ -422,7 +420,7 @@ class NewQPController():
         pencil_char = ( detHv/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(pencil_eig))
 
         self.pencil_dict["eigenvalues"] = pencil_eig[sorted_args]
-        self.pencil_dict["eigenvectors"] = pencil_eigenvectors[sorted_args]
+        self.pencil_dict["eigenvectors"] = pencil_eigenvectors[:,sorted_args]
         self.pencil_dict["alpha"] = alpha[sorted_args]
         self.pencil_dict["beta"] = beta[sorted_args]
         self.pencil_dict["polar_eigenvalues"] = np.arctan(pencil_eig[sorted_args])
@@ -446,8 +444,6 @@ class NewQPController():
 
         # Compute denominator of f
         den_poly = np.polynomial.polynomial.polymul(pencil_char, pencil_char)
-
-        print(den_poly)
 
         detHv = np.linalg.det(Hv)
         try:
@@ -480,15 +476,8 @@ class NewQPController():
 
         residues, poles, k = signal.residue( np.flip(num_poly), np.flip(den_poly), tol=0.001, rtype='avg' )
 
-        print( self.pencil_dict["eigenvectors"][:,0].T @ v0 )
-        print( self.pencil_dict["eigenvectors"][:,1].T @ v0 )
-
-        print("Residues = " + str(residues))
-
-        # print("Eig = " + str(self.pencil_dict["eigenvalues"]))
-
-        print("Poles = " + str(poles))
-        # print(k)
+        index = np.argwhere(np.real(residues) < 0.0000001)
+        residues = np.real(np.delete(residues, index))
 
         # Computes polynomial roots
         fzeros = np.real( np.polynomial.polynomial.polyroots(num_poly) )
@@ -573,6 +562,31 @@ class NewQPController():
             num_value = np.polynomial.polynomial.polyval( args[k], self.f_dict["numerator"] )
             pencil_char_value = np.polynomial.polynomial.polyval( args[k], self.pencil_dict["characteristic_polynomial"] )
             fvalues[k] = num_value/(pencil_char_value**2)
+        return fvalues
+
+    def f_values2(self, args):
+        '''
+        Returns the values of f.
+        '''
+        numpoints = len(args)
+        fvalues = np.zeros(numpoints)
+        poles = self.f_dict["poles"]
+        residues = self.f_dict["residues"]
+        for k in range(numpoints):
+            for i in range(len(residues)):
+                fvalues[k] = fvalues[k] + residues[i]/(( args[k] - poles[i] )**2)
+        return fvalues
+
+    def f_values3(self, args):
+        '''
+        Returns the values of f.
+        '''
+        numpoints = len(args)
+        fvalues = np.zeros(numpoints)
+        Hh = self.cbf.get_hessian()
+        for k in range(numpoints):
+            v = self.v_values(args[k])
+            fvalues[k] = v.T @ Hh @ v
         return fvalues
 
     def v_values( self, lambda_var ):
