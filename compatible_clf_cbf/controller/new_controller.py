@@ -36,7 +36,7 @@ class NewQPController():
         self.Z = np.zeros([self.state_dim,self.state_dim])
         self.pencil_dict = {}
         self.f_params_dict = {
-            "epsilon": 1.8,
+            "epsilon": 2.5,
             "min_CLF_eigenvalue": 0.1,
         }
         self.compute_compatibility()
@@ -115,8 +115,7 @@ class NewQPController():
         '''
         # Adds rate or barrier constraint, depending on the region
         a_rate, b_rate = self.get_rate_constraint()
-        a_clf_residue, b_clf_residue = self.get_residue_constraints()
-        a_clf_rot, b_clf_rot = self.get_pencil_eigenvector_constraints()
+        a_clf_rot, b_clf_rot = self.get_eigenvector_constraints()
         a_cbf_pi, b_cbf_pi = self.get_compatibility_constraints()
 
         # Adds compatibility constraints in case the trajectory is above the obstacle
@@ -124,9 +123,6 @@ class NewQPController():
         if (self.get_region() >= 0):
             A_outer = a_cbf_pi
             b_outer = b_cbf_pi
-            
-            # Aeq = np.vstack( [ a_clf_rot, a_clf_residue ])
-            # beq = np.hstack( [ b_clf_rot, b_clf_residue ])
 
             self.QP2.set_eq_constraints(a_clf_rot, b_clf_rot)
         else:
@@ -245,34 +241,23 @@ class NewQPController():
 
         return a_clf_pi, b_clf_pi
 
-    def get_residue_constraints(self):
-        '''
-        Sets the constraint for fixing the f-function residues.
-        '''
-        Jacobian = np.zeros([self.state_dim, self.sym_dim])
-        for i in range(self.state_dim):
-            for j in range(self.sym_dim):
-                Jacobian[i,j] = (self.cbf.get_critical() - self.clf.get_critical()).T @ self.sym_basis[j] @ self.pencil_dict["eigenvectors"][:,i]
-
-        a_clf_residue = np.hstack( [ Jacobian, np.zeros([self.state_dim, 1]) ])
-        b_clf_residue = np.zeros(self.state_dim)
-
-        return a_clf_residue, b_clf_residue
-
-    def get_pencil_eigenvector_constraints(self):
+    def get_eigenvector_constraints(self):
         '''
         Sets the constraint for fixing the pencil eigenvectors.
         '''
-        l = 0
-        Jacobian_pi_omega = np.zeros([self.skewsym_dim, self.sym_dim])
-        for i in range(self.state_dim):
-            for j in range(i+1,self.state_dim):
-                for k in range(self.sym_dim):
-                    left_matrix = self.Q.T @ self.sym_basis[k] @ self.Z
-                    Jacobian_pi_omega[l,k] = left_matrix[i,j]
-                l = l + 1
+        JacobianV = np.zeros([self.skewsym_dim, self.sym_dim])
+        Z = self.pencil_dict["eigenvectors"]
 
-        a_clf_rot = np.hstack( [ Jacobian_pi_omega, np.zeros([self.skewsym_dim, 1]) ])
+        for l in range(self.sym_dim):
+            diag_matrix = Z.T @ self.sym_basis[l] @ Z
+            m = 0
+            for i in range(self.state_dim):
+                for j in range(self.state_dim):
+                    if i < j:
+                        JacobianV[m,l] = diag_matrix[i,j]
+                        m += 1
+
+        a_clf_rot = np.hstack( [ JacobianV, np.zeros([self.skewsym_dim, 1]) ])
         b_clf_rot = np.zeros(self.skewsym_dim)
 
         return a_clf_rot, b_clf_rot
@@ -296,31 +281,58 @@ class NewQPController():
 
         return a_cbf_pi, b_cbf_pi
 
+    # def first_compatibility_barrier(self):
+    #     '''
+    #     Computes first compatibility barrier constraint, for keeping the critical values of f above/below 1.
+    #     '''
+    #     # Get mode (convex or concave)
+    #     mode = self.get_mode()
+
+    #     # First barrier
+    #     self.h_gamma1 = np.zeros(self.num_positive_critical)
+    #     gradient_h_gamma1 = np.zeros([self.num_positive_critical, self.sym_dim])
+    #     for k in range(self.num_positive_critical):
+
+    #         # Barrier function
+    #         self.h_gamma1[k] = mode * ( self.positive_critical_values[k] - np.exp( np.tanh(mode) * self.f_params_dict["epsilon"] ) )
+
+    #         # Barrier function gradient
+    #         v = self.v_values( self.positive_f_critical[k] )
+    #         H = self.pencil_value( self.positive_f_critical[k] )
+    #         vec_nabla_f = 2 * mode * ( np.linalg.inv(H) @ self.cbf.get_hessian() ) @ v
+    #         for i in range(self.sym_dim):
+    #             vec_i = self.sym_basis[i] @ ( v + self.cbf.get_critical() - self.clf.get_critical() )
+    #             gradient_h_gamma1[k,i] = vec_nabla_f.T @ vec_i
+
+    #     return self.h_gamma1, gradient_h_gamma1
+
     def first_compatibility_barrier(self):
         '''
         Computes first compatibility barrier constraint, for keeping the critical values of f above/below 1.
         '''
-        # Get mode (convex or concave)
-        mode = self.get_mode()
+        Z = self.pencil_dict["eigenvectors"]
+        Hv = self.clf.get_hessian()
+        x0, p0 = self.clf.get_critical(), self.cbf.get_critical()
+        pencil_eig = self.pencil_dict["eigenvalues"]
 
         # First barrier
-        self.h_gamma1 = np.zeros(self.num_positive_critical)
-        gradient_h_gamma1 = np.zeros([self.num_positive_critical, self.sym_dim])
-        for k in range(self.num_positive_critical):
+        self.h_gamma1 = np.zeros(self.state_dim-1)
+        gradient_h_gamma1 = np.zeros([self.state_dim-1, self.sym_dim])
 
-            # Barrier function
-            self.h_gamma1[k] = mode * ( self.positive_critical_values[k] - np.exp( np.tanh(mode) * self.f_params_dict["epsilon"] ) )
+        # Barrier function
+        for k in range(self.state_dim-1):
+            residue = Z[:,k].T @ Hv @ ( p0 - x0 )
+            delta_lambda = pencil_eig[k+1] - pencil_eig[k]
+            self.h_gamma1[k] = (residue**2)/(delta_lambda**2) - self.f_params_dict["epsilon"]
 
             # Barrier function gradient
-            v = self.v_values( self.positive_f_critical[k] )
-            H = self.pencil_value( self.positive_f_critical[k] )
-            vec_nabla_f = 2 * mode * ( np.linalg.inv(H) @ self.cbf.get_hessian() ) @ v
+            C = 2*residue/(delta_lambda**2)
             for i in range(self.sym_dim):
-                vec_i = self.sym_basis[i] @ ( v + self.cbf.get_critical() - self.clf.get_critical() )
-                gradient_h_gamma1[k,i] = vec_nabla_f.T @ vec_i
+                term1 = C*( Z[:,k].T @ self.sym_basis[i] @ ( p0 - x0 ) )
+                term2 = C*(residue/delta_lambda)*( Z[:,k+1].T @ self.sym_basis[i] @ Z[:,k+1] - Z[:,k].T @ self.sym_basis[i] @ Z[:,k] )
+                gradient_h_gamma1[k,i] = term1 - term2
 
-        # print("h_barrier = " + str(self.h_gamma1))
-        # print("gradient h_barrier = " + str(gradient_h_gamma1))
+        print(self.h_gamma1)
 
         return self.h_gamma1, gradient_h_gamma1
 
@@ -333,9 +345,6 @@ class NewQPController():
         Hv = self.clf.get_hessian()
         self.MCBF = Hv - self.f_params_dict["min_CLF_eigenvalue"] * np.eye(self.state_dim)
         eig_mbf, Q_mbf = np.linalg.eig(Hv)
-
-        # print("Eigenvalues of Hv = " + str(eig_mbf))
-        # print("Eigenvectors of Hv = " + str(Q_mbf))
 
         # Barrier functions for enforcing Sylvester's criterion
         self.first_minor = self.MCBF[0,0]
@@ -606,3 +615,21 @@ class NewQPController():
         '''
         Hv, Hh = self.clf.get_hessian(), self.cbf.get_hessian()
         return lambda_var*Hh - Hv
+
+    # def get_pencil_eigenvector_constraints(self):
+    #     '''
+    #     Sets the constraint for fixing the pencil eigenvectors (deprecated).
+    #     '''
+    #     l = 0
+    #     Jacobian_pi_omega = np.zeros([self.skewsym_dim, self.sym_dim])
+    #     for i in range(self.state_dim):
+    #         for j in range(i+1,self.state_dim):
+    #             for k in range(self.sym_dim):
+    #                 left_matrix = self.Q.T @ self.sym_basis[k] @ self.Z
+    #                 Jacobian_pi_omega[l,k] = left_matrix[i,j]
+    #             l = l + 1
+
+    #     a_clf_rot = np.hstack( [ Jacobian_pi_omega, np.zeros([self.skewsym_dim, 1]) ])
+    #     b_clf_rot = np.zeros(self.skewsym_dim)
+
+    #     return a_clf_rot, b_clf_rot
