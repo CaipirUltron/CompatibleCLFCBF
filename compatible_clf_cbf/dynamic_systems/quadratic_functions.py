@@ -312,6 +312,7 @@ class QuadraticLyapunov(Quadratic):
         Quadratic.__init__(self, init_value, **kwargs)
         self.set_param(height = 0.0)
 
+
 class QuadraticBarrier(Quadratic):
     '''
     Class for Quadratic barrier functions.
@@ -320,3 +321,53 @@ class QuadraticBarrier(Quadratic):
     def __init__(self, init_value=0.0, **kwargs):
         Quadratic.__init__(self, init_value, **kwargs)
         self.set_param(height = -0.5)
+
+
+class CassiniOval(Function):
+    '''
+    Class Cassini oval functions. Only works with 2-dimensional functions.
+    '''
+    def __init__(self, a, b, angle, init_value=np.zeros(2)):
+        super().__init__(init_value)
+        self.a = a
+        self.b = b
+        self.e = self.a / self.b
+        self.angle = math.degrees(angle)
+        c, s = np.cos(self.angle), np.sin(self.angle)
+        self.R = np.array([[c, -s],[s, c]])
+
+    def function(self):
+        '''
+        2D Cassini oval function.
+        '''
+        v = self.R @ self._var
+        v1, v2 = v[0], v[1]
+        self._function = (v1**2 + v2**2)**2 - (2*self.a**2)*(v1**2 - v2**2) + self.a**4 - self.b**4
+
+    def gradient(self):
+        '''
+        Gradient of the 2D Cassini oval function.
+        '''
+        v = self.R @ self._var
+        v1, v2 = v[0], v[1]
+
+        grad_v = np.zeros(2)
+        grad_v[0] = 4*( v1**2 + v2**2 )*v1 - (4*self.a**2)*v1
+        grad_v[1] = 4*( v1**2 + v2**2 )*v2 + (4*self.a**2)*v2
+
+        self._gradient = grad_v.T @ self.R
+
+    def hessian(self):
+        '''
+        Hessian of the 2D Cassini oval function.
+        '''
+        v = self.R @ self._var
+        v1, v2 = v[0], v[1]
+
+        hessian_v = np.zeros([2,2])
+        hessian_v[0,0] = 4*( 3*v1**2 + v2**2 ) - (4*self.a**2)
+        hessian_v[1,1] = 4*( v1**2 + 3*v2**2 ) + (4*self.a**2)
+        hessian_v[0,1] = 8*v1*v2
+        hessian_v[1,0] = 8*v1*v2
+
+        self._hessian = hessian_v @ self.R

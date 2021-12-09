@@ -1,10 +1,10 @@
 import math
 import numpy as np
 
-from compatible_clf_cbf.dynamic_systems import Quadratic, QuadraticLyapunov, QuadraticBarrier, Integrator, LinearSystem
+from compatible_clf_cbf.dynamic_systems import Quadratic, QuadraticLyapunov, QuadraticBarrier, LinearSystem, CassiniOval
 
 ######################################### Configure and create 2D plant ####################################################
-initial_state = [0.0, 6.0]
+initial_state = [0.1, 6.0]
 # plant = Integrator(initial_state, initial_control = np.zeros(2))
 plant = LinearSystem(initial_state, initial_control = np.zeros(2), A = np.zeros([2,2]), B = np.diag([1,1]))
 ############################################################################################################################
