@@ -27,12 +27,14 @@ for step in range(0, num_steps):
     # Send actuation commands 
     plant.set_control(u_control) 
     plant.actuate(dt)
+    qp_controller.update_cbf_dynamics(np.zeros(3))
 
     # Collect simulation logs ----------------------------------------------------------
     logs = {
         "time": time,
         "stateLog": plant.state_log,
-        "clfLog": qp_controller.clf_dynamics.state_log
+        "clfLog": qp_controller.clf_dynamics.state_log,
+        "cbfLog": qp_controller.cbf_dynamics.state_log
     }
 
 # Show animation -------------------------------------------------------------------

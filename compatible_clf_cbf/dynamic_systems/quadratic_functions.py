@@ -57,7 +57,7 @@ class Function(ABC):
 
     @abstractmethod
     def hessian(self):
-        pass  
+        pass
 
 
 class Quadratic(Function):
@@ -323,7 +323,32 @@ class QuadraticBarrier(Quadratic):
         self.set_param(height = -0.5)
 
 
-class CassiniOval(Function):
+class ApproxFunction(Function):
+    '''
+    Class for functions that can be approximated by a quadratic.
+    '''
+    def __init__(self, init_value=0.0):
+        super().__init__(init_value)
+        self.quadratic = Quadratic(init_value)
+
+    def compute_approx(self, value):
+        '''
+        Compute second order approximation for function.
+        '''
+        f = self.quadratic.evaluate(value)
+        grad = self.quadratic.get_gradient()
+        H = self.quadratic.get_hessian()
+        inv_H = np.inv(H)
+
+        l = np.sqrt( (2*f+1)/(grad.T @ inv_H @ grad) )
+        v = l* inv_H @ grad
+
+        self.quadratic.set_param(height = -0.5)
+        self.quadratic.set_param(gradient = value - v)
+        self.quadratic.set_param(hessian = H)
+
+
+class CassiniOval(ApproxFunction):
     '''
     Class Cassini oval functions. Only works with 2-dimensional functions.
     '''

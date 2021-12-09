@@ -26,6 +26,7 @@ class SimulationMatplot():
         self.time = logs["time"]
         self.state_log = logs["stateLog"]
         self.clf_log = logs["clfLog"]
+        self.cbf_log = logs["cbfLog"]
         self.num_steps = len(self.state_log[0])
 
         # Get point resolution for graphical objects
@@ -72,11 +73,11 @@ class SimulationMatplot():
 
         current_time = np.around(self.time[i], decimals = 2)
         current_state = [self.state_log[0][i], self.state_log[1][i]]
-        current_pi_state = [self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i]]
+        current_piv_state = [self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i]]
 
         self.time_text.set_text("Time = " + str(current_time) + "s")
 
-        Hv = Quadratic.vector2sym(current_pi_state)
+        Hv = Quadratic.vector2sym(current_piv_state)
         self.clf.set_param(hessian=Hv)
         if self.draw_level:
             V = self.clf.evaluate(current_state)
@@ -84,7 +85,10 @@ class SimulationMatplot():
             self.clf_level_set1.set_data(xclf[0], yclf[0])
             self.clf_level_set2.set_data(xclf[1], yclf[1])
 
-        # h = self.cbf.evaluate(current_state)
+        current_pih_state = [self.cbf_log[0][i], self.cbf_log[1][i], self.cbf_log[2][i]]
+        Hh = Quadratic.vector2sym(current_pih_state)
+        self.cbf.set_param(hessian=Hh)
+        
         xcbf, ycbf, ucbf, vcbf = self.cbf.superlevel(0.0, self.numpoints)
         self.cbf_level_set1.set_data(xcbf[0], ycbf[0])
         self.cbf_level_set2.set_data(xcbf[1], ycbf[1])
