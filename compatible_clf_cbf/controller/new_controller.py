@@ -36,8 +36,8 @@ class NewQPController():
         self.Z = np.zeros([self.state_dim,self.state_dim])
         self.pencil_dict = {}
         self.f_params_dict = {
-            "epsilon": 2.5,
-            "min_CLF_eigenvalue": 0.1,
+            "epsilon": 2.8,
+            "min_CLF_eigenvalue": 0.2,
         }
         self.compute_compatibility()
 
@@ -126,7 +126,6 @@ class NewQPController():
         if (self.get_region() >= 0):
             A_outer = a_cbf_pi
             b_outer = b_cbf_pi
-
             self.QP2.set_eq_constraints(a_clf_rot, b_clf_rot)
         else:
             A_outer = a_rate
@@ -284,7 +283,7 @@ class NewQPController():
         self.h_gamma2, gradient_h_gamma2 = self.second_compatibility_barrier()
 
         # Sets compatibility constraints
-        a_cbf_gamma1 = -np.hstack([ gradient_h_gamma1, np.zeros([self.num_positive_critical, 1]) ])
+        a_cbf_gamma1 = -np.hstack([ gradient_h_gamma1, np.zeros([self.state_dim-1, 1]) ])
         b_cbf_gamma1 = self.alpha[1]*self.h_gamma1
 
         a_cbf_gamma2 = -np.hstack([ gradient_h_gamma2, np.zeros([3,1]) ])
@@ -338,7 +337,7 @@ class NewQPController():
             residue = Z[:,k].T @ Hv @ ( p0 - x0 )
             delta_lambda = pencil_eig[k+1] - pencil_eig[k]
             self.h_gamma1[k] = (residue**2)/(delta_lambda**2) - self.f_params_dict["epsilon"]
-
+            
             # Barrier function gradient
             C = 2*residue/(delta_lambda**2)
             for i in range(self.sym_dim):
@@ -347,6 +346,7 @@ class NewQPController():
                 gradient_h_gamma1[k,i] = term1 - term2
 
         print(self.h_gamma1)
+        print("gradient = " + str(gradient_h_gamma1))
 
         return self.h_gamma1, gradient_h_gamma1
 

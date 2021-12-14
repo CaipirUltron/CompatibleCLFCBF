@@ -2,7 +2,7 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 
-from system_initialization import plant, clf, cbf
+from system_initialization import plant, clf, cbf, Quadratic
 from compatible_clf_cbf.controller import NominalQP
 from compatible_clf_cbf.graphical_simulation import SimulationMatplot
 
@@ -22,12 +22,13 @@ for step in range(0, num_steps):
 
     # Control
     u_control = qp_controller.get_control()
-    qp_controller.update_clf_dynamics(np.zeros(3))
+    qp_controller.clf_dynamics.set_state(Quadratic.sym2vector(clf.get_hessian()))
 
     # Send actuation commands 
     plant.set_control(u_control) 
     plant.actuate(dt)
-    qp_controller.update_cbf_dynamics(np.zeros(3))
+    # qp_controller.update_cbf_dynamics(np.zeros(3))
+    qp_controller.cbf_dynamics.set_state(Quadratic.sym2vector(cbf.get_hessian()))
 
     # Collect simulation logs ----------------------------------------------------------
     logs = {

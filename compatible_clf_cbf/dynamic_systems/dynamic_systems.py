@@ -12,9 +12,9 @@ class DynamicSystem(ABC):
     def __init__(self, initial_state, initial_control):
         
         # Sets integration method from scipy
+        self.n = len(initial_state)
+        self.m = len(initial_control)
         self.mODE = ode(self.get_flow).set_integrator('dopri5')
-        self.set_state(initial_state)
-        self.set_control(initial_control)
 
         self.state_log = []
         for _ in range(0, self.n):
@@ -24,21 +24,24 @@ class DynamicSystem(ABC):
         for _ in range(0, self.m):
             self.control_log.append([])
 
+        self.set_state(initial_state)
+        self.set_control(initial_control)
+
     def set_state(self, state):
         '''
         Sets system state.
         '''
-        self.n = len(state)
         self._state = np.array(state)
         self._dstate = np.zeros(self.n)
         self.mODE.set_initial_value(self._state)
+        self.log_state()
 
     def set_control(self, control_input):
         '''
         Sets system control.
         '''
-        self.m = len(control_input)
         self._control = np.array(control_input)
+        self.log_control()
 
     def actuate(self, dt):
         '''
@@ -46,10 +49,20 @@ class DynamicSystem(ABC):
         '''
         self.dynamics()
         self._state = self.mODE.integrate(self.mODE.t+dt)
+        self.log_state()
+        self.log_control()
 
+    def log_state(self):
+        '''
+        Logs the state.
+        '''
         for state_dim in range(0, self.n):
             self.state_log[state_dim].append(self._state[state_dim])
 
+    def log_control(self):
+        '''
+        Logs the control.
+        '''
         for ctrl_dim in range(0, self.m):
             self.control_log[ctrl_dim].append(self._control[ctrl_dim])
 
