@@ -4,10 +4,10 @@ import matplotlib.pyplot as plt
 
 from system_initialization import plant, clf, cbf, Quadratic
 from compatible_clf_cbf.controller import NominalQP
-from compatible_clf_cbf.graphical_simulation import SimulationMatplot
+from compatible_clf_cbf.graphical_simulation_matplot import SimulationMatplot
 
 # Create QP controller and graphical simulation.
-dt = .002
+dt = .005
 qp_controller = NominalQP(plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0)
 
 # Simulation loop -------------------------------------------------------------------

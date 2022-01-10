@@ -1,10 +1,9 @@
-import math
 import numpy as np
 import matplotlib.pyplot as plt
 
 from system_initialization import plant, clf, cbf, ref_clf, Quadratic
 from compatible_clf_cbf.controller import NewQPController
-from compatible_clf_cbf.graphical_simulation import SimulationMatplot
+from compatible_clf_cbf.graphical_simulation_matplot import SimulationMatplot
 
 # Create QP controller and graphical simulation.
 dt = .005
