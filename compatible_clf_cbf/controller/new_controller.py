@@ -34,6 +34,7 @@ class NewQPController():
         self.schurHh = np.zeros([self.state_dim,self.state_dim])
         self.Q = np.zeros([self.state_dim,self.state_dim])
         self.Z = np.zeros([self.state_dim,self.state_dim])
+        self.normal_vector = np.zeros([self.state_dim,self.state_dim])
         self.pencil_dict = {}
         self.f_params_dict = {
             "epsilon": 2.8,
@@ -124,10 +125,12 @@ class NewQPController():
         # Adds compatibility constraints in case the trajectory is above the obstacle
         self.QP2.initialize()
         if (self.get_region() >= 0):
+            print('Compatibility')
             A_outer = a_cbf_pi
             b_outer = b_cbf_pi
             self.QP2.set_eq_constraints(a_clf_rot, b_clf_rot)
         else:
+            print('Rate')
             A_outer = a_rate
             b_outer = np.array([ b_rate ])
         self.QP2.set_constraints(A_outer, b_outer)
@@ -252,6 +255,9 @@ class NewQPController():
         a_clf_pi = np.hstack( [ self.gradient_Vpi, -1.0 ])
         b_clf_pi = -self.gamma[1] * self.Vpi
 
+        # print("Vpi = " + str(self.Vpi))
+        # print("grad Vpi = " + str(self.gradient_Vpi))
+
         return a_clf_pi, b_clf_pi
 
     def get_eigenvector_constraints(self):
@@ -321,12 +327,13 @@ class NewQPController():
 
     def first_compatibility_barrier(self):
         '''
-        Computes first compatibility barrier constraint, for keeping the critical values of f above/below 1.
+        Computes first compatibility barrier constraint, for keeping the critical values of f above 1.
         '''
         Z = self.pencil_dict["eigenvectors"]
         Hv = self.clf.get_hessian()
         x0, p0 = self.clf.get_critical(), self.cbf.get_critical()
         pencil_eig = self.pencil_dict["eigenvalues"]
+        v0 = Hv @ ( p0 - x0 )
 
         # First barrier
         self.h_gamma1 = np.zeros(self.state_dim-1)
@@ -334,19 +341,22 @@ class NewQPController():
 
         # Barrier function
         for k in range(self.state_dim-1):
-            residue = Z[:,k].T @ Hv @ ( p0 - x0 )
+            residues = np.sqrt( np.array([ (Z[:,k].T @ v0 )**2, (Z[:,k+1].T @ v0)**2 ]) )
+            # max_index = np.argmax(residues)
+            max_index = 1
+            residue = residues[max_index]
             delta_lambda = pencil_eig[k+1] - pencil_eig[k]
             self.h_gamma1[k] = (residue**2)/(delta_lambda**2) - self.f_params_dict["epsilon"]
             
             # Barrier function gradient
             C = 2*residue/(delta_lambda**2)
             for i in range(self.sym_dim):
-                term1 = C*( Z[:,k].T @ self.sym_basis[i] @ ( p0 - x0 ) )
-                term2 = C*(residue/delta_lambda)*( Z[:,k+1].T @ self.sym_basis[i] @ Z[:,k+1] - Z[:,k].T @ self.sym_basis[i] @ Z[:,k] )
-                gradient_h_gamma1[k,i] = term1 - term2
+                term1 = ( Z[:,max_index].T @ self.sym_basis[i] @ ( p0 - x0 ) )
+                term2 = (residue/delta_lambda)*( Z[:,k+1].T @ self.sym_basis[i] @ Z[:,k+1] - Z[:,k].T @ self.sym_basis[i] @ Z[:,k] )
+                gradient_h_gamma1[k,i] = C*(term1 - term2)
 
-        print(self.h_gamma1)
-        print("gradient = " + str(gradient_h_gamma1))
+        # print("h_gamma1 = " + str(self.h_gamma1))
+        # print("grad h_gamma1 = " + str(gradient_h_gamma1))
 
         return self.h_gamma1, gradient_h_gamma1
 
@@ -399,13 +409,13 @@ class NewQPController():
         p0 = self.cbf.get_critical()
 
         # Computes the normal vector defining the separatrix plane
-        max_index = np.argmax(eig_cbf)
-        if (Q_cbf[:,max_index] @ (x0 - p0)) >= 0:
-            normal_vector = -Q_cbf[:,max_index]
+        Z = self.pencil_dict["eigenvectors"]
+        if Z[:,0] @ (x0 - p0) >= 0:
+            self.normal_vector = -Z[:,0]
         else:
-            normal_vector = Q_cbf[:,max_index]
+            self.normal_vector = Z[:,0]
 
-        return normal_vector @ ( state - p0 )
+        return self.normal_vector @ ( state - p0 )
 
     def compute_eigenvalues(self):
         '''
