@@ -37,7 +37,7 @@ class NewQPController():
         self.normal_vector = np.zeros([self.state_dim,self.state_dim])
         self.pencil_dict = {}
         self.f_params_dict = {
-            "epsilon": 2.8,
+            "epsilon": 2.2,
             "min_CLF_eigenvalue": 0.2,
         }
         self.compute_compatibility()
@@ -300,31 +300,6 @@ class NewQPController():
 
         return a_cbf_pi, b_cbf_pi
 
-    # def first_compatibility_barrier(self):
-    #     '''
-    #     Computes first compatibility barrier constraint, for keeping the critical values of f above/below 1.
-    #     '''
-    #     # Get mode (convex or concave)
-    #     mode = self.get_mode()
-
-    #     # First barrier
-    #     self.h_gamma1 = np.zeros(self.num_positive_critical)
-    #     gradient_h_gamma1 = np.zeros([self.num_positive_critical, self.sym_dim])
-    #     for k in range(self.num_positive_critical):
-
-    #         # Barrier function
-    #         self.h_gamma1[k] = mode * ( self.positive_critical_values[k] - np.exp( np.tanh(mode) * self.f_params_dict["epsilon"] ) )
-
-    #         # Barrier function gradient
-    #         v = self.v_values( self.positive_f_critical[k] )
-    #         H = self.pencil_value( self.positive_f_critical[k] )
-    #         vec_nabla_f = 2 * mode * ( np.linalg.inv(H) @ self.cbf.get_hessian() ) @ v
-    #         for i in range(self.sym_dim):
-    #             vec_i = self.sym_basis[i] @ ( v + self.cbf.get_critical() - self.clf.get_critical() )
-    #             gradient_h_gamma1[k,i] = vec_nabla_f.T @ vec_i
-
-    #     return self.h_gamma1, gradient_h_gamma1
-
     def first_compatibility_barrier(self):
         '''
         Computes first compatibility barrier constraint, for keeping the critical values of f above 1.
@@ -341,9 +316,8 @@ class NewQPController():
 
         # Barrier function
         for k in range(self.state_dim-1):
-            residues = np.sqrt( np.array([ (Z[:,k].T @ v0 )**2, (Z[:,k+1].T @ v0)**2 ]) )
-            # max_index = np.argmax(residues)
-            max_index = 1
+            residues = np.sqrt( np.array([ (Z[:,k].T @ v0)**2, (Z[:,k+1].T @ v0)**2 ]) )
+            max_index = np.argmax(residues)
             residue = residues[max_index]
             delta_lambda = pencil_eig[k+1] - pencil_eig[k]
             self.h_gamma1[k] = (residue**2)/(delta_lambda**2) - self.f_params_dict["epsilon"]
@@ -355,8 +329,8 @@ class NewQPController():
                 term2 = (residue/delta_lambda)*( Z[:,k+1].T @ self.sym_basis[i] @ Z[:,k+1] - Z[:,k].T @ self.sym_basis[i] @ Z[:,k] )
                 gradient_h_gamma1[k,i] = C*(term1 - term2)
 
-        # print("h_gamma1 = " + str(self.h_gamma1))
-        # print("grad h_gamma1 = " + str(gradient_h_gamma1))
+        print("h_gamma1 = " + str(self.h_gamma1))
+        print("grad h_gamma1 = " + str(gradient_h_gamma1))
 
         return self.h_gamma1, gradient_h_gamma1
 
