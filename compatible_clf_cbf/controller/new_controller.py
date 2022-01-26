@@ -37,7 +37,7 @@ class NewQPController():
         self.normal_vector = np.zeros([self.state_dim,self.state_dim])
         self.pencil_dict = {}
         self.f_params_dict = {
-            "epsilon": 2.2,
+            "epsilon": 2.8,
             "min_CLF_eigenvalue": 0.2,
         }
         self.compute_compatibility()
@@ -124,7 +124,7 @@ class NewQPController():
 
         # Adds compatibility constraints in case the trajectory is above the obstacle
         self.QP2.initialize()
-        if (self.get_region() >= 0):
+        if (self.get_region() > 0):
             print('Compatibility')
             A_outer = a_cbf_pi
             b_outer = b_cbf_pi
@@ -298,6 +298,9 @@ class NewQPController():
         a_cbf_pi = np.vstack([ a_cbf_gamma1, a_cbf_gamma2 ])
         b_cbf_pi = np.hstack([ b_cbf_gamma1, b_cbf_gamma2 ])
 
+        # a_cbf_pi = a_cbf_gamma1
+        # b_cbf_pi = b_cbf_gamma1
+
         return a_cbf_pi, b_cbf_pi
 
     def first_compatibility_barrier(self):
@@ -378,16 +381,20 @@ class NewQPController():
         '''                
         state = self.plant.get_state()
 
-        eig_cbf, Q_cbf = np.linalg.eig(self.cbf.get_hessian())
+        # eig_cbf, Q_cbf = np.linalg.eig(self.cbf.get_hessian())
+        Hv = self.clf.get_hessian()
         x0 = self.clf.get_critical()
         p0 = self.cbf.get_critical()
+        v0 = Hv @ ( p0 - x0 )
 
         # Computes the normal vector defining the separatrix plane
-        Z = self.pencil_dict["eigenvectors"]
-        if Z[:,0] @ (x0 - p0) >= 0:
-            self.normal_vector = -Z[:,0]
-        else:
-            self.normal_vector = Z[:,0]
+        self.normal_vector = v0/np.linalg.norm(v0)
+
+        # Z = self.pencil_dict["eigenvectors"]
+        # if Z[:,0] @ (x0 - p0) >= 0:
+        #     self.normal_vector = -Z[:,0]
+        # else:
+        #     self.normal_vector = Z[:,0]
 
         return self.normal_vector @ ( state - p0 )
 
