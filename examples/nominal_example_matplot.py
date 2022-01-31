@@ -36,12 +36,11 @@ for step in range(0, num_steps):
         "stateLog": plant.state_log,
         "clfLog": qp_controller.clf_dynamics.state_log,
         "cbfLog": qp_controller.cbf_dynamics.state_log,
-        "normal": []
     }
 
 # Show animation -------------------------------------------------------------------
 print('Animating simulation...')
 axes_lim = (-6,6,-6,6)
-plotSim = SimulationMatplot(axes_lim, 80, logs, clf, cbf, draw_level=True, draw_arrows=False)
+plotSim = SimulationMatplot(axes_lim, 80, logs, clf, cbf, draw_level=True)
 plotSim.animate()
 plt.show()

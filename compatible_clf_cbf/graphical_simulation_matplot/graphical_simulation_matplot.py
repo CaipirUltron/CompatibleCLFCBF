@@ -8,11 +8,10 @@ from compatible_clf_cbf.dynamic_systems import Quadratic
 
 class SimulationMatplot():
 
-    def __init__(self, axes_lim, numpoints, logs, clf, cbf, draw_level = False, draw_gradient = False, draw_arrows = False):
+    def __init__(self, axes_lim, numpoints, logs, clf, cbf, draw_level = False, draw_gradient = False):
 
         self.draw_level = draw_level
         self.draw_gradient = draw_gradient
-        self.draw_arrows = draw_arrows
 
         # Initialize plot objects
         self.fig = plt.gcf()
@@ -24,7 +23,7 @@ class SimulationMatplot():
         self.state_log = logs["stateLog"]
         self.clf_log = logs["clfLog"]
         self.cbf_log = logs["cbfLog"]
-        self.normal_vec = logs["normal"]
+        # self.normal_vec = logs["normal"]
         self.num_steps = len(self.state_log[0])
 
         # Get point resolution for graphical objects
@@ -46,8 +45,7 @@ class SimulationMatplot():
         self.clf_crit, = self.ax.plot(clf_crit[0], clf_crit[1], 'bo--', linewidth=1, markersize=2)
         self.cbf_crit, = self.ax.plot(cbf_crit[0], cbf_crit[1], 'go--', linewidth=1, markersize=2)
 
-        self.normal_arrow = self.ax.quiver([0.0],[0.0],[0.1],[0.1],pivot='mid',color='r')
-
+        # self.normal_arrow = self.ax.quiver([0.0],[0.0],[0.1],[0.1],pivot='mid',color='r')
         # self.clf_arrows = self.ax.quiver([0.0],[0.0],[0.1],[0.1],pivot='mid',color='b')
         # self.cbf_arrows = self.ax.quiver([0.0],[0.0],[0.1],[0.1],pivot='mid',color='g')
 
@@ -64,7 +62,7 @@ class SimulationMatplot():
         self.cbf_level_set1.set_data([],[])
         self.cbf_level_set2.set_data([],[])
 
-        return self.trajectory, self.clf_level_set1, self.clf_level_set2, self.cbf_level_set1, self.cbf_level_set2, self.clf_crit, self.cbf_crit, self.normal_arrow,
+        return self.trajectory, self.clf_level_set1, self.clf_level_set2, self.cbf_level_set1, self.cbf_level_set2, self.clf_crit, self.cbf_crit
 
     def update(self, i):
 
@@ -97,10 +95,10 @@ class SimulationMatplot():
         # self.clf_arrows = self.ax.quiver(xclf, yclf, uclf, vclf, pivot='tail', color='b', scale=50.0, headlength=0.5, headwidth=1.0)
             self.cbf_arrows = self.ax.quiver(xcbf, ycbf, ucbf, vcbf, pivot='tail', color='g', scale=50.0, headlength=0.5, headwidth=1.0)
 
-        if self.draw_arrows:
-            self.normal_arrow = self.ax.quiver(xdata, ydata, self.normal_vec[0], self.normal_vec[1], pivot='tail', color='r', scale=50.0, headlength=0.5, headwidth=1.0)
+        # if self.draw_arrows:
+        #     self.normal_arrow = self.ax.quiver(xdata, ydata, self.normal_vec[0], self.normal_vec[1], pivot='tail', color='r', scale=50.0, headlength=0.5, headwidth=1.0)
 
-        return self.time_text, self.trajectory, self.clf_level_set1, self.clf_level_set2, self.cbf_level_set1, self.cbf_level_set2, self.clf_crit, self.cbf_crit, self.normal_arrow
+        return self.time_text, self.trajectory, self.clf_level_set1, self.clf_level_set2, self.cbf_level_set1, self.cbf_level_set2, self.clf_crit, self.cbf_crit
 
     def animate(self):
         self.animation = anim.FuncAnimation(self.fig, func=self.update, init_func=self.init, frames=self.num_steps, interval=20, repeat=False, blit=True)

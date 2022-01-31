@@ -39,6 +39,7 @@ class NewQPController():
         self.f_params_dict = {
             "epsilon": 2.8,
             "min_CLF_eigenvalue": 0.2,
+            "compatibility_threshold": 1.0
         }
         self.compute_compatibility()
 
@@ -380,23 +381,7 @@ class NewQPController():
         Currently, we use a geometric method based on the relative position of the CLF-CBF.
         '''                
         state = self.plant.get_state()
-
-        # eig_cbf, Q_cbf = np.linalg.eig(self.cbf.get_hessian())
-        Hv = self.clf.get_hessian()
-        x0 = self.clf.get_critical()
-        p0 = self.cbf.get_critical()
-        v0 = Hv @ ( p0 - x0 )
-
-        # Computes the normal vector defining the separatrix plane
-        self.normal_vector = v0/np.linalg.norm(v0)
-
-        # Z = self.pencil_dict["eigenvectors"]
-        # if Z[:,0] @ (x0 - p0) >= 0:
-        #     self.normal_vector = -Z[:,0]
-        # else:
-        #     self.normal_vector = Z[:,0]
-
-        return self.normal_vector @ ( state - p0 )
+        return - ( self.cbf.evaluate(state) - self.f_params_dict["compatibility_threshold"] )
 
     def compute_eigenvalues(self):
         '''
