@@ -22,6 +22,7 @@ class NewQPController():
         self.skewsym_dim = int(( self.state_dim * ( self.state_dim - 1 ) )/2)
         self.sym_basis = Quadratic.symmetric_basis(self.state_dim)
         self.skewsym_basis = Quadratic.skewsymmetric_basis(self.state_dim)
+        self.triangular_basis = Quadratic.triangular_basis(self.state_dim)
 
         # Initialize rate CLF
         self.Vpi = 0.0
@@ -226,7 +227,9 @@ class NewQPController():
         self.clf_dynamics.set_control(piv_ctrl)
         self.clf_dynamics.actuate(self.ctrl_dt)
         pi_v = self.clf_dynamics.get_state()
-        Hv = Quadratic.vector2sym(pi_v)
+        
+        Lv = Quadratic.vector2triangular(pi_v)
+        Hv = Lv.T @ Lv + self.f_params_dict["min_CLF_eigenvalue"]*np.eye(self.state_dim)
 
         self.clf.set_param(hessian = Hv)
         self.compute_compatibility()
@@ -250,6 +253,9 @@ class NewQPController():
         deltaHv = self.clf.get_hessian() - self.ref_clf.get_hessian()
         self.Vpi = 0.5 * np.trace( deltaHv @ deltaHv )
         for k in range(self.sym_dim):
+            nablaHvj = np.zeros([self.state_dim, self.state_dim])
+            for j in range(self.sym_dim):
+                nablaHvj = self.sym_basis[k]
             self.gradient_Vpi[k] = np.trace( deltaHv @ self.sym_basis[k] )
 
         # Sets rate constraint

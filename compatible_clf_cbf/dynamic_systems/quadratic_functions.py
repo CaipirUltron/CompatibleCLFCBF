@@ -1,7 +1,8 @@
 import math
 import numpy as np
 from abc import ABC, abstractmethod
-
+from dynamic_systems import Integrator
+from scipy.optimize import fsolve
 
 class Function(ABC):
     '''
@@ -214,6 +215,21 @@ class Quadratic(Function):
         return x1, x2, u, v
 
     @staticmethod
+    def vector2triangular(vector):
+        '''
+        Transforms numpy vector to corresponding upper triangular matrix.
+        '''
+        dim = len(vector)
+        if dim < 3:
+            raise Exception("The input vector must be of length 3 or higher.")
+        n = int((-1 + np.sqrt(1+8*dim))/2)
+        triangular_basis = Quadratic.triangular_basis(n)
+        T = np.zeros([n,n])
+        for k in range(dim):
+            T = T + triangular_basis[k]*vector[k]
+        return T
+
+    @staticmethod
     def vector2sym(vector):
         '''
         Transforms numpy vector to corresponding symmetric matrix.
@@ -223,17 +239,34 @@ class Quadratic(Function):
             raise Exception("The input vector must be of length 3 or higher.")
         n = int((-1 + np.sqrt(1+8*dim))/2)
         sym_basis = Quadratic.symmetric_basis(n)
-        M = np.zeros([n,n])
+        S = np.zeros([n,n])
         for k in range(dim):
-            M = M + sym_basis[k]*vector[k]
-        return M
+            S = S + sym_basis[k]*vector[k]
+        return S
 
     @staticmethod
-    def sym2vector(M):
+    def triangular2vector(T):
         '''
-        Stacks the cofficients of a symmetric matrix to a numpy vector.
+        Stacks the coefficients of an upper triangular matrix to a numpy vector.
         '''
-        n = M.shape[0]
+        n = T.shape[0]
+        if n < 2:
+            raise Exception("The input matrix must be of size 2x2 or higher.")
+        triangular_basis = Quadratic.triangular_basis(n)
+        dim = int((n*(n+1))/2)
+        vector = np.zeros(dim)
+        for k in range(dim):
+            list = np.nonzero(triangular_basis[k])
+            i, j = list[0][0], list[1][0]
+            vector[k] = T[i][j]
+        return vector
+
+    @staticmethod
+    def sym2vector(S):
+        '''
+        Stacks the coefficients of a symmetric matrix to a numpy vector.
+        '''
+        n = S.shape[0]
         if n < 2:
             raise Exception("The input matrix must be of size 2x2 or higher.")
         sym_basis = Quadratic.symmetric_basis(n)
@@ -242,8 +275,23 @@ class Quadratic(Function):
         for k in range(dim):
             list = np.nonzero(sym_basis[k])
             i, j = list[0][0], list[1][0]
-            vector[k] = M[i][j]
+            vector[k] = S[i][j]
         return vector
+
+    @staticmethod
+    def triangular_basis(n):
+        '''
+        Returns the canonical basis of the space of upper triangular (n x n) matrices.
+        '''
+        sym_basis = list()
+        EYE = np.eye(n)
+        for i in range(n):
+            for j in range(i,n):
+                if i == j:
+                    sym_basis.append(np.outer(EYE[:,i], EYE[:,j]))
+                else:
+                    sym_basis.append(np.outer(EYE[:,i], EYE[:,j]))
+        return sym_basis
 
     @staticmethod
     def symmetric_basis(n):
@@ -303,15 +351,85 @@ class Quadratic(Function):
         H = R @ Diag @ R.T
         return H
 
+    @staticmethod
+    def sym2triangular(P):
+        '''
+        This function decomposes a symmetric semidefinite matrix P into the form P = L'L.
+        '''
+        eigs, Q = np.linalg.eig(P)
+        if np.any(eigs*eigs[0]) < 0:
+            Exception("The input matrix is not definite.")
+        Linit = np.diag(np.sqrt(eigs)) @ Q.T
+        param_init = Quadratic.triangular2vector(Linit)
+        dimension = len(eigs)
+
+        def func(l):
+            f = []
+            L = Quadratic.vector2triangular(l)
+            for i in range(dimension):
+                for j in range(dimension):
+                    if i <= j:
+                        l_term = 0
+                        for k in range(dimension):
+                            l_term = l_term + L[k,i] * L[k,j]
+                        f.append( l_term - P[i,j] )
+            return f
+
+        param_sol = fsolve(func, param_init)
+        return Quadratic.vector2triangular( param_sol )
+
 
 class QuadraticLyapunov(Quadratic):
     '''
-    Class for Quadratic Lyapunov functions.
+    Class for Quadratic Lyapunov functions of the type (x-x0)'Hv(x-x0), parametrized by vector pi_v.
+    Here, the Lyapunov minimum is a constant vector x0, and the hessian Hv is positive definite and parametrized by:
+    Hv = Lv(pi_v)'Lv(pi_v) + epsilon I_n (Lv is upper triangular and epsilon is a small positive constant).
     '''
-    def __init__(self, init_value=0.0, **kwargs):
-        Quadratic.__init__(self, init_value, **kwargs)
-        self.set_param(height = 0.0)
+    def __init__(self, init_value=0.0, epsilon=1.0, **kwargs):
 
+        super().__init__(self, init_value, **kwargs)
+        self.epsilon = epsilon
+        self.set_param(height=0.0)
+
+        self.dynamics = Integrator(param,np.zeros(len(param)))
+
+    def get_param(self):
+        '''
+        This function gets the params corresponding to the Lyapunov Hessian matrix.
+        '''
+        Hv = self.hessian()
+        eigs, Q = np.linalg.eig( Hv - self.epsilon*np.eye(self._dim) )
+        if np.any(eigs) < 0:
+            Exception("Hessian matrix is not valid.")
+        L = np.diag(np.sqrt(eigs)) @ Q.T
+        param = super().triangular2vector(L)
+
+
+    def set_epsilon(self, epsilon):
+        '''
+        Sets the minimum eigenvalue for the Lyapunov Hessian matrix.
+        '''
+        self.epsilon = epsilon
+        self.set_param(self.param)
+
+    def set_param(self, param):
+        '''
+        Sets the Lyapunov function parameters.
+        '''
+        self.param = param
+        Lv = super().vector2triangular(param)
+        Hv = Lv.T @ Lv + self.epsilon*np.eye(self._dim)
+        super().set_param(hessian = Hv)
+        self.dynamics.set_state(param)
+
+    def update(self, param_ctrl, dt):
+        '''
+        Integrates the parameters.
+        '''
+        self.dynamics.set_control(param_ctrl)
+        self.dynamics.actuate(dt)        
+        self.set_param(self.dynamics.get_state())
+        
 
 class QuadraticBarrier(Quadratic):
     '''
