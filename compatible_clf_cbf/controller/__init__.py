@@ -1,3 +1,3 @@
-from .new_controller import NewQPController
+from .compatible_controller import CompatibleQPController
 from .nominal_controller import NominalQP
 from .exceptions import InvalidQP

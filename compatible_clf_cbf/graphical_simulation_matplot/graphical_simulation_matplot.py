@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
 
-from compatible_clf_cbf.dynamic_systems import Quadratic
+from compatible_clf_cbf.dynamic_systems.common_methods import vector2sym
 
 class SimulationMatplot():
 
@@ -23,7 +23,7 @@ class SimulationMatplot():
         self.state_log = logs["stateLog"]
         self.clf_log = logs["clfLog"]
         self.cbf_log = logs["cbfLog"]
-        # self.normal_vec = logs["normal"]
+        self.mode_log = logs["modeLog"]
         self.num_steps = len(self.state_log[0])
 
         # Get point resolution for graphical objects
@@ -33,6 +33,8 @@ class SimulationMatplot():
 
         # Initalize graphical objects
         self.time_text = self.ax.text(axes_lim[1]-2.5, axes_lim[3]-1, str("Time = "))
+        self.mode_text = self.ax.text(axes_lim[0]+1.5, axes_lim[3]-1, str("Rate/Compatibility"))
+
         self.trajectory, = self.ax.plot([],[],lw=2)
         self.clf_level_set1, = self.ax.plot([],[],'b',lw=1)
         self.clf_level_set2, = self.ax.plot([],[],'b',lw=1)
@@ -45,15 +47,13 @@ class SimulationMatplot():
         self.clf_crit, = self.ax.plot(clf_crit[0], clf_crit[1], 'bo--', linewidth=1, markersize=2)
         self.cbf_crit, = self.ax.plot(cbf_crit[0], cbf_crit[1], 'go--', linewidth=1, markersize=2)
 
-        # self.normal_arrow = self.ax.quiver([0.0],[0.0],[0.1],[0.1],pivot='mid',color='r')
-        # self.clf_arrows = self.ax.quiver([0.0],[0.0],[0.1],[0.1],pivot='mid',color='b')
-        # self.cbf_arrows = self.ax.quiver([0.0],[0.0],[0.1],[0.1],pivot='mid',color='g')
-
         self.animation = None
 
     def init(self):
 
         self.time_text.text = str("Time = ")
+        self.mode_text.text = str("Rate/Compatibility")
+
         self.trajectory.set_data([],[])
 
         self.clf_level_set1.set_data([],[])
@@ -74,9 +74,12 @@ class SimulationMatplot():
         current_piv_state = [self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i]]
 
         self.time_text.set_text("Time = " + str(current_time) + "s")
+        if self.mode_log[i] == 1:
+            self.mode_text.set_text("Compatibility")
+        elif self.mode_log[i] == 0:
+            self.mode_text.set_text("Rate")
 
-        Hv = Quadratic.vector2sym(current_piv_state)
-        self.clf.set_param(hessian=Hv)
+        self.clf.set_param(current_piv_state)
         if self.draw_level:
             V = self.clf.evaluate(current_state)
             xclf, yclf, uclf, vclf = self.clf.superlevel(V, self.numpoints)
@@ -84,21 +87,16 @@ class SimulationMatplot():
             self.clf_level_set2.set_data(xclf[1], yclf[1])
 
         current_pih_state = [self.cbf_log[0][i], self.cbf_log[1][i], self.cbf_log[2][i]]
-        Hh = Quadratic.vector2sym(current_pih_state)
-        self.cbf.set_param(hessian=Hh)
+        self.cbf.set_param(current_pih_state)
         
         xcbf, ycbf, ucbf, vcbf = self.cbf.superlevel(0.0, self.numpoints)
         self.cbf_level_set1.set_data(xcbf[0], ycbf[0])
         self.cbf_level_set2.set_data(xcbf[1], ycbf[1])
 
         if self.draw_gradient:
-        # self.clf_arrows = self.ax.quiver(xclf, yclf, uclf, vclf, pivot='tail', color='b', scale=50.0, headlength=0.5, headwidth=1.0)
             self.cbf_arrows = self.ax.quiver(xcbf, ycbf, ucbf, vcbf, pivot='tail', color='g', scale=50.0, headlength=0.5, headwidth=1.0)
 
-        # if self.draw_arrows:
-        #     self.normal_arrow = self.ax.quiver(xdata, ydata, self.normal_vec[0], self.normal_vec[1], pivot='tail', color='r', scale=50.0, headlength=0.5, headwidth=1.0)
-
-        return self.time_text, self.trajectory, self.clf_level_set1, self.clf_level_set2, self.cbf_level_set1, self.cbf_level_set2, self.clf_crit, self.cbf_crit
+        return self.time_text, self.mode_text, self.trajectory, self.clf_level_set1, self.clf_level_set2, self.cbf_level_set1, self.cbf_level_set2, self.clf_crit, self.cbf_crit
 
     def animate(self):
         self.animation = anim.FuncAnimation(self.fig, func=self.update, init_func=self.init, frames=self.num_steps, interval=20, repeat=False, blit=True)

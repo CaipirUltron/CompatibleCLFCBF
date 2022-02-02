@@ -2,9 +2,10 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 
-from system_initialization import plant, clf, cbf, Quadratic
+from system_initialization import plant, clf, cbf
 from compatible_clf_cbf.controller import NominalQP
 from compatible_clf_cbf.graphical_simulation_matplot import SimulationMatplot
+from compatible_clf_cbf.dynamic_systems import sym2vector
 
 # Create QP controller and graphical simulation.
 dt = .005
@@ -22,21 +23,21 @@ for step in range(0, num_steps):
 
     # Control
     u_control = qp_controller.get_control()
-    qp_controller.clf_dynamics.set_state(Quadratic.sym2vector(clf.get_hessian()))
+    qp_controller.update_clf_dynamics(np.zeros(qp_controller.sym_dim))
+    qp_controller.update_cbf_dynamics(np.zeros(qp_controller.sym_dim))
 
     # Send actuation commands 
     plant.set_control(u_control) 
     plant.actuate(dt)
-    # qp_controller.update_cbf_dynamics(np.zeros(3))
-    qp_controller.cbf_dynamics.set_state(Quadratic.sym2vector(cbf.get_hessian()))
 
-    # Collect simulation logs ----------------------------------------------------------
-    logs = {
-        "time": time,
-        "stateLog": plant.state_log,
-        "clfLog": qp_controller.clf_dynamics.state_log,
-        "cbfLog": qp_controller.cbf_dynamics.state_log,
-    }
+# Collect simulation logs ----------------------------------------------------------
+logs = {
+    "time": time,
+    "stateLog": plant.state_log,
+    "clfLog": qp_controller.clf.dynamics.state_log,
+    "cbfLog": qp_controller.cbf.dynamics.state_log,
+    "modeLog": np.zeros(len(time))
+}
 
 # Show animation -------------------------------------------------------------------
 print('Animating simulation...')

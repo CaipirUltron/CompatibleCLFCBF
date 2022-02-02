@@ -2,13 +2,13 @@ import rospy
 import numpy as np
 
 from system_initialization import plant, clf, cbf, ref_clf
-from compatible_clf_cbf.controller import NewQPController
+from compatible_clf_cbf.controller import CompatibleQPController
 from compatible_clf_cbf.graphical_simulation_rviz import SimulationRviz
 
 try:
     # Create QP controller and graphical simulation.
     dt = 0.004
-    qp_controller = NewQPController(plant, clf, ref_clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 10.0], p = [1.0, 1.0], dt=dt)
+    qp_controller = CompatibleQPController(plant, clf, ref_clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 10.0], p = [1.0, 1.0], dt=dt)
     graphicalSimulation = SimulationRviz(plant, qp_controller.clf, cbf)
 
     rate = rospy.Rate(1/dt)

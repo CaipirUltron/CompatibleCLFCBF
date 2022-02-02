@@ -3,10 +3,8 @@ import scipy
 from scipy import signal
 
 from compatible_clf_cbf.quadratic_program import QuadraticProgram
-from compatible_clf_cbf.dynamic_systems import Quadratic, Integrator
 
-
-class NewQPController():
+class CompatibleQPController():
     '''
     Class for the compatible QP controller.
     '''
@@ -20,9 +18,6 @@ class NewQPController():
         self.control_dim = self.plant.m
         self.sym_dim = int(( self.state_dim * ( self.state_dim + 1 ) )/2)
         self.skewsym_dim = int(( self.state_dim * ( self.state_dim - 1 ) )/2)
-        self.sym_basis = Quadratic.symmetric_basis(self.state_dim)
-        self.skewsym_basis = Quadratic.skewsymmetric_basis(self.state_dim)
-        self.triangular_basis = Quadratic.triangular_basis(self.state_dim)
 
         # Initialize rate CLF
         self.Vpi = 0.0
@@ -35,13 +30,16 @@ class NewQPController():
         self.schurHh = np.zeros([self.state_dim,self.state_dim])
         self.Q = np.zeros([self.state_dim,self.state_dim])
         self.Z = np.zeros([self.state_dim,self.state_dim])
-        self.normal_vector = np.zeros([self.state_dim,self.state_dim])
+
+        self.mode_log = []                   # mode = 1 for compatibility, mode = 0 for rate
         self.pencil_dict = {}
         self.f_params_dict = {
-            "epsilon": 2.8,
+            "epsilon": 2.2,
             "min_CLF_eigenvalue": 0.2,
             "compatibility_threshold": 1.0
         }
+        self.clf.set_epsilon(self.f_params_dict["min_CLF_eigenvalue"])
+        self.ref_clf.set_epsilon(self.f_params_dict["min_CLF_eigenvalue"])
         self.compute_compatibility()
 
         # Parameters for the inner and outer QPs
@@ -70,23 +68,6 @@ class NewQPController():
         self.LgV = np.zeros(self.control_dim)
         self.Lgh = np.zeros(self.control_dim)
 
-        # Initialize dynamic subsystems
-        f_integrator, g_integrator = list(), list()
-        state_string, ctrl_string = str(), str()
-        EYE = np.eye(self.sym_dim)
-        for k in range(self.sym_dim):
-            f_integrator.append('0')
-            g_integrator.append(EYE[k,:])
-            state_string = state_string + 'pi' + str(k+1) + ', '
-            ctrl_string = ctrl_string + 'dpi' + str(k+1) + ', '
-
-        # Integrator sybsystem for the CLF parameters
-        piv_init = Quadratic.sym2vector(self.clf.get_hessian())
-        self.clf_dynamics = Integrator(piv_init,np.zeros(len(piv_init)))
-
-        pih_init = Quadratic.sym2vector(self.cbf.get_hessian())
-        self.cbf_dynamics = Integrator(pih_init,np.zeros(len(pih_init)))
-
     def get_control(self):
         '''
         Computes the solution of the inner QP.
@@ -106,6 +87,11 @@ class NewQPController():
         else:
             A_inner = np.vstack([ A, a_boundary_stable ])
             b_inner = np.hstack([ b, b_boundary_stable ])
+
+        if self.get_region() > 0:
+            self.mode_log.append(1)
+        else:
+            self.mode_log.append(0)
 
         # Solve inner loop QP
         self.QP1.initialize()
@@ -161,10 +147,11 @@ class NewQPController():
         self.LgV = g.T.dot(self.nablaV)
 
         # Gradient w.r.t. pi
+        partial_Hv = self.clf.get_partial_Hv()
         self.nablaV_pi = np.zeros(self.sym_dim)
         delta_x = ( state - self.clf.get_critical() ).reshape(self.state_dim,1)
         for k in range(self.sym_dim):
-            self.nablaV_pi[k] = 0.5 * ( delta_x.T @ self.sym_basis[k] @ delta_x )[0,0]
+            self.nablaV_pi[k] = 0.5 * ( delta_x.T @ partial_Hv[k] @ delta_x )[0,0]
 
         # Introduces instability in case the CBF is indefinite
         if (self.get_mode() <= 0) and (self.get_region() >= 0):
@@ -224,26 +211,15 @@ class NewQPController():
         '''
         Integrates the dynamic system for the CLF Hessian matrix.
         '''
-        self.clf_dynamics.set_control(piv_ctrl)
-        self.clf_dynamics.actuate(self.ctrl_dt)
-        pi_v = self.clf_dynamics.get_state()
-        
-        Lv = Quadratic.vector2triangular(pi_v)
-        Hv = Lv.T @ Lv + self.f_params_dict["min_CLF_eigenvalue"]*np.eye(self.state_dim)
-
-        self.clf.set_param(hessian = Hv)
+        self.clf.update(piv_ctrl, self.ctrl_dt)
         self.compute_compatibility()
 
     def update_cbf_dynamics(self, pih_ctrl):
         '''
         Integrates the dynamic system for the CBF Hessian matrix.
         '''
-        self.cbf_dynamics.set_control(pih_ctrl)
-        self.cbf_dynamics.actuate(self.ctrl_dt)
-        pi_h = self.cbf_dynamics.get_state()
-        Hh = Quadratic.vector2sym(pi_h)
-
-        self.cbf.set_param(hessian = Hh)
+        self.cbf.update(pih_ctrl, self.ctrl_dt)
+        self.compute_compatibility()
 
     def get_rate_constraint(self):
         '''
@@ -252,11 +228,9 @@ class NewQPController():
         # Computes rate Lyapunov and gradient
         deltaHv = self.clf.get_hessian() - self.ref_clf.get_hessian()
         self.Vpi = 0.5 * np.trace( deltaHv @ deltaHv )
+        partial_Hv = self.clf.get_partial_Hv()
         for k in range(self.sym_dim):
-            nablaHvj = np.zeros([self.state_dim, self.state_dim])
-            for j in range(self.sym_dim):
-                nablaHvj = self.sym_basis[k]
-            self.gradient_Vpi[k] = np.trace( deltaHv @ self.sym_basis[k] )
+            self.gradient_Vpi[k] = np.trace( deltaHv @ partial_Hv[k] )
 
         # Sets rate constraint
         a_clf_pi = np.hstack( [ self.gradient_Vpi, -1.0 ])
@@ -273,9 +247,10 @@ class NewQPController():
         '''
         JacobianV = np.zeros([self.skewsym_dim, self.sym_dim])
         Z = self.pencil_dict["eigenvectors"]
+        partial_Hv = self.clf.get_partial_Hv()
 
         for l in range(self.sym_dim):
-            diag_matrix = Z.T @ self.sym_basis[l] @ Z
+            diag_matrix = Z.T @ partial_Hv[l] @ Z
             m = 0
             for i in range(self.state_dim):
                 for j in range(self.state_dim):
@@ -292,37 +267,26 @@ class NewQPController():
         '''
         Sets the barrier constraints for compatibility.
         '''
-        self.h_gamma1, gradient_h_gamma1 = self.first_compatibility_barrier()
-        self.h_gamma2, gradient_h_gamma2 = self.second_compatibility_barrier()
-
-        # Sets compatibility constraints
-        a_cbf_gamma1 = -np.hstack([ gradient_h_gamma1, np.zeros([self.state_dim-1, 1]) ])
-        b_cbf_gamma1 = self.alpha[1]*self.h_gamma1
-
-        a_cbf_gamma2 = -np.hstack([ gradient_h_gamma2, np.zeros([3,1]) ])
-        b_cbf_gamma2 = self.alpha[1]*self.h_gamma2
-
-        a_cbf_pi = np.vstack([ a_cbf_gamma1, a_cbf_gamma2 ])
-        b_cbf_pi = np.hstack([ b_cbf_gamma1, b_cbf_gamma2 ])
-
-        # a_cbf_pi = a_cbf_gamma1
-        # b_cbf_pi = b_cbf_gamma1
+        self.h_gamma, gradient_h_gamma = self.compatibility_barrier()
+        a_cbf_pi = -np.hstack([ gradient_h_gamma, np.zeros([self.state_dim-1, 1]) ])
+        b_cbf_pi = self.alpha[1]*self.h_gamma
 
         return a_cbf_pi, b_cbf_pi
 
-    def first_compatibility_barrier(self):
+    def compatibility_barrier(self):
         '''
-        Computes first compatibility barrier constraint, for keeping the critical values of f above 1.
+        Computes compatibility barrier constraint, for keeping the critical values of f above 1.
         '''
         Z = self.pencil_dict["eigenvectors"]
         Hv = self.clf.get_hessian()
+        partial_Hv = self.clf.get_partial_Hv()
         x0, p0 = self.clf.get_critical(), self.cbf.get_critical()
         pencil_eig = self.pencil_dict["eigenvalues"]
         v0 = Hv @ ( p0 - x0 )
 
-        # First barrier
-        self.h_gamma1 = np.zeros(self.state_dim-1)
-        gradient_h_gamma1 = np.zeros([self.state_dim-1, self.sym_dim])
+        # Compatibility barrier
+        h_gamma = np.zeros(self.state_dim-1)
+        gradient_h_gamma = np.zeros([self.state_dim-1, self.sym_dim])
 
         # Barrier function
         for k in range(self.state_dim-1):
@@ -330,48 +294,19 @@ class NewQPController():
             max_index = np.argmax(residues)
             residue = residues[max_index]
             delta_lambda = pencil_eig[k+1] - pencil_eig[k]
-            self.h_gamma1[k] = (residue**2)/(delta_lambda**2) - self.f_params_dict["epsilon"]
+            h_gamma[k] = (residue**2)/(delta_lambda**2) - self.f_params_dict["epsilon"]
             
             # Barrier function gradient
             C = 2*residue/(delta_lambda**2)
             for i in range(self.sym_dim):
-                term1 = ( Z[:,max_index].T @ self.sym_basis[i] @ ( p0 - x0 ) )
-                term2 = (residue/delta_lambda)*( Z[:,k+1].T @ self.sym_basis[i] @ Z[:,k+1] - Z[:,k].T @ self.sym_basis[i] @ Z[:,k] )
-                gradient_h_gamma1[k,i] = C*(term1 - term2)
+                term1 = ( Z[:,max_index].T @ partial_Hv[i] @ ( p0 - x0 ) )
+                term2 = (residue/delta_lambda)*( Z[:,k+1].T @ partial_Hv[i] @ Z[:,k+1] - Z[:,k].T @ partial_Hv[i] @ Z[:,k] )
+                gradient_h_gamma[k,i] = C*(term1 - term2)
 
-        print("h_gamma1 = " + str(self.h_gamma1))
-        print("grad h_gamma1 = " + str(gradient_h_gamma1))
+        print("h_gamma = " + str(h_gamma))
+        print("grad h_gamma = " + str(gradient_h_gamma))
 
-        return self.h_gamma1, gradient_h_gamma1
-
-    def second_compatibility_barrier(self):
-        '''
-        Computes second compatibility barrier constraint, for positive-type eigenvalues left and negative-type eigenvalues right on the f-function.
-        Currently, it is in the form of a Matrix Barrier Function.
-        '''
-        # Matrix barrier function (MBF)
-        Hv = self.clf.get_hessian()
-        self.MCBF = Hv - self.f_params_dict["min_CLF_eigenvalue"] * np.eye(self.state_dim)
-        eig_mbf, Q_mbf = np.linalg.eig(Hv)
-
-        # Barrier functions for enforcing Sylvester's criterion
-        self.first_minor = self.MCBF[0,0]
-        self.second_minor = self.MCBF[1,1]
-        self.third_minor = np.linalg.det(self.MCBF)
-
-        # Barrier function gradients
-        grad_first_minor = np.zeros(self.sym_dim)
-        grad_second_minor = np.zeros(self.sym_dim)
-        grad_third_minor = np.zeros(self.sym_dim)
-        for i in range(self.sym_dim):
-            grad_first_minor[i] = self.sym_basis[i][0,0]
-            grad_second_minor[i] = self.sym_basis[i][1,1]
-            grad_third_minor[i] = (Q_mbf[:,0].T @ self.sym_basis[i] @ Q_mbf[:,0]) * eig_mbf[1] + (Q_mbf[:,1].T @ self.sym_basis[i] @ Q_mbf[:,1]) * eig_mbf[0]
-
-        self.h_gamma2 = np.array([ self.first_minor, self.second_minor, self.third_minor ]) - np.array([0.0, 0.0, 0.0])
-        gradient_h_gamma2 = np.vstack([ grad_first_minor, grad_second_minor, grad_third_minor ])
-
-        return self.h_gamma2, gradient_h_gamma2
+        return h_gamma, gradient_h_gamma
 
     def get_mode(self):
         '''
@@ -384,7 +319,6 @@ class NewQPController():
     def get_region(self):
         '''
         Computes the region function: positive when is necessary to compatibilize, negative otherwise.
-        Currently, we use a geometric method based on the relative position of the CLF-CBF.
         '''                
         state = self.plant.get_state()
         return - ( self.cbf.evaluate(state) - self.f_params_dict["compatibility_threshold"] )
@@ -611,21 +545,3 @@ class NewQPController():
         '''
         Hv, Hh = self.clf.get_hessian(), self.cbf.get_hessian()
         return lambda_var*Hh - Hv
-
-    # def get_pencil_eigenvector_constraints(self):
-    #     '''
-    #     Sets the constraint for fixing the pencil eigenvectors (deprecated).
-    #     '''
-    #     l = 0
-    #     Jacobian_pi_omega = np.zeros([self.skewsym_dim, self.sym_dim])
-    #     for i in range(self.state_dim):
-    #         for j in range(i+1,self.state_dim):
-    #             for k in range(self.sym_dim):
-    #                 left_matrix = self.Q.T @ self.sym_basis[k] @ self.Z
-    #                 Jacobian_pi_omega[l,k] = left_matrix[i,j]
-    #             l = l + 1
-
-    #     a_clf_rot = np.hstack( [ Jacobian_pi_omega, np.zeros([self.skewsym_dim, 1]) ])
-    #     b_clf_rot = np.zeros(self.skewsym_dim)
-
-    #     return a_clf_rot, b_clf_rot

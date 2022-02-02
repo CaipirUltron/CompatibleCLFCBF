@@ -1,9 +1,9 @@
 import math
 import numpy as np
 from abc import ABC, abstractmethod
-from dynamic_systems import Integrator, vector2triangular, triangular2vector
 
-from compatible_clf_cbf.dynamic_systems.common_methods import sym2triangular
+from compatible_clf_cbf.dynamic_systems.dynamic_systems import Integrator
+from compatible_clf_cbf.dynamic_systems.common_methods import vector2triangular, triangular2vector, sym2triangular, triangular_basis, sym2vector, vector2sym
 
 class Function(ABC):
     '''
@@ -20,7 +20,7 @@ class Function(ABC):
             self._hessian = 0.0
 
     def set_value(self, value):
-        if isinstance(value, list):
+        if isinstance(value, list) or isinstance(value,np.ndarray):
             self._dim = len(value)
             self._var = np.array(value)
         else:
@@ -82,7 +82,7 @@ class Quadratic(Function):
         self.c = 0.0
         self.height = 0.0
 
-        self.set_param(**kwargs)
+        Quadratic.set_param(self, **kwargs)
 
         # Set eigenbasis for hessian matrix
         _, _, Q = self.compute_eig()
@@ -222,27 +222,20 @@ class QuadraticLyapunov(Quadratic):
     Here, the Lyapunov minimum is a constant vector x0, and the hessian Hv is positive definite and parametrized by:
     Hv = Lv(pi_v)'Lv(pi_v) + epsilon I_n (Lv is upper triangular and epsilon is a small positive constant).
     '''
-    def __init__(self, init_value=0.0, epsilon=1.0, **kwargs):
+    def __init__(self, init_value=0.0, **kwargs):
+        super().__init__(init_value, **kwargs)
+        super().set_param(height=0.0)
 
-        super().__init__(self, init_value, **kwargs)
-        self.epsilon = epsilon
-        self.set_param(height=0.0)
-
-        self.L = sym2triangular( self.get_hessian() )
-
-        self.dynamics = Integrator(param,np.zeros(len(param)))
+        self.epsilon = 0.0
+        self.Lv = sym2triangular( self.get_hessian()-self.epsilon*np.eye(self._dim) )
+        self.param = triangular2vector( self.Lv )
+        self.dynamics = Integrator(self.param,np.zeros(len(self.param)))
 
     def get_param(self):
         '''
         This function gets the params corresponding to the Lyapunov Hessian matrix.
         '''
-        Hv = self.hessian()
-        eigs, Q = np.linalg.eig( Hv - self.epsilon*np.eye(self._dim) )
-        if np.any(eigs) < 0:
-            Exception("Hessian matrix is not valid.")
-        L = np.diag(np.sqrt(eigs)) @ Q.T
-        param = triangular2vector(L)
-
+        return self.param
 
     def set_epsilon(self, epsilon):
         '''
@@ -259,25 +252,61 @@ class QuadraticLyapunov(Quadratic):
         Lv = vector2triangular(param)
         Hv = Lv.T @ Lv + self.epsilon*np.eye(self._dim)
         super().set_param(hessian = Hv)
-        self.dynamics.set_state(param)
-
+    
     def update(self, param_ctrl, dt):
         '''
         Integrates the parameters.
         '''
         self.dynamics.set_control(param_ctrl)
-        self.dynamics.actuate(dt)        
+        self.dynamics.actuate(dt)
         self.set_param(self.dynamics.get_state())
-        
+
+    def get_partial_Hv(self):
+        '''
+        Returns the partial derivatives of Hv wrt to the parameters.
+        '''
+        tri_basis = triangular_basis(self._dim)
+        partial_Hv = np.zeros([ len(self.param), self._dim, self._dim ])
+        for i in range(len(self.param)):
+            for j in range(len(self.param)):
+                partial_Hv[i,:,:] = partial_Hv[i,:,:] + ( tri_basis[i].T @ tri_basis[j] + tri_basis[j].T @ tri_basis[i] )*self.param[j]
+
+        return partial_Hv
+
 
 class QuadraticBarrier(Quadratic):
     '''
     Class for Quadratic barrier functions.
     For positive definite Hessians, the unsafe set is described by the interior of an ellipsoid.
+    The symmetric Hessian is parametrized by Hh(pi) = \sum^n_i Li \pi_i, where {Li} is the canonical basis of the space of (n,n) symmetric matrices.
     '''
     def __init__(self, init_value=0.0, **kwargs):
-        Quadratic.__init__(self, init_value, **kwargs)
-        self.set_param(height = -0.5)
+        super().__init__(init_value, **kwargs)
+        super().set_param(height = -0.5)
+
+        self.param = sym2vector( self.get_hessian() )
+        self.dynamics = Integrator(self.param,np.zeros(len(self.param)))
+
+    def get_param(self):
+        '''
+        This function gets the params corresponding to the barrier Hessian matrix.
+        '''
+        return self.param
+
+    def set_param(self, param):
+        '''
+        Sets the barrier function parameters.
+        '''
+        self.param = param
+        super().set_param(hessian = vector2sym(param))
+
+    def update(self, param_ctrl, dt):
+        '''
+        Integrates the barrier function parameters.
+        '''
+        self.dynamics.set_control(param_ctrl)
+        self.dynamics.actuate(dt)
+        self.set_param(self.dynamics.get_state())
 
 
 class ApproxFunction(Function):
