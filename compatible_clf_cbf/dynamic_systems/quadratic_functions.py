@@ -1,8 +1,9 @@
 import math
 import numpy as np
 from abc import ABC, abstractmethod
-from dynamic_systems import Integrator
-from scipy.optimize import fsolve
+from dynamic_systems import Integrator, vector2triangular, triangular2vector
+
+from compatible_clf_cbf.dynamic_systems.common_methods import sym2triangular
 
 class Function(ABC):
     '''
@@ -214,170 +215,6 @@ class Quadratic(Function):
 
         return x1, x2, u, v
 
-    @staticmethod
-    def vector2triangular(vector):
-        '''
-        Transforms numpy vector to corresponding upper triangular matrix.
-        '''
-        dim = len(vector)
-        if dim < 3:
-            raise Exception("The input vector must be of length 3 or higher.")
-        n = int((-1 + np.sqrt(1+8*dim))/2)
-        triangular_basis = Quadratic.triangular_basis(n)
-        T = np.zeros([n,n])
-        for k in range(dim):
-            T = T + triangular_basis[k]*vector[k]
-        return T
-
-    @staticmethod
-    def vector2sym(vector):
-        '''
-        Transforms numpy vector to corresponding symmetric matrix.
-        '''
-        dim = len(vector)
-        if dim < 3:
-            raise Exception("The input vector must be of length 3 or higher.")
-        n = int((-1 + np.sqrt(1+8*dim))/2)
-        sym_basis = Quadratic.symmetric_basis(n)
-        S = np.zeros([n,n])
-        for k in range(dim):
-            S = S + sym_basis[k]*vector[k]
-        return S
-
-    @staticmethod
-    def triangular2vector(T):
-        '''
-        Stacks the coefficients of an upper triangular matrix to a numpy vector.
-        '''
-        n = T.shape[0]
-        if n < 2:
-            raise Exception("The input matrix must be of size 2x2 or higher.")
-        triangular_basis = Quadratic.triangular_basis(n)
-        dim = int((n*(n+1))/2)
-        vector = np.zeros(dim)
-        for k in range(dim):
-            list = np.nonzero(triangular_basis[k])
-            i, j = list[0][0], list[1][0]
-            vector[k] = T[i][j]
-        return vector
-
-    @staticmethod
-    def sym2vector(S):
-        '''
-        Stacks the coefficients of a symmetric matrix to a numpy vector.
-        '''
-        n = S.shape[0]
-        if n < 2:
-            raise Exception("The input matrix must be of size 2x2 or higher.")
-        sym_basis = Quadratic.symmetric_basis(n)
-        dim = int((n*(n+1))/2)
-        vector = np.zeros(dim)
-        for k in range(dim):
-            list = np.nonzero(sym_basis[k])
-            i, j = list[0][0], list[1][0]
-            vector[k] = S[i][j]
-        return vector
-
-    @staticmethod
-    def triangular_basis(n):
-        '''
-        Returns the canonical basis of the space of upper triangular (n x n) matrices.
-        '''
-        sym_basis = list()
-        EYE = np.eye(n)
-        for i in range(n):
-            for j in range(i,n):
-                if i == j:
-                    sym_basis.append(np.outer(EYE[:,i], EYE[:,j]))
-                else:
-                    sym_basis.append(np.outer(EYE[:,i], EYE[:,j]))
-        return sym_basis
-
-    @staticmethod
-    def symmetric_basis(n):
-        '''
-        Returns the canonical basis of the space of symmetric (n x n) matrices.
-        '''
-        sym_basis = list()
-        EYE = np.eye(n)
-        for i in range(n):
-            for j in range(i,n):
-                if i == j:
-                    sym_basis.append(np.outer(EYE[:,i], EYE[:,j]))
-                else:
-                    sym_basis.append(np.outer(EYE[:,i], EYE[:,j]) + np.outer(EYE[:,j], EYE[:,i]))
-        return sym_basis
-
-    @staticmethod
-    def skewsymmetric_basis(n):
-        '''
-        Returns the canonical basis of the space of skew-symmetric (n x n) matrices.
-        '''
-        sym_basis = list()
-        EYE = np.eye(n)
-        for i in range(n):
-            for j in range(i,n):
-                if i != j:
-                    sym_basis.append( ((-1)**(i+j))*(np.outer(EYE[:,i], EYE[:,j])-np.outer(EYE[:,j], EYE[:,i])) )
-        return sym_basis
-
-    @staticmethod
-    def hat(omega):
-        '''
-        Returns the skew-symmetric matrix corresponding to the omega vector array.
-        '''
-        n = len(omega)
-        basis = Quadratic.skewsymmetric_basis(n)
-        omega_hat = np.zeros([n,n])
-        for k in range(len(basis)):
-            omega_hat = omega_hat + omega[k]*basis[k]
-
-    @staticmethod
-    def rot2D(theta):
-        '''
-        Standard 2D rotation matrix.
-        '''
-        c, s = np.cos(theta), np.sin(theta)
-        R = np.array(((c,-s),(s,c)))
-        return R
-
-    @staticmethod
-    def canonical2D(eigen, theta):
-        '''
-        Returns the (2x2) symmetric matrix with eigenvalues eigen and eigenvector angle theta.
-        '''
-        Diag = np.diag(eigen)
-        R = Quadratic.rot2D(theta)
-        H = R @ Diag @ R.T
-        return H
-
-    @staticmethod
-    def sym2triangular(P):
-        '''
-        This function decomposes a symmetric semidefinite matrix P into the form P = L'L.
-        '''
-        eigs, Q = np.linalg.eig(P)
-        if np.any(eigs*eigs[0]) < 0:
-            Exception("The input matrix is not definite.")
-        Linit = np.diag(np.sqrt(eigs)) @ Q.T
-        param_init = Quadratic.triangular2vector(Linit)
-        dimension = len(eigs)
-
-        def func(l):
-            f = []
-            L = Quadratic.vector2triangular(l)
-            for i in range(dimension):
-                for j in range(dimension):
-                    if i <= j:
-                        l_term = 0
-                        for k in range(dimension):
-                            l_term = l_term + L[k,i] * L[k,j]
-                        f.append( l_term - P[i,j] )
-            return f
-
-        param_sol = fsolve(func, param_init)
-        return Quadratic.vector2triangular( param_sol )
-
 
 class QuadraticLyapunov(Quadratic):
     '''
@@ -391,6 +228,8 @@ class QuadraticLyapunov(Quadratic):
         self.epsilon = epsilon
         self.set_param(height=0.0)
 
+        self.L = sym2triangular( self.get_hessian() )
+
         self.dynamics = Integrator(param,np.zeros(len(param)))
 
     def get_param(self):
@@ -402,7 +241,7 @@ class QuadraticLyapunov(Quadratic):
         if np.any(eigs) < 0:
             Exception("Hessian matrix is not valid.")
         L = np.diag(np.sqrt(eigs)) @ Q.T
-        param = super().triangular2vector(L)
+        param = triangular2vector(L)
 
 
     def set_epsilon(self, epsilon):
@@ -417,7 +256,7 @@ class QuadraticLyapunov(Quadratic):
         Sets the Lyapunov function parameters.
         '''
         self.param = param
-        Lv = super().vector2triangular(param)
+        Lv = vector2triangular(param)
         Hv = Lv.T @ Lv + self.epsilon*np.eye(self._dim)
         super().set_param(hessian = Hv)
         self.dynamics.set_state(param)
