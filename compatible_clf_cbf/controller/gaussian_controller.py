@@ -3,7 +3,7 @@ from compatible_clf_cbf.quadratic_program import QuadraticProgram
 from compatible_clf_cbf.dynamic_systems import Integrator
 from compatible_clf_cbf.dynamic_systems import sym2vector, vector2sym
 
-class NominalQP():
+class GaussianQP():
     '''
     Class for the nominal QP controller.
     '''
@@ -62,9 +62,9 @@ class NominalQP():
         state = self.plant.get_state()
 
         # Lyapunov function and gradient
-        self.V = self.clf.evaluate_function(*state)[0]
-        self.nablaV = self.clf.evaluate_gradient(*state)[0]
-        
+        self.V = self.clf.evaluate(state)
+        self.nablaV = self.clf.get_gradient()
+
         # Lie derivatives
         self.LfV = self.nablaV.dot(f)
         self.LgV = g.T.dot(self.nablaV)
@@ -72,6 +72,9 @@ class NominalQP():
         # CLF contraint for the QP
         a_clf = np.hstack( [ self.LgV, -1.0 ])
         b_clf = -self.gamma * self.V - self.LfV
+
+        self.h = self.cbf.evaluate(state)
+        self.nablah = self.cbf.get_gradient()
 
         return a_clf, b_clf
 
@@ -85,8 +88,8 @@ class NominalQP():
         state = self.plant.get_state()
 
         # Barrier function and gradient
-        self.h = self.cbf.evaluate_function(*state)[0]
-        self.nablah = self.cbf.evaluate_gradient(*state)[0]
+        self.h = self.cbf.evaluate(state)
+        self.nablah = self.cbf.get_gradient()
 
         self.Lfh = self.nablah.dot(f)
         self.Lgh = g.T.dot(self.nablah)

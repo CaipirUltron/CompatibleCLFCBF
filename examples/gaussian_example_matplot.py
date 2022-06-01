@@ -34,14 +34,12 @@ for step in range(0, num_steps):
 logs = {
     "time": time,
     "stateLog": plant.state_log,
-    "clfLog": qp_controller.clf.dynamics.state_log,
-    "cbfLog": qp_controller.cbf.dynamics.state_log,
     "modeLog": np.zeros(len(time))
 }
 
 # Show animation -------------------------------------------------------------------
 print('Animating simulation...')
 axes_lim = (-6,6,-6,6)
-plotSim = SimulationMatplot(axes_lim, 50, logs, clf, cbf, draw_level=True)
+plotSim = SimulationMatplot(axes_lim, 50, logs, clf_bump, cbf, draw_level=True)
 plotSim.animate()
 plt.show()
