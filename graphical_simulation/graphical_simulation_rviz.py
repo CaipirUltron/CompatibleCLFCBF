@@ -1,11 +1,10 @@
-import math, rospy
+import rospy
 import tf2_ros
 import numpy as np
 
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point, PointStamped, TransformStamped
 
-from compatible_clf_cbf.dynamic_systems import Quadratic
 
 class SimulationRviz():
     def __init__(self, plant, clf, cbf):
@@ -275,7 +274,7 @@ class SimulationRviz():
         scale_x = np.sqrt((2/np.abs(eigs[0])*np.abs(quadratic_level - height)))
         scale_y = np.sqrt((2/np.abs(eigs[1])*np.abs(quadratic_level - height)))
         
-        res = 2*math.pi/num_points
+        res = 2*np.pi/num_points
         if eigs[0]*eigs[1] > 0:
             ellipse_marker.action = Marker.ADD
             hyperbola_marker1.action = Marker.DELETE

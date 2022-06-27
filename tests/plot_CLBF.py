@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
-from compatible_clf_cbf.dynamic_systems import Gaussian, CLBF
+from functions import Gaussian, CLBF
 
 # Create CLBF function with goal and obstacle list.
 x0 = [0.0, 0.0]

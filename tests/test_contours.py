@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-from compatible_clf_cbf.dynamic_systems import canonical2D, QuadraticLyapunov, Gaussian
+from functions import canonical2D, QuadraticLyapunov, Gaussian
 
 clf_lambda_x, clf_lambda_y, clf_angle = 3.0, 1.0, math.radians(0.0)
 clf_params = {

@@ -1,13 +1,13 @@
-from genericpath import exists
 import numpy as np
 
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
 
-from compatible_clf_cbf.dynamic_systems.common_methods import vector2sym
 
 class SimulationMatplot():
-
+    '''
+    Class for Matplot-based simulation.
+    '''
     def __init__(self, axes_lim, numpoints, logs, clf, cbf, draw_level = False):
 
         self.fps = 50

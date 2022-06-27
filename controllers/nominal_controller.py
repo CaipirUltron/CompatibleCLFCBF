@@ -1,7 +1,6 @@
 import numpy as np
-from compatible_clf_cbf.quadratic_program import QuadraticProgram
-from compatible_clf_cbf.dynamic_systems import Integrator
-from compatible_clf_cbf.dynamic_systems import sym2vector, vector2sym
+from quadratic_program import QuadraticProgram
+
 
 class NominalQP():
     '''

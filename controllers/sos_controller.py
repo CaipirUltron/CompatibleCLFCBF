@@ -1,17 +1,23 @@
 import numpy as np
-from compatible_clf_cbf.quadratic_program import QuadraticProgram
-from compatible_clf_cbf.dynamic_systems import Integrator
-from compatible_clf_cbf.dynamic_systems import sym2vector, vector2sym
+from quadratic_program import QuadraticProgram
+from functions import PolynomialFunction
+from SumOfSquares import SOSProblem, poly_opt_prob, Basis
 
-class SOSController():
+
+class SoSController():
     '''
     Class for the nominal QP controller.
     '''
-    def __init__(self, plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0, dt = 0.001):
+    def __init__(self, plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 1.0, epsilon = 1.0 , dt = 0.001):
 
         # Dimensions and system model initialization
         self.plant = plant
-        self.clf, self.cbf = clf, cbf
+        self.clf = clf
+        self.cbf = cbf
+
+        self._state_symbols = self.clf.get_symbols()
+        self._clf_poly = self.clf.get_polynomial()
+        self._cbf_poly = self.cbf.get_polynomial()
 
         self.state_dim = self.plant.n
         self.control_dim = self.plant.m
@@ -26,6 +32,15 @@ class SOSController():
         P[self.control_dim,self.control_dim] = self.p
         q = np.zeros(self.QP_dim)
         self.QP = QuadraticProgram(P=P, q=q)
+
+        # SoS optimization
+        self.SoS = SOSProblem()
+
+        self.epsilon = epsilon
+        self.pos_def_poly = self.epsilon * PolynomialFunction(np.zeros(self.state_dim), degree = 1, P = np.diag([0.0, 1.0, 1.0,])).get_polynomial()
+        
+        self.positivity_constr = self.SoS.add_sos_constraint(self._clf_poly - self.pos_def_poly, self._state_symbols, name="positivity")
+        # self.dissipativity_constr = self.SoS.add_sos_constraint(, self.clf.get_symbols(), name="dissipativity")
 
         self.ctrl_dt = dt
 

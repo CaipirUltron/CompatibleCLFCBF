@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from system_initialization import plant, clf, cbf, ref_clf
-from compatible_clf_cbf.controller import CompatibleQPController
+from compatible_clf_cbf.controllers import CompatibleQPController
 from compatible_clf_cbf.graphical_simulation_matplot import SimulationMatplot
 from compatible_clf_cbf.dynamic_systems import sym2vector
 

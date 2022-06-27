@@ -1,4 +1,4 @@
 from .compatible_controller import CompatibleQPController
 from .nominal_controller import NominalQP
-from .gaussian_controller import GaussianQP
+from .sos_controller import SoSController
 from .exceptions import InvalidQP

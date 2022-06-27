@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from system_initialization import plant, clf, ref_clf, cbf
-from compatible_clf_cbf.controller import NewQPController
+from controllers import NewQPController
 
 # Create QP controller
 qp_controller = NewQPController(plant, clf, ref_clf, cbf)

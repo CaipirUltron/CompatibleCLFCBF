@@ -3,9 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from system_initialization import plant, clf, cbf
-from compatible_clf_cbf.controller import NominalQP
-from compatible_clf_cbf.graphical_simulation_matplot import SimulationMatplot
-from compatible_clf_cbf.dynamic_systems import sym2vector
+from controllers import NominalQP
+from graphical_simulation import SimulationMatplot
 
 # Create QP controller and graphical simulation.
 dt = .005

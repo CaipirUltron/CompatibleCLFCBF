@@ -2,7 +2,7 @@ import numpy as np
 import scipy
 from scipy import signal
 
-from compatible_clf_cbf.quadratic_program import QuadraticProgram
+from quadratic_program import QuadraticProgram
 
 class CompatibleQPController():
     '''

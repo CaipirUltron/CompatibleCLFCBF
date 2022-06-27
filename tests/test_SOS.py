@@ -19,7 +19,7 @@ p = len(list_of_monomials)
 P = sp.Matrix(sp.symarray('p',(p,p)))
 m = sp.Matrix(list_of_monomials)
 
-V = 
+V = ( P * m ).dot(m)
 
 prob = SOSProblem()
 V_constraint = prob.add_sos_constraint(V, [x, y], name="positive_definiteness")

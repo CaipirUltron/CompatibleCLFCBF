@@ -1,6 +1,7 @@
 import numpy as np
 from qpsolvers import solve_qp
 
+
 class QuadraticProgram():
     def __init__(self, **kwargs):
         for key in kwargs:

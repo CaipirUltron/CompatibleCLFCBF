@@ -1,4 +1,3 @@
-import math
 import numpy as np
 from scipy.integrate import ode
 from abc import ABC, abstractmethod
@@ -183,3 +182,14 @@ class Unicycle(AffineSystem):
         y = self._state[1]
         phi = self._state[2]
         self._g = np.array([[ np.cos(phi), 0.0 ],[ np.sin(phi), 0.0 ],[0.0, 1.0]])
+
+
+class PolynomialSystem(AffineSystem):
+    '''
+    Implements a polynomial affine system.
+    '''
+    def __init__(self, initial_state, initial_control, f_list, g_list):
+        super().__init__(initial_state, initial_control)
+        
+        self._sym_f = [ f_i.get_polynomial() for f_i in f_list ]
+        self._sym_g = [ [g_list[i][j].get_polynomial() for i in range(self.n)] for j in range(self.m) ]
