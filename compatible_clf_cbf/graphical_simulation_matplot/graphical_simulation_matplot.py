@@ -57,6 +57,7 @@ class SimulationMatplot():
         self.mode_text.text = str("Rate/Compatibility")
 
         self.trajectory.set_data([],[])
+        self.cbf_contours = self.cbf.contour_plot(self.ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.2)
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
@@ -86,18 +87,22 @@ class SimulationMatplot():
 
         if self.draw_level:
             V = self.clf.evaluate_function(*current_state)[0]
+            h = self.cbf.evaluate_function(*current_state)[0]
             for coll in self.clf_contours.collections:
                 coll.remove()
+            # for coll in self.cbf_contours.collections:
+            #     coll.remove()
             perimeter = 4*abs(current_state[0]) + 4*abs(current_state[1])
             self.clf_contours = self.clf.contour_plot(self.ax, levels=[V], colors=['blue'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.008*perimeter+0.1)
+            # self.cbf_contours = self.cbf.contour_plot(self.ax, levels=[h], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.008*perimeter+0.1)
 
-        if hasattr(self, 'cbf_log'):
-            current_pih_state = [self.cbf_log[0][i], self.cbf_log[1][i], self.cbf_log[2][i]]
-            self.cbf.set_param(current_pih_state)
+        # if hasattr(self, 'cbf_log'):
+        #     current_pih_state = [self.cbf_log[0][i], self.cbf_log[1][i], self.cbf_log[2][i]]
+        #     self.cbf.set_param(current_pih_state)
 
-        for coll in self.cbf_contours.collections:
-            coll.remove()
-        self.cbf_contours = self.cbf.contour_plot(self.ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.2)
+        # for coll in self.cbf_contours.collections:
+            # coll.remove()
+        # self.cbf_contours = self.cbf.contour_plot(self.ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.2)
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
@@ -116,3 +121,19 @@ class SimulationMatplot():
 
     def animate(self):
         self.animation = anim.FuncAnimation(self.fig, func=self.update, frames=self.gen_function(), init_func=self.init, interval=1000/self.fps, repeat=False, blit=True)
+
+    def get_frame(self, t):
+        '''
+        Updates frame at time time.
+        '''
+        self.init()
+        step = np.argmin( (self.time - t)**2 )
+        graphical_elements = self.update(step)
+
+        return graphical_elements
+
+    def plot_frame(self, t):
+        '''
+        Plots specific animation frame at time t.
+        '''
+        self.get_frame(t)

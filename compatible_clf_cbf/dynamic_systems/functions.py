@@ -1,8 +1,11 @@
-from copy import copy
 import math
+import scipy
 import numpy as np
-import matplotlib.pyplot as plt 
+import sympy as sp
+import matplotlib.pyplot as plt
 
+from copy import copy
+from SumOfSquares import Basis
 from compatible_clf_cbf.dynamic_systems.dynamic_systems import Integrator
 from compatible_clf_cbf.dynamic_systems.common_methods import vector2triangular, triangular2vector, sym2triangular, triangular_basis, sym2vector, vector2sym
 
@@ -251,65 +254,6 @@ class Quadratic(Function):
         angle = np.arctan2(Q[0, 1], Q[0, 0])
         return eigen, angle, Q
 
-    # def superlevel(self, level, num_points):
-    #     '''
-    #     This function returns the corresponding level set of the quadratic function, if its 2-dim.
-    #     '''
-    #     if self._dim != 2:
-    #         Exception("Quadratic function is not two-dimensional.")
-
-    #     eigs, Q = np.linalg.eig(self.hessian(0))
-    #     height = self.get_height()
-
-    #     scale_x = np.sqrt((2/np.abs(eigs[0])*np.abs(level - height)))
-    #     scale_y = np.sqrt((2/np.abs(eigs[1])*np.abs(level - height)))
-
-    #     def change_variables(y1, y2):
-    #         p = self.critical_point
-    #         x = p[0] + Q[0,0]*y1 + Q[0,1]*y2
-    #         y = p[1] + Q[1,0]*y1 + Q[1,1]*y2
-    #         return x, y
-
-    #     def compute_grad_pts(x1, x2):
-    #         u, v = np.zeros(num_points), np.zeros(num_points)
-    #         for k in range(num_points):
-    #             self.evaluate_function(x1[k],x2[k])
-    #             gradient = self.get_gradient()[0]
-    #             u[k], v[k] = gradient[0], gradient[1]
-    #         return u, v
-
-    #     t = np.linspace(-math.pi, math.pi, num_points)
-    #     if eigs[0]*eigs[1] > 0:
-    #         # ellipse
-    #         y1, y2 = scale_x*np.cos(t), scale_y*np.sin(t)
-    #         x1, x2 = change_variables( y1, y2 )
-    #         u, v = compute_grad_pts( x1, x2 )
-
-    #         x1, x2 = [x1, 0.0], [x2, 0.0]
-    #         u, v = [u, 0.0], [v, 0.0]
-    #     else:
-    #         # hyperbola
-    #         if eigs[0] < 0:
-    #             hyper1_y1, hyper1_y2 = scale_x*np.sinh(t), scale_y*np.cosh(t)
-    #             hyper2_y1, hyper2_y2 = scale_x*np.sinh(t), -scale_y*np.cosh(t)
-    #         else:
-    #             hyper1_y1, hyper1_y2 = scale_x*np.cosh(t), scale_y*np.sinh(t)
-    #             hyper2_y1, hyper2_y2 = -scale_x*np.cosh(t), scale_y*np.sinh(t)
-
-    #         hyper1_x1, hyper1_x2 = change_variables(hyper1_y1, hyper1_y2)
-    #         hyper1_u, hyper1_v = compute_grad_pts( hyper1_x1, hyper1_x2 )
-
-    #         hyper2_x1, hyper2_x2 = change_variables(hyper2_y1, hyper2_y2)
-    #         hyper2_u, hyper2_v = compute_grad_pts( hyper2_x1, hyper2_x2 )
-
-    #         x1 = [hyper1_x1, hyper2_x1]
-    #         x2 = [hyper1_x2, hyper2_x2]
-
-    #         u = [hyper1_u, hyper2_u]
-    #         v = [hyper1_v, hyper2_v]
-
-    #     return x1, x2, u, v
-
 
 class QuadraticLyapunov(Quadratic):
     '''
@@ -462,6 +406,103 @@ class Gaussian(Function):
         '''
         v = np.array(point) - self.mu
         return - self.c * np.exp( -v.T @ self.Sigma @ v ) * ( self.Sigma - np.outer( self.Sigma @ v, self.Sigma @ v ) )
+
+
+class PolynomialFunction(Function):
+    '''
+    Class for polynomial functions of the type m(x)' P m(x) of maximum degree 2*d, where m(x) is a vector of (n+d,d) known monomials.
+    '''
+    def __init__(self, *args, **kwargs):
+
+        # Initialization
+        super().__init__(*args)
+        self.set_param(**kwargs)
+
+        self._symbols = sp.symarray('x',self._dim)
+        self._monomials = Basis.from_degree(self._dim, self._degree).to_sym(self._symbols)
+        self._num_monomials = len(self._monomials)
+
+        # Symbolic computations
+        self._symP = sp.Matrix(sp.symarray('p',(self._num_monomials,self._num_monomials)))
+        self._sym_monomials = sp.Matrix(self._monomials)
+        self._sym_jacobian_monomials = self._sym_monomials.jacobian(self._symbols)
+
+        self._hessian_monomials = [ [0 for i in range(self._dim)] for j in range(self._dim) ]
+        for i in range(self._dim):
+            for j in range(self._dim):
+                self._hessian_monomials[i][j] = sp.diff(self._sym_jacobian_monomials[:,j], self._symbols[i])
+
+        self._sym_fun = ( self._symP * self._sym_monomials ).dot(self._sym_monomials)
+
+        # Lambda functions
+        self._lambda_monomials = sp.lambdify( list(self._symbols), self._monomials )
+        self._lambda_jacobian_monomials = sp.lambdify( list(self._symbols), self._sym_jacobian_monomials )
+        self._lambda_hessian_monomials = sp.lambdify( list(self._symbols), self._hessian_monomials )
+
+    def set_param(self, **kwargs):
+        '''
+        Sets the function parameters.
+        '''
+        self._degree = 0
+        self._num_monomials = 1
+        self._P = np.zeros([self._num_monomials,self._num_monomials])
+
+        for key in kwargs:
+            if key == "P":
+                self._P = np.array(kwargs[key])
+            if key == "degree":
+                self._degree = kwargs[key]
+
+        self._num_monomials = scipy.special.binom( self._dim+self._degree, self._degree )
+        if np.shape(kwargs[key]) != ( self._num_monomials, self._num_monomials ):
+            raise Exception("P must be N x N, where N is the dimension of the monomial basis!")
+
+    def function(self, point):
+        '''
+        Compute polynomial function numerically.
+        '''
+        m = np.array(self._lambda_monomials(*point))
+        return m @ self._P @ m
+
+    def gradient(self, point):
+        '''
+        Compute gradient of polynomial function numerically.
+        '''
+        m = np.array(self._lambda_monomials(*point))
+        del_m = np.array(self._lambda_jacobian_monomials(*point))
+        return m @ self._P @ del_m + del_m.T @ self._P @ m
+
+    def hessian(self, point):
+        '''
+        Compute hessian of polynomial function numerically.
+        '''
+        m = np.array(self._lambda_monomials(*point))
+        Hv = np.zeros([self._dim, self._dim])
+        for i in range(self._dim):
+            for j in range(self._dim):
+                delm_i = np.array(self._lambda_jacobian_monomials(*point))[:,i].reshape(self._num_monomials)
+                delm_j = np.array(self._lambda_jacobian_monomials(*point))[:,j].reshape(self._num_monomials)
+                hessian_m_ij = self._lambda_hessian_monomials(*point)[i][j].reshape(self._num_monomials)
+                Hv[i,j] = delm_i @ ( self._P + self._P.T ) @ delm_j + m @ ( self._P + self._P.T ) @ hessian_m_ij
+        return Hv
+
+    def get_symbols(self):
+        '''
+        Return the sympy variables.
+        '''
+        return list(self._symbols)
+
+    def get_monomials(self):
+        '''
+        Return the monomial basis vector.
+        '''
+        return self._monomials
+
+    def get_polynomial(self):
+        '''
+        Return the complete symbolic polynomial of the function
+        '''
+        return self._sym_fun
 
 
 class ApproxFunction(Function):

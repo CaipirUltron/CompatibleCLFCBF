@@ -3,7 +3,7 @@ from compatible_clf_cbf.quadratic_program import QuadraticProgram
 from compatible_clf_cbf.dynamic_systems import Integrator
 from compatible_clf_cbf.dynamic_systems import sym2vector, vector2sym
 
-class NominalQP():
+class SOSController():
     '''
     Class for the nominal QP controller.
     '''
@@ -112,12 +112,12 @@ class NominalQP():
         Lgh2 = self.Lgh.dot(self.Lgh)
         LgVLgh = self.LgV.dot(self.Lgh)
 
-        delta = ( (1/self.p) + LgV2 ) * Lgh2 - LgVLgh**2
+        delta = LgVLgh**2 - ( (1/self.p) + LgV2 ) * Lgh2
         
         FV = self.LfV + self.gamma * self.V
         Fh = self.Lfh + self.alpha * self.h
         
-        lambda1 = (1/delta) * ( FV * Lgh2 - Fh * LgVLgh )
-        lambda2 = (1/delta) * ( FV * LgVLgh - Fh * ( (1/self.p) + LgV2 )  )
+        lambda1 = (1/delta) * ( Fh * LgVLgh - FV * Lgh2 )
+        lambda2 = (1/delta) * ( Fh * ( (1/self.p) + LgV2 ) - FV * LgVLgh )
 
         return lambda1, lambda2, delta
