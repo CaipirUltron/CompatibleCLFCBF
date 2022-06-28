@@ -1,4 +1,8 @@
+import scipy
 import numpy as np
+import sympy as sp
+
+from SumOfSquares import Basis
 from scipy.integrate import ode
 from abc import ABC, abstractmethod
 
@@ -186,10 +190,96 @@ class Unicycle(AffineSystem):
 
 class PolynomialSystem(AffineSystem):
     '''
-    Implements a polynomial affine system.
+    Class for affine polynomial systems of the type xdot = f(x) + g(x) u, where f(x), g(x) are affine combinations of monomials:
+        f(x) = \sum F_k m_k(x),
+        g(x) = \sum G_k m_k(x),
+    where m(x) = [ m_1(x) m_2(x) ... m_p(x) ] is a vector of (n+d,d) known monomials (up to degree d) and:
+        F = [ F_1 F_2 ... F_p ], F_k \in (n x 1)
+        G = [ G_1 G_2 ... G_p ], G_k \in (n x m)
+    are lists of vector and matrix coefficients describing f(x) and g(x).
     '''
-    def __init__(self, initial_state, initial_control, f_list, g_list):
+    def __init__(self, initial_state, initial_control, **kwargs):
         super().__init__(initial_state, initial_control)
+        self.set_param(**kwargs)
         
-        self._sym_f = [ f_i.get_polynomial() for f_i in f_list ]
-        self._sym_g = [ [g_list[i][j].get_polynomial() for i in range(self.n)] for j in range(self.m) ]
+        self._symbols = sp.symarray('x',self.n)
+        self._monomials = Basis.from_degree(self.n, self._degree).to_sym(self._symbols)
+        self._num_monomials = len(self._monomials)
+
+        # Symbolic f(x) and corresponding lambda function
+        self._sym_f = sp.zeros(self.n,1)
+        for k in range(len(self._F_list)):
+            self._sym_f += sp.Matrix(self._F_list[k]) * self._monomials[k]
+        self._lambda_f = sp.lambdify( list(self._symbols), self._sym_f )
+
+        # Symbolic g(x)
+        self._sym_g = sp.zeros(self.n,self.m)
+        for k in range(len(self._G_list)):
+            self._sym_g += sp.Matrix(self._G_list[k]) * self._monomials[k]
+        self._lambda_g = sp.lambdify( list(self._symbols), self._sym_g )
+
+    def set_param(self, **kwargs):
+        '''
+        Sets the system parameters.
+        '''
+        self._degree = 0
+        self._num_monomials = 1
+
+        for key in kwargs:
+            if key == "degree":
+                self._degree = kwargs[key]
+            if key == "F_list":
+                self._F_list = kwargs[key]
+            if key == "G_list":
+                self._G_list = kwargs[key]
+
+        self._num_monomials = scipy.special.comb( self.n+self._degree, self._degree, exact=True )
+
+        # Initialize lists with zeros if no argument is given.
+        if not hasattr(self, "_F_list"):
+            print('here')
+            self._F_list = [ np.zeros(self.n) for _ in range(self._num_monomials) ]
+        if not hasattr(self, "_G_list"):
+            self._G_list = [ np.zeros([self.n,self.m]) for _ in range(self._num_monomials) ]
+
+        # Debugging
+        if len(self._F_list) != self._num_monomials or len(self._G_list) != self._num_monomials:
+            raise Exception("Number of list elements must be N, where N is the dimension of the monomial basis!")
+
+        for F_k in self._F_list:
+            if len(F_k) != self.n:
+                raise Exception("The dimension of the vector monomial coefficients of f(x) must be n!")
+
+        for G_k in self._G_list:
+            if np.shape(G_k) != (self.n, self.m):
+                raise Exception("The dimension of the matrix monomial coefficients of g(x) must be (n x m)!")
+
+    def f(self):
+        self._f = self._lambda_f(*self._state).reshape(self.n,)
+
+    def g(self):
+        self._g = self._lambda_g(*self._state).reshape(self.n,self.m)
+
+    def get_symbols(self):
+        '''
+        Return the sympy variables.
+        '''
+        return list(self._symbols)
+
+    def get_monomials(self):
+        '''
+        Return the monomial basis vector.
+        '''
+        return self._monomials
+
+    def get_symbolic_f(self):
+        '''
+        Return symbolic expression for f(x)
+        '''
+        return self._sym_f
+
+    def get_symbolic_g(self):
+        '''
+        Return symbolic expression for g(x)
+        '''
+        return self._sym_g

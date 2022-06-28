@@ -315,9 +315,8 @@ class QuadraticLyapunov(Quadratic):
 
 class QuadraticBarrier(Quadratic):
     '''
-    Class for Quadratic barrier functions.
-    For positive definite Hessians, the unsafe set is described by the interior of an ellipsoid.
-    The symmetric Hessian is parametrized by Hh(pi) = \sum^n_i Li \pi_i, where {Li} is the canonical basis of the space of (n,n) symmetric matrices.
+    Class for Quadratic barrier functions. For positive definite Hessians, the unsafe set is described by the interior of an ellipsoid.
+    The symmetric Hessian is parametrized by Hh(pi) = sum^n_i Li pi_i, where {Li} is the canonical basis of the space of (n,n) symmetric matrices.
     '''
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -445,17 +444,23 @@ class PolynomialFunction(Function):
         '''
         self._degree = 0
         self._num_monomials = 1
-        self._P = np.zeros([self._num_monomials,self._num_monomials])
+        self._P = np.zeros(self._num_monomials)
 
         for key in kwargs:
-            if key == "P":
-                self._P = np.array(kwargs[key])
             if key == "degree":
                 self._degree = kwargs[key]
+            if key == "P":
+                self._coefficients = kwargs[key]
 
-        self._num_monomials = scipy.special.binom( self._dim+self._degree, self._degree )
-        if np.shape(kwargs[key]) != ( self._num_monomials, self._num_monomials ):
-            raise Exception("P must be N x N, where N is the dimension of the monomial basis!")
+        self._num_monomials = scipy.special.comb( self._dim+self._degree, self._degree, exact=True )
+        if np.shape(self._P) != (self._num_monomials, self._num_monomials):
+                raise Exception("P must be (N x N), where N is the dimension of the monomial basis!")
+
+        if self._type == "sos":
+            self._maxdegree = 2*self._degree
+            self._coefficients = np.array(self._coefficients)
+        elif self._type == "affine":
+            self._maxdegree = self._degree
 
     def function(self, point):
         '''
