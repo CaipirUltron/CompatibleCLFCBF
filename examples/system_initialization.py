@@ -1,11 +1,16 @@
 import numpy as np
 
-from dynamic_systems import LinearSystem
+from dynamic_systems import PolynomialSystem
 from functions import canonical2D, QuadraticLyapunov, QuadraticBarrier, Gaussian
 
 ######################################### Configure and create 2D plant ####################################################
 initial_state = [0.1, 5.5]
-plant = LinearSystem(initial_state = initial_state, initial_control = np.zeros(2), A = np.zeros([2,2]), B = np.array([[0,-1],[1,0]]))
+
+G1 = [[1,0],[0,1]]
+G2 = [[0,0],[0,0]]
+G3 = [[0,0],[0,0]]
+G = [ G1, G2, G3 ]
+plant = PolynomialSystem(initial_state = initial_state, initial_control = np.zeros(2), degree=1, G_list = G)
 ############################################################################################################################
 
 ############################################# Configure and create CLF #####################################################

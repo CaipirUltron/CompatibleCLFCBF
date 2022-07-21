@@ -106,33 +106,3 @@ class SoSController():
         b_cbf = self.alpha * self.h + self.Lfh
 
         return a_cbf, b_cbf
-
-    def update_clf_dynamics(self, piv_ctrl):
-        '''
-        Integrates the dynamic system for the CLF Hessian matrix.
-        '''
-        self.clf.update(piv_ctrl, self.ctrl_dt)
-
-    def update_cbf_dynamics(self, pih_ctrl):
-        '''
-        Integrates the dynamic system for the CBF Hessian matrix.
-        '''
-        self.cbf.update(pih_ctrl, self.ctrl_dt)
-
-    def get_lambda(self):
-        '''
-        Computes the KKT multipliers of the Optimization problem.
-        '''
-        LgV2 = self.LgV.dot(self.LgV)
-        Lgh2 = self.Lgh.dot(self.Lgh)
-        LgVLgh = self.LgV.dot(self.Lgh)
-
-        delta = LgVLgh**2 - ( (1/self.p) + LgV2 ) * Lgh2
-        
-        FV = self.LfV + self.gamma * self.V
-        Fh = self.Lfh + self.alpha * self.h
-        
-        lambda1 = (1/delta) * ( Fh * LgVLgh - FV * Lgh2 )
-        lambda2 = (1/delta) * ( Fh * ( (1/self.p) + LgV2 ) - FV * LgVLgh )
-
-        return lambda1, lambda2, delta

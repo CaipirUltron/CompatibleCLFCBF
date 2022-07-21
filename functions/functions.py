@@ -1,10 +1,10 @@
+import itertools
 import math
 import scipy
 import numpy as np
 import sympy as sp
 
 from copy import copy
-from SumOfSquares import Basis
 from dynamic_systems import Integrator
 from functions.common_methods import vector2triangular, triangular2vector, sym2triangular, triangular_basis, sym2vector, vector2sym
 
@@ -417,8 +417,25 @@ class PolynomialFunction(Function):
         super().__init__(*args)
         self.set_param(**kwargs)
 
-        self._symbols = sp.symarray('x',self._dim)
-        self._monomials = Basis.from_degree(self._dim, self._degree).to_sym(self._symbols)
+        self._symbols = []
+        for dim in range(self._dim):
+            self._symbols.append( sp.Symbol('x' + str(dim+1)) )
+
+        to_be_removed = []
+        self.combinations = list( itertools.product( list(range(self._degree+1)), repeat=self._dim ) )
+        for k in range(len(self.combinations)):
+            if sum(self.combinations[k])>self._degree:
+                to_be_removed.append(k)
+        for ele in sorted(to_be_removed, reverse = True):
+            del self.combinations[ele]
+        self.alpha = np.array(self.combinations)
+
+        self._monomials = []
+        for row in self.alpha:
+            mon = 1
+            for dim in range(self._dim):
+                mon = mon*self._symbols[dim]**row[dim]
+            self._monomials.append( mon )
         self._num_monomials = len(self._monomials)
 
         # Symbolic computations
@@ -433,6 +450,26 @@ class PolynomialFunction(Function):
 
         self._sym_fun = ( self._symP * self._sym_monomials ).dot(self._sym_monomials)
 
+        # Computing numeric A matrices
+        self.A = []
+        jacobian_columns = self._sym_jacobian_monomials.T.tolist()
+        for dim in range(self._dim):
+            Ak = np.zeros([self._num_monomials, self._num_monomials])
+            jacobian_column = jacobian_columns[dim]
+            for i in range(len(jacobian_column)):
+                for j in range(1, self._num_monomials):
+                    if len(jacobian_column[i].free_symbols) == 0:
+                        if jacobian_column[i] == 0:
+                            break
+                        else:
+                            Ak[i,0] = jacobian_column[i]
+                    else:
+                        monom_i = jacobian_column[i].as_poly(self._symbols).monoms()
+                        monom_j = self._monomials[j].as_poly(self._symbols).monoms()
+                        if monom_i[0] == monom_j[0]:
+                            Ak[i,j] = jacobian_column[i].as_poly().coeffs()[0]
+            self.A.append( Ak )
+
         # Lambda functions
         self._lambda_monomials = sp.lambdify( list(self._symbols), self._monomials )
         self._lambda_jacobian_monomials = sp.lambdify( list(self._symbols), self._sym_jacobian_monomials )
@@ -444,30 +481,25 @@ class PolynomialFunction(Function):
         '''
         self._degree = 0
         self._num_monomials = 1
-        self._P = np.zeros(self._num_monomials)
+        self._maxdegree = 2*self._degree
+        self._coefficients = np.zeros(self._num_monomials)
 
         for key in kwargs:
             if key == "degree":
                 self._degree = kwargs[key]
             if key == "P":
-                self._coefficients = kwargs[key]
+                self._coefficients = np.array(kwargs[key])
 
         self._num_monomials = scipy.special.comb( self._dim+self._degree, self._degree, exact=True )
-        if np.shape(self._P) != (self._num_monomials, self._num_monomials):
+        if np.shape(self._coefficients) != (self._num_monomials, self._num_monomials):
                 raise Exception("P must be (N x N), where N is the dimension of the monomial basis!")
-
-        if self._type == "sos":
-            self._maxdegree = 2*self._degree
-            self._coefficients = np.array(self._coefficients)
-        elif self._type == "affine":
-            self._maxdegree = self._degree
 
     def function(self, point):
         '''
         Compute polynomial function numerically.
         '''
         m = np.array(self._lambda_monomials(*point))
-        return m @ self._P @ m
+        return m @ self._coefficients @ m
 
     def gradient(self, point):
         '''
@@ -475,7 +507,7 @@ class PolynomialFunction(Function):
         '''
         m = np.array(self._lambda_monomials(*point))
         del_m = np.array(self._lambda_jacobian_monomials(*point))
-        return m @ self._P @ del_m + del_m.T @ self._P @ m
+        return m @ self._coefficients @ del_m + del_m.T @ self._coefficients @ m
 
     def hessian(self, point):
         '''
@@ -488,14 +520,20 @@ class PolynomialFunction(Function):
                 delm_i = np.array(self._lambda_jacobian_monomials(*point))[:,i].reshape(self._num_monomials)
                 delm_j = np.array(self._lambda_jacobian_monomials(*point))[:,j].reshape(self._num_monomials)
                 hessian_m_ij = self._lambda_hessian_monomials(*point)[i][j].reshape(self._num_monomials)
-                Hv[i,j] = delm_i @ ( self._P + self._P.T ) @ delm_j + m @ ( self._P + self._P.T ) @ hessian_m_ij
+                Hv[i,j] = delm_i @ ( self._coefficients + self._coefficients.T ) @ delm_j + m @ ( self._coefficients + self._coefficients.T ) @ hessian_m_ij
         return Hv
+
+    def get_matrices(self):
+        '''
+        Return the A matrices.
+        '''
+        return self.A
 
     def get_symbols(self):
         '''
         Return the sympy variables.
         '''
-        return list(self._symbols)
+        return self._symbols
 
     def get_monomials(self):
         '''

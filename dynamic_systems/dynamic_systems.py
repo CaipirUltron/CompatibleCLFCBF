@@ -191,11 +191,11 @@ class Unicycle(AffineSystem):
 class PolynomialSystem(AffineSystem):
     '''
     Class for affine polynomial systems of the type xdot = f(x) + g(x) u, where f(x), g(x) are affine combinations of monomials:
-        f(x) = \sum F_k m_k(x),
-        g(x) = \sum G_k m_k(x),
+        f(x) = sum F_k m_k(x),
+        g(x) = sum G_k m_k(x),
     where m(x) = [ m_1(x) m_2(x) ... m_p(x) ] is a vector of (n+d,d) known monomials (up to degree d) and:
-        F = [ F_1 F_2 ... F_p ], F_k \in (n x 1)
-        G = [ G_1 G_2 ... G_p ], G_k \in (n x m)
+        F = [ F_1 F_2 ... F_p ], F_k in (n x 1)
+        G = [ G_1 G_2 ... G_p ], G_k in (n x m)
     are lists of vector and matrix coefficients describing f(x) and g(x).
     '''
     def __init__(self, initial_state, initial_control, **kwargs):
@@ -237,7 +237,6 @@ class PolynomialSystem(AffineSystem):
 
         # Initialize lists with zeros if no argument is given.
         if not hasattr(self, "_F_list"):
-            print('here')
             self._F_list = [ np.zeros(self.n) for _ in range(self._num_monomials) ]
         if not hasattr(self, "_G_list"):
             self._G_list = [ np.zeros([self.n,self.m]) for _ in range(self._num_monomials) ]
@@ -283,3 +282,15 @@ class PolynomialSystem(AffineSystem):
         Return symbolic expression for g(x)
         '''
         return self._sym_g
+
+    def get_F(self):
+        '''
+        Return polynomial coefficients of f(x)
+        '''
+        return self._F_list
+
+    def get_G(self):
+        '''
+        Return polynomial coefficients of g(x)
+        '''
+        return self._G_list

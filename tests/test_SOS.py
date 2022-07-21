@@ -11,9 +11,9 @@ p = s*x**6 + t*y**6 - x**4*y**2 - x**2*y**4 - x**4 + 3*x**2*y**2 - y**4 - x**2 -
 # list_of_monomials = [ 1, x, y, x*y, x**2, y**2 ]
 
 dimension = 2
-degree = 1
-b = Basis.from_degree(dimension, degree)
-list_of_monomials = b.to_sym([x,y])
+degree = 3
+basis = Basis.from_degree(dimension, degree)
+list_of_monomials = basis.to_sym([x,y])
 
 p = len(list_of_monomials)
 P = sp.Matrix(sp.symarray('p',(p,p)))
@@ -26,17 +26,11 @@ V_constraint = prob.add_sos_constraint(V, [x, y], name="positive_definiteness")
 Pv = prob.sp_mat_to_picos(P)
 
 Pdes = np.random.rand(p,p)
-Pdelta = Pv - Pdes
-
-cost = 0.0
-for i in range(p):
-    for j in range(p):
-        cost = Pdelta[i,j]**2
-print(cost)
+prob.set_objective('min', abs( Pv - Pdes ))
+print(prob)
 
 start = time.time()
 
-prob.set_objective('min', cost)
 prob.solve()
 
 end = time.time()
