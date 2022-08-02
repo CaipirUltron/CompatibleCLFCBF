@@ -417,25 +417,14 @@ class PolynomialFunction(Function):
         super().__init__(*args)
         self.set_param(**kwargs)
 
+        # Create symbols
         self._symbols = []
         for dim in range(self._dim):
             self._symbols.append( sp.Symbol('x' + str(dim+1)) )
 
-        to_be_removed = []
-        self.combinations = list( itertools.product( list(range(self._degree+1)), repeat=self._dim ) )
-        for k in range(len(self.combinations)):
-            if sum(self.combinations[k])>self._degree:
-                to_be_removed.append(k)
-        for ele in sorted(to_be_removed, reverse = True):
-            del self.combinations[ele]
-        self.alpha = np.array(self.combinations)
-
-        self._monomials = []
-        for row in self.alpha:
-            mon = 1
-            for dim in range(self._dim):
-                mon = mon*self._symbols[dim]**row[dim]
-            self._monomials.append( mon )
+        # Generate monomial list and symbolic monomials
+        self.alpha = PolynomialFunction.generate_monomial_list( self._dim, self._degree )
+        self._monomials = PolynomialFunction.generate_monomials_from_symbols( self._symbols, self._degree )
         self._num_monomials = len(self._monomials)
 
         # Symbolic computations
@@ -450,7 +439,38 @@ class PolynomialFunction(Function):
 
         self._sym_fun = ( self._symP * self._sym_monomials ).dot(self._sym_monomials)
 
-        # Computing numeric A matrices
+        # Compute numeric A matrices
+        self.compute_A()
+
+        # Lambda functions
+        self._lambda_monomials = sp.lambdify( list(self._symbols), self._monomials )
+        self._lambda_jacobian_monomials = sp.lambdify( list(self._symbols), self._sym_jacobian_monomials )
+        self._lambda_hessian_monomials = sp.lambdify( list(self._symbols), self._hessian_monomials )
+
+    def set_param(self, **kwargs):
+        '''
+        Sets the function parameters.
+        '''
+        self._degree = 0
+        self._num_monomials = 1
+        self._maxdegree = 2*self._degree
+        self._coefficients = np.zeros([self._num_monomials, self._num_monomials])
+
+        for key in kwargs:
+            if key == "degree":
+                self._degree = kwargs[key]
+                self._num_monomials = PolynomialFunction.num_comb(self._dim, self._degree)
+                self._coefficients = np.zeros([self._num_monomials, self._num_monomials])
+            if key == "P":
+                self._coefficients = np.array(kwargs[key])
+
+        if np.shape(self._coefficients) != (self._num_monomials, self._num_monomials):
+            raise Exception("P must be (N x N), where N is the dimension of the monomial basis!")
+
+    def compute_A(self):
+        '''
+        Computes numeric A matrices.
+        '''
         self.A = []
         jacobian_columns = self._sym_jacobian_monomials.T.tolist()
         for dim in range(self._dim):
@@ -469,30 +489,6 @@ class PolynomialFunction(Function):
                         if monom_i[0] == monom_j[0]:
                             Ak[i,j] = jacobian_column[i].as_poly().coeffs()[0]
             self.A.append( Ak )
-
-        # Lambda functions
-        self._lambda_monomials = sp.lambdify( list(self._symbols), self._monomials )
-        self._lambda_jacobian_monomials = sp.lambdify( list(self._symbols), self._sym_jacobian_monomials )
-        self._lambda_hessian_monomials = sp.lambdify( list(self._symbols), self._hessian_monomials )
-
-    def set_param(self, **kwargs):
-        '''
-        Sets the function parameters.
-        '''
-        self._degree = 0
-        self._num_monomials = 1
-        self._maxdegree = 2*self._degree
-        self._coefficients = np.zeros(self._num_monomials)
-
-        for key in kwargs:
-            if key == "degree":
-                self._degree = kwargs[key]
-            if key == "P":
-                self._coefficients = np.array(kwargs[key])
-
-        self._num_monomials = scipy.special.comb( self._dim+self._degree, self._degree, exact=True )
-        if np.shape(self._coefficients) != (self._num_monomials, self._num_monomials):
-                raise Exception("P must be (N x N), where N is the dimension of the monomial basis!")
 
     def function(self, point):
         '''
@@ -546,6 +542,49 @@ class PolynomialFunction(Function):
         Return the complete symbolic polynomial of the function
         '''
         return self._sym_fun
+
+    def get_degree(self):
+        '''
+        Return the maximum polynomial degree. 
+        '''
+        return self._degree
+
+    @staticmethod
+    def num_comb(n, d):
+        '''
+        Returns the number of monomials of n-dimensions up to degree d
+        '''
+        return math.comb(n+d,d)
+
+    @staticmethod
+    def generate_monomial_list(n, d):
+        '''
+        Returns the matrix of monomial powers of dimension n up to degree d.
+        '''
+        to_be_removed = []
+        combinations = list( itertools.product( list(range(d+1)), repeat=n ) )
+        for k in range(len(combinations)):
+            if sum(combinations[k])>d:
+                to_be_removed.append(k)
+        for ele in sorted(to_be_removed, reverse = True):
+            del combinations[ele]
+
+        return np.array(combinations)
+
+    @staticmethod
+    def generate_monomials_from_symbols(symbols, d):
+        '''
+        Returns the vector of monomial powers of dimension n up to degree d.
+        '''
+        n = len(symbols)
+        alpha = PolynomialFunction.generate_monomial_list(n, d)
+        monomials = []
+        for row in alpha:
+            mon = 1
+            for dim in range(n):
+                mon = mon*symbols[dim]**row[dim]
+            monomials.append( mon )
+        return monomials
 
 
 class ApproxFunction(Function):

@@ -294,3 +294,15 @@ class PolynomialSystem(AffineSystem):
         Return polynomial coefficients of g(x)
         '''
         return self._G_list
+
+    def get_monomial_dimension_f(self):
+        '''
+        Return the monomial dimension of f(x).
+        '''
+        return len(self._F_list)
+
+    def get_monomial_dimension_g(self):
+        '''
+        Return the monomial dimension of g(x).
+        '''
+        return len(self._G_list)

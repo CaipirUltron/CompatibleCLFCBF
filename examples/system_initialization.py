@@ -1,14 +1,16 @@
 import numpy as np
 
 from dynamic_systems import PolynomialSystem
-from functions import canonical2D, QuadraticLyapunov, QuadraticBarrier, Gaussian
+from functions import canonical2D, QuadraticLyapunov, QuadraticBarrier
+from controllers import SoSController
+from functions.functions import PolynomialFunction
 
 ######################################### Configure and create 2D plant ####################################################
 initial_state = [0.1, 5.5]
 
-G1 = [[1,0],[0,1]]
-G2 = [[0,0],[0,0]]
-G3 = [[0,0],[0,0]]
+G1 = np.array([[1,0],[0,1]])
+G2 = np.array([[0,0],[0,0]])
+G3 = np.array([[0,0],[0,0]])
 G = [ G1, G2, G3 ]
 plant = PolynomialSystem(initial_state = initial_state, initial_control = np.zeros(2), degree=1, G_list = G)
 ############################################################################################################################
@@ -40,11 +42,13 @@ cbf_params = {
 ############################################################################################################################
 
 ################################## Configure and create CLF and CBF functions ##############################################
-clf_quadratic_component = QuadraticLyapunov(*initial_state, hessian = clf_params["Hv"], critical = clf_params["x0"])
+clf = PolynomialFunction(*initial_state, degree = 2)
+# clf = QuadraticLyapunov(*initial_state, hessian = clf_params["Hv"], critical = clf_params["x0"])
 # clf_gaussian_component = Gaussian(*initial_state, constant=3.0, mean=[ 0.0, 3.0 ], shape=np.diag([15, 1]))
-
-clf = clf_quadratic_component
 
 ref_clf = QuadraticLyapunov(*initial_state, hessian = ref_clf_params["Hv"], critical = ref_clf_params["x0"])
 cbf = QuadraticBarrier(*initial_state, hessian = cbf_params["Hh"], critical = cbf_params["p0"])
 ############################################################################################################################
+
+#################################################### SoS Controller ########################################################
+controller = SoSController( plant, clf, cbf )
