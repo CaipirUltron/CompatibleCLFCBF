@@ -2,9 +2,9 @@ import scipy
 import numpy as np
 import sympy as sp
 
-from SumOfSquares import Basis
 from scipy.integrate import ode
 from abc import ABC, abstractmethod
+from common import *
 
 
 class DynamicSystem(ABC):
@@ -202,8 +202,14 @@ class PolynomialSystem(AffineSystem):
         super().__init__(initial_state, initial_control)
         self.set_param(**kwargs)
         
-        self._symbols = sp.symarray('x',self.n)
-        self._monomials = Basis.from_degree(self.n, self._degree).to_sym(self._symbols)
+        # self._symbols = sp.symarray('x',self.n)
+        # self._monomials = Basis.from_degree(self.n, self._degree).to_sym(self._symbols)
+        # self._num_monomials = len(self._monomials)
+
+        self._symbols = []
+        for dim in range(self.n):
+            self._symbols.append( sp.Symbol('x' + str(dim+1)) )
+        self._monomials = generate_monomials_from_symbols( self._symbols, self._degree )
         self._num_monomials = len(self._monomials)
 
         # Symbolic f(x) and corresponding lambda function

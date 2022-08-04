@@ -1,4 +1,6 @@
+import math
 import numpy as np
+import itertools
 from scipy.optimize import fsolve
 
 def vector2triangular(vector):
@@ -153,3 +155,37 @@ def sym2triangular(P):
 
     param_sol = fsolve(func, param_init)
     return vector2triangular( param_sol )
+
+def num_comb(n, d):
+    '''
+    Returns the number of monomials of n-dimensions up to degree d
+    '''
+    return math.comb(n+d,d)
+
+def generate_monomial_list(n, d):
+    '''
+    Returns the matrix of monomial powers of dimension n up to degree d.
+    '''
+    to_be_removed = []
+    combinations = list( itertools.product( list(range(d+1)), repeat=n ) )
+    for k in range(len(combinations)):
+        if sum(combinations[k])>d:
+            to_be_removed.append(k)
+    for ele in sorted(to_be_removed, reverse = True):
+        del combinations[ele]
+
+    return np.array(combinations)
+
+def generate_monomials_from_symbols(symbols, d):
+    '''
+    Returns the vector of monomial powers of dimension n up to degree d.
+    '''
+    n = len(symbols)
+    alpha = generate_monomial_list(n, d)
+    monomials = []
+    for row in alpha:
+        mon = 1
+        for dim in range(n):
+            mon = mon*symbols[dim]**row[dim]
+        monomials.append( mon )
+    return monomials

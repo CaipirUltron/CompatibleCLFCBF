@@ -3,8 +3,7 @@ import picos as pc
 import sympy as sp
 
 from quadratic_program import QuadraticProgram
-from functions import PolynomialFunction
-
+from common import *
 
 class SoSController():
     '''
@@ -33,20 +32,22 @@ class SoSController():
         self._lyapunov_symbols = self._lyapunov.get_symbols()
         self._lyapunov_monomials = self._lyapunov.get_monomials()
 
-        self._alpha = PolynomialFunction.generate_monomial_list(self._state_dim, self._lyapunov_degree)
+        self._alpha = generate_monomial_list(self._state_dim, self._lyapunov_degree)
 
         self._dV_degree = 3*self._lyapunov_degree
-        self._dV_alpha = PolynomialFunction.generate_monomial_list(self._state_dim, self._dV_degree)
-        self._dV_monomials = PolynomialFunction.generate_monomials_from_symbols(self._lyapunov_symbols, self._dV_degree)
+        self._dV_alpha = generate_monomial_list(self._state_dim, self._dV_degree)
+        self._dV_monomials = generate_monomials_from_symbols(self._lyapunov_symbols, self._dV_degree)
 
         # PICOS variable
-        self._mon_dim = len(self._lyapunov_monomials)
+        self._mon_lyap_dim = len(self._lyapunov_monomials)
+        self._mon_plant_dim = self._plant._num_monomials
+
         self._f_dim = self._plant.get_monomial_dimension_f()
         self._g_dim = self._plant.get_monomial_dimension_g()
 
-        self._picos_P = pc.SymmetricVariable("P", self._mon_dim)
+        self._picos_P = pc.SymmetricVariable("P", self._mon_lyap_dim)
         self._picos_u = pc.RealVariable("u", self._ctrl_dim)
-        self.compute_lambda_tensor()
+        self.compute_dot_lyapunov()
 
         # QP parameters
         self.p = p
@@ -74,34 +75,43 @@ class SoSController():
         self.phi = np.zeros(len(self._dV_monomials))
         pass
 
-    def compute_lambda_tensor(self):
+    def compute_dot_lyapunov(self):
         '''
-        Computes the tensor = phi(P,u) n(x) (n(x) is a vector of monomials)
+        Computes the time derivative of the Lyapunov function along the system trajectories.
         '''
-        G_list = self._plant.get_G()
+        # Computes P-dependent vector polynomial
+        lyap_monomials = np.array(self._lyapunov.get_monomials())
         A_list = self._lyapunov.get_matrices()
+        P_sp = sp.Matrix(sp.symarray( 'p', (self._mon_lyap_dim, self._mon_lyap_dim)))
 
-        symbolic_P = sp.Matrix(sp.symarray( 'p', (self._mon_dim, self._mon_dim)))
-        symbolic_u = sp.symarray( 'u', self._ctrl_dim )
+        P_sp_poly = np.empty(self._state_dim, dtype=object)
+        P_pc_poly = np.empty(self._state_dim, dtype=object)
+        for k in range(self._state_dim):
+            P_sp_poly[k] = lyap_monomials.dot( ( P_sp @ A_list[k] ) @ lyap_monomials )
+            # P_pc_poly[k] = lyap_monomials.dot( ( self._picos_P @ A_list[k] ) @ lyap_monomials )
 
-        self.symbolic_M = np.empty((self._mon_dim, self._g_dim, self._mon_dim), dtype=object)
-        self.picos_M = np.empty((self._mon_dim, self._g_dim, self._mon_dim), dtype=object)
-        for r in range(self._mon_dim):
-            for s in range(self._g_dim):
-                for t in range(self._mon_dim):
-                    for i in range(self._mon_dim):
-                        for j in range(self._ctrl_dim):
-                            for k in range(self._state_dim):
-                                self.symbolic_M[r,s,t] = symbolic_P[r,i]*A_list[k][i,t]*G_list[s][k,j]*symbolic_u[j]
-                                self.picos_M[r,s,t] = self._picos_P[r,i]*A_list[k][i,t]*G_list[s][k,j]*self._picos_u[j]
+        # Computes u-dependent vector polynomial
+        plant_monomials = np.array(self._plant.get_monomials())
+        G_list = self._plant.get_G()
+        u_sp = sp.symarray( 'u', self._ctrl_dim )
 
-        self.lambda_M =  sp.lambdify( [symbolic_P, symbolic_u], self.symbolic_M )
+        u_sp_poly = 0.0
+        u_pc_poly = 0.0
+        for k in range(self._mon_plant_dim):
+            u_sp_poly += plant_monomials[k]*G_list[k] @ u_sp
+            # u_pc_poly += plant_monomials[k]*G_list[k] @ self._picos_u
 
-    def compute_tensor(self, P, u):
-        '''
-        Computes the numeric value of the M tensor.
-        '''
-        return self.lambda_M(P.reshape(np.size(P)), u)
+        # Computes dot product
+        self._dot_lyapunov_sp = P_sp_poly.dot( u_sp_poly )
+        # self._dot_lyapunov_pc = P_pc_poly.dot( u_pc_poly )
+
+        # self.lambda_dot_lyapunov = sp.lambdify( [P_sp, u_sp], self._dot_lyapunov_sp )
+
+    # def compute_tensor(self, P, u):
+    #     '''
+    #     Computes the numeric value of the M tensor.
+    #     '''
+    #     return self.lambda_dot_lyapunov(P.reshape(np.size(P)), u)
 
     def get_control(self):
         '''

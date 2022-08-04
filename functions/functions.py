@@ -1,12 +1,10 @@
-import itertools
 import math
-import scipy
 import numpy as np
 import sympy as sp
 
 from copy import copy
+from common import *
 from dynamic_systems import Integrator
-from functions.common_methods import vector2triangular, triangular2vector, sym2triangular, triangular_basis, sym2vector, vector2sym
 
 
 class Function():
@@ -423,8 +421,8 @@ class PolynomialFunction(Function):
             self._symbols.append( sp.Symbol('x' + str(dim+1)) )
 
         # Generate monomial list and symbolic monomials
-        self.alpha = PolynomialFunction.generate_monomial_list( self._dim, self._degree )
-        self._monomials = PolynomialFunction.generate_monomials_from_symbols( self._symbols, self._degree )
+        self.alpha = generate_monomial_list( self._dim, self._degree )
+        self._monomials = generate_monomials_from_symbols( self._symbols, self._degree )
         self._num_monomials = len(self._monomials)
 
         # Symbolic computations
@@ -459,7 +457,7 @@ class PolynomialFunction(Function):
         for key in kwargs:
             if key == "degree":
                 self._degree = kwargs[key]
-                self._num_monomials = PolynomialFunction.num_comb(self._dim, self._degree)
+                self._num_monomials = num_comb(self._dim, self._degree)
                 self._coefficients = np.zeros([self._num_monomials, self._num_monomials])
             if key == "P":
                 self._coefficients = np.array(kwargs[key])
@@ -548,43 +546,6 @@ class PolynomialFunction(Function):
         Return the maximum polynomial degree. 
         '''
         return self._degree
-
-    @staticmethod
-    def num_comb(n, d):
-        '''
-        Returns the number of monomials of n-dimensions up to degree d
-        '''
-        return math.comb(n+d,d)
-
-    @staticmethod
-    def generate_monomial_list(n, d):
-        '''
-        Returns the matrix of monomial powers of dimension n up to degree d.
-        '''
-        to_be_removed = []
-        combinations = list( itertools.product( list(range(d+1)), repeat=n ) )
-        for k in range(len(combinations)):
-            if sum(combinations[k])>d:
-                to_be_removed.append(k)
-        for ele in sorted(to_be_removed, reverse = True):
-            del combinations[ele]
-
-        return np.array(combinations)
-
-    @staticmethod
-    def generate_monomials_from_symbols(symbols, d):
-        '''
-        Returns the vector of monomial powers of dimension n up to degree d.
-        '''
-        n = len(symbols)
-        alpha = PolynomialFunction.generate_monomial_list(n, d)
-        monomials = []
-        for row in alpha:
-            mon = 1
-            for dim in range(n):
-                mon = mon*symbols[dim]**row[dim]
-            monomials.append( mon )
-        return monomials
 
 
 class ApproxFunction(Function):
