@@ -78,6 +78,7 @@ class SoSController():
     def compute_dot_lyapunov(self):
         '''
         Computes the time derivative of the Lyapunov function along the system trajectories.
+        dV = < l(x,P), p(x,u)>
         '''
         # Computes P-dependent vector polynomial
         lyap_monomials = np.array(self._lyapunov.get_monomials())
@@ -102,7 +103,7 @@ class SoSController():
             # u_pc_poly += plant_monomials[k]*G_list[k] @ self._picos_u
 
         # Computes dot product
-        self._dot_lyapunov_sp = P_sp_poly.dot( u_sp_poly )
+        self._dot_lyapunov_poly = sp.Poly( P_sp_poly.dot( u_sp_poly ).as_expr(), self._plant.get_symbols() )
         # self._dot_lyapunov_pc = P_pc_poly.dot( u_pc_poly )
 
         # self.lambda_dot_lyapunov = sp.lambdify( [P_sp, u_sp], self._dot_lyapunov_sp )
