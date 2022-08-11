@@ -32,11 +32,11 @@ class SoSController():
         self._lyapunov_symbols = self._lyapunov.get_symbols()
         self._lyapunov_monomials = self._lyapunov.get_monomials()
 
-        self._alpha = generate_monomial_list(self._state_dim, self._lyapunov_degree)
+        self._V_alpha = generate_monomial_list(self._state_dim, self._lyapunov_degree)
+        # self._V_monomials = generate_monomials_from_symbols(self._lyapunov_symbols, self._lyapunov_degree)
 
-        self._dV_degree = 3*self._lyapunov_degree
-        self._dV_alpha = generate_monomial_list(self._state_dim, self._dV_degree)
-        self._dV_monomials = generate_monomials_from_symbols(self._lyapunov_symbols, self._dV_degree)
+        # self._dV_alpha = generate_monomial_list(self._state_dim, self._dV_degree)
+        # self._dV_monomials = generate_monomials_from_symbols(self._lyapunov_symbols, self._dV_degree)
 
         # PICOS variable
         self._mon_lyap_dim = len(self._lyapunov_monomials)
@@ -68,12 +68,12 @@ class SoSController():
 
         self.ctrl_dt = dt
 
-    def compute_bilinear_operator(self):
-        '''
-        Computes the bilinear operator phi(P,u) such that dV = phi(P,u) n(x) (n(x) is a vector of monomials)
-        '''
-        self.phi = np.zeros(len(self._dV_monomials))
-        pass
+    # def compute_bilinear_operator(self):
+    #     '''
+    #     Computes the bilinear operator phi(P,u) such that dV = phi(P,u) n(x) (n(x) is a vector of monomials)
+    #     '''
+    #     self.phi = np.zeros(len(self._dV_monomials))
+    #     pass
 
     def compute_dot_lyapunov(self):
         '''
@@ -96,8 +96,7 @@ class SoSController():
         G_list = self._plant.get_G()
         u_sp = sp.symarray( 'u', self._ctrl_dim )
 
-        u_sp_poly = 0.0
-        u_pc_poly = 0.0
+        u_sp_poly, u_pc_poly = 0.0, 0.0
         for k in range(self._mon_plant_dim):
             u_sp_poly += plant_monomials[k]*G_list[k] @ u_sp
             # u_pc_poly += plant_monomials[k]*G_list[k] @ self._picos_u
@@ -106,13 +105,32 @@ class SoSController():
         self._dot_lyapunov_poly = sp.Poly( P_sp_poly.dot( u_sp_poly ).as_expr(), self._plant.get_symbols() )
         # self._dot_lyapunov_pc = P_pc_poly.dot( u_pc_poly )
 
-        # self.lambda_dot_lyapunov = sp.lambdify( [P_sp, u_sp], self._dot_lyapunov_sp )
+        self.dV_monoms = self._dot_lyapunov_poly.monoms()
+        max_dV_degree = max(max(self.dV_monoms))
+        if (max_dV_degree % 2) == 0:
+            self._dV_alpha = generate_monomial_list(self._state_dim, max_dV_degree/2)
+        else:
+            self._dV_alpha = generate_monomial_list(self._state_dim, int((max_dV_degree+1)/2))
 
-    # def compute_tensor(self, P, u):
-    #     '''
-    #     Computes the numeric value of the M tensor.
-    #     '''
-    #     return self.lambda_dot_lyapunov(P.reshape(np.size(P)), u)
+        dimR = len(self._dV_alpha)
+        self.R = np.empty([dimR,dimR], dtype=object)
+        for i in range(dimR):
+            for j in range(i,dimR):
+                exp_coeff = self._dV_alpha[i] + self._dV_alpha[j]
+                coeff = self._dot_lyapunov_poly.coeff_monomial(exp_coeff.tolist())
+                if i == j:
+                    self.R[i,j] = coeff
+                else:
+                    self.R[i,j] = (1/2)*coeff
+                    self.R[j,i] = (1/2)*coeff
+
+        self.lambda_R = sp.lambdify( [P_sp, u_sp], self.R )
+
+    def compute_R(self, P, u):
+        '''
+        Computes the numeric value of the dV matrix.
+        '''
+        return np.array(self.lambda_R(P.reshape(np.size(P)), u))
 
     def get_control(self):
         '''
