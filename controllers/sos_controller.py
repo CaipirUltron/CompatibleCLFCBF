@@ -83,22 +83,22 @@ class SoSController():
         # Computes P-dependent vector polynomial
         lyap_monomials = np.array(self._lyapunov.get_monomials())
         A_list = self._lyapunov.get_matrices()
-        P_sp = sp.Matrix(sp.symarray( 'p', (self._mon_lyap_dim, self._mon_lyap_dim)))
+        self.P_sp = sp.Matrix(sp.symarray( 'p', (self._mon_lyap_dim, self._mon_lyap_dim)))
 
         P_sp_poly = np.empty(self._state_dim, dtype=object)
-        P_pc_poly = np.empty(self._state_dim, dtype=object)
+        # P_pc_poly = np.empty(self._state_dim, dtype=object)
         for k in range(self._state_dim):
-            P_sp_poly[k] = lyap_monomials.dot( ( P_sp @ A_list[k] ) @ lyap_monomials )
+            P_sp_poly[k] = lyap_monomials.dot( ( self.P_sp @ A_list[k] ) @ lyap_monomials )
             # P_pc_poly[k] = lyap_monomials.dot( ( self._picos_P @ A_list[k] ) @ lyap_monomials )
 
         # Computes u-dependent vector polynomial
         plant_monomials = np.array(self._plant.get_monomials())
         G_list = self._plant.get_G()
-        u_sp = sp.symarray( 'u', self._ctrl_dim )
+        self.u_sp = sp.symarray( 'u', self._ctrl_dim )
 
         u_sp_poly, u_pc_poly = 0.0, 0.0
         for k in range(self._mon_plant_dim):
-            u_sp_poly += plant_monomials[k]*G_list[k] @ u_sp
+            u_sp_poly += plant_monomials[k]*G_list[k] @ self.u_sp
             # u_pc_poly += plant_monomials[k]*G_list[k] @ self._picos_u
 
         # Computes dot product
@@ -124,13 +124,47 @@ class SoSController():
                     self.R[i,j] = (1/2)*coeff
                     self.R[j,i] = (1/2)*coeff
 
-        self.lambda_R = sp.lambdify( [P_sp, u_sp], self.R )
+        lambda_R = sp.lambdify( [self.P_sp, self.u_sp], self.R )
+        def compute_R(P, u):
+            return np.array(lambda_R(P.reshape(np.size(P)), u))
+        self.lambda_R = compute_R
 
-    def compute_R(self, P, u):
+    def dotV_SDP_Constraint(self, u):
         '''
-        Computes the numeric value of the dV matrix.
+        Computes the SDP constraint for dV = n(x)' R n(x)
         '''
-        return np.array(self.lambda_R(P.reshape(np.size(P)), u))
+        u_dict = dict(zip(self.u_sp.tolist(),u))
+
+        dimR = len(self.R)
+        R_sp = np.zeros([dimR,dimR], dtype=object)
+        for i in range(dimR):
+            for j in range(i,dimR):
+                if i == j:
+                    R_sp[i,j] = 0.5*self.R[i,j].subs(u_dict)
+                else:
+                    R_sp[i,j] = self.R[i,j].subs(u_dict)
+        R_sp = R_sp + R_sp.T
+
+        return R_sp
+
+        # for i in range(dimR):
+        #     for j in range(dimR):
+
+
+        
+
+    # def compute_R(self, P, u):
+    #     '''
+    #     Computes the numeric value of the dV matrix.
+    #     '''
+    #     return np.array(self.lambda_R(P.reshape(np.size(P)), u))
+
+    def solve_SDP(self):
+        '''
+        Solves the main SDP.
+        '''
+        sdp = pc.Problem()
+        C1 = sdp.add_constraint(self._picos_P >> 0)
 
     def get_control(self):
         '''
