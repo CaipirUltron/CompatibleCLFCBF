@@ -1,7 +1,7 @@
 import numpy as np
 import picos as pc
 import sympy as sp
-
+import time 
 from quadratic_program import QuadraticProgram
 from common import *
 
@@ -57,23 +57,7 @@ class SoSController():
         P[self._ctrl_dim,self._ctrl_dim] = self.p
         q = np.zeros(self._qp_dim)
         self.QP = QuadraticProgram(P=P, q=q)
-
-        # SoS optimization
-
-        # self.epsilon = epsilon
-        # self.pos_def_poly = self.epsilon * PolynomialFunction(np.zeros(self.state_dim), degree = 1, P = np.diag([0.0, 1.0, 1.0,])).get_polynomial()
-        
-        # self.positivity_constr = self.SoS.add_sos_constraint(self._clf_poly - self.pos_def_poly, self._state_symbols, name="positivity")
-        # self.dissipativity_constr = self.SoS.add_sos_constraint(, self.clf.get_symbols(), name="dissipativity")
-
         self.ctrl_dt = dt
-
-    # def compute_bilinear_operator(self):
-    #     '''
-    #     Computes the bilinear operator phi(P,u) such that dV = phi(P,u) n(x) (n(x) is a vector of monomials)
-    #     '''
-    #     self.phi = np.zeros(len(self._dV_monomials))
-    #     pass
 
     def compute_dot_lyapunov(self):
         '''
@@ -86,10 +70,8 @@ class SoSController():
         self.P_sp = sp.Matrix(sp.symarray( 'p', (self._mon_lyap_dim, self._mon_lyap_dim)))
 
         P_sp_poly = np.empty(self._state_dim, dtype=object)
-        # P_pc_poly = np.empty(self._state_dim, dtype=object)
         for k in range(self._state_dim):
             P_sp_poly[k] = lyap_monomials.dot( ( self.P_sp @ A_list[k] ) @ lyap_monomials )
-            # P_pc_poly[k] = lyap_monomials.dot( ( self._picos_P @ A_list[k] ) @ lyap_monomials )
 
         # Computes u-dependent vector polynomial
         plant_monomials = np.array(self._plant.get_monomials())
@@ -99,11 +81,9 @@ class SoSController():
         u_sp_poly, u_pc_poly = 0.0, 0.0
         for k in range(self._mon_plant_dim):
             u_sp_poly += plant_monomials[k]*G_list[k] @ self.u_sp
-            # u_pc_poly += plant_monomials[k]*G_list[k] @ self._picos_u
 
         # Computes dot product
         self._dot_lyapunov_poly = sp.Poly( P_sp_poly.dot( u_sp_poly ).as_expr(), self._plant.get_symbols() )
-        # self._dot_lyapunov_pc = P_pc_poly.dot( u_pc_poly )
 
         self.dV_monoms = self._dot_lyapunov_poly.monoms()
         max_dV_degree = max(max(self.dV_monoms))
@@ -134,37 +114,39 @@ class SoSController():
         Computes the SDP constraint for dV = n(x)' R n(x)
         '''
         u_dict = dict(zip(self.u_sp.tolist(),u))
-
+        
+        # Substitute the values of u
         dimR = len(self.R)
         R_sp = np.zeros([dimR,dimR], dtype=object)
         for i in range(dimR):
             for j in range(i,dimR):
-                if i == j:
-                    R_sp[i,j] = 0.5*self.R[i,j].subs(u_dict)
-                else:
-                    R_sp[i,j] = self.R[i,j].subs(u_dict)
-        R_sp = R_sp + R_sp.T
+                u_function = self.R[i,j].subs(u_dict)
+                R_sp[i,j] = u_function
+                if i != j:
+                    R_sp[j,i] = u_function
 
-        return R_sp
+        # Construct the LMI matrices like: [ ] * p_0_0 + ... + [ ] * p_6_6 + ...
+        R_dict = dict()
+        for i in range(dimR):
+            for j in range(i,dimR):
+                for symbol in R_sp[i,j].free_symbols:
+                    if not (symbol in R_dict.keys()):
+                        R_dict[symbol.name] = np.zeros([dimR, dimR])
+                    R_dict[symbol.name][i,j] = R_sp[i,j].coeff(symbol)
+                    R_dict[symbol.name][j,i] = R_sp[j,i].coeff(symbol)
 
-        # for i in range(dimR):
-        #     for j in range(dimR):
-
-
+        # Finally, construct the LMI constraint in PICOS
+        self.dissipativity_lmi = pc.sum( R_dict[symbol]*self._picos_P[int(symbol[-3]),int(symbol[-1])] for symbol in R_dict.keys() )
         
-
-    # def compute_R(self, P, u):
-    #     '''
-    #     Computes the numeric value of the dV matrix.
-    #     '''
-    #     return np.array(self.lambda_R(P.reshape(np.size(P)), u))
-
     def solve_SDP(self):
         '''
         Solves the main SDP.
         '''
         sdp = pc.Problem()
         C1 = sdp.add_constraint(self._picos_P >> 0)
+        C2 = sdp.add_constraint(self.dissipativity_lmi << 0)
+
+        return sdp
 
     def get_control(self):
         '''
