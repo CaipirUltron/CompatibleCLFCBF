@@ -104,39 +104,38 @@ class SoSController():
                     self.R[i,j] = (1/2)*coeff
                     self.R[j,i] = (1/2)*coeff
 
-        lambda_R = sp.lambdify( [self.P_sp, self.u_sp], self.R )
-        def compute_R(P, u):
-            return np.array(lambda_R(P.reshape(np.size(P)), u))
-        self.lambda_R = compute_R
+        self.lambda_R = sp.lambdify( [self.P_sp, self.u_sp], self.R )
+        # def compute_R(P, u):
+        #     return np.array(lambda_R(P.reshape(np.size(P)), u))
+        # self.lambda_R = compute_R
 
     def dotV_SDP_Constraint(self, u):
         '''
         Computes the SDP constraint for dV = n(x)' R n(x)
         '''
-        u_dict = dict(zip(self.u_sp.tolist(),u))
-        
         # Substitute the values of u
+        t = time.time()
+
         dimR = len(self.R)
-        R_sp = np.zeros([dimR,dimR], dtype=object)
-        for i in range(dimR):
-            for j in range(i,dimR):
-                u_function = self.R[i,j].subs(u_dict)
-                R_sp[i,j] = u_function
-                if i != j:
-                    R_sp[j,i] = u_function
+        R_sp = np.array(self.lambda_R(self.P_sp, u))
 
         # Construct the LMI matrices like: [ ] * p_0_0 + ... + [ ] * p_6_6 + ...
         R_dict = dict()
         for i in range(dimR):
             for j in range(i,dimR):
-                for symbol in R_sp[i,j].free_symbols:
-                    if not (symbol in R_dict.keys()):
-                        R_dict[symbol.name] = np.zeros([dimR, dimR])
-                    R_dict[symbol.name][i,j] = R_sp[i,j].coeff(symbol)
-                    R_dict[symbol.name][j,i] = R_sp[j,i].coeff(symbol)
+                if hasattr(R_sp[i,j], "free_symbols"):
+                    for symbol in R_sp[i,j].free_symbols:
+                        if not (symbol in R_dict.keys()):
+                            R_dict[symbol.name] = np.zeros([dimR, dimR])
+                        R_dict[symbol.name][i,j] = R_sp[i,j].coeff(symbol)
+                        R_dict[symbol.name][j,i] = R_sp[j,i].coeff(symbol)
 
         # Finally, construct the LMI constraint in PICOS
         self.dissipativity_lmi = pc.sum( R_dict[symbol]*self._picos_P[int(symbol[-3]),int(symbol[-1])] for symbol in R_dict.keys() )
+
+        elapsed_time = time.time() - t
+
+        return elapsed_time
         
     def solve_SDP(self):
         '''
