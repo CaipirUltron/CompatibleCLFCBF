@@ -17,29 +17,18 @@ class SoSController():
         self._barrier = cbf
         self._state_dim = self._plant.n
         self._ctrl_dim = self._plant.m
-
-        # self._state_symbols = self.clf.get_symbols()
-        # self._clf_poly = self.clf.get_polynomial()
-        # self._cbf_poly = self.cbf.get_polynomial()
-
-        # self.state_dim = self.plant.n
-        # self.control_dim = self.plant.m
-        # self.sym_dim = int(( self.state_dim * ( self.state_dim + 1 ) )/2)
-        # self.skewsym_dim = int(( self.state_dim * ( self.state_dim - 1 ) )/2)
         
         # Important monomials
-        self._lyapunov_degree = self._lyapunov.get_degree()
-        self._lyapunov_symbols = self._lyapunov.get_symbols()
-        self._lyapunov_monomials = self._lyapunov.get_monomials()
+        self.lyapunov_degree = self._lyapunov.get_degree()
+        self.lyapunov_symbols = self._lyapunov.get_symbols()
+        self.lyapunov_monomials = self._lyapunov.get_monomials()
 
-        self._V_alpha = generate_monomial_list(self._state_dim, self._lyapunov_degree)
-        # self._V_monomials = generate_monomials_from_symbols(self._lyapunov_symbols, self._lyapunov_degree)
-
-        # self._dV_alpha = generate_monomial_list(self._state_dim, self._dV_degree)
-        # self._dV_monomials = generate_monomials_from_symbols(self._lyapunov_symbols, self._dV_degree)
+        self.V_alpha = generate_monomial_list(self._state_dim, self.lyapunov_degree)
+        self.V_monomials = generate_monomials_from_symbols(self.lyapunov_symbols, self.lyapunov_degree)
+        self.lambda_V_monomials = sp.lambdify( self.lyapunov_symbols, self.V_monomials )
 
         # PICOS variable
-        self._mon_lyap_dim = len(self._lyapunov_monomials)
+        self._mon_lyap_dim = len(self.lyapunov_monomials)
         self._mon_plant_dim = self._plant._num_monomials
 
         self._f_dim = self._plant.get_monomial_dimension_f()
@@ -47,7 +36,10 @@ class SoSController():
 
         self._picos_P = pc.SymmetricVariable("P", self._mon_lyap_dim)
         self._picos_u = pc.RealVariable("u", self._ctrl_dim)
+
         self.compute_dot_lyapunov()
+        self.R_sp = np.zeros([self.dimR,self.dimR])
+        self.P = np.zeros([self.dimR,self.dimR])
 
         # QP parameters
         self.p = p
@@ -78,64 +70,84 @@ class SoSController():
         G_list = self._plant.get_G()
         self.u_sp = sp.symarray( 'u', self._ctrl_dim )
 
-        u_sp_poly, u_pc_poly = 0.0, 0.0
-        for k in range(self._mon_plant_dim):
+        u_sp_poly = 0.0
+        for k in range(self._g_dim):
             u_sp_poly += plant_monomials[k]*G_list[k] @ self.u_sp
 
         # Computes dot product
-        self._dot_lyapunov_poly = sp.Poly( P_sp_poly.dot( u_sp_poly ).as_expr(), self._plant.get_symbols() )
+        self.dot_lyapunov_poly = sp.Poly( P_sp_poly.dot( u_sp_poly ).as_expr(), self._plant.get_symbols() )
 
-        self.dV_monoms = self._dot_lyapunov_poly.monoms()
+        self.dV_monoms = self.dot_lyapunov_poly.monoms()
         max_dV_degree = max(max(self.dV_monoms))
         if (max_dV_degree % 2) == 0:
-            self._dV_alpha = generate_monomial_list(self._state_dim, max_dV_degree/2)
+            self.dV_alpha = generate_monomial_list(self._state_dim, max_dV_degree/2)
+            self.dV_monomials = generate_monomials_from_symbols(self.lyapunov_symbols, max_dV_degree/2)
         else:
-            self._dV_alpha = generate_monomial_list(self._state_dim, int((max_dV_degree+1)/2))
+            self.dV_alpha = generate_monomial_list(self._state_dim, int((max_dV_degree+1)/2))
+            self.dV_monomials = generate_monomials_from_symbols(self.lyapunov_symbols, int((max_dV_degree+1)/2))
 
-        dimR = len(self._dV_alpha)
-        self.R = np.empty([dimR,dimR], dtype=object)
-        for i in range(dimR):
-            for j in range(i,dimR):
-                exp_coeff = self._dV_alpha[i] + self._dV_alpha[j]
-                coeff = self._dot_lyapunov_poly.coeff_monomial(exp_coeff.tolist())
+        self.lambda_dV_monomials = sp.lambdify( self.lyapunov_symbols, self.dV_monomials )
+
+        self.dimR = len(self.dV_alpha)
+        self.symbolic_R = np.empty([self.dimR,self.dimR], dtype=object)
+        for i in range(self.dimR):
+            for j in range(i,self.dimR):
+                exp_coeff = self.dV_alpha[i] + self.dV_alpha[j]
+                coeff = self.dot_lyapunov_poly.coeff_monomial(exp_coeff.tolist())
                 if i == j:
-                    self.R[i,j] = coeff
+                    self.symbolic_R[i,j] = coeff
                 else:
-                    self.R[i,j] = (1/2)*coeff
-                    self.R[j,i] = (1/2)*coeff
+                    self.symbolic_R[i,j] = (1/2)*coeff
+                    self.symbolic_R[j,i] = (1/2)*coeff
 
-        self.lambda_R = sp.lambdify( [self.P_sp, self.u_sp], self.R )
-        # def compute_R(P, u):
-        #     return np.array(lambda_R(P.reshape(np.size(P)), u))
-        # self.lambda_R = compute_R
+        self.lambda_R = sp.lambdify( [self.P_sp, self.u_sp], self.symbolic_R )
+
+    def m(self, x):
+        '''
+        Compute m(x) vector.
+        '''
+        return np.array(self.lambda_V_monomials(*x))
+
+    def n(self, x):
+        '''
+        Compute n(x) vector.
+        '''
+        return np.array(self.lambda_dV_monomials(*x))
+
+    def V(self, x, P):
+        '''
+        Compute the lyapunov function V(x,P) = m(x) P m(x)
+        '''
+        return self.m(x).T @ P @ self.m(x)
+
+    def dV(self, x, P, u):
+        '''
+        Compute the time derivative of the lyapunov function dV(x,P) = n(x) R(P,u) n(x)
+        '''
+        R = np.array(self.lambda_R(P.reshape(np.size(P)), u))
+        return self.n(x).T @ R @ self.n(x)
 
     def dotV_SDP_Constraint(self, u):
         '''
         Computes the SDP constraint for dV = n(x)' R n(x)
         '''
         # Substitute the values of u
-        t = time.time()
-
-        dimR = len(self.R)
-        R_sp = np.array(self.lambda_R(self.P_sp, u))
+        dimR = len(self.symbolic_R)
+        self.R_sp = np.array(self.lambda_R(self.P_sp, u))
 
         # Construct the LMI matrices like: [ ] * p_0_0 + ... + [ ] * p_6_6 + ...
         R_dict = dict()
         for i in range(dimR):
             for j in range(i,dimR):
-                if hasattr(R_sp[i,j], "free_symbols"):
-                    for symbol in R_sp[i,j].free_symbols:
+                if hasattr(self.R_sp[i,j], "free_symbols"):
+                    for symbol in self.R_sp[i,j].free_symbols:
                         if not (symbol in R_dict.keys()):
                             R_dict[symbol.name] = np.zeros([dimR, dimR])
-                        R_dict[symbol.name][i,j] = R_sp[i,j].coeff(symbol)
-                        R_dict[symbol.name][j,i] = R_sp[j,i].coeff(symbol)
+                        R_dict[symbol.name][i,j] = self.R_sp[i,j].coeff(symbol)
+                        R_dict[symbol.name][j,i] = self.R_sp[j,i].coeff(symbol)
 
         # Finally, construct the LMI constraint in PICOS
         self.dissipativity_lmi = pc.sum( R_dict[symbol]*self._picos_P[int(symbol[-3]),int(symbol[-1])] for symbol in R_dict.keys() )
-
-        elapsed_time = time.time() - t
-
-        return elapsed_time
         
     def solve_SDP(self):
         '''
