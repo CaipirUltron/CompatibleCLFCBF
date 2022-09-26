@@ -1,8 +1,19 @@
 import rospy
 
-from system_initialization import plant, clf, cbf
+from examples.system_initialization import plant, clf, cbf
 from controllers import NominalQP
 from graphical_simulation import SimulationRviz
+
+# clf = PolynomialFunction(*initial_state, degree = 2)
+clf = QuadraticLyapunov(*initial_state, hessian = clf_params["Hv"], critical = clf_params["x0"])
+# clf_gaussian_component = Gaussian(*initial_state, constant=3.0, mean=[ 0.0, 3.0 ], shape=np.diag([15, 1]))
+
+ref_clf = QuadraticLyapunov(*initial_state, hessian = ref_clf_params["Hv"], critical = ref_clf_params["x0"])
+cbf = QuadraticBarrier(*initial_state, hessian = cbf_params["Hh"], critical = cbf_params["p0"])
+############################################################################################################################
+
+#################################################### SoS Controller ########################################################
+controller = SoSController( plant, clf, cbf )
 
 try:
     # Create QP controller and graphical simulation.

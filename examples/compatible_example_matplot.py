@@ -1,14 +1,19 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from system_initialization import plant, clf, cbf, ref_clf
-from compatible_clf_cbf.controllers import CompatibleQPController
-from compatible_clf_cbf.graphical_simulation_matplot import SimulationMatplot
-from compatible_clf_cbf.dynamic_systems import sym2vector
+from system_initialization import plant, initial_state, clf_params, ref_clf_params, cbf_params
+from graphical_simulation import SimulationMatplot
+from functions import QuadraticLyapunov, QuadraticBarrier
+from controllers import CompatibleQPController
+
+# Define quadratic Lyapunov and barriers
+clf = QuadraticLyapunov(*initial_state, hessian = clf_params["Hv"], critical = clf_params["x0"])
+ref_clf = QuadraticLyapunov(*initial_state, hessian = ref_clf_params["Hv"], critical = ref_clf_params["x0"])
+cbf = QuadraticBarrier(*initial_state, hessian = cbf_params["Hh"], critical = cbf_params["p0"])
 
 # Create QP controller and graphical simulation.
 dt = .005
-qp_controller = CompatibleQPController(plant, clf, ref_clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 10.0], p = [1.0, 1.0], dt = dt)
+controller = CompatibleQPController(plant, clf, ref_clf, cbf, gamma = [1.0, 10.0], alpha = [1.0, 10.0], p = [1.0, 1.0], dt = dt)
 
 # Simulation loop -------------------------------------------------------------------
 T = 20
@@ -21,14 +26,14 @@ for step in range(0, num_steps):
     time[step] = step*dt
 
     # Inner loop control
-    u_control = qp_controller.get_control()
+    u_control = controller.get_control()
 
     # Outer loop control
-    upi_control = qp_controller.get_clf_control()
+    upi_control = controller.get_clf_control()
 
     # Send actuation commands
-    qp_controller.update_clf_dynamics(upi_control)
-    qp_controller.update_cbf_dynamics(np.zeros(len(upi_control)))
+    controller.update_clf_dynamics(upi_control)
+    controller.update_cbf_dynamics(np.zeros(len(upi_control)))
 
     plant.set_control(u_control)
     plant.actuate(dt)
@@ -37,9 +42,9 @@ for step in range(0, num_steps):
 logs = {
     "time": time,
     "stateLog": plant.state_log,
-    "clfLog": qp_controller.clf.dynamics.state_log,
-    "cbfLog": qp_controller.cbf.dynamics.state_log,
-    "modeLog": qp_controller.mode_log
+    "clfLog": controller.clf.dynamics.state_log,
+    "cbfLog": controller.cbf.dynamics.state_log,
+    "modeLog": controller.mode_log
 }
 
 # Show animation -------------------------------------------------------------------

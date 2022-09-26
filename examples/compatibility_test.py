@@ -2,7 +2,7 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 
-from system_initialization import plant, clf, ref_clf, cbf
+from examples.system_initialization import plant, clf, ref_clf, cbf
 from controllers import NewQPController
 
 # Create QP controller

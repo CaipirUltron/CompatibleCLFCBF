@@ -77,8 +77,8 @@ class SoSController():
         # Computes dot product
         self.dot_lyapunov_poly = sp.Poly( P_sp_poly.dot( u_sp_poly ).as_expr(), self._plant.get_symbols() )
 
-        self.dV_monoms = self.dot_lyapunov_poly.monoms()
-        max_dV_degree = max(max(self.dV_monoms))
+        self.dV_monoms_alpha = self.dot_lyapunov_poly.monoms()
+        max_dV_degree = max(max(self.dV_monoms_alpha))
         if (max_dV_degree % 2) == 0:
             self.dV_alpha = generate_monomial_list(self._state_dim, max_dV_degree/2)
             self.dV_monomials = generate_monomials_from_symbols(self.lyapunov_symbols, max_dV_degree/2)

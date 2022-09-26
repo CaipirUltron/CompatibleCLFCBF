@@ -1,7 +1,7 @@
 import rospy
 import numpy as np
 
-from system_initialization import plant, clf, cbf, ref_clf
+from examples.system_initialization import plant, clf, cbf, ref_clf
 from controllers import CompatibleQPController
 from graphical_simulation import SimulationRviz
 
