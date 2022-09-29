@@ -8,7 +8,7 @@ class SimulationMatplot():
     '''
     Class for Matplot-based simulation.
     '''
-    def __init__(self, axes_lim, numpoints, logs, clf, cbf, draw_level = False):
+    def __init__(self, axes_lim, numpoints, logs, clf, cbfs, draw_level = False):
 
         self.fps = 50
         self.draw_level = draw_level
@@ -36,7 +36,8 @@ class SimulationMatplot():
         # Get point resolution for graphical objects
         self.numpoints = numpoints
 
-        self.clf, self.cbf = clf, cbf
+        self.clf, self.cbfs = clf, cbfs
+        self.num_cbfs = len(self.cbfs)
 
         # Initalize graphical objects
         self.time_text = self.ax.text(axes_lim[1]-2.5, axes_lim[3]-1, str("Time = "))
@@ -45,7 +46,8 @@ class SimulationMatplot():
         self.trajectory, = self.ax.plot([],[],lw=2)
 
         self.clf_contours = self.clf.contour_plot(self.ax, levels=[0.0], colors=['blue'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.5)
-        self.cbf_contours = self.cbf.contour_plot(self.ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.1)
+        self.cbf_contours = []
+        # self.cbf_contours = self.cbf.contour_plot(self.ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.1)
 
         self.animation = None
 
@@ -55,9 +57,9 @@ class SimulationMatplot():
 
         self.time_text.text = str("Time = ")
         self.mode_text.text = str("Rate/Compatibility")
-
         self.trajectory.set_data([],[])
-        self.cbf_contours = self.cbf.contour_plot(self.ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.2)
+        for cbf in self.cbfs:
+            self.cbf_contours.append( cbf.contour_plot(self.ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.2) )
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
@@ -87,7 +89,7 @@ class SimulationMatplot():
 
         if self.draw_level:
             V = self.clf.evaluate_function(*current_state)[0]
-            h = self.cbf.evaluate_function(*current_state)[0]
+            # h = self.cbf.evaluate_function(*current_state)[0]
             for coll in self.clf_contours.collections:
                 coll.remove()
             # for coll in self.cbf_contours.collections:
@@ -109,6 +111,7 @@ class SimulationMatplot():
         graphical_elements.append(self.mode_text)
         graphical_elements.append(self.trajectory)
         graphical_elements += self.clf_contours.collections
+
         graphical_elements += self.cbf_contours.collections
 
         return graphical_elements

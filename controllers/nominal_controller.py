@@ -6,11 +6,11 @@ class NominalQP():
     '''
     Class for the nominal QP controller.
     '''
-    def __init__(self, plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0, dt = 0.001):
+    def __init__(self, plant, clf, cbfs, gamma = 1.0, alpha = 1.0, p = 10.0, dt = 0.001):
 
         # Dimensions and system model initialization
         self.plant = plant
-        self.clf, self.cbf = clf, cbf
+        self.clf, self.cbfs = clf, cbfs
 
         self.state_dim = self.plant.n
         self.control_dim = self.plant.m
@@ -33,7 +33,8 @@ class NominalQP():
         Computes the QP control.
         '''
         a_clf, b_clf = self.get_clf_constraint()
-        a_cbf, b_cbf = self.get_cbf_constraint()
+        for cbf in self.cbfs:
+            a_cbf, b_cbf = self.get_cbf_constraint(cbf)
 
         # Stacking the CLF and CBF constraints
         A = np.vstack( [a_clf, a_cbf ])
@@ -69,9 +70,9 @@ class NominalQP():
 
         return a_clf, b_clf
 
-    def get_cbf_constraint(self):
+    def get_cbf_constraint(self, cbf):
         '''
-        Sets the barrier constraint.
+        Sets the i-th barrier constraint.
         '''
         # Affine plant dynamics
         f = self.plant.get_f()
@@ -79,11 +80,11 @@ class NominalQP():
         state = self.plant.get_state()
 
         # Barrier function and gradient
-        self.h = self.cbf.evaluate_function(*state)[0]
-        self.nablah = self.cbf.evaluate_gradient(*state)[0]
+        h = cbf.evaluate_function(*state)[0]
+        nablah = cbf.evaluate_gradient(*state)[0]
 
         self.Lfh = self.nablah.dot(f)
-        self.Lgh = g.T.dot(self.nablah)
+        self.Lgh = g.T.dot(nablah)
 
         # CBF contraint for the QP
         a_cbf = -np.hstack( [ self.Lgh, 0.0 ])
@@ -103,20 +104,20 @@ class NominalQP():
         '''
         self.cbf.update(pih_ctrl, self.ctrl_dt)
 
-    def get_lambda(self):
-        '''
-        Computes the KKT multipliers of the Optimization problem.
-        '''
-        LgV2 = self.LgV.dot(self.LgV)
-        Lgh2 = self.Lgh.dot(self.Lgh)
-        LgVLgh = self.LgV.dot(self.Lgh)
-
-        delta = ( (1/self.p) + LgV2 ) * Lgh2 - LgVLgh**2
+#  def get_lambda(self):
+#         '''
+#         Computes the KKT multipliers of the Optimization problem.
+#         '''
+#         LgV2 = self.LgV.dot(self.LgV)
+#         Lgh2 = self.Lgh.dot(self.Lgh)
+#         LgVLgh = self.LgV.dot(self.Lgh)
         
-        FV = self.LfV + self.gamma * self.V
-        Fh = self.Lfh + self.alpha * self.h
+#         delta = ( (1/self.p) + LgV2 ) * Lgh2 - LgVLgh**2
         
-        lambda1 = (1/delta) * ( FV * Lgh2 - Fh * LgVLgh )
-        lambda2 = (1/delta) * ( FV * LgVLgh - Fh * ( (1/self.p) + LgV2 )  )
+#         FV = self.LfV + self.gamma * self.V
+#         Fh = self.Lfh + self.alpha * self.h
+        
+#         lambda1 = (1/delta) * ( FV * Lgh2 - Fh * LgVLgh )
+#         lambda2 = (1/delta) * ( FV * LgVLgh - Fh * ( (1/self.p) + LgV2 )  )
 
-        return lambda1, lambda2, delta
+#         return lambda1, lambda2, delta

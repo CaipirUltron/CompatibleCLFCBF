@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from system_initialization import plant, initial_state, clf_params, ref_clf_params, cbf_params
+from system_initialization import plant, initial_state, clf_params, ref_clf_params, cbf_params1, cbf_params2
 from graphical_simulation import SimulationMatplot
 from functions import QuadraticLyapunov, QuadraticBarrier
 from controllers import NominalQP
@@ -9,11 +9,13 @@ from controllers import NominalQP
 # Define quadratic Lyapunov and barriers
 clf = QuadraticLyapunov(*initial_state, hessian = clf_params["Hv"], critical = clf_params["x0"])
 ref_clf = QuadraticLyapunov(*initial_state, hessian = ref_clf_params["Hv"], critical = ref_clf_params["x0"])
-cbf = QuadraticBarrier(*initial_state, hessian = cbf_params["Hh"], critical = cbf_params["p0"])
+cbf1 = QuadraticBarrier(*initial_state, hessian = cbf_params1["Hh"], critical = cbf_params1["p0"])
+cbf2 = QuadraticBarrier(*initial_state, hessian = cbf_params2["Hh"], critical = cbf_params2["p0"])
+cbfs = [cbf1, cbf2]
 
 # Define QP controller
 dt = .005
-controller = NominalQP(plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0)
+controller = NominalQP(plant, clf, cbfs, gamma = 1.0, alpha = 1.0, p = 10.0)
 
 # Simulation loop -------------------------------------------------------------------
 T = 20
