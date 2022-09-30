@@ -65,7 +65,8 @@ class SimulationMatplot():
         graphical_elements.append(self.time_text)
         graphical_elements.append(self.trajectory)
         graphical_elements += self.clf_contours.collections
-        graphical_elements += self.cbf_contours.collections
+        for cbf_countour in self.cbf_contours:
+            graphical_elements += cbf_countour.collections
 
         return graphical_elements
 
@@ -111,8 +112,8 @@ class SimulationMatplot():
         graphical_elements.append(self.mode_text)
         graphical_elements.append(self.trajectory)
         graphical_elements += self.clf_contours.collections
-
-        graphical_elements += self.cbf_contours.collections
+        for cbf_countour in self.cbf_contours:
+            graphical_elements += cbf_countour.collections
 
         return graphical_elements
 

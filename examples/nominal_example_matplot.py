@@ -30,7 +30,7 @@ for step in range(0, num_steps):
     # Control
     u_control = controller.get_control()
     controller.update_clf_dynamics(np.zeros(controller.sym_dim))
-    controller.update_cbf_dynamics(np.zeros(controller.sym_dim))
+    # controller.update_cbf_dynamics(np.zeros(controller.sym_dim))
 
     # Send actuation commands 
     plant.set_control(u_control) 
@@ -41,14 +41,14 @@ logs = {
     "time": time,
     "stateLog": plant.state_log,
     "clfLog": controller.clf.dynamics.state_log,
-    "cbfLog": controller.cbf.dynamics.state_log,
+    # "cbfLog": controller.cbf.dynamics.state_log,
     "modeLog": np.zeros(len(time))
 }
 
 # Show animation -------------------------------------------------------------------
 print('Animating simulation...')
 axes_lim = (-6,6,-6,6)
-plotSim = SimulationMatplot(axes_lim, 50, logs, clf, cbf, draw_level=True)
+plotSim = SimulationMatplot(axes_lim, 50, logs, clf, cbfs, draw_level=True)
 plotSim.animate()
 # plotSim.plot_frame(2)
 plt.show()

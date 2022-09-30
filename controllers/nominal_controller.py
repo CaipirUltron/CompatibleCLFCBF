@@ -32,13 +32,13 @@ class NominalQP():
         '''
         Computes the QP control.
         '''
-        a_clf, b_clf = self.get_clf_constraint()
-        for cbf in self.cbfs:
-            a_cbf, b_cbf = self.get_cbf_constraint(cbf)
+        A, b = self.get_clf_constraint()
 
         # Stacking the CLF and CBF constraints
-        A = np.vstack( [a_clf, a_cbf ])
-        b = np.array([ b_clf, b_cbf ],dtype=float)
+        for cbf in self.cbfs:
+            a_cbf, b_cbf = self.get_cbf_constraint(cbf)
+            A = np.vstack( [ A, a_cbf ])
+            b = np.hstack( [ b, b_cbf ])
 
         # Solve QP
         self.QP.set_constraints(A, b)
@@ -83,12 +83,12 @@ class NominalQP():
         h = cbf.evaluate_function(*state)[0]
         nablah = cbf.evaluate_gradient(*state)[0]
 
-        self.Lfh = self.nablah.dot(f)
+        self.Lfh = nablah.dot(f)
         self.Lgh = g.T.dot(nablah)
 
         # CBF contraint for the QP
         a_cbf = -np.hstack( [ self.Lgh, 0.0 ])
-        b_cbf = self.alpha * self.h + self.Lfh
+        b_cbf = self.alpha * h + self.Lfh
 
         return a_cbf, b_cbf
 
@@ -104,20 +104,20 @@ class NominalQP():
         '''
         self.cbf.update(pih_ctrl, self.ctrl_dt)
 
-#  def get_lambda(self):
-#         '''
-#         Computes the KKT multipliers of the Optimization problem.
-#         '''
-#         LgV2 = self.LgV.dot(self.LgV)
-#         Lgh2 = self.Lgh.dot(self.Lgh)
-#         LgVLgh = self.LgV.dot(self.Lgh)
+"""  def get_lambda(self):
+        '''
+        Computes the KKT multipliers of the Optimization problem.
+        '''
+        LgV2 = self.LgV.dot(self.LgV)
+        Lgh2 = self.Lgh.dot(self.Lgh)
+        LgVLgh = self.LgV.dot(self.Lgh)
         
-#         delta = ( (1/self.p) + LgV2 ) * Lgh2 - LgVLgh**2
+        delta = ( (1/self.p) + LgV2 ) * Lgh2 - LgVLgh**2
         
-#         FV = self.LfV + self.gamma * self.V
-#         Fh = self.Lfh + self.alpha * self.h
+        FV = self.LfV + self.gamma * self.V
+        Fh = self.Lfh + self.alpha * self.h
         
-#         lambda1 = (1/delta) * ( FV * Lgh2 - Fh * LgVLgh )
-#         lambda2 = (1/delta) * ( FV * LgVLgh - Fh * ( (1/self.p) + LgV2 )  )
+        lambda1 = (1/delta) * ( FV * Lgh2 - Fh * LgVLgh )
+        lambda2 = (1/delta) * ( FV * LgVLgh - Fh * ( (1/self.p) + LgV2 )  )
 
-#         return lambda1, lambda2, delta
+        return lambda1, lambda2, delta """
