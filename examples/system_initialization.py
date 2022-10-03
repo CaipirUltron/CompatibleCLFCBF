@@ -27,19 +27,19 @@ ref_clf_params = {
     "x0": [ 0.0, 0.0 ] }
 ############################################################################################################################
 
-############################################## Configure and create CBFs ###################################################
+############################################## Configure and create CBF ####################################################
 # xaxis_length, yaxis_length, cbf_angle = 3.0, 1.0, np.radians(0.0)
 # cbf_params = {
 #     "Hh": canonical2D([ 1/(xaxis_length**2), 1/(yaxis_length**2) ], cbf_angle),
 #     "p0": [ 0.0, 3.0 ]
 # }
-cbf_lambda1_x, cbf_lambda1_y, cbf_angle1 = 1.0, 3.0, np.radians(0.0)
+cbf_lambda_x, cbf_lambda_y, cbf_angle = 1.0, 3.0, np.radians(0.0)
 cbf_params1 = {
-    "Hh": canonical2D([ cbf_lambda1_x , cbf_lambda1_y ], cbf_angle1),
+    "Hh": canonical2D([ cbf_lambda_x , cbf_lambda_y ], cbf_angle),
     "p0": [ 0.0, 3.0 ] }
 
-cbf_lambda2_x, cbf_lambda2_y, cbf_angle2 = 6.0, 1.0, np.radians(30.0)
+cbf_lambda_x, cbf_lambda_y, cbf_angle = 1.0, 1.0, np.radians(30.0)
 cbf_params2 = {
-    "Hh": canonical2D([ cbf_lambda2_x , cbf_lambda2_y ], cbf_angle2),
+    "Hh": canonical2D([ cbf_lambda_x , cbf_lambda_y ], cbf_angle),
     "p0": [ 3.0, 3.0 ] }
 ############################################################################################################################

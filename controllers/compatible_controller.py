@@ -1,18 +1,20 @@
-import numpy as np
 import scipy
 from scipy import signal
-
+import numpy as np
 from quadratic_program import QuadraticProgram
+
 
 class CompatibleQPController():
     '''
     Class for the compatible QP controller.
     '''
-    def __init__(self, plant, clf, ref_clf, cbf, gamma = [1.0, 1.0], alpha = [1.0, 1.0], p = [10.0, 10.0], dt = 0.001):
+    def __init__(self, plant, clf, ref_clf, cbfs, gamma = [1.0, 1.0], alpha = [1.0, 1.0], p = [10.0, 10.0], dt = 0.001):
 
         # Dimensions and system model initialization
         self.plant = plant
-        self.clf, self.ref_clf, self.cbf = clf, ref_clf, cbf
+        self.clf, self.ref_clf = clf, ref_clf
+        self.cbfs = cbfs
+        self.num_cbfs = len(self.cbfs)
 
         self.state_dim = self.plant.n
         self.control_dim = self.plant.m
@@ -51,6 +53,7 @@ class CompatibleQPController():
         P1[-1,-1] = self.p[0]
         q1 = np.zeros(self.QP1_dim)
         self.QP1 = QuadraticProgram(P=P1,q=q1)
+        self.QP1_sol = np.zeros(self.QP1_dim)
 
         # Parameters for the outer QP controller (QP2)
         self.QP2_dim = self.sym_dim + 1
@@ -58,6 +61,7 @@ class CompatibleQPController():
         P2[-1,-1] = self.p[1]
         q2 = np.zeros(self.QP2_dim)
         self.QP2 = QuadraticProgram(P=P2,q=q2)
+        self.QP2_sol = np.zeros(self.QP2_dim)
 
         # Variable initialization
         self.ctrl_dt = dt
@@ -73,33 +77,36 @@ class CompatibleQPController():
         Computes the solution of the inner QP.
         '''
         # Configure constraints
-        a_clf, b_clf = self.get_clf_constraint()
-        a_cbf, b_cbf = self.get_cbf_constraint()
-        a_boundary_stable, b_boundary_stable = self.get_boundary_stability_constraint()
+        A, b = self.get_clf_constraint()
 
-        A = np.vstack([ a_clf, a_cbf ])
-        b = np.array([ b_clf, b_cbf ], dtype=float)
+        for cbf in self.cbfs:
+            a_cbf, b_cbf = self.get_cbf_constraint(cbf)
+            A = np.vstack( [ A, a_cbf ])
+            b = np.hstack( [ b, b_cbf ])
 
-        # Adds boundary stability constraint in case the CBF is indefinite
-        if (self.get_mode() >= 0):
-            A_inner = A
-            b_inner = b
-        else:
-            A_inner = np.vstack([ A, a_boundary_stable ])
-            b_inner = np.hstack([ b, b_boundary_stable ])
+        # a_boundary_stable, b_boundary_stable = self.get_boundary_stability_constraint()
 
-        if self.get_region() > 0:
-            self.mode_log.append(1)
-        else:
-            self.mode_log.append(0)
+        # A = np.vstack([ a_clf, a_cbf ])
+        # b = np.array([ b_clf, b_cbf ], dtype=float)
 
         # Solve inner loop QP
         self.QP1.initialize()
-        self.QP1.set_constraints(A_inner, b_inner)
-        QP1_sol = self.QP1.get_solution()
-        self.u = QP1_sol[0:self.control_dim]
+        self.QP1.set_constraints(A, b)
+        self.QP1_sol = self.QP1.get_solution()
+        self.u = self.QP1_sol[0:self.control_dim]
 
         return self.u
+
+    def get_cbf_constraint_activation(self):
+        '''
+        Return the current CBF constraint activation. 
+        '''
+        cbf_constraints = []
+        for cbf in self.cbfs:
+            a_cbf, b_cbf = self.get_cbf_constraint(cbf)
+            cbf_constraints.append( a_cbf @ self.QP1_sol - b_cbf )
+
+        return cbf_constraints
 
     def get_clf_control(self):
         '''
@@ -153,19 +160,13 @@ class CompatibleQPController():
         for k in range(self.sym_dim):
             self.nablaV_pi[k] = 0.5 * ( delta_x.T @ partial_Hv[k] @ delta_x )[0,0]
 
-        # Introduces instability in case the CBF is indefinite
-        if (self.get_mode() <= 0) and (self.get_region() >= 0):
-            eta = -1
-        else:
-            eta = +1
-
         # CLF constraint for the first QP
-        a_clf = np.hstack([ eta*self.LgV, -1.0 ])
-        b_clf = - self.gamma[0]*self.V - eta*self.LfV
+        a_clf = np.hstack([ self.LgV, -1.0 ])
+        b_clf = - self.gamma[0]*self.V - self.LfV
 
         return a_clf, b_clf
 
-    def get_cbf_constraint(self):
+    def get_cbf_constraint(self, cbf):
         '''
         Sets the barrier constraint.
         '''
@@ -175,37 +176,17 @@ class CompatibleQPController():
         state = self.plant.get_state()
 
         # Barrier function and gradient
-        self.h = self.cbf.evaluate(state)
-        self.nablah = self.cbf.get_gradient()
+        h = cbf.evaluate_function(*state)[0]
+        nablah = cbf.evaluate_gradient(*state)[0]
 
-        self.Lfh = self.nablah.dot(f)
-        self.Lgh = g.T.dot(self.nablah)
+        self.Lfh = nablah.dot(f)
+        self.Lgh = g.T.dot(nablah)
 
         # CBF contraint for the QP
         a_cbf = -np.hstack([ self.Lgh, 0.0 ])
-        b_cbf = self.alpha[0] * self.h + self.Lfh
+        b_cbf = self.alpha[0] * h + self.Lfh
 
         return a_cbf, b_cbf
-
-    def get_boundary_stability_constraint(self):
-        '''
-        Sets the constraint for boundary stability in case the CBF is indefinite.
-        '''
-        # Affine plant dynamics
-        f = self.plant.get_f()
-        g = self.plant.get_g()
-
-        # Barrier function gradient
-        self.nablah = self.cbf.get_gradient()
-
-        self.Lfh = self.nablah.dot(f)
-        self.Lgh = g.T.dot(self.nablah)
-
-        # Boundary stability constraint for the first QP
-        a_boundary_stable = np.hstack([ self.Lgh, -1.0 ])
-        b_boundary_stable = -self.Lfh
-
-        return a_boundary_stable, b_boundary_stable
 
     def update_clf_dynamics(self, piv_ctrl):
         '''
