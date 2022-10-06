@@ -35,6 +35,9 @@ for step in range(0, num_steps):
 
     # Send actuation commands
     controller.update_clf_dynamics(upi_control)
+    index = controller.return_active_cbf()
+    # print("Constraints = " + str(constraints))
+    print("Active CBF = " + str(index))
     # controller.update_cbf_dynamics(np.zeros(len(upi_control)))
 
     plant.set_control(u_control)
