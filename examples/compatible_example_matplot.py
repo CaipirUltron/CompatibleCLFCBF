@@ -21,7 +21,7 @@ dt = .005
 controller = CompatibleQPController(plant, clf, ref_clf, cbfs, gamma = [1.0, 10.0], alpha = [1.0, 10.0], p = [1.0, 1.0], dt = dt)
 
 # Simulation loop -------------------------------------------------------------------
-T = 20
+T = 10
 num_steps = int(T/dt)
 time = np.zeros(num_steps)
 print('Running simulation...')
@@ -50,7 +50,7 @@ logs = {
     "stateLog": plant.state_log,
     "clfLog": controller.clf.dynamics.state_log,
     # "cbfLog": controller.cbf.dynamics.state_log,
-    "modeLog": np.zeros(len(time))
+    "modeLog": controller.mode_log,
 }
 
 # Show animation -------------------------------------------------------------------

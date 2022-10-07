@@ -38,8 +38,7 @@ class CompatibleQPController():
         self.pencil_dict = {}
         self.f_params_dict = {
             "epsilon": 1.5,
-            "min_CLF_eigenvalue": 0.2,
-            "compatibility_threshold": 1.0
+            "min_CLF_eigenvalue": 0.2
         }
         self.clf.set_epsilon(self.f_params_dict["min_CLF_eigenvalue"])
         self.ref_clf.set_epsilon(self.f_params_dict["min_CLF_eigenvalue"])
@@ -102,6 +101,7 @@ class CompatibleQPController():
             '''
             Compatibility constraints are added if an active CBF exists
             '''
+            self.mode_log.append(1.0)
             a_clf_rot, b_clf_rot = self.get_eigenvector_constraints()
             a_cbf_pi, b_cbf_pi = self.get_compatibility_constraints()
             A_outer = a_cbf_pi
@@ -111,6 +111,7 @@ class CompatibleQPController():
             '''
             Instead, rate constraints are added if no active CBF exists
             '''
+            self.mode_log.append(0.0)
             a_rate, b_rate = self.get_rate_constraint()
             A_outer = a_rate
             b_outer = np.array([ b_rate ])
@@ -186,7 +187,7 @@ class CompatibleQPController():
     #     '''
     #     Integrates the dynamic system for the CBF Hessian matrix.
     #     '''
-    #     self.cbfs[0].update(pih_ctrl, self.ctrl_dt)
+    #     self.active_cbf.update(pih_ctrl, self.ctrl_dt)
     #     self.compute_compatibility()
 
     def compute_active_cbf(self):
