@@ -42,4 +42,9 @@ cbf_lambda_x, cbf_lambda_y, cbf_angle = 6.0, 1.0, np.radians(30.0)
 cbf_params2 = {
     "Hh": canonical2D([ cbf_lambda_x , cbf_lambda_y ], cbf_angle),
     "p0": [ 3.0, 3.0 ] }
+
+cbf_lambda_x, cbf_lambda_y, cbf_angle = 1.0, 4.0, np.radians(30.0)
+cbf_params3 = {
+    "Hh": canonical2D([ cbf_lambda_x , cbf_lambda_y ], cbf_angle),
+    "p0": [ -3.0, -3.0 ] }
 ############################################################################################################################

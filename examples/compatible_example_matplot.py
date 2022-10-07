@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from system_initialization import plant, initial_state, clf_params, ref_clf_params, cbf_params1, cbf_params2
+from system_initialization import plant, initial_state, clf_params, ref_clf_params, cbf_params1, cbf_params2, cbf_params3
 from graphical_simulation import SimulationMatplot
 from functions import QuadraticLyapunov, QuadraticBarrier
 from controllers import CompatibleQPController
@@ -9,9 +9,12 @@ from controllers import CompatibleQPController
 # Define quadratic Lyapunov and barriers
 clf = QuadraticLyapunov(*initial_state, hessian = clf_params["Hv"], critical = clf_params["x0"])
 ref_clf = QuadraticLyapunov(*initial_state, hessian = ref_clf_params["Hv"], critical = ref_clf_params["x0"])
+
 cbf1 = QuadraticBarrier(*initial_state, hessian = cbf_params1["Hh"], critical = cbf_params1["p0"])
 cbf2 = QuadraticBarrier(*initial_state, hessian = cbf_params2["Hh"], critical = cbf_params2["p0"])
-cbfs = [cbf1, cbf2]
+cbf3 = QuadraticBarrier(*initial_state, hessian = cbf_params3["Hh"], critical = cbf_params3["p0"])
+
+cbfs = [cbf1, cbf2, cbf3]
 
 # Create QP controller and graphical simulation.
 dt = .005
