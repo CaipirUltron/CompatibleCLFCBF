@@ -14,6 +14,7 @@ class CompatibleQPController():
         self.plant = plant
         self.clf, self.ref_clf = clf, ref_clf
         self.cbfs = cbfs
+        self.active_cbf = None
         self.num_cbfs = len(self.cbfs)
 
         self.state_dim = self.plant.n
@@ -42,7 +43,6 @@ class CompatibleQPController():
         }
         self.clf.set_epsilon(self.f_params_dict["min_CLF_eigenvalue"])
         self.ref_clf.set_epsilon(self.f_params_dict["min_CLF_eigenvalue"])
-        self.compute_compatibility()
 
         # Parameters for the inner and outer QPs
         self.gamma, self.alpha, self.p = gamma, alpha, p
@@ -66,11 +66,10 @@ class CompatibleQPController():
         # Variable initialization
         self.ctrl_dt = dt
         self.V = 0.0
-        self.h = 0.0
         self.u = np.zeros(self.control_dim)
         self.u_v = np.zeros(self.sym_dim)
-        self.LgV = np.zeros(self.control_dim)
-        self.Lgh = np.zeros(self.control_dim)
+
+        self.compute_compatibility()
 
     def get_control(self):
         '''
@@ -86,60 +85,37 @@ class CompatibleQPController():
 
         # Solve inner loop QP
         self.QP1.initialize()
-        self.QP1.set_constraints(A, b)
+        self.QP1.set_inequality_constraints(A, b)
         self.QP1_sol = self.QP1.get_solution()
         self.u = self.QP1_sol[0:self.control_dim]
 
         return self.u
 
-    def return_active_cbf(self):
-        '''
-        Returns the index of the current active CBF, if only one CBF is active.
-        Returns -1 otherwise.
-        '''
-        cbf_constraints = []
-        for cbf in self.cbfs:
-            a_cbf, b_cbf = self.get_cbf_constraint(cbf)
-            cbf_constraints.append( -a_cbf @ self.QP1_sol + b_cbf )
-
-        arr = np.array(cbf_constraints) <= np.array([ 0.000001 for _ in range(len(self.cbfs)) ])
-
-        count_sum = False
-        for i in range(len(arr)):
-            count_mult = True
-            for j in range(len(arr)):
-                if i != j:
-                    count_mult = count_mult and not(arr[j])
-            count_sum = count_sum or count_mult
-
-        if count_sum:
-            for index in range(len(arr)):
-                if arr[index] == True:
-                    return index
-        
-        return -1
-
     def get_clf_control(self):
         '''
         Computes the solution of the outer QP.
         '''
-        # Adds rate or barrier constraint, depending on the region
-        a_rate, b_rate = self.get_rate_constraint()
-        a_clf_rot, b_clf_rot = self.get_eigenvector_constraints()
-        a_cbf_pi, b_cbf_pi = self.get_compatibility_constraints()
-
-        # Adds compatibility constraints in case the trajectory is above the obstacle
         self.QP2.initialize()
-        if (self.get_region() > 0):
-            # print('Compatibility')
+
+        # Adds compatibility/rate constraints
+        if self.active_cbf:
+            '''
+            Compatibility constraints are added if an active CBF exists
+            '''
+            a_clf_rot, b_clf_rot = self.get_eigenvector_constraints()
+            a_cbf_pi, b_cbf_pi = self.get_compatibility_constraints()
             A_outer = a_cbf_pi
             b_outer = b_cbf_pi
-            self.QP2.set_eq_constraints(a_clf_rot, b_clf_rot)
+            self.QP2.set_equality_constraints(a_clf_rot, b_clf_rot)
         else:
-            # print('Rate')
+            '''
+            Instead, rate constraints are added if no active CBF exists
+            '''
+            a_rate, b_rate = self.get_rate_constraint()
             A_outer = a_rate
             b_outer = np.array([ b_rate ])
-        self.QP2.set_constraints(A_outer, b_outer)
+
+        self.QP2.set_inequality_constraints(A_outer, b_outer)
 
         # Solve outer loop QP
         QP2_sol = self.QP2.get_solution()
@@ -190,12 +166,12 @@ class CompatibleQPController():
         h = cbf.evaluate_function(*state)[0]
         nablah = cbf.evaluate_gradient(*state)[0]
 
-        self.Lfh = nablah.dot(f)
-        self.Lgh = g.T.dot(nablah)
+        Lfh = nablah.dot(f)
+        Lgh = g.T.dot(nablah)
 
         # CBF contraint for the QP
-        a_cbf = -np.hstack([ self.Lgh, 0.0 ])
-        b_cbf = self.alpha[0] * h + self.Lfh
+        a_cbf = -np.hstack([ Lgh, 0.0 ])
+        b_cbf = self.alpha[0] * h + Lfh
 
         return a_cbf, b_cbf
 
@@ -212,6 +188,43 @@ class CompatibleQPController():
     #     '''
     #     self.cbfs[0].update(pih_ctrl, self.ctrl_dt)
     #     self.compute_compatibility()
+
+    def compute_active_cbf(self):
+        '''
+        Computes the active CBF.
+        '''
+        index = self.active_cbf_index()
+        if index >= 0:
+            self.active_cbf = self.cbfs[index]
+        else:
+            self.active_cbf = None
+
+    def active_cbf_index(self):
+        '''
+        Returns the index of the current active CBF, if only one CBF is active.
+        Returns -1 otherwise.
+        '''
+        cbf_constraints = []
+        for cbf in self.cbfs:
+            a_cbf, b_cbf = self.get_cbf_constraint(cbf)
+            cbf_constraints.append( -a_cbf @ self.QP1_sol + b_cbf )
+
+        arr = np.array(cbf_constraints) <= np.array([ 0.000001 for _ in range(len(self.cbfs)) ])
+
+        count_sum = False
+        for i in range(len(arr)):
+            count_mult = True
+            for j in range(len(arr)):
+                if i != j:
+                    count_mult = count_mult and not(arr[j])
+            count_sum = count_sum or count_mult
+
+        if count_sum:
+            for index in range(len(arr)):
+                if arr[index] == True:
+                    return index
+        
+        return -1
 
     def get_rate_constraint(self):
         '''
@@ -266,14 +279,16 @@ class CompatibleQPController():
         '''
         Computes compatibility barrier constraint, for keeping the critical values of f above 1.
         '''
-        Z = self.pencil_dict["eigenvectors"]
         Hv = self.clf.get_hessian()
         partial_Hv = self.clf.get_partial_Hv()
         x0 = self.clf.get_critical()
-        p0 = self.cbfs[0].get_critical()
+
+        p0 = self.active_cbf.get_critical()
+
+        Z = self.pencil_dict["eigenvectors"]
         pencil_eig = self.pencil_dict["eigenvalues"]
         v0 = Hv @ ( p0 - x0 )
-
+        self.cbfs
         # Compatibility barrier
         h_gamma = np.zeros(self.state_dim-1)
         gradient_h_gamma = np.zeros([self.state_dim-1, self.sym_dim])
@@ -299,20 +314,20 @@ class CompatibleQPController():
 
         return h_gamma, gradient_h_gamma
 
-    def get_mode(self):
-        '''
-        Computes the operation mode for a general n-th order system (for now, only for second order systems - determinant suffices).
-        Positive for definite barrier Hessian, negative otherwise.
-        '''
-        Hh = self.cbf.get_hessian()
-        return np.linalg.det(Hh)
+    # def get_mode(self):
+    #     '''
+    #     Computes the operation mode for a general n-th order system (for now, only for second order systems - determinant suffices).
+    #     Positive for definite barrier Hessian, negative otherwise.
+    #     '''
+    #     Hh = self.cbf.get_hessian()
+    #     return np.linalg.det(Hh)
 
-    def get_region(self):
-        '''
-        Computes the region function: positive when is necessary to compatibilize, negative otherwise.
-        '''                
-        state = self.plant.get_state()
-        return - ( self.cbfs[0].evaluate_function(*state) - self.f_params_dict["compatibility_threshold"] )
+    # def get_region(self):
+    #     '''
+    #     Computes the region function: positive when is necessary to compatibilize, negative otherwise.
+    #     '''                
+    #     state = self.plant.get_state()
+    #     return - ( self.cbfs[0].evaluate_function(*state) - self.f_params_dict["compatibility_threshold"] )
 
     def compute_eigenvalues(self):
         '''
@@ -366,8 +381,8 @@ class CompatibleQPController():
         Hv = self.clf.get_hessian()
         x0 = self.clf.get_critical()
 
-        Hh = self.cbfs[0].get_hessian()
-        p0 = self.cbfs[0].get_critical()
+        Hh = self.active_cbf.get_hessian()
+        p0 = self.active_cbf.get_critical()
 
         v0 = Hv @ ( p0 - x0 )
 
@@ -440,7 +455,7 @@ class CompatibleQPController():
         '''
         Compute equilibrium solutions and equilibrium points.
         '''
-        p0 = self.cbfs[0].get_critical()
+        p0 = self.active_cbf.get_critical()
         solution_poly = np.polynomial.polynomial.polysub( self.f_dict["numerator"], self.f_dict["denominator"] )
         
         equilibrium_solutions = np.polynomial.polynomial.polyroots(solution_poly)
@@ -482,9 +497,11 @@ class CompatibleQPController():
         '''
         This function computes the polynomials of the rational compatibility funcion f(lambda). It assumes an invertible Hv.
         '''
-        self.compute_f()
-        self.compute_equilibrium()
-        self.compute_f_critical()
+        self.compute_active_cbf()
+        if self.active_cbf:
+            self.compute_f()
+            self.compute_equilibrium()
+            self.compute_f_critical()
 
     def f_values(self, args):
         '''
@@ -498,37 +515,12 @@ class CompatibleQPController():
             fvalues[k] = num_value/(pencil_char_value**2)
         return fvalues
 
-    def f_values2(self, args):
-        '''
-        Returns the values of f.
-        '''
-        numpoints = len(args)
-        fvalues = np.zeros(numpoints)
-        poles = self.f_dict["poles"]
-        residues = self.f_dict["residues"]
-        for k in range(numpoints):
-            for i in range(len(residues)):
-                fvalues[k] = fvalues[k] + residues[i]/(( args[k] - poles[i] )**2)
-        return fvalues
-
-    def f_values3(self, args):
-        '''
-        Returns the values of f.
-        '''
-        numpoints = len(args)
-        fvalues = np.zeros(numpoints)
-        Hh = self.cbf.get_hessian()
-        for k in range(numpoints):
-            v = self.v_values(args[k])
-            fvalues[k] = v.T @ Hh @ v
-        return fvalues
-
     def v_values( self, lambda_var ):
         '''
         This function returns the value of vector v(lambda) = H(lambda)^{-1} v0
         '''
         Hv, x0 = self.clf.get_hessian(), self.clf.get_critical(), 
-        p0 = self.cbfs[0].get_critical()
+        p0 = self.active_cbf.get_critical()
         v0 = Hv.dot( p0 - x0 )
 
         H = self.pencil_value( lambda_var )
@@ -540,5 +532,31 @@ class CompatibleQPController():
         This function returns the value of the matrix pencil H(lambda) = lambda Hh - Hv
         '''
         Hv = self.clf.get_hessian()
-        Hh = self.cbfs[0].get_hessian()
+        Hh = self.active_cbf.get_hessian()
         return lambda_var*Hh - Hv
+
+    # def f_values2(self, args):
+    #     '''
+    #     Returns the values of f.
+    #     '''
+    #     numpoints = len(args)
+    #     fvalues = np.zeros(numpoints)
+    #     poles = self.f_dict["poles"]
+    #     residues = self.f_dict["residues"]
+    #     for k in range(numpoints):
+    #         for i in range(len(residues)):
+    #             fvalues[k] = fvalues[k] + residues[i]/(( args[k] - poles[i] )**2)
+    #     return fvalues
+
+    # def f_values3(self, args):
+    #     '''
+    #     Returns the values of f.
+    #     '''
+    #     numpoints = len(args)
+    #     fvalues = np.zeros(numpoints)
+    #     Hh = self.cbf.get_hessian()
+    #     for k in range(numpoints):
+    #         v = self.v_values(args[k])
+    #         fvalues[k] = v.T @ Hh @ v
+    #     return fvalues
+

@@ -50,7 +50,7 @@ class QuadraticProgram():
         self.q = q
         self.dimension = len(q)
 
-    def set_constraints(self, A, b):
+    def set_inequality_constraints(self, A, b):
         '''
         Set constraints of the type A x <= b
         '''
@@ -66,7 +66,7 @@ class QuadraticProgram():
         else:
             self.num_constraints = 1
 
-    def set_eq_constraints(self, Aeq, beq):
+    def set_equality_constraints(self, Aeq, beq):
         '''
         Set constraints of the type A x == b
         '''

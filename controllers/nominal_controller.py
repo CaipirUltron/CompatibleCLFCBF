@@ -41,7 +41,7 @@ class NominalQP():
             b = np.hstack( [ b, b_cbf ])
 
         # Solve QP
-        self.QP.set_constraints(A, b)
+        self.QP.set_inequality_constraints(A, b)
         QP_sol = self.QP.get_solution()
         control = QP_sol[0:self.control_dim,]
 
