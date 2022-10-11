@@ -121,12 +121,33 @@ def rot2D(theta):
     R = np.array(((c,-s),(s,c)))
     return R
 
+def rot3D(theta, axis):
+    '''
+    Angle and axis 3D rotation matrix.
+    '''
+    axis_norm = np.linalg.norm(axis)
+    u = axis/axis_norm
+    uut = np.outer(u, u)
+    u_cross = np.cross(u,np.identity(u.shape[0])*-1)
+    cos, sin = np.cos(theta), np.sin(theta)
+    R = cos*np.eye(3) + sin*u_cross + (1-cos)*uut
+    return R
+
 def canonical2D(eigen, theta):
     '''
     Returns the (2x2) symmetric matrix with eigenvalues eigen and eigenvector angle theta.
     '''
     Diag = np.diag(eigen)
     R = rot2D(theta)
+    H = R @ Diag @ R.T
+    return H
+
+def canonical3D(eigen, theta, axis):
+    '''
+    Returns the (3x3) symmetric matrix with eigenvalues eigen and eigenvector angle theta.
+    '''
+    Diag = np.diag(eigen)
+    R = rot3D(theta, axis)
     H = R @ Diag @ R.T
     return H
 

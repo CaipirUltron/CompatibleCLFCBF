@@ -249,7 +249,7 @@ class PolynomialSystem(AffineSystem):
 
         # Debugging
         if len(self._F_list) != self._num_monomials or len(self._G_list) != self._num_monomials:
-            raise Exception("Number of list elements must be N, where N is the dimension of the monomial basis!")
+            raise Exception("Number of list elements must be " + str(self._num_monomials) + ".")
 
         for F_k in self._F_list:
             if len(F_k) != self.n:
