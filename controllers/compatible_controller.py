@@ -95,6 +95,7 @@ class CompatibleQPController():
         Computes the solution of the outer QP.
         '''
         self.QP2.initialize()
+        a_rate, b_rate = self.get_rate_constraint()
 
         # Adds compatibility/rate constraints
         if self.active_cbf:
@@ -104,15 +105,15 @@ class CompatibleQPController():
             self.mode_log.append(1.0)
             a_clf_rot, b_clf_rot = self.get_eigenvector_constraints()
             a_cbf_pi, b_cbf_pi = self.get_compatibility_constraints()
-            A_outer = a_cbf_pi
-            b_outer = b_cbf_pi
+            A_outer = np.vstack([a_rate, a_cbf_pi])
+            b_outer = np.hstack([b_rate, b_cbf_pi])
             self.QP2.set_equality_constraints(a_clf_rot, b_clf_rot)
         else:
             '''
             Instead, rate constraints are added if no active CBF exists
             '''
             self.mode_log.append(0.0)
-            a_rate, b_rate = self.get_rate_constraint()
+            # a_rate, b_rate = self.get_rate_constraint()
             A_outer = a_rate
             b_outer = np.array([ b_rate ])
 
