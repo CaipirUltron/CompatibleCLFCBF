@@ -8,6 +8,10 @@ Such systems are known to generate undesirable equilibria that can be stable.
 Compatibility in a CLF-CBF pair is a property that ensures that the given combination of CLF and CBF does not generate 
 stable equilibria other than the origin on the closed-loop system formed by a min-norm QP-based controller.
 
+**Instalation instructions:**
+
+pip3 install -e .
+
 **Running instructions:** 
 
 $ *python3 examples/<example_file_name>.py*

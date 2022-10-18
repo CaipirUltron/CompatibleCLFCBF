@@ -25,8 +25,8 @@ class SimulationMatplot():
         self.state_log = logs["stateLog"]
         if "clfLog" in logs.keys():
             self.clf_log = logs["clfLog"]
-        if "cbfLog" in logs.keys():
-            self.cbf_log = logs["cbfLog"]
+        # if "cbfLog" in logs.keys():
+        #     self.cbf_log = logs["cbfLog"]
         self.mode_log = logs["modeLog"]
         self.num_steps = len(self.state_log[0])-1
         self.anim_step = (self.num_steps/self.time[-1])/self.fps
@@ -76,7 +76,7 @@ class SimulationMatplot():
         self.trajectory.set_data(xdata, ydata)
 
         current_time = np.around(self.time[i], decimals = 2)
-        current_state = [self.state_log[0][i], self.state_log[1][i]]
+        current_state = [ self.state_log[0][i], self.state_log[1][i] ]
 
         if hasattr(self, 'clf_log'):
             current_piv_state = [self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i]]
@@ -118,7 +118,6 @@ class SimulationMatplot():
         return graphical_elements
 
     def gen_function(self):
-        
         while self.runs:
             yield self.current_step
             self.current_step += int(max(1,np.ceil(self.anim_step)))

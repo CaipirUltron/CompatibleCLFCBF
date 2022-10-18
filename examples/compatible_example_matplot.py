@@ -39,7 +39,6 @@ for step in range(0, num_steps):
     # Send actuation commands
     controller.update_clf_dynamics(upi_control)
     print("Active CBF = " + str(controller.active_cbf_index()))
-    # controller.update_cbf_dynamics(np.zeros(len(upi_control)))
 
     plant.set_control(u_control)
     plant.actuate(dt)
@@ -49,7 +48,6 @@ logs = {
     "time": time,
     "stateLog": plant.state_log,
     "clfLog": controller.clf.dynamics.state_log,
-    # "cbfLog": controller.cbf.dynamics.state_log,
     "modeLog": controller.mode_log,
 }
 

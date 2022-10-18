@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from system_initialization import plant, initial_state, clf_params, ref_clf_params, cbf_params1, cbf_params2, cbf_params3
+from examples.system_initialization import plant, initial_state, clf_params, ref_clf_params, cbf_params1, cbf_params2, cbf_params3
 from graphical_simulation import SimulationMatplot
 from functions import QuadraticLyapunov, QuadraticBarrier
 from controllers import NominalQP
@@ -33,7 +33,6 @@ for step in range(0, num_steps):
     # Control
     u_control = controller.get_control()
     controller.update_clf_dynamics(np.zeros(controller.sym_dim))
-    # controller.update_cbf_dynamics(np.zeros(controller.sym_dim))
 
     # Send actuation commands 
     plant.set_control(u_control) 
@@ -44,7 +43,6 @@ logs = {
     "time": time,
     "stateLog": plant.state_log,
     "clfLog": controller.clf.dynamics.state_log,
-    # "cbfLog": controller.cbf.dynamics.state_log,
     "modeLog": np.zeros(len(time))
 }
 

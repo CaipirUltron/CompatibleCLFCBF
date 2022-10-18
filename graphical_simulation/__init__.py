@@ -1,2 +1,2 @@
 from .graphical_simulation_matplot import SimulationMatplot
-from .graphical_simulation_rviz import *
+# from .graphical_simulation_rviz import *

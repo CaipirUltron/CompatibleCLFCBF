@@ -37,7 +37,7 @@ class CompatibleQPController():
         self.mode_log = []                   # mode = 1 for compatibility, mode = 0 for rate
         self.pencil_dict = {}
         self.f_params_dict = {
-            "epsilon": 1.5,
+            "epsilon": 0.4,
             "min_CLF_eigenvalue": 0.2
         }
         self.clf.set_epsilon(self.f_params_dict["min_CLF_eigenvalue"])
