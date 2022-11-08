@@ -221,3 +221,25 @@ class SoSController():
         b_cbf = self.alpha * self.h + self.Lfh
 
         return a_cbf, b_cbf
+
+    def max_constrained_curvature(self, P, v):
+        '''
+        Given a n x n matrix P and a n-dimensional vector v, compute max z' P z s.t. z'v = 0 and z'z = 1.
+        '''
+        dimP = np.shape(P)[0]
+        normalized_v = v/np.linalg.norm(v)
+        _, V = np.linalg.eig(P)
+
+        values = []
+        for i in range(dimP):
+            values.append( v.dot(V[:,i]) )
+        index_to_delete = np.argmin(values)
+        np.delete(V,index_to_delete,1)      # discart one of the columns
+
+        M = np.hstack([normalized_v, V])
+        Q, R = np.linalg.qr(M)              # columns of Q are vectors from Gram Schmidt orthogonalization
+
+        Pbar = Q.T @ P @ Q
+        sol_eigs, _ = np.linalg.eig(Pbar[1:,1:])
+
+        return np.max(sol_eigs)
