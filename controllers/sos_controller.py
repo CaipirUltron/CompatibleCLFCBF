@@ -232,7 +232,7 @@ class SoSController():
 
         values = []
         for i in range(dimP):
-            values.append( v.dot(V[:,i]) )
+            values.append( 1-(v.dot(V[:,i]))**2 )
         index_to_delete = np.argmin(values)
         np.delete(V,index_to_delete,1)      # discart one of the columns
 
