@@ -6,8 +6,9 @@ def max_constrained_curvature(P, v):
     '''
     dimP = np.shape(P)[0]
     normalized_v = v.reshape(dimP,1)/np.linalg.norm(v)
-    _, V = np.linalg.eig(P)
-
+    # _, V = np.linalg.eig(P)
+    V = np.eye(dimP)
+    
     values = []
     for i in range(dimP):
         values.append( 1-(v.dot(V[:,i]))**2 )

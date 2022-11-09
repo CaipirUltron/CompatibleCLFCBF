@@ -228,7 +228,8 @@ class SoSController():
         '''
         dimP = np.shape(P)[0]
         normalized_v = v/np.linalg.norm(v)
-        _, V = np.linalg.eig(P)
+        # _, V = np.linalg.eig(P)
+        V = np.eye(dimP)
 
         values = []
         for i in range(dimP):
