@@ -23,9 +23,9 @@ controller = NominalQP(plant, clf, cbfs, gamma = 1.0, alpha = 1.0, p = 10.0)
 # Simulation loop -------------------------------------------------------------------
 T = 20
 num_steps = int(T/dt)
-time = np.zeros(num_steps)
+time = np.zeros(num_steps+1)
 print('Running simulation...')
-for step in range(0, num_steps):
+for step in range(1, num_steps+1):
 
     # Simulation time
     time[step] = step*dt
@@ -41,15 +41,17 @@ for step in range(0, num_steps):
 # Collect simulation logs ----------------------------------------------------------
 logs = {
     "time": time,
-    "stateLog": plant.state_log,
-    "clfLog": controller.clf.dynamics.state_log,
-    "modeLog": np.zeros(len(time))
+    "state": plant.state_log,
+    "control": plant.control_log,
+    "clf": controller.clf.dynamics.state_log,
+    "mode": np.zeros(len(time))
 }
 
 # Show animation -------------------------------------------------------------------
-print('Animating simulation...')
+print('Printing simulation...')
 axes_lim = (-6,6,-6,6)
-plotSim = SimulationMatplot(axes_lim, 50, logs, clf, cbfs, draw_level=True)
-plotSim.animate()
+
+# plotSim = SimulationMatplot(axes_lim, 50, logs, clf, cbfs, draw_level=True)
+# plotSim.animate()
 # plotSim.plot_frame(4.0)
-plt.show()
+# plt.show()

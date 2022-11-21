@@ -22,13 +22,13 @@ class SimulationMatplot():
 
         # Get logs
         self.time = logs["time"]
-        self.state_log = logs["stateLog"]
-        if "clfLog" in logs.keys():
-            self.clf_log = logs["clfLog"]
+        self.state_log = logs["state"]
+        if "clf" in logs.keys():
+            self.clf_log = logs["clf"]
         # if "cbfLog" in logs.keys():
         #     self.cbf_log = logs["cbfLog"]
-        self.mode_log = logs["modeLog"]
-        self.num_steps = len(self.state_log[0])-1
+        self.mode_log = logs["mode"]
+        self.num_steps = len(self.state_log[0])
         self.anim_step = (self.num_steps/self.time[-1])/self.fps
         self.current_step = 0
         self.runs = False
@@ -72,40 +72,46 @@ class SimulationMatplot():
 
     def update(self, i):
 
-        xdata, ydata = self.state_log[0][0:i], self.state_log[1][0:i]
-        self.trajectory.set_data(xdata, ydata)
+        if i <= self.num_steps:
 
-        current_time = np.around(self.time[i], decimals = 2)
-        current_state = [ self.state_log[0][i], self.state_log[1][i] ]
+            xdata, ydata = self.state_log[0][0:i], self.state_log[1][0:i]
+            self.trajectory.set_data(xdata, ydata)
 
-        if hasattr(self, 'clf_log'):
-            current_piv_state = [self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i]]
-            self.clf.set_param(current_piv_state)
+            current_time = np.around(self.time[i], decimals = 2)
+            current_state = [ self.state_log[0][i], self.state_log[1][i] ]
 
-        self.time_text.set_text("Time = " + str(current_time) + "s")
-        if self.mode_log[i] == 1:
-            self.mode_text.set_text("Compatibility")
-        elif self.mode_log[i] == 0:
-            self.mode_text.set_text("Rate")
+            if hasattr(self, 'clf_log'):
+                current_piv_state = [self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i]]
+                self.clf.set_param(current_piv_state)
 
-        if self.draw_level:
-            V = self.clf.evaluate_function(*current_state)[0]
-            # h = self.cbf.evaluate_function(*current_state)[0]
-            for coll in self.clf_contours.collections:
-                coll.remove()
+            self.time_text.set_text("Time = " + str(current_time) + "s")
+            if self.mode_log[i] == 1:
+                self.mode_text.set_text("Compatibility")
+            elif self.mode_log[i] == 0:
+                self.mode_text.set_text("Rate")
+
+            if self.draw_level:
+                V = self.clf.evaluate_function(*current_state)[0]
+                # h = self.cbf.evaluate_function(*current_state)[0]
+                for coll in self.clf_contours.collections:
+                    coll.remove()
+                # for coll in self.cbf_contours.collections:
+                #     coll.remove()
+                perimeter = 4*abs(current_state[0]) + 4*abs(current_state[1])
+                self.clf_contours = self.clf.contour_plot(self.ax, levels=[V], colors=['blue'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.008*perimeter+0.1)
+                # self.cbf_contours = self.cbf.contour_plot(self.ax, levels=[h], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.008*perimeter+0.1)
+
+            # if hasattr(self, 'cbf_log'):
+            #     current_pih_state = [self.cbf_log[0][i], self.cbf_log[1][i], self.cbf_log[2][i]]
+            #     self.cbf.set_param(current_pih_state)
+
             # for coll in self.cbf_contours.collections:
-            #     coll.remove()
-            perimeter = 4*abs(current_state[0]) + 4*abs(current_state[1])
-            self.clf_contours = self.clf.contour_plot(self.ax, levels=[V], colors=['blue'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.008*perimeter+0.1)
-            # self.cbf_contours = self.cbf.contour_plot(self.ax, levels=[h], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.008*perimeter+0.1)
+                # coll.remove()
+            # self.cbf_contours = self.cbf.contour_plot(self.ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.2)
 
-        # if hasattr(self, 'cbf_log'):
-        #     current_pih_state = [self.cbf_log[0][i], self.cbf_log[1][i], self.cbf_log[2][i]]
-        #     self.cbf.set_param(current_pih_state)
-
-        # for coll in self.cbf_contours.collections:
-            # coll.remove()
-        # self.cbf_contours = self.cbf.contour_plot(self.ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.2)
+        else:
+            self.runs = False
+            self.animation.event_source.stop()
 
         graphical_elements = []
         graphical_elements.append(self.time_text)

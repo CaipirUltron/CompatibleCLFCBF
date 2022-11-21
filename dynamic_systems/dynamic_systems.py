@@ -53,7 +53,6 @@ class DynamicSystem(ABC):
         self.dynamics()
         self._state = self.mODE.integrate(self.mODE.t+dt)
         self.log_state()
-        self.log_control()
 
     def log_state(self):
         '''

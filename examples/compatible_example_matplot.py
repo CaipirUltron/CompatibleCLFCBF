@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from system_initialization import plant, initial_state, clf_params, ref_clf_params, cbf_params1, cbf_params2, cbf_params3
+from examples.system_initialization import plant, initial_state, clf_params, ref_clf_params, cbf_params1, cbf_params2, cbf_params3
 from graphical_simulation import SimulationMatplot
 from functions import QuadraticLyapunov, QuadraticBarrier
 from controllers import CompatibleQPController
@@ -23,12 +23,12 @@ controller = CompatibleQPController(plant, clf, ref_clf, cbfs, gamma = [1.0, 10.
 # Simulation loop -------------------------------------------------------------------
 T = 10
 num_steps = int(T/dt)
-time = np.zeros(num_steps)
+time = np.zeros(num_steps+1)
 print('Running simulation...')
-for step in range(0, num_steps):
+for step in range(1, num_steps+1):
 
     # Simulation time
-    time[step] = step*dt
+    time[step] = step*dt    
 
     # Inner loop control
     u_control = controller.get_control()
@@ -44,17 +44,20 @@ for step in range(0, num_steps):
     plant.actuate(dt)
 
 # Collect simulation logs ----------------------------------------------------------
+print(time[-2])
 logs = {
     "time": time,
-    "stateLog": plant.state_log,
-    "clfLog": controller.clf.dynamics.state_log,
-    "modeLog": controller.mode_log,
+    "state": plant.state_log,
+    "control": plant.control_log,
+    "clf": controller.clf.dynamics.state_log,
+    "mode": controller.mode_log,
 }
 
 # Show animation -------------------------------------------------------------------
 print('Animating simulation...')
 axes_lim = (-6,6,-6,6)
-plotSim = SimulationMatplot(axes_lim, 80, logs, clf, cbfs, draw_level=True)
-plotSim.animate()
+
+# plotSim = SimulationMatplot(axes_lim, 80, logs, clf, cbfs, draw_level=True)
+# plotSim.animate()
 # plotSim.plot_frame(0.1)
-plt.show()
+# plt.show()
