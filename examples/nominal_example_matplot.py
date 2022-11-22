@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from examples.system_initialization import plant, initial_state, clf_params, ref_clf_params, cbf_params1, cbf_params2, cbf_params3
+from examples.system_initialization_periodic import plant, initial_state, clf_params, ref_clf_params, cbf_params1, cbf_params2, cbf_params3
 from graphical_simulation import SimulationMatplot
 from functions import QuadraticLyapunov, QuadraticBarrier
 from controllers import NominalQP
@@ -51,7 +51,7 @@ logs = {
 print('Printing simulation...')
 axes_lim = (-6,6,-6,6)
 
-# plotSim = SimulationMatplot(axes_lim, 50, logs, clf, cbfs, draw_level=True)
-# plotSim.animate()
+plotSim = SimulationMatplot(axes_lim, 50, logs, clf, cbfs, draw_level=True)
+plotSim.animate()
 # plotSim.plot_frame(4.0)
-# plt.show()
+plt.show()

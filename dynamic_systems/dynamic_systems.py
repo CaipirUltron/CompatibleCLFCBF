@@ -5,6 +5,7 @@ import sympy as sp
 from scipy.integrate import ode
 from abc import ABC, abstractmethod
 from common import *
+from itertools import product
 
 
 class DynamicSystem(ABC):
@@ -163,17 +164,60 @@ class LinearSystem(AffineSystem):
         self._g = self._B
 
 
+class Periodic(AffineSystem):
+    '''
+    Implements a general periodic dynamic: dx = \sum_{k,i} A_{k,i} sin(w_{k,i} x_k + \phi_{k,i})
+    '''
+    def __init__(self, initial_state, initial_control, **kwargs):
+        super().__init__(initial_state, initial_control)
+        self.set_param(**kwargs)
+
+    def set_param(self, **kwargs):
+        '''
+        Sets the system parameters.
+        '''
+        for key in kwargs:
+            if key == "Gains":
+                self._gains = kwargs[key]
+            if key == "Frequencies":
+                self._frequencies = kwargs[key]
+            if key == "Phases":
+                self._phases = kwargs[key]
+
+        self.sh = self._gains.shape[:2]
+        self._num_terms = self.sh[0]
+        if self.sh[1] != self.n:
+            raise Exception('Input dimensions mismatch.')
+
+        if self.sh != self._frequencies.shape or self.sh != self._phases.shape:
+            raise Exception('Input dimensions mismatch.')
+
+        for i in range(self.sh[0]):
+            for j in range(self.sh[1]):
+                if self._gains[i,j].shape != (self.n, self.m) or self._frequencies.shape != (self.n, self.m) or self._phases.shape != (self.n, self.m):
+                    raise Exception('Input dimensions mismatch.')
+
+    def f(self):
+        self._f = np.zeros(self.n)
+
+    def g(self):
+        self._g = np.zeros([self.n, self.m])
+        for i in range(self._num_terms):
+            for k in range(self.n):
+                self._g += self._gains[k,i] * np.sin( self._frequencies[k,i] * self._state[k] + self._phases[k,i] )
+
 class Unicycle(AffineSystem):
     '''
     Implements the unicycle dynamics: dx = v cos(phi), dy = v sin(phi), dphi = omega.
     State and control are given by [x, y, z] and [v, omega], respectively.
     '''
-    def __init__(self, initial_state, initial_control):
+    def __init__(self, initial_state, initial_control, distance):
         if len(initial_state) != 3:
             raise Exception('State dimension is different from 3.')
         if len(initial_control) != 2:
             raise Exception('Control dimension is different from 3.')
         super().__init__(initial_state, initial_control)
+        self.distance = distance
         self.f()
         self.g()
 
@@ -181,10 +225,10 @@ class Unicycle(AffineSystem):
         self._f = np.zeros(self.n)
 
     def g(self):
-        x = self._state[0]
-        y = self._state[1]
+        # x = self._state[0]
+        # y = self._state[1]
         phi = self._state[2]
-        self._g = np.array([[ np.cos(phi), 0.0 ],[ np.sin(phi), 0.0 ],[0.0, 1.0]])
+        self._g = np.array([[ np.cos(phi), -self.distance*np.sin(phi) ],[ np.sin(phi), self.distance*np.cos(phi) ],[0.0, 1.0]])
 
 
 class PolynomialSystem(AffineSystem):

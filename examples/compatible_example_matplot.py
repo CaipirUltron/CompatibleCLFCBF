@@ -44,7 +44,6 @@ for step in range(1, num_steps+1):
     plant.actuate(dt)
 
 # Collect simulation logs ----------------------------------------------------------
-print(time[-2])
 logs = {
     "time": time,
     "state": plant.state_log,
@@ -54,10 +53,10 @@ logs = {
 }
 
 # Show animation -------------------------------------------------------------------
-print('Animating simulation...')
+print('Printing simulation...')
 axes_lim = (-6,6,-6,6)
 
-# plotSim = SimulationMatplot(axes_lim, 80, logs, clf, cbfs, draw_level=True)
-# plotSim.animate()
+plotSim = SimulationMatplot(axes_lim, 80, logs, clf, cbfs, draw_level=True)
+plotSim.animate()
 # plotSim.plot_frame(0.1)
-# plt.show()
+plt.show()

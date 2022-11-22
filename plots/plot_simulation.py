@@ -2,8 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 plt.rcParams['text.usetex'] = True
 
-from examples.nominal_example_matplot import logs
-# from examples.compatible_example_matplot import logs
+# from examples.nominal_example_matplot import logs
+from examples.compatible_example_matplot import logs
 
 time = logs["time"]
 

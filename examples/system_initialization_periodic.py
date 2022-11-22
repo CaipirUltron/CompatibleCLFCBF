@@ -1,16 +1,25 @@
 import numpy as np
 
-from dynamic_systems import PolynomialSystem
+from dynamic_systems import Periodic
 from functions import canonical2D
 
-######################################### Configure and create 2D plant ####################################################
+######################################### Configure and create unicycle plant ##############################################
 initial_state = [-4.1, 5.0]
 
-G1 = np.array([[1,0],[0,1]])
-G2 = np.array([[0,0],[0,0]])
-G3 = np.array([[0,0],[0,0]])
-G = [ G1 ]
-plant = PolynomialSystem(initial_state = initial_state, initial_control = np.zeros(2), degree=0, G_list = G)
+g11 = np.array([ [ 1, 0 ], 
+                 [ 0, 1 ] ])
+g12 = np.array([ [ 0, -1 ], 
+                 [ 1,  0 ] ])
+g21 = np.zeros([2,2])
+g22 = np.zeros([2,2])
+
+G = np.array([  [g11, g21], 
+                [g12, g22],  ])
+F = np.array([  [1, 0],
+                [1, 0] ])
+P = np.array([  [np.pi/2, 0],
+                [0      , 0] ])
+plant = Periodic(initial_state = initial_state, initial_control = np.zeros(2), Gains=G, Frequencies = F, Phases = P)
 ############################################################################################################################
 
 ############################################# Configure and create CLF #####################################################
@@ -28,11 +37,6 @@ ref_clf_params = {
 ############################################################################################################################
 
 ############################################## Configure and create CBF ####################################################
-# xaxis_length, yaxis_length, cbf_angle = 3.0, 1.0, np.radians(0.0)
-# cbf_params = {
-#     "Hh": canonical2D([ 1/(xaxis_length**2), 1/(yaxis_length**2) ], cbf_angle),
-#     "p0": [ 0.0, 3.0 ]
-# }
 cbf_lambda_x, cbf_lambda_y, cbf_angle = 1.0, 3.0, np.radians(0.0)
 cbf_params1 = {
     "Hh": canonical2D([ cbf_lambda_x , cbf_lambda_y ], cbf_angle),
