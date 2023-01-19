@@ -4,7 +4,7 @@ from dynamic_systems import PolynomialSystem
 from functions import canonical2D
 
 ######################################### Configure and create 2D plant ####################################################
-initial_state = [-4.1, 5.0]
+initial_state = [4.1, 5.0]
 
 G1 = np.array([[1,0],[0,1]])
 G2 = np.array([[0,0],[0,0]])

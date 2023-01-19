@@ -50,6 +50,7 @@ logs = {
     "control": plant.control_log,
     "clf": controller.clf.dynamics.state_log,
     "mode": controller.mode_log,
+    "equilibria": controller.equilibrium_points
 }
 
 # Show animation -------------------------------------------------------------------

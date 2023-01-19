@@ -215,7 +215,7 @@ class Unicycle(AffineSystem):
         if len(initial_state) != 3:
             raise Exception('State dimension is different from 3.')
         if len(initial_control) != 2:
-            raise Exception('Control dimension is different from 3.')
+            raise Exception('Control dimension is different from 2.')
         super().__init__(initial_state, initial_control)
         self.distance = distance
         self.f()
