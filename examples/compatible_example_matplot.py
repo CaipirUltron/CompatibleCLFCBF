@@ -38,7 +38,10 @@ for step in range(1, num_steps+1):
 
     # Send actuation commands
     controller.update_clf_dynamics(upi_control)
-    print("Active CBF = " + str(controller.active_cbf_index()))
+    if controller.active_cbf_index() >= 0:
+        print("Active CBF = " + str(controller.active_cbf_index()))
+    else:
+        print("No CBF is active.")
 
     plant.set_control(u_control)
     plant.actuate(dt)

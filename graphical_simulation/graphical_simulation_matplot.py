@@ -1,5 +1,4 @@
 import numpy as np
-
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
 
@@ -41,12 +40,12 @@ class SimulationMatplot():
         self.num_cbfs = len(self.cbfs)
 
         # Initalize graphical objects
-        self.time_text = self.ax.text(axes_lim[1]-2.5, axes_lim[3]-1, str("Time = "))
-        # self.mode_text = self.ax.text(axes_lim[0]+1.5, axes_lim[3]-1, str("Rate/Compatibility"))
+        self.time_text = self.ax.text(axes_lim[1]-2.5, axes_lim[3]-11.5, str("Time = "))
+        self.mode_text = self.ax.text(axes_lim[0]+0.5, axes_lim[3]-1, "", fontweight="bold")
 
         self.trajectory, = self.ax.plot([],[],lw=2)
         self.init_state, = self.ax.plot([],[],'bo',lw=2)
-        self.equilibria_plot, = self.ax.plot([],[],'ro',lw=2)
+        self.equilibria_plot, = self.ax.plot([],[], marker='o', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
 
         self.clf_contours = self.clf.contour_plot(self.ax, levels=[0.0], colors=['blue'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.5)
         self.cbf_contours = []
@@ -59,16 +58,16 @@ class SimulationMatplot():
         self.runs = True
 
         self.time_text.text = str("Time = ")
-        # self.mode_text.text = str("Rate/Compatibility")
+        self.mode_text.text = ""
         self.trajectory.set_data([],[])
 
         x_init, y_init = self.state_log[0][0], self.state_log[1][0]
         self.init_state.set_data(x_init, y_init)
 
-        num_eq = self.equilibria.shape[1]
+        num_eq = self.equilibria.shape[0]
         x_eq, y_eq = np.zeros(num_eq), np.zeros(num_eq)
         for k in range(num_eq):
-            x_eq[k], y_eq[k] = self.equilibria[0,k], self.equilibria[1,k]
+            x_eq[k], y_eq[k] = self.equilibria[k,0], self.equilibria[k,1]
         self.equilibria_plot.set_data(x_eq, y_eq)
 
         for cbf in self.cbfs:
@@ -76,6 +75,7 @@ class SimulationMatplot():
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
+        graphical_elements.append(self.mode_text)
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
         graphical_elements.append(self.equilibria_plot)
@@ -100,16 +100,12 @@ class SimulationMatplot():
                 self.clf.set_param(current_piv_state)
 
             self.time_text.set_text("Time = " + str(current_time) + "s")
-            # if self.mode_log[i] == 1:
-            #     self.mode_text.set_text("Compatibility")
-            # elif self.mode_log[i] == 0:
-            #     self.mode_text.set_text("Rate")
 
-            num_eq = self.equilibria.shape[1]
-            x_eq, y_eq = np.zeros(num_eq), np.zeros(num_eq)
-            for k in range(num_eq):
-                x_eq[k], y_eq[k] = self.equilibria[0,k], self.equilibria[1,k]
-            self.equilibria_plot.set_data(x_eq, y_eq)
+            if self.mode_log:
+                if self.mode_log[i] == 1:
+                    self.mode_text.set_text("Compatibility")
+                elif self.mode_log[i] == 0:
+                    self.mode_text.set_text("Rate")
 
             if self.draw_level:
                 V = self.clf.evaluate_function(*current_state)[0]
@@ -136,7 +132,7 @@ class SimulationMatplot():
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
-        # graphical_elements.append(self.mode_text)
+        graphical_elements.append(self.mode_text)
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
         graphical_elements.append(self.equilibria_plot)

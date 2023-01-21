@@ -1,4 +1,5 @@
 import numpy as np
+from controllers import CLFCBFPair
 from quadratic_program import QuadraticProgram
 
 
@@ -11,12 +12,20 @@ class NominalQP():
         # Dimensions and system model initialization
         self.plant = plant
         self.clf, self.cbfs = clf, cbfs
+        self.clf_cbf_pairs = []
 
         self.state_dim = self.plant.n
         self.control_dim = self.plant.m
         self.sym_dim = int(( self.state_dim * ( self.state_dim + 1 ) )/2)
         self.skewsym_dim = int(( self.state_dim * ( self.state_dim - 1 ) )/2)
         
+        # Compute equilibrium points
+        self.equilibrium_points = np.zeros([0,self.state_dim])
+        for cbf in cbfs:
+            clf_cbf_pair = CLFCBFPair(self.clf, cbf)
+            self.clf_cbf_pairs.append( clf_cbf_pair )
+            self.equilibrium_points = np.vstack([ self.equilibrium_points, clf_cbf_pair.equilibrium_points.T ])
+
         # QP parameters
         self.p = p
         self.gamma, self.alpha = gamma, alpha

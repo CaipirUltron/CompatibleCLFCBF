@@ -14,7 +14,7 @@ plant = PolynomialSystem(initial_state = initial_state, initial_control = np.zer
 ############################################################################################################################
 
 ############################################# Configure and create CLF #####################################################
-clf_lambda_x, clf_lambda_y, clf_angle = 6.0, 1.0, np.radians(-45.0)
+clf_lambda_x, clf_lambda_y, clf_angle = 6.0, 1.0, np.radians(45.0)
 clf_params = {
     "Hv": canonical2D([ clf_lambda_x , clf_lambda_y ], clf_angle),
     "x0": [ 0.0, 0.0 ] }

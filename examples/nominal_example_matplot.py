@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from examples.system_initialization_periodic import plant, initial_state, clf_params, ref_clf_params, cbf_params1, cbf_params2, cbf_params3
+from examples.system_initialization import plant, initial_state, clf_params, ref_clf_params, cbf_params1, cbf_params2, cbf_params3
 from graphical_simulation import SimulationMatplot
 from functions import QuadraticLyapunov, QuadraticBarrier
 from controllers import NominalQP
@@ -44,7 +44,8 @@ logs = {
     "state": plant.state_log,
     "control": plant.control_log,
     "clf": controller.clf.dynamics.state_log,
-    "mode": np.zeros(len(time))
+    "mode": None,
+    "equilibria": controller.equilibrium_points
 }
 
 # Show animation -------------------------------------------------------------------

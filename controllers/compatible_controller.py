@@ -1,6 +1,5 @@
-import scipy
-from scipy import signal
 import numpy as np
+from controllers import CLFCBFPair
 from quadratic_program import QuadraticProgram
 
 
@@ -14,7 +13,6 @@ class CompatibleQPController():
         self.plant = plant
         self.clf, self.ref_clf = clf, ref_clf
         self.cbfs = cbfs
-        self.active_cbf = None
         self.num_cbfs = len(self.cbfs)
 
         self.state_dim = self.plant.n
@@ -27,13 +25,6 @@ class CompatibleQPController():
         self.gradient_Vpi = np.zeros(self.sym_dim)
         self.gradient_Vrot = np.zeros(self.skewsym_dim)
 
-        # Initialize compatibility function parameters
-        self.eigen_threshold = 0.000001
-        self.schurHv = np.zeros([self.state_dim,self.state_dim])
-        self.schurHh = np.zeros([self.state_dim,self.state_dim])
-        self.Q = np.zeros([self.state_dim,self.state_dim])
-        self.Z = np.zeros([self.state_dim,self.state_dim])
-
         self.mode_log = []                   # mode = 1 for compatibility, mode = 0 for rate
         self.pencil_dict = {}
         self.f_params_dict = {
@@ -42,6 +33,17 @@ class CompatibleQPController():
         }
         self.clf.set_epsilon(self.f_params_dict["min_CLF_eigenvalue"])
         self.ref_clf.set_epsilon(self.f_params_dict["min_CLF_eigenvalue"])
+
+        # Create CLF-CBF pairs
+        self.active_pair = None
+        self.clf_cbf_pairs = []
+        self.ref_clf_cbf_pairs = []
+        self.equilibrium_points = np.zeros([0,self.state_dim])
+        for cbf in cbfs:
+            self.clf_cbf_pairs.append( CLFCBFPair(self.clf, cbf) )
+            ref_clf_cbf_pair = CLFCBFPair(self.ref_clf, cbf)
+            self.ref_clf_cbf_pairs.append( ref_clf_cbf_pair )
+            self.equilibrium_points = np.vstack([ self.equilibrium_points, ref_clf_cbf_pair.equilibrium_points.T ])
 
         # Parameters for the inner and outer QPs
         self.gamma, self.alpha, self.p = gamma, alpha, p
@@ -67,8 +69,6 @@ class CompatibleQPController():
         self.V = 0.0
         self.u = np.zeros(self.control_dim)
         self.u_v = np.zeros(self.sym_dim)
-
-        self.compute_compatibility()
 
     def get_control(self):
         '''
@@ -98,7 +98,7 @@ class CompatibleQPController():
         a_rate, b_rate = self.get_rate_constraint()
 
         # Adds compatibility/rate constraints
-        if self.active_cbf:
+        if self.active_pair:
             '''
             Compatibility constraints are added if an active CBF exists
             '''
@@ -113,7 +113,6 @@ class CompatibleQPController():
             Instead, rate constraints are added if no active CBF exists
             '''
             self.mode_log.append(0.0)
-            # a_rate, b_rate = self.get_rate_constraint()
             A_outer = a_rate
             b_outer = np.array([ b_rate ])
 
@@ -179,27 +178,25 @@ class CompatibleQPController():
 
     def update_clf_dynamics(self, piv_ctrl):
         '''
-        Integrates the dynamic system for the CLF Hessian matrix.
+        Integrates the dynamic system for the CLF Hessian matrix and updates the active CLF-CBF pair.
         '''
         self.clf.update(piv_ctrl, self.ctrl_dt)
-        self.compute_compatibility()
 
+        index = self.active_cbf_index()
+        if index >= 0:
+            # self.active_cbf = self.cbfs[index]
+            self.active_pair = self.clf_cbf_pairs[index]
+            self.active_pair.update( clf = self.clf )
+        else:
+            # self.active_cbf = None
+            self.active_pair = None        
+        
     # def update_cbf_dynamics(self, pih_ctrl):
     #     '''
     #     Integrates the dynamic system for the CBF Hessian matrix.
     #     '''
     #     self.active_cbf.update(pih_ctrl, self.ctrl_dt)
-    #     self.compute_compatibility()
-
-    def compute_active_cbf(self):
-        '''
-        Computes the active CBF.
-        '''
-        index = self.active_cbf_index()
-        if index >= 0:
-            self.active_cbf = self.cbfs[index]
-        else:
-            self.active_cbf = None
+    #     self.active_pair.update( cbf = self.cbf )
 
     def active_cbf_index(self):
         '''
@@ -234,8 +231,9 @@ class CompatibleQPController():
         '''
         # Computes rate Lyapunov and gradient
         deltaHv = self.clf.get_hessian() - self.ref_clf.get_hessian()
-        self.Vpi = 0.5 * np.trace( deltaHv @ deltaHv )
         partial_Hv = self.clf.get_partial_Hv()
+
+        self.Vpi = 0.5 * np.trace( deltaHv @ deltaHv )
         for k in range(self.sym_dim):
             self.gradient_Vpi[k] = np.trace( deltaHv @ partial_Hv[k] )
 
@@ -250,8 +248,8 @@ class CompatibleQPController():
         Sets the constraint for fixing the pencil eigenvectors.
         '''
         JacobianV = np.zeros([self.skewsym_dim, self.sym_dim])
-        Z = self.pencil_dict["eigenvectors"]
-        partial_Hv = self.clf.get_partial_Hv()
+        Z = self.active_pair.pencil.eigenvectors
+        partial_Hv = self.active_pair.clf.get_partial_Hv()
 
         for l in range(self.sym_dim):
             diag_matrix = Z.T @ partial_Hv[l] @ Z
@@ -281,23 +279,17 @@ class CompatibleQPController():
         '''
         Computes compatibility barrier constraint, for keeping the critical values of f above 1.
         '''
-        Hv = self.clf.get_hessian()
-        partial_Hv = self.clf.get_partial_Hv()
-        x0 = self.clf.get_critical()
+        partial_Hv = self.active_pair.clf.get_partial_Hv()
+        pencil_eig = self.active_pair.pencil.eigenvalues
+        Z = self.active_pair.pencil.eigenvectors
 
-        p0 = self.active_cbf.get_critical()
-
-        Z = self.pencil_dict["eigenvectors"]
-        pencil_eig = self.pencil_dict["eigenvalues"]
-        v0 = Hv @ ( p0 - x0 )
-        self.cbfs
         # Compatibility barrier
         h_gamma = np.zeros(self.state_dim-1)
         gradient_h_gamma = np.zeros([self.state_dim-1, self.sym_dim])
 
         # Barrier function
         for k in range(self.state_dim-1):
-            residues = np.sqrt( np.array([ (Z[:,k].T @ v0)**2, (Z[:,k+1].T @ v0)**2 ]) )
+            residues = np.sqrt( np.array([ (Z[:,k].T @ self.active_pair.v0)**2, (Z[:,k+1].T @ self.active_pair.v0)**2 ]) )
             max_index = np.argmax(residues)
             residue = residues[max_index]
             delta_lambda = pencil_eig[k+1] - pencil_eig[k]
@@ -307,258 +299,8 @@ class CompatibleQPController():
             # Barrier function gradient
             C = 2*residue/(delta_lambda**2)/h1
             for i in range(self.sym_dim):
-                term1 = ( Z[:,max_index].T @ partial_Hv[i] @ ( p0 - x0 ) )
+                term1 = ( Z[:,max_index].T @ partial_Hv[i] @ ( self.active_pair.p0 - self.active_pair.x0 ) )
                 term2 = (residue/delta_lambda)*( Z[:,k+1].T @ partial_Hv[i] @ Z[:,k+1] - Z[:,k].T @ partial_Hv[i] @ Z[:,k] )
                 gradient_h_gamma[k,i] = C*(term1 - term2)
 
-        # print("h_gamma = " + str(h_gamma))
-        # print("grad h_gamma = " + str(gradient_h_gamma))
-
         return h_gamma, gradient_h_gamma
-
-    # def get_mode(self):
-    #     '''
-    #     Computes the operation mode for a general n-th order system (for now, only for second order systems - determinant suffices).
-    #     Positive for definite barrier Hessian, negative otherwise.
-    #     '''
-    #     Hh = self.cbf.get_hessian()
-    #     return np.linalg.det(Hh)
-
-    # def get_region(self):
-    #     '''
-    #     Computes the region function: positive when is necessary to compatibilize, negative otherwise.
-    #     '''                
-    #     state = self.plant.get_state()
-    #     return - ( self.cbfs[0].evaluate_function(*state) - self.f_params_dict["compatibility_threshold"] )
-
-    def compute_eigenvalues(self):
-        '''
-        Computes pencil eigenvalues from Schur decomposition.
-        '''
-        alpha = np.diag(self.schurHv)
-        beta = np.diag(self.schurHh)
-        eigenvalues = alpha/beta
-        sorted_args = np.argsort(eigenvalues)
-
-        return eigenvalues, alpha, beta, sorted_args
-
-    def compute_pencil(self, Hv, Hh):
-        '''
-        Given Hv and Hh, this method computes the generalized pencil eigenvalues and the pencil characteristic polynomial.
-        '''
-        self.schurHv, self.schurHh, alpha, beta, self.Q, self.Z = scipy.linalg.ordqz(Hv, Hh)
-        pencil_eig, alpha, beta, sorted_args = self.compute_eigenvalues()
-
-        # Compute the pencil eigenvectors
-        pencil_eigenvectors = np.zeros([self.state_dim,self.state_dim])
-        for k in range(len(pencil_eig)):
-            eig, Q = np.linalg.eig( pencil_eig[k]*Hh - Hv )
-            for i in range(len(eig)):
-                if np.abs(eig[i]) <= 0.000001:
-                    normalization_const = 1/np.sqrt(Q[:,i].T @ Hh @ Q[:,i])
-                    pencil_eigenvectors[:,k] = normalization_const * Q[:,i]
-                    break
-
-        # Assumption: Hv is invertible => detHv != 0
-        detHv = np.linalg.det(Hv)
-
-        # Computes the pencil characteristic polynomial and denominator of f(\lambda)
-        pencil_det = np.real(np.prod(pencil_eig))
-        pencil_char = ( detHv/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(pencil_eig))
-
-        self.pencil_dict["eigenvalues"] = pencil_eig[sorted_args]
-        self.pencil_dict["eigenvectors"] = pencil_eigenvectors[:,sorted_args]
-        self.pencil_dict["alpha"] = alpha[sorted_args]
-        self.pencil_dict["beta"] = beta[sorted_args]
-        self.pencil_dict["polar_eigenvalues"] = np.arctan(pencil_eig[sorted_args])
-        self.pencil_dict["characteristic_polynomial"] = pencil_char
-
-    def compute_f(self):
-        '''
-        This method computes rational function f.
-        '''
-        n = self.state_dim
-
-        # Similarity transformation
-        Hv = self.clf.get_hessian()
-        x0 = self.clf.get_critical()
-
-        Hh = self.active_cbf.get_hessian()
-        p0 = self.active_cbf.get_critical()
-
-        v0 = Hv @ ( p0 - x0 )
-
-        # Compute the pencil
-        self.compute_pencil(Hv, Hh)
-        pencil_eig = self.pencil_dict["eigenvalues"]
-        pencil_char = self.pencil_dict["characteristic_polynomial"]
-
-        # Compute denominator of f
-        den_poly = np.polynomial.polynomial.polymul(pencil_char, pencil_char)
-
-        detHv = np.linalg.det(Hv)
-        try:
-            Hv_inv = np.linalg.inv(Hv)
-            Hv_adj = detHv*Hv_inv
-        except np.linalg.LinAlgError as error:
-            print(error)
-            return
-
-        # This computes the pencil adjugate expansion and the set of numerator vectors by the adapted Faddeev-LeVerrier algorithm.
-        D = np.zeros([n, n, n])
-        D[:][:][0] = pow(-1,n-1) * Hv_adj
-
-        self.Omega = np.zeros([n,n])
-        self.Omega[0,:] = D[:][:][0].dot(v0)
-        for k in range(1,n):
-            D[:][:][k] = np.matmul( Hv_inv, np.matmul(Hh, D[:][:][k-1]) - pencil_char[k]*np.eye(n) )
-            self.Omega[k,:] = D[:][:][k].dot(v0)
-
-        # Computes the numerator polynomial
-        W = np.zeros([n,n])
-        for i in range(n):
-            for j in range(n):
-                W[i,j] = np.inner(Hh.dot(self.Omega[i,:]), self.Omega[j,:])
-
-        num_poly = np.polynomial.polynomial.polyzero
-        for k in range(n):
-            poly_term = np.polynomial.polynomial.polymul( W[:,k], np.eye(n)[:,k] )
-            num_poly = np.polynomial.polynomial.polyadd(num_poly, poly_term)
-
-        residues, poles, k = signal.residue( np.flip(num_poly), np.flip(den_poly), tol=0.001, rtype='avg' )
-
-        index = np.argwhere(np.real(residues) < 0.0000001)
-        residues = np.real(np.delete(residues, index))
-
-        # Computes polynomial roots
-        fzeros = np.real( np.polynomial.polynomial.polyroots(num_poly) )
-
-        # Filters repeated poles from pencil_eig and numerator_roots
-        repeated_poles = []
-        for i in range( len(pencil_eig) ):
-            for j in range( len(fzeros) ):
-                if np.absolute(fzeros[j] - pencil_eig[i]) < self.eigen_threshold:
-                    if np.any(repeated_poles == pencil_eig[i]):
-                            break
-                    else:
-                        repeated_poles.append( pencil_eig[i] )
-        repeated_poles = np.array( repeated_poles )
-
-        self.f_dict = {
-            "denominator": den_poly,
-            "numerator": num_poly,
-            "poles": pencil_eig,
-            "zeros": fzeros,
-            "repeated_poles": repeated_poles,
-            "residues": residues,
-        }
-
-    def compute_equilibrium(self):
-        '''
-        Compute equilibrium solutions and equilibrium points.
-        '''
-        p0 = self.active_cbf.get_critical()
-        solution_poly = np.polynomial.polynomial.polysub( self.f_dict["numerator"], self.f_dict["denominator"] )
-        
-        equilibrium_solutions = np.polynomial.polynomial.polyroots(solution_poly)
-        equilibrium_solutions = np.real(np.extract( equilibrium_solutions.imag == 0.0, equilibrium_solutions ))
-        equilibrium_solutions = np.concatenate((equilibrium_solutions, self.f_dict["repeated_poles"]))
-
-        # Extract positive solutions and sort array
-        self.equilibrium_solutions = np.sort( np.extract( equilibrium_solutions > 0, equilibrium_solutions ) )
-
-        # Compute equilibrium points from equilibrium solutions
-        self.equilibrium_points = np.zeros([self.state_dim,len(self.equilibrium_solutions)])
-        for k in range(len(self.equilibrium_solutions)):
-            if all(np.absolute(self.equilibrium_solutions[k] - self.pencil_dict["eigenvalues"]) > self.eigen_threshold ):
-                self.equilibrium_points[:,k] = self.v_values( self.equilibrium_solutions[k] ) + p0
-
-    def compute_f_critical(self):
-        '''
-        Computes critical points of f.
-        '''
-        dnum_poly = np.polynomial.polynomial.polyder(self.f_dict["numerator"])
-        dpencil_char = np.polynomial.polynomial.polyder(self.pencil_dict["characteristic_polynomial"])
-
-        poly1 = np.polynomial.polynomial.polymul(dnum_poly, self.pencil_dict["characteristic_polynomial"])
-        poly2 = 2*np.polynomial.polynomial.polymul(self.f_dict["numerator"], dpencil_char)
-        num_df = np.polynomial.polynomial.polysub( poly1, poly2 )
-
-        self.f_critical = np.polynomial.polynomial.polyroots(num_df)
-        self.f_critical = np.real(np.extract( self.f_critical.imag == 0.0, self.f_critical ))
-        self.critical_values = self.f_values(self.f_critical)
-        self.number_critical = len(self.critical_values)
-
-        # Get positive critical points
-        index, = np.where(self.f_critical > 0)
-        self.positive_f_critical = self.f_critical[index]
-        self.positive_critical_values = self.critical_values[index]
-        self.num_positive_critical = len(self.positive_f_critical)
-
-    def compute_compatibility(self):
-        '''
-        This function computes the polynomials of the rational compatibility funcion f(lambda). It assumes an invertible Hv.
-        '''
-        self.compute_active_cbf()
-        if self.active_cbf:
-            self.compute_f()
-            self.compute_equilibrium()
-            self.compute_f_critical()
-
-    def f_values(self, args):
-        '''
-        Returns the values of f.
-        '''
-        numpoints = len(args)
-        fvalues = np.zeros(numpoints)
-        for k in range(numpoints):
-            num_value = np.polynomial.polynomial.polyval( args[k], self.f_dict["numerator"] )
-            pencil_char_value = np.polynomial.polynomial.polyval( args[k], self.pencil_dict["characteristic_polynomial"] )
-            fvalues[k] = num_value/(pencil_char_value**2)
-        return fvalues
-
-    def v_values( self, lambda_var ):
-        '''
-        This function returns the value of vector v(lambda) = H(lambda)^{-1} v0
-        '''
-        Hv, x0 = self.clf.get_hessian(), self.clf.get_critical(), 
-        p0 = self.active_cbf.get_critical()
-        v0 = Hv.dot( p0 - x0 )
-
-        H = self.pencil_value( lambda_var )
-        H_inv = np.linalg.inv(H)
-        return H_inv.dot(v0)
-
-    def pencil_value(self, lambda_var):
-        '''
-        This function returns the value of the matrix pencil H(lambda) = lambda Hh - Hv
-        '''
-        Hv = self.clf.get_hessian()
-        Hh = self.active_cbf.get_hessian()
-        return lambda_var*Hh - Hv
-
-    # def f_values2(self, args):
-    #     '''
-    #     Returns the values of f.
-    #     '''
-    #     numpoints = len(args)
-    #     fvalues = np.zeros(numpoints)
-    #     poles = self.f_dict["poles"]
-    #     residues = self.f_dict["residues"]
-    #     for k in range(numpoints):
-    #         for i in range(len(residues)):
-    #             fvalues[k] = fvalues[k] + residues[i]/(( args[k] - poles[i] )**2)
-    #     return fvalues
-
-    # def f_values3(self, args):
-    #     '''
-    #     Returns the values of f.
-    #     '''
-    #     numpoints = len(args)
-    #     fvalues = np.zeros(numpoints)
-    #     Hh = self.cbf.get_hessian()
-    #     for k in range(numpoints):
-    #         v = self.v_values(args[k])
-    #         fvalues[k] = v.T @ Hh @ v
-    #     return fvalues
-
