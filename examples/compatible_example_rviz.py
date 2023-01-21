@@ -1,9 +1,9 @@
 import rospy
 import numpy as np
 
-from examples.system_initialization import plant, clf, cbf, ref_clf
+from examples.integrator_nominalQP import plant, clf, cbf, ref_clf
 from controllers import CompatibleQPController
-from graphical_simulation import SimulationRviz
+from graphics import SimulationRviz
 
 try:
     # Create QP controller and graphical simulation.

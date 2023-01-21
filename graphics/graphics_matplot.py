@@ -1,3 +1,4 @@
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
@@ -7,7 +8,7 @@ class SimulationMatplot():
     '''
     Class for Matplot-based simulation.
     '''
-    def __init__(self, axes_lim, numpoints, logs, clf, cbfs, draw_level = False):
+    def __init__(self, axes_lim, numpoints, log_file, clf, cbfs, draw_level = False):
 
         self.fps = 50
         self.draw_level = draw_level
@@ -20,14 +21,16 @@ class SimulationMatplot():
         self.ax.set_title('CLF-CBF QP-based Control')
 
         # Get logs
-        self.time = logs["time"]
-        self.state_log = logs["state"]
-        if "clf" in logs.keys():
-            self.clf_log = logs["clf"]
-        # if "cbfLog" in logs.keys():
-        #     self.cbf_log = logs["cbfLog"]
-        self.mode_log = logs["mode"]
-        self.equilibria = logs["equilibria"]
+        self.load_log(log_file)
+
+        self.time = np.array(self.logs["time"])
+        self.state_log = self.logs["state"]
+        if "clf_log" in self.logs.keys():
+            self.clf_log = self.logs["clf_log"]
+        # if "cbf_log" in logs.keys():
+        #     self.cbf_log = logs["cbf_log"]
+        self.mode_log = self.logs["mode"]
+        self.equilibria = np.array(self.logs["equilibria"])
         self.num_steps = len(self.state_log[0])
         self.anim_step = (self.num_steps/self.time[-1])/self.fps
         self.current_step = 0
@@ -165,3 +168,12 @@ class SimulationMatplot():
         Plots specific animation frame at time t.
         '''
         self.get_frame(t)
+
+    def load_log(self, filename):
+        try:
+            with open(filename) as file:
+                print("Loading graphical simulation with "+filename+str(".json"))
+                self.logs = json.load(file)
+            
+        except IOError:
+            print("Couldn't locate "+filename+str(".json"))

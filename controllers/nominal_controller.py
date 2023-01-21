@@ -13,6 +13,7 @@ class NominalQP():
         self.plant = plant
         self.clf, self.cbfs = clf, cbfs
         self.clf_cbf_pairs = []
+        self.mode_log = None
 
         self.state_dim = self.plant.n
         self.control_dim = self.plant.m
@@ -55,6 +56,12 @@ class NominalQP():
         control = QP_sol[0:self.control_dim,]
 
         return control
+
+    def get_clf_control(self):
+        '''
+        This controller will not modify the CLF.
+        '''
+        return np.zeros(self.sym_dim)
 
     def get_clf_constraint(self):
         '''

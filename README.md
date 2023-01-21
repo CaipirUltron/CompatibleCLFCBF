@@ -14,7 +14,9 @@ pip3 install -e .
 
 **Running instructions:** 
 
-$ *python3 examples/<example_file_name>.py*
+$ *python3 simulation.py <configuration_config_file.py in ./examples>: **runs specified simulation**.
+
+$ *python3 animation.py <log_file.json in ./>: **animates specified simulation**.
 
 This project is structured in the following way:
 
@@ -34,9 +36,9 @@ This project is structured in the following way:
 
 **./dynamic_systems:** Contains different classes of dynamic systems for simulation, such as linear, affine nonlinear systems, and polynomial systems.
 
-**./controlers:** Contains different controllers for achieving compatibility.
+**./controllers:** Contains different controllers for achieving compatibility.
 
-**./graphical_simulation:** All code functionality for graphical simulations.
+**./graphics:** All code functionality for graphical simulations.
 
 **./tests:** Current test scripts (DEVEL, not to be used)
 

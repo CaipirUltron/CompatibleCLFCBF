@@ -2,9 +2,9 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 
-from examples.system_initialization import plant, clf, cbf
+from examples.integrator_nominalQP import plant, clf, cbf
 from controllers import NominalQP
-from graphical_simulation import SimulationMatplot
+from graphics import SimulationMatplot
 
 # Create QP controller and graphical simulation.
 dt = .005
