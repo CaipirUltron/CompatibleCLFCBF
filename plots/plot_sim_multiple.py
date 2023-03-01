@@ -19,9 +19,11 @@ except IOError:
 
 configuration = {
     "figsize": (7,7),
-    "axestype": (2,2,(1,2)),
+    "gridspec": (2,2,(1,2)),
+    "widthratios": [1, 1],
+    "heightratios": [4, 1],
     "axeslim": (-6,6,-6,6),
-    "drawlevel": False,
+    "drawlevel": True,
     "resolution": 50,
     "fps":50
 }
@@ -48,7 +50,7 @@ ax1 = plotSim.fig.add_subplot(223)
 ax1.set_title('State', fontsize=18)
 ax1.plot(time, state_x, "--", label='$x_1$', linewidth=2, markersize=10)
 ax1.plot(time, state_y, "--", label='$x_2$', linewidth=2, markersize=10)
-ax1.legend(fontsize=12)
+ax1.legend(fontsize=12, loc='upper right')
 ax1.set_xlim(0, max_time)
 ax1.set_ylim(np.min(all_states)-1, np.max(all_states)+1)
 ax1.set_xlabel('Time [s]', fontsize=18)
@@ -59,7 +61,7 @@ ax2 = plotSim.fig.add_subplot(224)
 ax2.set_title('Control', fontsize=18)
 ax2.plot(time, control_x, "--", label='$u_1$', linewidth=2, markersize=10, alpha=1.0)
 ax2.plot(time, control_y, "--", label='$u_2$', linewidth=2, markersize=10, alpha=0.6) 
-ax2.legend(fontsize=12)
+ax2.legend(fontsize=12, loc='upper right')
 ax2.set_xlim(0, max_time)
 ax2.set_ylim(np.min(all_controls)-1, np.max(all_controls)+1)
 ax2.set_xlabel('Time [s]', fontsize=18)

@@ -2,7 +2,7 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
-
+from matplotlib import gridspec
 
 class SimulationMatplot():
     '''
@@ -11,8 +11,10 @@ class SimulationMatplot():
     def __init__(self, logs, clf, cbfs, **kwargs):
         
         plot_config = {
-            "figsize": (7,7),
-            "axestype": (1,1,1),
+            "figsize": (5,5),
+            "gridspec": (1,1,1),
+            "widthratios": [1],
+            "heightratios": [1],
             "axeslim": (-6,6,-6,6),
             "drawlevel": False,
             "resolution": 50,
@@ -41,8 +43,8 @@ class SimulationMatplot():
         self.clf, self.cbfs = clf, cbfs
         self.num_cbfs = len(self.cbfs)
 
-        # Initalize graphical objects
-        self.time_text = self.ax.text(self.x_lim[1]-5.5, self.y_lim[0]-11.5, str("Time = "), fontsize=18)
+        # Initalize some graphical objects
+        self.time_text = self.ax.text(0.5, self.y_lim[0]+0.5, str("Time = "), fontsize=18)
         self.mode_text = self.ax.text(self.x_lim[0]+0.5, self.y_lim[0]-1, "", fontweight="bold",  fontsize=18)
 
         self.trajectory, = self.ax.plot([],[],lw=2)
@@ -53,6 +55,7 @@ class SimulationMatplot():
         self.cbf_contours = []
         # self.cbf_contours = self.cbf.contour_plot(self.ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.1)
 
+        self.fig.tight_layout(pad=2.0)
         self.animation = None
 
     def configure(self, plot_config):
@@ -60,15 +63,21 @@ class SimulationMatplot():
         Configure axes.
         '''
         self.fig = plt.figure(figsize = plot_config["figsize"], constrained_layout=True)
-        self.ax_struct = plot_config["axestype"][0:2]
-        gs = self.fig.add_gridspec(self.ax_struct[0], self.ax_struct[1])
+        self.ax_struct = plot_config["gridspec"][0:2]
+        self.main_axes = self.ax_struct[-1]
+        width_ratios = plot_config["widthratios"]
+        height_ratios = plot_config["heightratios"]
+
+        gs = gridspec.GridSpec(self.ax_struct[0], self.ax_struct[1], width_ratios = width_ratios, height_ratios = height_ratios)
         self.ax = self.fig.add_subplot(gs[0,:])
+
+        # Gets size of ax
+        # bbox = self.ax.get_window_extent().transformed(self.fig.dpi_scale_trans.inverted())
+        # ax_width, ax_height = bbox.width, bbox.height
 
         axes_lim = plot_config["axeslim"]
         self.x_lim = axes_lim[0:2]
         self.y_lim = axes_lim[2:4]
-
-        # self.ax = self.fig.subplot_mosaic([['Left', 'TopRight'],['Left', 'BottomRight']],gridspec_kw={'width_ratios':[2, 1]})
 
         self.ax.set_xlim(*self.x_lim)
         self.ax.set_ylim(*self.y_lim)
@@ -101,7 +110,7 @@ class SimulationMatplot():
             self.cbf_contours.append( cbf.contour_plot(self.ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.2) )
 
         graphical_elements = []
-        # graphical_elements.append(self.time_text)
+        graphical_elements.append(self.time_text)
         graphical_elements.append(self.mode_text)
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
