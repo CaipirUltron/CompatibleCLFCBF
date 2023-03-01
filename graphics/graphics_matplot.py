@@ -1,8 +1,9 @@
-import json
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
+import matplotlib.colors as mcolors
 from matplotlib import gridspec
+
 
 class SimulationMatplot():
     '''
@@ -23,10 +24,20 @@ class SimulationMatplot():
         if "plot_config" in kwargs.keys():
             plot_config = kwargs["plot_config"]
         
-        self.configure( plot_config )
-
-        # Get logs
         self.logs = logs
+        self.clf, self.cbfs = clf, cbfs
+
+        self.fig = plt.figure(figsize = plot_config["figsize"], constrained_layout=True)
+        self.configure( plot_config )
+        
+        self.fig.tight_layout(pad=2.0)
+        self.animation = None
+
+    def create_graphical_objs(self):
+        '''
+        Create graphical objects into the correct axes.
+        '''
+        # Get logs
         self.time = np.array(self.logs["time"])
         self.state_log = self.logs["state"]
         if "clf_log" in self.logs.keys():
@@ -40,54 +51,84 @@ class SimulationMatplot():
         self.current_step = 0
         self.runs = False
 
-        self.clf, self.cbfs = clf, cbfs
         self.num_cbfs = len(self.cbfs)
 
         # Initalize some graphical objects
-        self.time_text = self.ax.text(0.5, self.y_lim[0]+0.5, str("Time = "), fontsize=18)
-        self.mode_text = self.ax.text(self.x_lim[0]+0.5, self.y_lim[0]-1, "", fontweight="bold",  fontsize=18)
+        self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str("Time = "), fontsize=18)
+        self.mode_text = self.main_ax.text(self.x_lim[0]+0.5, self.y_lim[0]-1, "", fontweight="bold",  fontsize=18)
 
-        self.trajectory, = self.ax.plot([],[],lw=2)
-        self.init_state, = self.ax.plot([],[],'bo',lw=2)
-        self.equilibria_plot, = self.ax.plot([],[], marker='o', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
+        self.origin, = self.main_ax.plot([],[],lw=4, marker='*', color=[0.,0.,0.])
+        self.trajectory, = self.main_ax.plot([],[],lw=2)
+        self.init_state, = self.main_ax.plot([],[],'bo',lw=2)
+        self.equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
 
-        self.clf_contours = self.clf.contour_plot(self.ax, levels=[0.0], colors=['blue'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.5)
+        self.clf_contour_color = mcolors.TABLEAU_COLORS['tab:blue']
+        self.cbf_contour_color = mcolors.TABLEAU_COLORS['tab:green']
+
+        self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[0.0], colors=self.clf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.5)
         self.cbf_contours = []
-        # self.cbf_contours = self.cbf.contour_plot(self.ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.1)
-
-        self.fig.tight_layout(pad=2.0)
-        self.animation = None
+        # self.cbf_contours = self.cbf.contour_plot(self.main_ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.1)
 
     def configure(self, plot_config):
         '''
         Configure axes.
         '''
-        self.fig = plt.figure(figsize = plot_config["figsize"], constrained_layout=True)
         self.ax_struct = plot_config["gridspec"][0:2]
-        self.main_axes = self.ax_struct[-1]
         width_ratios = plot_config["widthratios"]
         height_ratios = plot_config["heightratios"]
-
         gs = gridspec.GridSpec(self.ax_struct[0], self.ax_struct[1], width_ratios = width_ratios, height_ratios = height_ratios)
-        self.ax = self.fig.add_subplot(gs[0,:])
 
+        # Specify main ax
+        main_ax = plot_config["gridspec"][-1]
+
+        def order2indexes(k, m):
+            i = int((k-1)/m)
+            j = int(np.mod(k-1, m))
+            return i,j
+
+        if isinstance(main_ax, list):
+            i_list, j_list = [], []
+            for axes in main_ax:
+                i,j = order2indexes(axes, self.ax_struct[1])
+                i_list.append(i)
+                j_list.append(j)
+            i = np.sort(i_list).tolist()
+            j = np.sort(j_list).tolist()
+            if i[0] == i[-1]: i = i[0]
+            if j[0] == j[-1]: j = j[0]
+        
+        if isinstance(main_ax, int):
+            i,j = order2indexes(main_ax, self.ax_struct[1])
+
+        if isinstance(i, int):
+            if isinstance(j, int):
+                self.main_ax = self.fig.add_subplot(gs[i,j])
+            else:
+                self.main_ax = self.fig.add_subplot(gs[i,j[0]:(j[-1]+1)])
+        else:
+            if isinstance(j, int):
+                self.main_ax = self.fig.add_subplot(gs[i[0]:(i[-1]+1),j])
+            else:
+                self.main_ax = self.fig.add_subplot(gs[i[0]:(i[-1]+1),j[0]:(j[-1]+1)])
+    
         # Gets size of ax
-        # bbox = self.ax.get_window_extent().transformed(self.fig.dpi_scale_trans.inverted())
+        # bbox = self.main_ax.get_window_extent().transformed(self.fig.dpi_scale_trans.inverted())
         # ax_width, ax_height = bbox.width, bbox.height
 
         axes_lim = plot_config["axeslim"]
         self.x_lim = axes_lim[0:2]
         self.y_lim = axes_lim[2:4]
 
-        self.ax.set_xlim(*self.x_lim)
-        self.ax.set_ylim(*self.y_lim)
-        self.ax.set_title('Trajectory', fontsize=18)
-        # self.ax.axis('equal')
-        self.ax.set_aspect('equal', adjustable='box')
+        self.main_ax.set_xlim(*self.x_lim)
+        self.main_ax.set_ylim(*self.y_lim)
+        self.main_ax.set_title('Trajectory', fontsize=18)
+        self.main_ax.set_aspect('equal', adjustable='box')
 
         self.draw_level = plot_config["drawlevel"]
         self.fps = plot_config["fps"]
         self.numpoints = plot_config["resolution"]
+
+        self.create_graphical_objs()
 
     def init(self):
 
@@ -96,6 +137,8 @@ class SimulationMatplot():
         self.time_text.text = str("Time = ")
         self.mode_text.text = ""
         self.trajectory.set_data([],[])
+
+        self.origin.set_data([0],[0])
 
         x_init, y_init = self.state_log[0][0], self.state_log[1][0]
         self.init_state.set_data(x_init, y_init)
@@ -107,7 +150,7 @@ class SimulationMatplot():
         self.equilibria_plot.set_data(x_eq, y_eq)
 
         for cbf in self.cbfs:
-            self.cbf_contours.append( cbf.contour_plot(self.ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.2) )
+            self.cbf_contours.append( cbf.contour_plot(self.main_ax, levels=[0.0], colors=self.cbf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.2) )
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
@@ -151,8 +194,8 @@ class SimulationMatplot():
                 # for coll in self.cbf_contours.collections:
                 #     coll.remove()
                 perimeter = 4*abs(current_state[0]) + 4*abs(current_state[1])
-                self.clf_contours = self.clf.contour_plot(self.ax, levels=[V], colors=['blue'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.008*perimeter+0.1)
-                # self.cbf_contours = self.cbf.contour_plot(self.ax, levels=[h], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.008*perimeter+0.1)
+                self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[V], colors=self.clf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.008*perimeter+0.1)
+                # self.cbf_contours = self.cbf.contour_plot(self.main_ax, levels=[h], colors=self.cbf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.008*perimeter+0.1)
 
             # if hasattr(self, 'cbf_log'):
             #     current_pih_state = [self.cbf_log[0][i], self.cbf_log[1][i], self.cbf_log[2][i]]
@@ -160,7 +203,7 @@ class SimulationMatplot():
 
             # for coll in self.cbf_contours.collections:
                 # coll.remove()
-            # self.cbf_contours = self.cbf.contour_plot(self.ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.2)
+            # self.cbf_contours = self.cbf.contour_plot(self.main_ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.2)
 
         else:
             self.runs = False
@@ -195,20 +238,3 @@ class SimulationMatplot():
         graphical_elements = self.update(step)
 
         return graphical_elements
-
-    # def plot_frame(self, t, where=1):
-    #     '''
-    #     Plots specific animation frame at time t.
-    #     '''
-    #     pos = ( self.ax_struct[0], self.ax_struct[1], where )
-    #     self.ax = self.fig.add_subplot(*pos)
-    #     self.get_frame(t)
-
-    # def load_log(self, filename):
-    #     try:
-    #         with open(filename) as file:
-    #             print("Loading graphical simulation with "+filename+str(".json"))
-    #             self.logs = json.load(file)
-            
-    #     except IOError:
-    #         print("Couldn't locate "+filename+str(".json"))

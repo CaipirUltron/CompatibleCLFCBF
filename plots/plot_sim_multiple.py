@@ -19,9 +19,9 @@ except IOError:
 
 configuration = {
     "figsize": (7,7),
-    "gridspec": (2,2,(1,2)),
+    "gridspec": (3,2,1),
     "widthratios": [1, 1],
-    "heightratios": [4, 1],
+    "heightratios": [3, 3, 1],
     "axeslim": (-6,6,-6,6),
     "drawlevel": True,
     "resolution": 50,
@@ -30,8 +30,25 @@ configuration = {
 
 plotSim = SimulationMatplot(logs, sim.clf, sim.cbfs, plot_config=configuration)
 
-plotSim.plot_frame(5.9)
-# plotSim.ax.set_aspect('equal', adjustable='box')
+# Plot 221
+configuration["gridspec"] = (3,2,1)
+plotSim.configure(configuration)
+plotSim.plot_frame(0.1)
+
+# Subplot 222
+configuration["gridspec"] = (3,2,2)
+plotSim.configure(configuration)
+plotSim.plot_frame(1.5)
+
+# Subplot 223
+configuration["gridspec"] = (3,2,3)
+plotSim.configure(configuration)
+plotSim.plot_frame(4.0)
+
+# Subplot 224
+configuration["gridspec"] = (3,2,4)
+plotSim.configure(configuration)
+plotSim.plot_frame(15.0)
 
 time = logs["time"]
 
@@ -45,7 +62,8 @@ all_controls = np.hstack([control_x, control_y])
 
 max_time = 10
 
-ax1 = plotSim.fig.add_subplot(223)
+# Subplot 325
+ax1 = plotSim.fig.add_subplot(325)
 # ax1.set_aspect('equal', adjustable='box')
 ax1.set_title('State', fontsize=18)
 ax1.plot(time, state_x, "--", label='$x_1$', linewidth=2, markersize=10)
@@ -56,7 +74,8 @@ ax1.set_ylim(np.min(all_states)-1, np.max(all_states)+1)
 ax1.set_xlabel('Time [s]', fontsize=18)
 # plt.grid()
 
-ax2 = plotSim.fig.add_subplot(224)
+# Subplot 326
+ax2 = plotSim.fig.add_subplot(326)
 # ax1.set_aspect('equal', adjustable='box')
 ax2.set_title('Control', fontsize=18)
 ax2.plot(time, control_x, "--", label='$u_1$', linewidth=2, markersize=10, alpha=1.0)
