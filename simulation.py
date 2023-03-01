@@ -3,13 +3,13 @@ import json
 import importlib
 
 # simulation_file = "integrator_nominalQP"
-simulation_config = sys.argv[1]
-sim = importlib.import_module("examples."+simulation_config.replace(".json",""), package=None)
+simulation_config = sys.argv[1].replace(".json","")
+sim = importlib.import_module("examples."+simulation_config, package=None)
 
 # Simulation loop -------------------------------------------------------------------
 T = 20
 num_steps = int(T/sim.sample_time)
-time = []
+time = [0]
 print('Running simulation...')
 for step in range(1, num_steps+1):
 
@@ -27,8 +27,8 @@ for step in range(1, num_steps+1):
 
 # Collect simulation logs and save in .json file ------------------------------------
 logs = {
-    "sample_time": sim.sample_time,
     "time": time,
+    "sample_time": sim.sample_time,
     "state": sim.plant.state_log,
     "control": sim.plant.control_log,
     "clf_log": sim.controller.clf.dynamics.state_log,

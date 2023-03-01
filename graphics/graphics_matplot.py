@@ -8,21 +8,23 @@ class SimulationMatplot():
     '''
     Class for Matplot-based simulation.
     '''
-    def __init__(self, axes_lim, numpoints, log_file, clf, cbfs, draw_level = False):
-
-        self.fps = 50
-        self.draw_level = draw_level
-
-        # Initialize plot objects
-        self.fig = plt.gcf()
-        self.x_lim = axes_lim[0:2]
-        self.y_lim = axes_lim[2:4]
-        self.ax = plt.axes(xlim=self.x_lim, ylim=self.y_lim)
-        self.ax.set_title('CLF-CBF QP-based Control')
+    def __init__(self, logs, clf, cbfs, **kwargs):
+        
+        plot_config = {
+            "figsize": (7,7),
+            "axestype": (1,1,1),
+            "axeslim": (-6,6,-6,6),
+            "drawlevel": False,
+            "resolution": 50,
+            "fps":50
+        }
+        if "plot_config" in kwargs.keys():
+            plot_config = kwargs["plot_config"]
+        
+        self.configure( plot_config )
 
         # Get logs
-        self.load_log(log_file)
-
+        self.logs = logs
         self.time = np.array(self.logs["time"])
         self.state_log = self.logs["state"]
         if "clf_log" in self.logs.keys():
@@ -36,15 +38,12 @@ class SimulationMatplot():
         self.current_step = 0
         self.runs = False
 
-        # Get point resolution for graphical objects
-        self.numpoints = numpoints
-
         self.clf, self.cbfs = clf, cbfs
         self.num_cbfs = len(self.cbfs)
 
         # Initalize graphical objects
-        self.time_text = self.ax.text(axes_lim[1]-2.5, axes_lim[3]-11.5, str("Time = "))
-        self.mode_text = self.ax.text(axes_lim[0]+0.5, axes_lim[3]-1, "", fontweight="bold")
+        self.time_text = self.ax.text(self.x_lim[1]-5.5, self.y_lim[0]-11.5, str("Time = "), fontsize=18)
+        self.mode_text = self.ax.text(self.x_lim[0]+0.5, self.y_lim[0]-1, "", fontweight="bold",  fontsize=18)
 
         self.trajectory, = self.ax.plot([],[],lw=2)
         self.init_state, = self.ax.plot([],[],'bo',lw=2)
@@ -55,6 +54,31 @@ class SimulationMatplot():
         # self.cbf_contours = self.cbf.contour_plot(self.ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.1)
 
         self.animation = None
+
+    def configure(self, plot_config):
+        '''
+        Configure axes.
+        '''
+        self.fig = plt.figure(figsize = plot_config["figsize"], constrained_layout=True)
+        self.ax_struct = plot_config["axestype"][0:2]
+        gs = self.fig.add_gridspec(self.ax_struct[0], self.ax_struct[1])
+        self.ax = self.fig.add_subplot(gs[0,:])
+
+        axes_lim = plot_config["axeslim"]
+        self.x_lim = axes_lim[0:2]
+        self.y_lim = axes_lim[2:4]
+
+        # self.ax = self.fig.subplot_mosaic([['Left', 'TopRight'],['Left', 'BottomRight']],gridspec_kw={'width_ratios':[2, 1]})
+
+        self.ax.set_xlim(*self.x_lim)
+        self.ax.set_ylim(*self.y_lim)
+        self.ax.set_title('Trajectory', fontsize=18)
+        # self.ax.axis('equal')
+        self.ax.set_aspect('equal', adjustable='box')
+
+        self.draw_level = plot_config["drawlevel"]
+        self.fps = plot_config["fps"]
+        self.numpoints = plot_config["resolution"]
 
     def init(self):
 
@@ -77,7 +101,7 @@ class SimulationMatplot():
             self.cbf_contours.append( cbf.contour_plot(self.ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.2) )
 
         graphical_elements = []
-        graphical_elements.append(self.time_text)
+        # graphical_elements.append(self.time_text)
         graphical_elements.append(self.mode_text)
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
@@ -153,9 +177,9 @@ class SimulationMatplot():
     def animate(self):
         self.animation = anim.FuncAnimation(self.fig, func=self.update, frames=self.gen_function(), init_func=self.init, interval=1000/self.fps, repeat=False, blit=True)
 
-    def get_frame(self, t):
+    def plot_frame(self, t):
         '''
-        Updates frame at time time.
+        Updates frame at time t.
         '''
         self.init()
         step = np.argmin( (self.time - t)**2 )
@@ -163,17 +187,19 @@ class SimulationMatplot():
 
         return graphical_elements
 
-    def plot_frame(self, t):
-        '''
-        Plots specific animation frame at time t.
-        '''
-        self.get_frame(t)
+    # def plot_frame(self, t, where=1):
+    #     '''
+    #     Plots specific animation frame at time t.
+    #     '''
+    #     pos = ( self.ax_struct[0], self.ax_struct[1], where )
+    #     self.ax = self.fig.add_subplot(*pos)
+    #     self.get_frame(t)
 
-    def load_log(self, filename):
-        try:
-            with open(filename) as file:
-                print("Loading graphical simulation with "+filename+str(".json"))
-                self.logs = json.load(file)
+    # def load_log(self, filename):
+    #     try:
+    #         with open(filename) as file:
+    #             print("Loading graphical simulation with "+filename+str(".json"))
+    #             self.logs = json.load(file)
             
-        except IOError:
-            print("Couldn't locate "+filename+str(".json"))
+    #     except IOError:
+    #         print("Couldn't locate "+filename+str(".json"))

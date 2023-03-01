@@ -17,9 +17,19 @@ try:
 except IOError:
     print("Couldn't locate "+simulation_file + ".json")
 
-plotSim = SimulationMatplot(logs, sim.clf, sim.cbfs)
-plotSim.plot_frame(5.0)
-plotSim.ax.set_aspect('equal', adjustable='box')
+configuration = {
+    "figsize": (7,7),
+    "axestype": (2,2,(1,2)),
+    "axeslim": (-6,6,-6,6),
+    "drawlevel": False,
+    "resolution": 50,
+    "fps":50
+}
+
+plotSim = SimulationMatplot(logs, sim.clf, sim.cbfs, plot_config=configuration)
+
+plotSim.plot_frame(5.9)
+# plotSim.ax.set_aspect('equal', adjustable='box')
 
 time = logs["time"]
 

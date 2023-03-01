@@ -1,15 +1,22 @@
 import sys
+import json
 import importlib
 import matplotlib.pyplot as plt
 from graphics import SimulationMatplot
 
 # Load simulation file
-initialization_file = sys.argv[1]
-sim = importlib.import_module("examples."+initialization_file.replace(".json",""), package=None)
+simulation_file = sys.argv[1].replace(".json","")
+sim = importlib.import_module("examples."+simulation_file, package=None)
+
+try:
+    with open(simulation_file + ".json") as file:
+        print("Loading graphical simulation with "+simulation_file + ".json")
+        logs = json.load(file)
+except IOError:
+    print("Couldn't locate "+simulation_file + ".json")
 
 print('Animating simulation...')
-axes_lim = (-6,6,-6,6)
-
-plotSim = SimulationMatplot(axes_lim, 50, initialization_file, sim.clf, sim.cbfs, draw_level=True)
+plotSim = SimulationMatplot( logs, sim.clf, sim.cbfs )
 plotSim.animate()
+
 plt.show()
