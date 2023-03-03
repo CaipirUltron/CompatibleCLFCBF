@@ -3,7 +3,7 @@ import json
 import numpy as np
 import importlib
 import matplotlib.pyplot as plt
-from graphics import SimulationMatplot
+from graphics import Plot2DSimulation
 
 plt.rcParams['text.usetex'] = True
 
@@ -28,7 +28,7 @@ configuration = {
     "fps":50
 }
 
-plotSim = SimulationMatplot(logs, sim.clf, sim.cbfs, plot_config = configuration)
+plotSim = Plot2DSimulation(logs, sim.clf, sim.cbfs, plot_config = configuration)
 plotSim.plot_frame(5.0)
 
 time = logs["time"]

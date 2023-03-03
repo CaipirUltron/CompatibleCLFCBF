@@ -2,12 +2,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
 import matplotlib.colors as mcolors
-from matplotlib import gridspec
+from matplotlib import gridspec, patches
 
 
-class SimulationMatplot():
+class Plot2DSimulation():
     '''
-    Class for Matplot-based simulation.
+    Class for matplotlib-based simulation of a point-like 2D dynamical system.
     '''
     def __init__(self, logs, clf, cbfs, **kwargs):
         
@@ -42,8 +42,10 @@ class SimulationMatplot():
         self.state_log = self.logs["state"]
         if "clf_log" in self.logs.keys():
             self.clf_log = self.logs["clf_log"]
+            self.clf_param_dim = np.shape(np.array(self.clf_log))[0]
         # if "cbf_log" in logs.keys():
         #     self.cbf_log = logs["cbf_log"]
+        #     self.cbf_param_dim = np.shape(np.array(self.cbf_log))[0]
         self.mode_log = self.logs["mode"]
         self.equilibria = np.array(self.logs["equilibria"])
         self.num_steps = len(self.state_log[0])
@@ -110,10 +112,6 @@ class SimulationMatplot():
                 self.main_ax = self.fig.add_subplot(gs[i[0]:(i[-1]+1),j])
             else:
                 self.main_ax = self.fig.add_subplot(gs[i[0]:(i[-1]+1),j[0]:(j[-1]+1)])
-    
-        # Gets size of ax
-        # bbox = self.main_ax.get_window_extent().transformed(self.fig.dpi_scale_trans.inverted())
-        # ax_width, ax_height = bbox.width, bbox.height
 
         axes_lim = plot_config["axeslim"]
         self.x_lim = axes_lim[0:2]
@@ -175,7 +173,7 @@ class SimulationMatplot():
             current_state = [ self.state_log[0][i], self.state_log[1][i] ]
 
             if hasattr(self, 'clf_log'):
-                current_piv_state = [self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i]]
+                current_piv_state = [ self.clf_log[k][i] for k in range(self.clf_param_dim) ]
                 self.clf.set_param(current_piv_state)
 
             self.time_text.set_text("Time = " + str(current_time) + "s")
@@ -198,7 +196,7 @@ class SimulationMatplot():
                 # self.cbf_contours = self.cbf.contour_plot(self.main_ax, levels=[h], colors=self.cbf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.008*perimeter+0.1)
 
             # if hasattr(self, 'cbf_log'):
-            #     current_pih_state = [self.cbf_log[0][i], self.cbf_log[1][i], self.cbf_log[2][i]]
+            #     current_pih_state = [ self.cbf_log[k][i] for k in range(self.cbf_param_dim) ]
             #     self.cbf.set_param(current_pih_state)
 
             # for coll in self.cbf_contours.collections:
@@ -236,5 +234,61 @@ class SimulationMatplot():
         self.init()
         step = np.argmin( (self.time - t)**2 )
         graphical_elements = self.update(step)
+
+        return graphical_elements
+    
+
+class PlotUnicycleSimulation(Plot2DSimulation):
+    '''
+    Class for matplotlib-based simulation of the unicycle robot.
+    '''
+    def __init__(self, logs, clf, cbfs, **kwargs):
+        super().__init__(logs, clf, cbfs, **kwargs)
+
+        self.radius = 0.2
+        self.color = mcolors.TABLEAU_COLORS['tab:blue']
+        if "radius" in kwargs.keys():
+            self.radius = kwargs["radius"]
+        if "color" in kwargs.keys():
+            self.color = kwargs["color"]
+
+        self.circle = patches.Circle( (0.0, 0.0), radius = self.radius, color = self.color, alpha = 0.7)
+        self.main_ax.add_patch(self.circle)
+
+        self.angle_line, = self.main_ax.plot([],[],lw=2, color = mcolors.TABLEAU_COLORS['tab:green'])
+
+    def init(self):
+        graphical_elements = super().init()
+
+        x = self.state_log[0][0]
+        y = self.state_log[1][0]
+        theta = self.state_log[2][0]
+
+        center_x = x - self.radius*np.cos(theta)
+        center_y = y - self.radius*np.sin(theta)
+
+        self.circle.center = center_x, center_y
+        self.angle_line.set_data( [ center_x, x ], [ center_y, y ] )
+
+        graphical_elements.append(self.circle)
+        graphical_elements.append(self.angle_line)
+
+        return graphical_elements
+
+    def update(self, i):
+        graphical_elements = super().update(i)
+
+        x = self.state_log[0][i]
+        y = self.state_log[1][i]
+        theta = self.state_log[2][i]
+
+        center_x = x - self.radius*np.cos(theta)
+        center_y = y - self.radius*np.sin(theta)
+
+        self.circle.center = center_x, center_y
+        self.angle_line.set_data( [ center_x, x ], [ center_y, y ] )
+
+        graphical_elements.append(self.circle)
+        graphical_elements.append(self.angle_line)
 
         return graphical_elements

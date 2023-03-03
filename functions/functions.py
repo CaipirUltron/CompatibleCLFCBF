@@ -143,8 +143,8 @@ class Function():
         '''
         Return 2D contour plot object.
         '''
-        if self._dim != 2:
-            raise Exception("Contour plot can only be used for 2D functions.")
+        # if self._dim != 2:
+        #     raise Exception("Contour plot can only be used for 2D functions.")
 
         x = np.arange(min, max, resolution)
         y = np.arange(min, max, resolution)
@@ -152,7 +152,13 @@ class Function():
 
         mesh_fvalues = np.zeros([np.size(xv,0),np.size(xv,1)])
         for i in range(np.size(xv,1)):
-            mesh_fvalues[:,i] = np.array(self.evaluate_function(xv[:,i], yv[:,i]))
+            args = []
+            args.append(xv[:,i])
+            args.append(yv[:,i])
+            for k in range(self._dim-2):
+                args.append( [self._var[k+2,0] for _ in range(len(xv[:,i]))] )
+            # mesh_fvalues[:,i] = np.array(self.evaluate_function(xv[:,i], yv[:,i]))
+            mesh_fvalues[:,i] = np.array(self.evaluate_function(*args))
 
         cs = ax.contour(xv, yv, mesh_fvalues, levels=levels, colors=colors)
         return cs

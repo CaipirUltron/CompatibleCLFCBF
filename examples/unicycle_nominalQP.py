@@ -2,10 +2,12 @@ import numpy as np
 
 from dynamic_systems import Unicycle
 from functions import canonical3D
+from functions import QuadraticLyapunov, QuadraticBarrier
+from controllers import NominalQP
 
 ######################################### Configure and create unicycle plant ##############################################
 initial_state = [ -4.1, 5.0, np.radians(0.0) ]
-plant = Unicycle(initial_state = initial_state, initial_control = np.zeros(2), distance = 0.1)
+plant = Unicycle(initial_state = initial_state, initial_control = np.zeros(2), radius = 0.5)
 ############################################################################################################################
 
 ############################################# Configure and create CLF #####################################################
@@ -25,21 +27,35 @@ ref_clf_params = {
 ############################################################################################################################
 
 ############################################## Configure and create CBF ####################################################
-cbf_lambda_x, cbf_lambda_y, cbf_lambda_z = 1.0, 3.0, 1.0
+cbf_lambda_x, cbf_lambda_y, cbf_lambda_z = 1.0, 3.0, 0.1
 cbf_angle, cbf_axis = np.radians(0.0), np.array([0.0, 0.0, 1.0])
 cbf_params1 = {
     "Hh": canonical3D([ cbf_lambda_x , cbf_lambda_y, cbf_lambda_z ], cbf_angle, cbf_axis),
     "p0": [ 0.0, 3.0, 0.0 ] }
 
-cbf_lambda_x, cbf_lambda_y, cbf_lambda_z = 6.0, 1.0, 1.0
+cbf_lambda_x, cbf_lambda_y, cbf_lambda_z = 6.0, 1.0, 0.1
 cbf_angle, cbf_axis = np.radians(30.0), np.array([0.0, 0.0, 1.0])
 cbf_params2 = {
     "Hh": canonical3D([ cbf_lambda_x , cbf_lambda_y, cbf_lambda_z ], cbf_angle, cbf_axis),
     "p0": [ 3.0, 3.0, 0.0 ] }
 
-cbf_lambda_x, cbf_lambda_y, cbf_lambda_z = 4.0, 1.0, 1.0
+cbf_lambda_x, cbf_lambda_y, cbf_lambda_z = 4.0, 1.0, 0.1
 cbf_angle, cbf_axis = np.radians(30.0), np.array([0.0, 0.0, 1.0])
 cbf_params3 = {
     "Hh": canonical3D([ cbf_lambda_x , cbf_lambda_y, cbf_lambda_z ], cbf_angle, cbf_axis),
     "p0": [ -3.0, -3.0, 0.0] }
 ############################################################################################################################
+
+########################################## Define quadratic Lyapunov and barriers ##########################################
+clf = QuadraticLyapunov(*initial_state, hessian = clf_params["Hv"], critical = clf_params["x0"])
+ref_clf = QuadraticLyapunov(*initial_state, hessian = ref_clf_params["Hv"], critical = ref_clf_params["x0"])
+
+cbf1 = QuadraticBarrier(*initial_state, hessian = cbf_params1["Hh"], critical = cbf_params1["p0"])
+cbf2 = QuadraticBarrier(*initial_state, hessian = cbf_params2["Hh"], critical = cbf_params2["p0"])
+cbf3 = QuadraticBarrier(*initial_state, hessian = cbf_params3["Hh"], critical = cbf_params3["p0"])
+
+cbfs = [cbf1, cbf2, cbf3]
+
+#################################################### Define controllers ####################################################
+sample_time = .005
+controller = NominalQP(plant, clf, cbfs, gamma = 1.0, alpha = 1.0, p = 10.0)

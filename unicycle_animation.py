@@ -2,7 +2,7 @@ import sys
 import json
 import importlib
 import matplotlib.pyplot as plt
-from graphics import Plot2DSimulation
+from graphics import PlotUnicycleSimulation
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -16,7 +16,7 @@ except IOError:
     print("Couldn't locate "+simulation_file + ".json")
 
 print('Animating simulation...')
-plotSim = Plot2DSimulation( logs, sim.clf, sim.cbfs )
+plotSim = PlotUnicycleSimulation( logs, sim.clf, sim.cbfs, radius = sim.plant.radius )
 plotSim.animate()
 
 plt.show()
