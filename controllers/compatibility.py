@@ -108,6 +108,11 @@ class CLFCBFPair():
         self.compute_equilibrium()
         self.compute_critical()
 
+    def compute_equilibrium_points(self):
+        '''
+        Compute the equilibrium points using new method.
+        '''
+
     def compute_q(self):
         '''
         This method computes the q-function for the pair.

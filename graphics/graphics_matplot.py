@@ -19,7 +19,8 @@ class Plot2DSimulation():
             "axeslim": (-6,6,-6,6),
             "drawlevel": False,
             "resolution": 50,
-            "fps":50
+            "fps":50,
+            "pad":2.0
         }
         if "plot_config" in kwargs.keys():
             plot_config = kwargs["plot_config"]
@@ -30,7 +31,7 @@ class Plot2DSimulation():
         self.fig = plt.figure(figsize = plot_config["figsize"], constrained_layout=True)
         self.configure( plot_config )
         
-        self.fig.tight_layout(pad=2.0)
+        # self.fig.tight_layout(pad=plot_config["pad"])
         self.animation = None
 
     def create_graphical_objs(self):
@@ -56,7 +57,7 @@ class Plot2DSimulation():
         self.num_cbfs = len(self.cbfs)
 
         # Initalize some graphical objects
-        self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str("Time = "), fontsize=18)
+        self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str("Time = "), fontsize=14)
         self.mode_text = self.main_ax.text(self.x_lim[0]+0.5, self.y_lim[0]-1, "", fontweight="bold",  fontsize=18)
 
         self.origin, = self.main_ax.plot([],[],lw=4, marker='*', color=[0.,0.,0.])
@@ -178,11 +179,11 @@ class Plot2DSimulation():
 
             self.time_text.set_text("Time = " + str(current_time) + "s")
 
-            if self.mode_log:
-                if self.mode_log[i] == 1:
-                    self.mode_text.set_text("Compatibility")
-                elif self.mode_log[i] == 0:
-                    self.mode_text.set_text("Rate")
+            # if self.mode_log:
+            #     if self.mode_log[i] == 1:
+            #         self.mode_text.set_text("Compatibility")
+            #     elif self.mode_log[i] == 0:
+            #         self.mode_text.set_text("Rate")
 
             if self.draw_level:
                 V = self.clf.evaluate_function(*current_state)[0]

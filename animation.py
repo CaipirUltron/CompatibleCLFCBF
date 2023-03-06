@@ -15,8 +15,20 @@ try:
 except IOError:
     print("Couldn't locate "+simulation_file + ".json")
 
+plot_config = {
+    "figsize": (5,5),
+    "gridspec": (1,1,1),
+    "widthratios": [1],
+    "heightratios": [1],
+    "axeslim": (-6,6,-6,6),
+    "drawlevel": True,
+    "resolution": 50,
+    "fps":50,
+    "pad":2.0
+}
+
 print('Animating simulation...')
-plotSim = Plot2DSimulation( logs, sim.clf, sim.cbfs )
+plotSim = Plot2DSimulation( logs, sim.clf, sim.cbfs, plot_config = plot_config )
 plotSim.animate()
 
 plt.show()

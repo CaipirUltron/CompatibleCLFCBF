@@ -17,15 +17,17 @@ try:
 except IOError:
     print("Couldn't locate "+simulation_file + ".json")
 
+font_size = 18
 configuration = {
-    "figsize": (7,7),
-    "gridspec": (2,2,[1,2]),
+    "figsize": (8,5),
+    "gridspec": (2,2,[1,3]),
     "widthratios": [1, 1],
-    "heightratios": [4, 1],
+    "heightratios": [1, 1],
     "axeslim": (-6,6,-6,6),
     "drawlevel": True,
     "resolution": 50,
-    "fps":50
+    "fps":50,
+    "pad":3.8
 }
 
 plotSim = Plot2DSimulation(logs, sim.clf, sim.cbfs, plot_config = configuration)
@@ -43,26 +45,29 @@ all_controls = np.hstack([control_x, control_y])
 
 max_time = 10
 
-ax1 = plotSim.fig.add_subplot(223)
+ax1 = plotSim.fig.add_subplot(222)
 # ax1.set_aspect('equal', adjustable='box')
-ax1.set_title('State', fontsize=18)
+ax1.set_title('State', fontsize=font_size)
 ax1.plot(time, state_x, "--", label='$x_1$', linewidth=2, markersize=10)
 ax1.plot(time, state_y, "--", label='$x_2$', linewidth=2, markersize=10)
 ax1.legend(fontsize=12, loc='upper right')
 ax1.set_xlim(0, max_time)
 ax1.set_ylim(np.min(all_states)-1, np.max(all_states)+1)
-ax1.set_xlabel('Time [s]', fontsize=18)
+# ax1.set_xlabel('Time [s]', fontsize=14)
+# ax1.set_ylabel('m', fontsize=14)
 # plt.grid()
 
 ax2 = plotSim.fig.add_subplot(224)
-# ax1.set_aspect('equal', adjustable='box')
-ax2.set_title('Control', fontsize=18)
+# ax2.set_aspect('equal', adjustable='box')
+ax2.set_title('Control', fontsize=font_size)
 ax2.plot(time, control_x, "--", label='$u_1$', linewidth=2, markersize=10, alpha=1.0)
 ax2.plot(time, control_y, "--", label='$u_2$', linewidth=2, markersize=10, alpha=0.6) 
-ax2.legend(fontsize=12, loc='upper right')
+ax2.legend(fontsize=font_size, loc='upper right')
 ax2.set_xlim(0, max_time)
 ax2.set_ylim(np.min(all_controls)-1, np.max(all_controls)+1)
-ax2.set_xlabel('Time [s]', fontsize=18)
+ax2.set_xlabel('Time [s]', fontsize=14)
+ax2.set_ylabel('m/s', fontsize=14)
+
 # plt.grid()
 
 plt.savefig(simulation_file + ".eps", format='eps', transparent=True)
