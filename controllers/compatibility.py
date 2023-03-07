@@ -54,8 +54,8 @@ class LinearMatrixPencil():
 
         # Assumption: B is invertible => detB != 0
         detB = np.linalg.det(self._B)
-        if detB == 0:
-            raise Exception("B is rank deficient.")
+        # if detB == 0:
+        #     raise Exception("B is rank deficient.")
 
         # Computes the pencil characteristic polynomial and denominator of f(\lambda)
         pencil_det = np.real(np.prod(pencil_eig))
@@ -106,12 +106,26 @@ class CLFCBFPair():
 
         self.compute_q()
         self.compute_equilibrium()
+        self.compute_equilibrium2()
         self.compute_critical()
 
-    def compute_equilibrium_points(self):
+    def compute_equilibrium2(self):
         '''
         Compute the equilibrium points using new method.
         '''
+        temp_P = -(self.Hv @ self.x0).reshape(self.dim,1)
+        P_matrix = np.block([ [ self.Hv  , temp_P                        ], 
+                              [ temp_P.T , (self.x0 @ self.Hv @ self.x0) ] ])
+
+        temp_Q = -(self.Hh @ self.p0).reshape(self.dim,1)
+        Q_matrix = np.block([ [ self.Hh  , temp_Q                        ], 
+                              [ temp_Q.T , (self.p0 @ self.Hh @ self.p0) ] ])
+
+        pencil = LinearMatrixPencil( Q_matrix, P_matrix )
+
+        self.equilibrium_points2 = np.zeros([self.dim, self.dim+1])
+        for k in range(self.dim+1):
+            self.equilibrium_points2[:,k] = pencil.eigenvectors[0:-1,k]/pencil.eigenvectors[-1,k]
 
     def compute_q(self):
         '''
