@@ -2,6 +2,46 @@ import scipy
 from scipy import signal
 import numpy as np
 
+def solve_PEP( A, B, C, k, init_mu2 ):
+    '''
+    Solves the eigenproblem of the type: (mu1 * A + mu2 * B + C) @ z = 0, mu2 = 0.5 k * z.T @ B @ z
+    where A, B, C are ( n x n ) matrices and k > 0.
+
+    Returns: mu1:    n-array of mu1 eigenvalues, repeated according to its multiplicity
+             mu2:    n-array of mu2 eigenvalues, repeated according to its multiplicity
+             Z:      (n x n)-array of lambda values, each column corresponding to the corresponding eigenpair (mu1, mu2)
+    '''
+    dim = len(init_mu2)
+    def compute_mu(z):
+        return 0.5 * k * z @ B @ z 
+
+    mu2 = init_mu2
+    pencil = LinearMatrixPencil( A, mu2 * B + C )
+    
+    Z = pencil.eigenvectors
+    new_mu1 = pencil.eigenvalues
+    new_mu2 = np.zeros(dim)
+    for k in range(dim):
+        new_mu2[k] = compute_mu( Z[:,k] )
+
+    while np.any( np.abs( new_mu2 - mu2 ) >= 0.00001 ):
+
+        mu1 = new_mu1
+        mu2 = new_mu2
+
+        new_m1 = np.zeros(dim)
+        new_m2 = np.zeros(dim)
+        for k in range(dim):
+            
+            pencil = LinearMatrixPencil( A, mu2[k] * B + C )
+
+            Z = pencil.eigenvectors
+
+            dmu2_dmu1 = 0
+
+            new_mu1 = pencil.eigenvalues
+            new_mu2 = mu2 + dmu2_dmu1*(new_mu1 - mu1)
+
 
 class LinearMatrixPencil():
     '''
