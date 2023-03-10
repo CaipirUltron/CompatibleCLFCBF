@@ -137,7 +137,7 @@ class Plot2DSimulation():
         self.mode_text.text = ""
         self.trajectory.set_data([],[])
 
-        self.origin.set_data([0],[0])
+        self.origin.set_data([self.clf.critical_point[0]],[self.clf.critical_point[1]])
 
         x_init, y_init = self.state_log[0][0], self.state_log[1][0]
         self.init_state.set_data(x_init, y_init)

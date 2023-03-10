@@ -24,6 +24,7 @@ class LinearMatrixPencil():
                 self._lambda = kwargs[key]
 
         self.compute_eig()
+        # self.compute_eig2()
     
     def value(self, lambda_param):
         '''
@@ -31,21 +32,28 @@ class LinearMatrixPencil():
         '''
         return lambda_param * self._A - self._B
 
+    def value2(self, lambda1_param, lambda2_param):
+        '''
+        Returns pencil value.
+        '''
+        return lambda2_param * self._A - lambda1_param * self._B
+
     def compute_eig(self):
         '''
         Given the pencil matrices A and B, this method solves the pencil eigenvalue problem.
         '''
         # Compute the sorted pencil eigenvalues
         schurHv, schurHh, _, _, Q, Z = scipy.linalg.ordqz(self._B, self._A)
-        alpha = np.diag(schurHv)
-        beta = np.diag(schurHh)
-        pencil_eig = alpha/beta
+        self.lambda1 = np.diag(schurHh)
+        self.lambda2 = np.diag(schurHv)
+        pencil_eig = self.lambda2/self.lambda1
         sorted_args = np.argsort(pencil_eig)
 
         # Compute the pencil eigenvectors
         pencil_eigenvectors = np.zeros([self.dim,self.dim])
         for k in range(len(pencil_eig)):
-            eig, Q = np.linalg.eig( self.value(pencil_eig[k]) )
+            # eig, Q = np.linalg.eig( self.value(pencil_eig[k]) )
+            eig, Q = np.linalg.eig( self.value2(self.lambda1[k], self.lambda2[k]) )
             for i in range(len(eig)):
                 if np.abs(eig[i]) <= 0.000001:
                     normalization_const = 1/np.sqrt(Q[:,i].T @ self._A @ Q[:,i])
@@ -64,6 +72,38 @@ class LinearMatrixPencil():
         # Sorts eigenpairs
         self.eigenvalues = pencil_eig[sorted_args]
         self.eigenvectors = pencil_eigenvectors[:,sorted_args]
+
+    def compute_eig2(self):
+        '''
+        Given the pencil matrices A and B, this method solves the pencil eigenvalue problem.
+        '''
+        # Compute the sorted pencil eigenvalues
+        schurHv, schurHh, _, _, Q, Z = scipy.linalg.ordqz(self._B, self._A)
+        self.lambda1 = np.diag(schurHh)
+        self.lambda2 = np.diag(schurHv)
+        pencil_eig = self.lambda2/self.lambda1
+        sorted_args = np.argsort(pencil_eig)
+
+        # Compute the pencil eigenvectors
+        pencil_eigenvectors = []
+        for k in range(len(self.lambda1)):
+            eig, Q = np.linalg.eig( self.value2(self.lambda1[k], self.lambda2[k]) )
+            for i in range(len(eig)):
+                if np.abs(eig[i]) <= 0.000001:
+                    pencil_eigenvectors.append( Q[:,i] )
+        pencil_eigenvectors = np.array(pencil_eigenvectors).T
+
+        # num_eig = np.shape(pencil_eigenvectors)[1]
+        # if num_eig > 2:
+        #     for k in range(num_eig):
+        #         L = self.value2(self.lambda1[k], self.lambda2[k])
+        #         print( "Eig" + str(k+1) + " = " + str(L @ pencil_eigenvectors[:,k]) )
+
+        # Sorts eigenpairs
+        # self.lambda1 = self.lambda1[sorted_args]
+        # self.lambda2 = self.lambda2[sorted_args]
+        # self.eigenvalues = pencil_eig
+        self.eigenvectors = pencil_eigenvectors
 
     def __str__(self):         
         '''
@@ -106,7 +146,7 @@ class CLFCBFPair():
 
         self.compute_q()
         self.compute_equilibrium()
-        self.compute_equilibrium2()
+        # self.compute_equilibrium2()
         self.compute_critical()
 
     def compute_equilibrium2(self):
@@ -115,17 +155,27 @@ class CLFCBFPair():
         '''
         temp_P = -(self.Hv @ self.x0).reshape(self.dim,1)
         P_matrix = np.block([ [ self.Hv  , temp_P                        ], 
-                              [ temp_P.T , (self.x0 @ self.Hv @ self.x0) ] ])
+                              [ temp_P.T , self.x0 @ self.Hv @ self.x0 ] ])
 
         temp_Q = -(self.Hh @ self.p0).reshape(self.dim,1)
         Q_matrix = np.block([ [ self.Hh  , temp_Q                        ], 
-                              [ temp_Q.T , (self.p0 @ self.Hh @ self.p0) ] ])
+                              [ temp_Q.T , self.p0 @ self.Hh @ self.p0 ] ])
 
         pencil = LinearMatrixPencil( Q_matrix, P_matrix )
+        # print("Eig = " + str(pencil.eigenvectors))
 
-        self.equilibrium_points2 = np.zeros([self.dim, self.dim+1])
-        for k in range(self.dim+1):
-            self.equilibrium_points2[:,k] = pencil.eigenvectors[0:-1,k]/pencil.eigenvectors[-1,k]
+        # self.equilibrium_points2 = np.zeros([self.dim, self.dim+1])1
+        self.equilibrium_points2 = []
+        for k in range(np.shape(pencil.eigenvectors)[1]):
+            # if np.abs(pencil.eigenvectors[-1,k]) > 0.0001:
+            # print(pencil.eigenvectors)
+            self.equilibrium_points2.append( (pencil.eigenvectors[0:-1,k]/pencil.eigenvectors[-1,k]).tolist() )
+        
+        self.equilibrium_points2 = np.array(self.equilibrium_points2).T
+
+        # print("Lambda 1 = " + str(pencil.lambda1))
+        # print("Lambda 2 = " + str(pencil.lambda2))
+        # print("Eq = " + str(self.equilibrium_points2))
 
     def compute_q(self):
         '''
