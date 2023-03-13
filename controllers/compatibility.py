@@ -12,35 +12,38 @@ def solve_PEP( A, B, C, k, init_mu2 ):
              Z:      (n x n)-array of lambda values, each column corresponding to the corresponding eigenpair (mu1, mu2)
     '''
     dim = len(init_mu2)
+    
     def compute_mu(z):
-        return 0.5 * k * z @ B @ z 
+        return 0.5 * k * z @ B @ z
 
     mu2 = init_mu2
     pencil = LinearMatrixPencil( A, mu2 * B + C )
     
+    mu1 = pencil.eigenvalues
     Z = pencil.eigenvectors
-    new_mu1 = pencil.eigenvalues
+
     new_mu2 = np.zeros(dim)
     for k in range(dim):
         new_mu2[k] = compute_mu( Z[:,k] )
 
     while np.any( np.abs( new_mu2 - mu2 ) >= 0.00001 ):
 
-        mu1 = new_mu1
-        mu2 = new_mu2
-
-        new_m1 = np.zeros(dim)
-        new_m2 = np.zeros(dim)
+        new_mu1 = np.zeros(dim)
+        new_mu2 = np.zeros(dim)
         for k in range(dim):
-            
-            pencil = LinearMatrixPencil( A, mu2[k] * B + C )
 
+            L = (mu1 * A + mu2 * B + C)
+            invM = np.inv( L + k * np.outer( B @ Z[:,k], B @ Z[:,k] ) )
+            dmu2_dmu1 = - k * Z[:,k] @ B @ invM @ A @ Z[:,k]
+
+            new_mu1[k] = mu1[k] +(1/dmu2_dmu1)*(new_mu2 - mu2)
+
+        for k in range(dim):
+
+            pencil = LinearMatrixPencil( B, new_mu1[k] * A + C )
+
+            new_mu2 = pencil.eigenvalues
             Z = pencil.eigenvectors
-
-            dmu2_dmu1 = 0
-
-            new_mu1 = pencil.eigenvalues
-            new_mu2 = mu2 + dmu2_dmu1*(new_mu1 - mu1)
 
 
 class LinearMatrixPencil():
