@@ -2,7 +2,12 @@ import scipy
 from scipy import signal
 import numpy as np
 
-def solve_PEP( A, B, C, k, init_mu2 ):
+
+def compute_mu(B, const, z):
+    return 0.5 * const * z @ B @ z
+
+
+def solve_PEP( A, B, C, const, init_mu2 ):
     '''
     Solves the eigenproblem of the type: (mu1 * A + mu2 * B + C) @ z = 0, mu2 = 0.5 k * z.T @ B @ z
     where A, B, C are ( n x n ) matrices and k > 0.
@@ -11,10 +16,8 @@ def solve_PEP( A, B, C, k, init_mu2 ):
              mu2:    n-array of mu2 eigenvalues, repeated according to its multiplicity
              Z:      (n x n)-array of lambda values, each column corresponding to the corresponding eigenpair (mu1, mu2)
     '''
+    adjust = 0.1
     dim = len(init_mu2)
-    
-    def compute_mu(z):
-        return 0.5 * k * z @ B @ z
 
     mu2 = init_mu2
     pencil = LinearMatrixPencil( A, mu2 * B + C )
@@ -22,28 +25,70 @@ def solve_PEP( A, B, C, k, init_mu2 ):
     mu1 = pencil.eigenvalues
     Z = pencil.eigenvectors
 
+    new_mu1 = mu1
     new_mu2 = np.zeros(dim)
     for k in range(dim):
-        new_mu2[k] = compute_mu( Z[:,k] )
+        new_mu2[k] = compute_mu( B, const, Z[:,k] )
+        Z[:,k] = Z[:,k]/ np.sqrt( Z[:,k] @ A @ Z[:,k] )
 
     while np.any( np.abs( new_mu2 - mu2 ) >= 0.00001 ):
+
+        print("Lacks = " + str(np.abs( new_mu2 - mu2 )))
+
+        mu1 = new_mu1
+        mu2 = new_mu2
 
         new_mu1 = np.zeros(dim)
         new_mu2 = np.zeros(dim)
         for k in range(dim):
 
-            L = (mu1 * A + mu2 * B + C)
-            invM = np.inv( L + k * np.outer( B @ Z[:,k], B @ Z[:,k] ) )
-            dmu2_dmu1 = - k * Z[:,k] @ B @ invM @ A @ Z[:,k]
-
-            new_mu1[k] = mu1[k] +(1/dmu2_dmu1)*(new_mu2 - mu2)
-
-        for k in range(dim):
+            # Predict mu1 using Newton-Raphson rule 
+            slope = ( Z[:,k] @ B @ Z[:,k] / Z[:,k] @ A @ Z[:,k] )
+            new_mu1[k] = mu1[k] + adjust * slope * ( compute_mu( B, const, Z[:,k] ) - mu2[k] )
 
             pencil = LinearMatrixPencil( B, new_mu1[k] * A + C )
 
-            new_mu2 = pencil.eigenvalues
-            Z = pencil.eigenvectors
+            # Compute closest eigenvector
+            eigen_distances = np.zeros(dim)
+            for i in range(dim):
+                c = np.sqrt(pencil.eigenvectors[:,i] @ A @ pencil.eigenvectors[:,i])
+                eigen_distances[i] = np.linalg.norm( pencil.eigenvectors[:,i]/c - Z[:,k] )
+            closest = np.argmin(eigen_distances)
+
+            # Update eigenvector and mu2 from pencil
+            Z[:,k] = pencil.eigenvectors[:,closest]
+            Z[:,k] = Z[:,k]/ np.sqrt( Z[:,k] @ A @ Z[:,k] )
+            new_mu2[k] = pencil.eigenvalues[closest]
+
+        # mu1 = new_mu1
+        # mu2 = new_mu2
+
+        # new_mu1 = np.zeros(dim)
+        # new_mu2 = np.zeros(dim)
+        # for k in range(dim):
+
+        #     # Predict mu2 using Newton-Raphson rule 
+        #     slope = -( Z[:,k] @ A @ Z[:,k] / Z[:,k] @ B @ Z[:,k] )
+        #     desired_mu1 = - 0.5 * const * (( Z[:,k] @ B @ Z[:,k] )**2)/(Z[:,k] @ A @ Z[:,k]) - (Z[:,k] @ C @ Z[:,k] / Z[:,k] @ A @ Z[:,k])
+        #     new_mu2[k] = mu2[k] + adjust * slope * ( desired_mu1 - mu1[k] )
+
+        #     pencil = LinearMatrixPencil( A, new_mu2[k] * B + C )
+
+        #     # Compute closest eigenvector
+        #     eigen_distances = np.zeros(dim)
+        #     for i in range(dim):
+        #         c = np.sqrt(pencil.eigenvectors[:,i] @ A @ pencil.eigenvectors[:,i])
+        #         eigen_distances[i] = np.linalg.norm( pencil.eigenvectors[:,i]/c - Z[:,k] )
+        #     closest = np.argmin(eigen_distances)
+
+        #     # Update eigenvector and mu1 from pencil
+        #     Z[:,k] = pencil.eigenvectors[:,closest]
+        #     Z[:,k] = Z[:,k]/ np.sqrt( Z[:,k] @ A @ Z[:,k] )
+        #     new_mu1[k] = pencil.eigenvalues[closest]
+
+        # print("Lacks = " + str(np.abs( new_mu2 - mu2 )))
+
+    return mu1, mu2, Z
 
 
 class LinearMatrixPencil():
