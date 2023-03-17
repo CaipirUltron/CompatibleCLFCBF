@@ -3,90 +3,116 @@ from scipy import signal
 import numpy as np
 
 
-def compute_mu(B, const, z):
-    return 0.5 * const * z @ B @ z
-
-
-def solve_PEP( A, B, C, const, init_mu2 ):
+def solve_PEP( A, B, C, **kwargs ):
     '''
-    Solves the eigenproblem of the type: (mu1 * A + mu2 * B + C) @ z = 0, mu2 = 0.5 k * z.T @ B @ z
-    where A, B, C are ( n x n ) matrices and k > 0.
+    Solves the eigenproblem of the type: (mu1 * A - mu2 * B + C) @ z = 0, mu2 = 0.5 k * z.T @ B @ z
+    where A, B, C are ( n x n ) p.s.d. matrices and k > 0.
 
     Returns: mu1:    n-array of mu1 eigenvalues, repeated according to its multiplicity
              mu2:    n-array of mu2 eigenvalues, repeated according to its multiplicity
              Z:      (n x n)-array of lambda values, each column corresponding to the corresponding eigenpair (mu1, mu2)
     '''
-    adjust = 0.1
-    dim = len(init_mu2)
-
-    mu2 = init_mu2
-    pencil = LinearMatrixPencil( A, mu2 * B + C )
+    if np.shape(A) != np.shape(B) or np.shape(B) != np.shape(C) or np.shape(C) != np.shape(A):
+        raise Exception("Matrix shapes are not compatible with given initial value.")
     
-    mu1 = pencil.eigenvalues
+    matrix_shapes = np.shape(A)
+    if matrix_shapes[0] != matrix_shapes[1]:
+        raise Exception("Matrices are not square.")
+
+    dim = matrix_shapes[0]
+
+    for key in kwargs.keys():
+        if key.lower() == "constant":
+            const = kwargs[key]
+            continue
+        else:
+            const = 1
+        if key.lower() == "mu1":
+            mu1 = kwargs[key]
+            continue
+        else:
+            mu1 = 0
+        if key.lower() == "mu2":
+            mu2 = kwargs[key]
+            continue
+        else:
+            mu2 = 0
+        if key.lower() == "tolerance":
+            tol = kwargs[key]
+            continue
+        else:
+            tol = 0.000001
+        if key.lower() == "max_iter":
+            max_iter = kwargs[key]
+            continue
+        else:
+            max_iter = 1000
+
+    def compute_vector_field(solution):
+        '''
+        This inner method computes the vector field F(mu1, mu2, z) and returns its value.
+        '''        
+        mu1 = solution[0]
+        mu2 = solution[1]
+        z = solution[2:]
+
+        F = np.zeros(dim+2)
+        F[0:dim] = ( mu1 * A - mu2 * B + C ) @ z
+        F[dim] = mu2 - 0.5 * const * z @ B @ z
+        F[dim+1] = z @ A @ z - 1
+
+        return F
+
+    def compute_Jacobian(solution):
+        '''
+        This inner method computes the vector field F(mu1, mu2, z) and returns its value.
+        '''        
+        mu1 = solution[0]
+        mu2 = solution[1]
+        z = solution[2:]
+
+        L = mu1 * A - mu2 * B + C
+
+        Jac1 = np.vstack( [ (A @ z).reshape(len(z),1), 0, 0 ] )
+        Jac2 = np.vstack( [ -(B @ z).reshape(len(z),1), 1, 0 ] )
+        Jac3 = np.vstack( [ L, const * (B @ z).reshape(1,len(z)), (A @ z).reshape(1,len(z)) ] )
+        Jac = np.hstack([ Jac1, Jac2, Jac3 ])
+
+        return Jac
+
+    # Initial guess
+    if "mu1" in kwargs.keys():
+        pencil = LinearMatrixPencil( B, mu1 * A + C )
+        mu2 = pencil.eigenvalues
+        mu1 = mu1 * np.ones(len(mu2))
+    if "mu2" in kwargs.keys():
+        pencil = LinearMatrixPencil( A, mu2 * B - C )
+        mu1 = pencil.eigenvalues
+        mu2 = mu2 * np.ones(len(mu1))
     Z = pencil.eigenvectors
 
-    new_mu1 = mu1
-    new_mu2 = np.zeros(dim)
-    for k in range(dim):
-        new_mu2[k] = compute_mu( B, const, Z[:,k] )
-        Z[:,k] = Z[:,k]/ np.sqrt( Z[:,k] @ A @ Z[:,k] )
+    solutions = np.vstack([mu1, mu2, Z])
+    num_solutions = np.shape(solutions)[1]
 
-    while np.any( np.abs( new_mu2 - mu2 ) >= 0.00001 ):
+    F_sols = np.zeros([dim+2, num_solutions])
+    for k in range(num_solutions):
+        F_sols[:,k] = compute_vector_field( solutions[:,k] )
 
-        print("Lacks = " + str(np.abs( new_mu2 - mu2 )))
+    # Main loop
+    num_iter = 0
+    while np.any( np.abs(F_sols) > tol*np.ones(np.shape(F_sols)) ) and num_iter < max_iter:
+        num_iter += 1
 
-        mu1 = new_mu1
-        mu2 = new_mu2
+        for k in range(num_solutions):
+            Jac = compute_Jacobian(solutions[:,k])
+            invJac = np.linalg.inv(Jac)
+            F_sols[:,k] = compute_vector_field(solutions[:,k])
+            solutions[:,k] = solutions[:,k] - invJac @ F_sols[:,k]
 
-        new_mu1 = np.zeros(dim)
-        new_mu2 = np.zeros(dim)
-        for k in range(dim):
-
-            # Predict mu1 using Newton-Raphson rule 
-            slope = ( Z[:,k] @ B @ Z[:,k] / Z[:,k] @ A @ Z[:,k] )
-            new_mu1[k] = mu1[k] + adjust * slope * ( compute_mu( B, const, Z[:,k] ) - mu2[k] )
-
-            pencil = LinearMatrixPencil( B, new_mu1[k] * A + C )
-
-            # Compute closest eigenvector
-            eigen_distances = np.zeros(dim)
-            for i in range(dim):
-                c = np.sqrt(pencil.eigenvectors[:,i] @ A @ pencil.eigenvectors[:,i])
-                eigen_distances[i] = np.linalg.norm( pencil.eigenvectors[:,i]/c - Z[:,k] )
-            closest = np.argmin(eigen_distances)
-
-            # Update eigenvector and mu2 from pencil
-            Z[:,k] = pencil.eigenvectors[:,closest]
-            Z[:,k] = Z[:,k]/ np.sqrt( Z[:,k] @ A @ Z[:,k] )
-            new_mu2[k] = pencil.eigenvalues[closest]
-
-        # mu1 = new_mu1
-        # mu2 = new_mu2
-
-        # new_mu1 = np.zeros(dim)
-        # new_mu2 = np.zeros(dim)
-        # for k in range(dim):
-
-        #     # Predict mu2 using Newton-Raphson rule 
-        #     slope = -( Z[:,k] @ A @ Z[:,k] / Z[:,k] @ B @ Z[:,k] )
-        #     desired_mu1 = - 0.5 * const * (( Z[:,k] @ B @ Z[:,k] )**2)/(Z[:,k] @ A @ Z[:,k]) - (Z[:,k] @ C @ Z[:,k] / Z[:,k] @ A @ Z[:,k])
-        #     new_mu2[k] = mu2[k] + adjust * slope * ( desired_mu1 - mu1[k] )
-
-        #     pencil = LinearMatrixPencil( A, new_mu2[k] * B + C )
-
-        #     # Compute closest eigenvector
-        #     eigen_distances = np.zeros(dim)
-        #     for i in range(dim):
-        #         c = np.sqrt(pencil.eigenvectors[:,i] @ A @ pencil.eigenvectors[:,i])
-        #         eigen_distances[i] = np.linalg.norm( pencil.eigenvectors[:,i]/c - Z[:,k] )
-        #     closest = np.argmin(eigen_distances)
-
-        #     # Update eigenvector and mu1 from pencil
-        #     Z[:,k] = pencil.eigenvectors[:,closest]
-        #     Z[:,k] = Z[:,k]/ np.sqrt( Z[:,k] @ A @ Z[:,k] )
-        #     new_mu1[k] = pencil.eigenvalues[closest]
-
-        # print("Lacks = " + str(np.abs( new_mu2 - mu2 )))
+    print("Algorithm converged with " + str(num_iter) + " iterations.")
+    mu1 = solutions[0,:]
+    mu2 = solutions[1,:]
+    Z = solutions[2:,:]
 
     return mu1, mu2, Z
 

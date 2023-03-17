@@ -28,8 +28,7 @@ class NominalQP():
             self.equilibrium_points = np.vstack([ self.equilibrium_points, clf_cbf_pair.equilibrium_points.T ])
 
         # QP parameters
-        self.p = p
-        self.gamma, self.alpha = gamma, alpha
+        self.p, self.gamma, self.alpha = p, gamma, alpha
         self.QP_dim = self.control_dim + 1
         P = np.eye(self.QP_dim)
         P[self.control_dim,self.control_dim] = self.p
