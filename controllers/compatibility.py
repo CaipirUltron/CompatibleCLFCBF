@@ -27,16 +27,16 @@ def solve_PEP( A, B, C, **kwargs ):
             continue
         else:
             const = 1
-        if key.lower() == "mu1":
-            mu1 = kwargs[key]
-            continue
-        else:
-            mu1 = 0
         if key.lower() == "mu2":
             mu2 = kwargs[key]
             continue
         else:
             mu2 = 0
+        if key.lower() == "step":
+            step = kwargs[key]
+            continue
+        else:
+            step = 1
         if key.lower() == "tolerance":
             tol = kwargs[key]
             continue
@@ -48,73 +48,172 @@ def solve_PEP( A, B, C, **kwargs ):
         else:
             max_iter = 1000
 
-    def compute_vector_field(solution):
+    def cost(mu2, z):
         '''
-        This inner method computes the vector field F(mu1, mu2, z) and returns its value.
-        '''        
-        mu1 = solution[0]
-        mu2 = solution[1]
-        z = solution[2:]
+        This inner method computes the cost and returns its value.
+        '''     
+        return (mu2 - 0.5 * const * z @ B @ z)**2
 
-        F = np.zeros(dim+2)
-        F[0:dim] = ( mu1 * A - mu2 * B + C ) @ z
-        F[dim] = mu2 - 0.5 * const * z @ B @ z
-        F[dim+1] = z @ A @ z - 1
-
-        return F
-
-    def compute_Jacobian(solution):
+    def cost_derivative(mu2, z):
         '''
-        This inner method computes the vector field F(mu1, mu2, z) and returns its value.
+        This inner method computes cost derivative.
         '''        
-        mu1 = solution[0]
-        mu2 = solution[1]
-        z = solution[2:]
-
-        L = mu1 * A - mu2 * B + C
-
-        Jac1 = np.vstack( [ (A @ z).reshape(len(z),1), 0, 0 ] )
-        Jac2 = np.vstack( [ -(B @ z).reshape(len(z),1), 1, 0 ] )
-        Jac3 = np.vstack( [ L, const * (B @ z).reshape(1,len(z)), (A @ z).reshape(1,len(z)) ] )
-        Jac = np.hstack([ Jac1, Jac2, Jac3 ])
-
-        return Jac
-
+        return mu2 - 0.5 * const * z @ B @ z
+    
     # Initial guess
-    if "mu1" in kwargs.keys():
-        pencil = LinearMatrixPencil( B, mu1 * A + C )
-        mu2 = pencil.eigenvalues
-        mu1 = mu1 * np.ones(len(mu2))
-    if "mu2" in kwargs.keys():
-        pencil = LinearMatrixPencil( A, mu2 * B - C )
-        mu1 = pencil.eigenvalues
-        mu2 = mu2 * np.ones(len(mu1))
+    pencil = LinearMatrixPencil( A, mu2 * B - C )
+    mu1 = pencil.eigenvalues
+    mu2 = mu2 * np.ones(len(mu1))
     Z = pencil.eigenvectors
 
-    solutions = np.vstack([mu1, mu2, Z])
-    num_solutions = np.shape(solutions)[1]
+    num_solutions = len(mu1)
 
-    F_sols = np.zeros([dim+2, num_solutions])
-    for k in range(num_solutions):
-        F_sols[:,k] = compute_vector_field( solutions[:,k] )
+    costs = np.zeros(num_solutions)
+    for k in range(num_solutions): 
+        costs[k] = cost(mu2[k], Z[:,k])
 
     # Main loop
     num_iter = 0
-    while np.any( np.abs(F_sols) > tol*np.ones(np.shape(F_sols)) ) and num_iter < max_iter:
+    pencil = LinearMatrixPencil( A, mu2[k] * B - C )
+    while np.any( np.abs(mu2 - costs) > tol*np.ones(num_solutions) ) and num_iter < max_iter:
+
         num_iter += 1
 
         for k in range(num_solutions):
-            Jac = compute_Jacobian(solutions[:,k])
-            invJac = np.linalg.inv(Jac)
-            F_sols[:,k] = compute_vector_field(solutions[:,k])
-            solutions[:,k] = solutions[:,k] - invJac @ F_sols[:,k]
 
-    print("Algorithm converged with " + str(num_iter) + " iterations.")
-    mu1 = solutions[0,:]
-    mu2 = solutions[1,:]
-    Z = solutions[2:,:]
+            # Advance one step (recompute mu2 and costs)
+            mu2[k] = mu2[k] - step * 0.5 * cost_derivative(mu2[k], Z[:,k])
+            costs[k] = cost(mu2[k], Z[:,k])
 
-    return mu1, mu2, Z
+            # Reprojection
+            pencil._B = mu2[k] * B - C
+            pencil.compute_eig()
+
+            # Compute closest mu1
+            mu1_diffs = np.zeros(dim)
+            for i in range(dim):
+                mu1_diffs[i] = np.abs( pencil.eigenvalues[i] - mu1[k] )
+            closest = np.argmin(mu1_diffs)
+
+            # New mu1 is the closest
+            mu1[k] = pencil.eigenvalues[closest]
+            Z[:,k] = pencil.eigenvectors[closest]
+
+    return mu1, mu2, Z  
+
+# def solve_PEP( A, B, C, **kwargs ):
+#     '''
+#     Solves the eigenproblem of the type: (mu1 * A - mu2 * B + C) @ z = 0, mu2 = 0.5 k * z.T @ B @ z
+#     where A, B, C are ( n x n ) p.s.d. matrices and k > 0.
+
+#     Returns: mu1:    n-array of mu1 eigenvalues, repeated according to its multiplicity
+#              mu2:    n-array of mu2 eigenvalues, repeated according to its multiplicity
+#              Z:      (n x n)-array of lambda values, each column corresponding to the corresponding eigenpair (mu1, mu2)
+#     '''
+#     if np.shape(A) != np.shape(B) or np.shape(B) != np.shape(C) or np.shape(C) != np.shape(A):
+#         raise Exception("Matrix shapes are not compatible with given initial value.")
+    
+#     matrix_shapes = np.shape(A)
+#     if matrix_shapes[0] != matrix_shapes[1]:
+#         raise Exception("Matrices are not square.")
+
+#     dim = matrix_shapes[0]
+
+#     for key in kwargs.keys():
+#         if key.lower() == "constant":
+#             const = kwargs[key]
+#             continue
+#         else:
+#             const = 1
+#         if key.lower() == "mu1":
+#             mu1 = kwargs[key]
+#             continue
+#         else:
+#             mu1 = 0
+#         if key.lower() == "mu2":
+#             mu2 = kwargs[key]
+#             continue
+#         else:
+#             mu2 = 0
+#         if key.lower() == "tolerance":
+#             tol = kwargs[key]
+#             continue
+#         else:
+#             tol = 0.000001
+#         if key.lower() == "max_iter":
+#             max_iter = kwargs[key]
+#             continue
+#         else:
+#             max_iter = 1000
+
+#     selection = np.zeros(dim)
+#     selection[-1] = 1
+
+#     def compute_vector_field(solution):
+#         '''
+#         This inner method computes the vector field F(mu1, mu2, z) and returns its value.
+#         '''        
+#         mu1 = solution[0]
+#         mu2 = solution[1]
+#         z = solution[2:]
+
+#         F = np.zeros(dim+2)
+#         F[0:dim] = ( mu1 * A - mu2 * B + C ) @ z
+#         F[dim] = mu2 - 0.5 * const * z @ B @ z
+#         F[dim+1] = selection @ z - 1
+
+#         return F
+
+#     def compute_Jacobian(solution):
+#         '''
+#         This inner method computes the vector field F(mu1, mu2, z) and returns its value.
+#         '''        
+#         mu1 = solution[0]
+#         mu2 = solution[1]
+#         z = solution[2:]
+
+#         L = mu1 * A - mu2 * B + C
+
+#         Jac1 = np.vstack( [ (A @ z).reshape(len(z),1), 0, 0 ] )
+#         Jac2 = np.vstack( [ -(B @ z).reshape(len(z),1), 1, 0 ] )
+#         Jac3 = np.vstack( [ L, const * (B @ z).reshape(1,len(z)), selection.reshape(1,len(z)) ] )
+#         Jac = np.hstack([ Jac1, Jac2, Jac3 ])
+
+#         return Jac
+
+#     # Initial guess
+#     if "mu1" in kwargs.keys():
+#         pencil = LinearMatrixPencil( B, mu1 * A + C )
+#         mu2 = pencil.eigenvalues
+#         mu1 = mu1 * np.ones(len(mu2))
+#     if "mu2" in kwargs.keys():
+#         pencil = LinearMatrixPencil( A, mu2 * B - C )
+#         mu1 = pencil.eigenvalues
+#         mu2 = mu2 * np.ones(len(mu1))
+#     Z = pencil.eigenvectors
+
+#     solutions = np.vstack([mu1, mu2, Z])
+#     num_solutions = np.shape(solutions)[1]
+
+#     F_sols = np.zeros([dim+2, num_solutions])
+#     for k in range(num_solutions):
+#         F_sols[:,k] = compute_vector_field( solutions[:,k] )
+
+#     # Main loop
+#     num_iter = 0
+#     while np.any( np.abs(F_sols) > tol*np.ones(np.shape(F_sols)) ) and num_iter < max_iter:
+#         num_iter += 1
+#         for k in range(num_solutions):
+#             Jac = compute_Jacobian(solutions[:,k])
+#             F_sols[:,k] = compute_vector_field(solutions[:,k])
+#             solutions[:,k] = solutions[:,k] + np.linalg.solve( Jac, -F_sols[:,k] )
+
+#     print("Algorithm converged with " + str(num_iter) + " iterations.")
+#     mu1 = solutions[0,:]
+#     mu2 = solutions[1,:]
+#     Z = solutions[2:,:]
+
+#     return mu1, mu2, Z
 
 
 class LinearMatrixPencil():
