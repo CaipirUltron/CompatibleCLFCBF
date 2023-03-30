@@ -3,119 +3,386 @@ from scipy import signal
 import numpy as np
 
 
-def solve_PEP( A, B, C, **kwargs ):
+def solve_PEP1(Q, P, **kwargs):
     '''
-    Solves the eigenproblem of the type: (mu1 * A - mu2 * B + C) @ z = 0, mu2 = 0.5 k * z.T @ B @ z
-    where A, B, C are ( n x n ) p.s.d. matrices and k > 0.
+    Solves the eigenproblem of the type: (lambda1 * Q - lambda2 * C - P) @ z = 0, lambda1 = lambda_2 + z.T @ P @ z
+    where P and Q are ( n x n ) p.s.d. matrices and C is a nilpotent matrix with index 2.
 
-    Returns: mu1:    n-array of mu1 eigenvalues, repeated according to its multiplicity
-             mu2:    n-array of mu2 eigenvalues, repeated according to its multiplicity
-             Z:      (n x n)-array of lambda values, each column corresponding to the corresponding eigenpair (mu1, mu2)
-    '''
-    if np.shape(A) != np.shape(B) or np.shape(B) != np.shape(C) or np.shape(C) != np.shape(A):
+    Returns: lambda1:    n-array of mu1 eigenvalues, repeated according to its multiplicity
+             lambda2:    n-array of mu2 eigenvalues, repeated according to its multiplicity
+             Z:          (n x n)-array of lambda values, each column corresponding to the corresponding eigenpair (mu1, mu2)
+    ''' 
+    accuracy = 0.0000000001
+
+    if np.shape(Q) != np.shape(P):
         raise Exception("Matrix shapes are not compatible with given initial value.")
     
-    matrix_shapes = np.shape(A)
+    matrix_shapes = np.shape(Q)
     if matrix_shapes[0] != matrix_shapes[1]:
         raise Exception("Matrices are not square.")
 
-    dim = matrix_shapes[0]
+    C = np.zeros(matrix_shapes)
+    C[-1,-1] = 1
 
+    init_lambda = 0.0
+    step = 1
+    tol = 0.00001
+    max_iter = 1000
     for key in kwargs.keys():
-        if key.lower() == "constant":
-            const = kwargs[key]
+        aux_key = key.lower()
+        if aux_key == "init_lambda":
+            init_lambda = kwargs[key]
             continue
-        else:
-            const = 1
-        if key.lower() == "mu2":
-            mu2 = kwargs[key]
-            continue
-        else:
-            mu2 = 0
-        if key.lower() == "step":
+        if aux_key == "step":
             step = kwargs[key]
             continue
-        else:
-            step = 1
-        if key.lower() == "tolerance":
+        if aux_key == "tolerance":
             tol = kwargs[key]
             continue
-        else:
-            tol = 0.00001
-        if key.lower() == "max_iter":
+        if aux_key == "max_iter":
             max_iter = kwargs[key]
             continue
-        else:
-            max_iter = 1000
 
-    def cost(mu2, z):
+    def compute_F(solution):
         '''
-        This inner method computes the cost and returns its value.
-        '''     
-        return (mu2 - 0.5 * const * z @ B @ z)**2
-
-    def cost_derivative(mu2, z):
-        '''
-        This inner method computes cost derivative.
+        This inner method computes the vector field F(mu1, mu2, z) and returns its value.
         '''        
-        return mu2 - 0.5 * const * z @ B @ z
-    
+        lambda1 = solution[0]
+        lambda2 = solution[1]
+        z = solution[2:]
+
+        n = len(z)
+
+        F = np.zeros(n+2)
+        L = lambda1 * Q - lambda2 * C - P
+
+        F[0:n] = L @ z
+        F[n] = 0.5 - 0.5 * z @ C @ z
+        F[n+1] = z @ Q @ z - 1
+
+        return F
+
+    def compute_Jacobian(solution):
+        '''
+        This inner method computes the vector field F(mu1, mu2, z) and returns its value.
+        '''        
+        lambda1 = solution[0]
+        lambda2 = solution[1]
+        z = solution[2:]
+
+        n = len(z)
+
+        L = lambda1 * Q - lambda2 * C - P
+
+        Jac1 = np.vstack( [ (Q @ z).reshape(n,1), 0, 0 ] )
+        Jac2 = np.vstack( [ -(C @ z).reshape(n,1), 0, 0 ] )
+        Jac3 = np.vstack( [ L, -(C @ z).reshape(1,n), (Q @ z).reshape(1,n) ] )
+        Jac = np.hstack([ Jac1, Jac2, Jac3 ])
+
+        return Jac
+
     # Initial guess
-    pencil = LinearMatrixPencil( A, mu2 * B - C )
-    mu1 = pencil.eigenvalues
-    mu2 = mu2 * np.ones(len(mu1))
+    pencil = LinearMatrixPencil2( Q, init_lambda * C + P )
+    lambda1 = pencil.eigenvalues
+    lambda2 = init_lambda * np.ones(len(lambda1))
     Z = pencil.eigenvectors
 
-    num_solutions = len(mu1)
+    # Normalize eigenvectors and delete the degenerate ones
+    index_to_be_deleted = []
+    for k in range(len(lambda1)):
+        if np.abs(lambda1[k]) == np.inf or np.abs(lambda2[k]) == np.inf:
+            index_to_be_deleted.append(k)
+        z = Z[:,k]
+        if np.linalg.norm(C @ z) < accuracy or np.linalg.norm(Q @ z) < accuracy or np.linalg.norm(P @ z) < accuracy:
+            index_to_be_deleted.append(k)
+
+    Z = np.delete(Z, index_to_be_deleted, axis = 1)
+    lambda1 = np.delete(lambda1, index_to_be_deleted)
+    lambda2 = np.delete(lambda2, index_to_be_deleted)
+
+    print("Initial lambdas = " + str(lambda1))
+
+    for k in range(len(lambda1)):
+        z = Z[:,k]
+        normalization_const = 1/np.sqrt(z @ Q @ z)
+        Z[:,k] = normalization_const * z
+
+    num_solutions = len(lambda1)
+
+    costs = np.zeros(num_solutions)
+    solutions = np.zeros([matrix_shapes[0]+2, num_solutions])
+
+    for k in range(num_solutions):
+        solutions[0,k] = lambda1[k]
+        solutions[1,k] = lambda2[k]
+        solutions[2:,k] = Z[:,k]
+        costs[k] = np.linalg.norm(compute_F(solutions[:,k]))
+
+    lambda1_list, lambda2_list = [], []
+    for _ in range(num_solutions):
+        lambda1_list.append([])
+        lambda2_list.append([])
+    
+    # Main loop
+    num_iter = 0
+    while np.any( costs > tol*np.ones(num_solutions) ) and num_iter < max_iter:
+        num_iter += 1
+        for k in range(num_solutions):
+            
+            solution = solutions[:,k]
+
+            F = compute_F(solution)
+            Jac = compute_Jacobian(solution)
+            invJac = np.linalg.inv(Jac)
+
+            new_solution = solution - step * (invJac @ F)
+
+            costs[k] = np.linalg.norm(compute_F(new_solution))
+
+            lambda1[k] = new_solution[0]
+            lambda2[k] = new_solution[1]
+            Z[:,k] = new_solution[2:]
+
+            solutions[:,k] = new_solution
+
+            lambda1_list[k].append(lambda1[k])
+            lambda2_list[k].append(lambda2[k])
+
+        # print('Costs = ' + str(costs))
+        # print('Solutions = ' + str(solutions))
+
+    return lambda1, lambda2, Z, lambda1_list, lambda2_list
+
+
+def solve_PEP2( Q, P, **kwargs ):
+    '''
+    Solves the eigenproblem of the type: (lambda1 * Q - lambda2 * C - P) @ z = 0, lambda1 = lambda_2 + z.T @ P @ z
+    where P and Q are ( n x n ) p.s.d. matrices and C is a nilpotent matrix with index 2.
+
+    Returns: lambda1:    n-array of mu1 eigenvalues, repeated according to its multiplicity
+             lambda2:    n-array of mu2 eigenvalues, repeated according to its multiplicity
+             Z:          (n x n)-array of lambda values, each column corresponding to the corresponding eigenpair (mu1, mu2)
+    '''
+    accuracy = 0.0000000001
+
+    if np.shape(Q) != np.shape(P):
+        raise Exception("Matrix shapes are not compatible with given initial value.")
+    
+    matrix_shapes = np.shape(Q)
+    if matrix_shapes[0] != matrix_shapes[1]:
+        raise Exception("Matrices are not square.")
+
+    C = np.zeros(matrix_shapes)
+    C[-1,-1] = 1
+
+    init_lambda = 0.0
+    step = 1
+    tol = 0.00001
+    max_iter = 1000
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "init_lambda":
+            init_lambda = kwargs[key]
+            continue
+        if aux_key == "step":
+            step = kwargs[key]
+            continue
+        if aux_key == "tolerance":
+            tol = kwargs[key]
+            continue
+        if aux_key == "max_iter":
+            max_iter = kwargs[key]
+            continue
+
+    def cost(lambda1, lambda2, z):
+        '''
+        Computes the cost and returns its value.
+        '''
+        error = lambda1 - lambda2 - z @ P @ z
+        return error**2
+
+    def cost_derivative(lambda1, lambda2, z):
+        '''
+        Computes cost derivative.
+        '''        
+        return lambda1 - lambda2 - z @ P @ z
+
+    # Initial guess
+    pencil = LinearMatrixPencil2( Q, init_lambda * C + P )
+    lambda1 = pencil.eigenvalues
+    lambda2 = init_lambda * np.ones(len(lambda1))
+    Z = pencil.eigenvectors
+
+    # Delete degenerate eigenvalues
+    index_to_be_deleted = []
+    for k in range(len(lambda1)):
+        z = Z[:,k]
+        if np.abs(lambda1[k]) == np.inf or np.abs(lambda2[k]) == np.inf:
+            index_to_be_deleted.append(k)
+        if np.linalg.norm(C @ z) < accuracy or np.linalg.norm(Q @ z) < accuracy or np.linalg.norm(P @ z) < accuracy:
+            index_to_be_deleted.append(k)
+
+    Z = np.delete(Z, index_to_be_deleted, axis = 1)
+    lambda1 = np.delete(lambda1, index_to_be_deleted)
+    lambda2 = np.delete(lambda2, index_to_be_deleted)
+
+    # Normalize eigenvectors
+    for k in range(len(lambda1)):
+        normalization_const = 1/np.sqrt(z @ Q @ z)
+        Z[:,k] = normalization_const * Z[:,k]
+
+    num_solutions = len(lambda1)
 
     costs = np.zeros(num_solutions)
     for k in range(num_solutions): 
-        costs[k] = cost(mu2[k], Z[:,k])
+        costs[k] = cost(lambda1[k], lambda2[k], Z[:,k])
 
-    mu1_list, mu2_list = [], []
-    for i in range(num_solutions):
-        mu1_list.append([])
-        mu2_list.append([])
+    lambda1_list, lambda2_list = [], []
+    for _ in range(num_solutions):
+        lambda1_list.append([])
+        lambda2_list.append([])
 
     # Main loop
     num_iter = 0
-    pencil = LinearMatrixPencil( A, mu2[k] * B - C )
-    while np.any( np.abs(mu2 - costs) > tol*np.ones(num_solutions) ) and num_iter < max_iter:
+    while np.any( costs > tol*np.ones(num_solutions) ) and num_iter < max_iter:
+
+        print("Costs = " + str(costs))
 
         num_iter += 1
-
         for k in range(num_solutions):
             
             # Advance one step (recompute mu2 and costs)
-            mu2[k] = mu2[k] - step * 0.5 * cost_derivative(mu2[k], Z[:,k])
-            costs[k] = cost(mu2[k], Z[:,k])
+            mu2_delta = step * cost_derivative(lambda1[k], lambda2[k], Z[:,k])
+
+            aux_pencil = LinearMatrixPencil2( mu2_delta * C, lambda1[k] * Q - lambda2[k] * C - P )
+            aux_eig = aux_pencil.eigenvalues
+            eigs_in_interval = aux_eig[np.where((aux_eig <= 1) & (aux_eig > 0) & (np.abs(aux_eig) > accuracy) )[0]]
+            if eigs_in_interval.size > 0:
+                lambda2[k] = lambda2[k] + mu2_delta * np.min(eigs_in_interval)
+            else:
+                lambda2[k] = lambda2[k] + mu2_delta
 
             # Reprojection
-            pencil._B = mu2[k] * B - C
-            pencil.compute_eig()
+            pencil = LinearMatrixPencil2( Q, lambda2[k] * C + P )
+            candidate_mu1s = pencil.eigenvalues
+            auxZ = pencil.eigenvectors
 
-            # Compute closest mu1
-            mu1_diffs = np.zeros(dim)
-            for i in range(dim):
-                mu1_diffs[i] = np.abs( pencil.eigenvalues[i] - mu1[k] )
-            closest = np.argmin(mu1_diffs)
+            for i in range(len(candidate_mu1s)):
+                z = pencil.eigenvectors[:,i]
+                if np.linalg.norm(C @ z) < accuracy or np.linalg.norm(Q @ z) < accuracy or np.linalg.norm(P @ z) < accuracy:
+                    index_to_be_deleted.append(i)
+            candidate_mu1s = np.delete(candidate_mu1s, index_to_be_deleted)
+            auxZ = np.delete(auxZ, index_to_be_deleted, axis=1)
 
-            # New mu1 is the closest
-            mu1[k] = pencil.eigenvalues[closest]
-            Z[:,k] = pencil.eigenvectors[:,closest]
+            # Filter candidate mu1s
+            if mu2_delta > 0:
+                indexes = np.where(candidate_mu1s > lambda1[k])[0]
+            else:
+                indexes = np.where(candidate_mu1s < lambda1[k])[0]
 
-            # Renormalize eigenvector
-            Z[:,k] = Z[:,k]/Z[-1,k]
+            distances = []
+            for index in indexes:
+                distances.append( np.abs( candidate_mu1s[index] - lambda1[k] ) )
 
-            mu1_list[k].append(mu1[k])
-            mu2_list[k].append(mu2[k])
+            closest = np.argmin(np.array(distances))
+            lambda1[k] = candidate_mu1s[indexes[closest]]
+            z = auxZ[:,indexes[closest]]
 
-    return mu1, mu2, Z, mu1_list, mu2_list
+            if z.T @ Q @ z >= accuracy:
+                normalization_const = 1/np.sqrt( z.T @ Q @ z )
+            else:
+                normalization_const = 1
+            Z[:,k] = normalization_const * z
+
+            # Recompute cost
+            costs[k] = cost(lambda1[k], lambda2[k], Z[:,k])
+
+            lambda1_list[k].append(lambda1[k])
+            lambda2_list[k].append(lambda2[k])
+
+    return lambda1, lambda2, Z, lambda1_list, lambda2_list
+
+
+class LinearMatrixPencil2():
+    '''
+    Class for regular, symmetric linear matrix pencils of the form P(mu1,mu2) = mu1 A - mu2 B, where A and B are p.s.d. matrices.
+    '''
+    accuracy = 0.0000000001
+    
+    def __init__(self, A, B, **kwargs):
+
+        dimA = A.shape
+        dimB = B.shape
+        if dimA != dimB:
+            raise Exception("Matrix dimensions are not equal.")
+        if (dimA[0] != dimA[1]) or (dimB[0] != dimB[1]):
+            raise Exception("Matrices are not square.")
+        self._A, self._B = A, B
+        self.dim = dimA[0]
+
+        self.compute_eigen()
+
+    def value(self, lambda_param):
+        '''
+        Returns pencil value.
+        '''
+        return lambda_param * self._A  - self._B
+
+    def compute_eigen(self):
+        '''
+        Computes the generalized eigenvalues and eigenvectors of the pencil.
+        '''
+        # Compute the pencil eigenvalues
+        schurA, schurB, _, _, _, _ = scipy.linalg.ordqz(self._B, self._A)
+        schurA_vec = np.diag(schurA)
+        schurB_vec = np.diag(schurB)
+
+        self.eigenvalues = np.zeros(self.dim)
+        for k in range(self.dim):
+            if np.abs(schurB_vec[k]) > LinearMatrixPencil2.accuracy:
+                self.eigenvalues[k] = schurA_vec[k]/schurB_vec[k]
+            else:
+                self.eigenvalues[k] = np.sign(schurA_vec[k]) * np.inf
+
+        # Compute the (normalized, if possible) pencil eigenvectors
+        self.eigenvectors = np.zeros([self.dim,self.dim])
+        for k in range(len(self.eigenvalues)):
+            if np.abs(self.eigenvalues[k]) != np.inf:
+                eig, Q = np.linalg.eig( self.value( self.eigenvalues[k]) )
+            else:
+                eig, Q = np.linalg.eig( schurA_vec[k] * self._A - schurB_vec[k] * self._B )
+            for i in range(len(eig)):
+                if np.abs(eig[i]) <= LinearMatrixPencil2.accuracy:
+                    # if np.abs(Q[-1,i]) > LinearMatrixPencil2.accuracy:
+                        # normalization_const = 1/Q[-1,i]
+                        # normalization_const = 1
+                        # self.eigenvectors[:,k] = normalization_const * Q[:,i]
+                    # else:
+                    self.eigenvectors[:,k] = Q[:,i]
+
+    def solve_nonlinear(self, const):
+        '''
+        Compute all the solutions for the nonlinear system: (mu1 A - mu2 B) z = 0               ,
+                                                                          mu2 = 0.5 k z.T @ B z , 
+                                                                          z \in Im(m(x))        
+        '''
+        mu1_list, mu2_list, z_list = [], [], []
+        for k in range(self.dim):
+            z = self.eigenvectors[:,k]
+            if z[-1] == 1.0 and np.abs(self.eigenvalues[k]) != np.inf:
+                mu2 = 0.5 * const * (z.T @ self._B @ z)
+                mu1 = self.eigenvalues[k] * mu2
+                
+                mu1_list.append( mu1 )
+                mu2_list.append( mu2 )
+                z_list.append( z.tolist() )
+        
+        return np.array(mu1_list), np.array(mu2_list), np.array( z_list ).T
 
 
 class LinearMatrixPencil():
     '''
-    Class for regular, symmetric linear matrix pencils of the form H(\lambda) = \lambda A - B
+    Class for regular, symmetric linear matrix pencils of the form H(\lambda) = mu1 A - mu2 B, where A and B are p.s.d. matrices
     '''
     def __init__(self, A, B, **kwargs):
 

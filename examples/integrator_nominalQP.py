@@ -5,7 +5,7 @@ from dynamic_systems import PolynomialSystem
 from controllers import NominalQP
 
 ######################################### Configure and create 2D plant ####################################################
-initial_state = [4.1, 5.0]
+initial_state = [-1.73638977, 10.4183386]
 
 G1 = np.array([[1,0],[0,1]])
 G2 = np.array([[0,0],[0,0]])
@@ -15,7 +15,7 @@ plant = PolynomialSystem(initial_state = initial_state, initial_control = np.zer
 ############################################################################################################################
 
 ############################################# Configure and create CLF #####################################################
-clf_lambda_x, clf_lambda_y, clf_angle = 6.0, 1.0, np.radians(-45.0)
+clf_lambda_x, clf_lambda_y, clf_angle = 6.0, 1.0, np.radians(0.0)
 clf_params = {
     "Hv": canonical2D([ clf_lambda_x , clf_lambda_y ], clf_angle),
     "x0": [ 0.0, 0.0 ] }
@@ -58,7 +58,7 @@ cbf1 = QuadraticBarrier(*initial_state, hessian = cbf_params1["Hh"], critical = 
 cbf2 = QuadraticBarrier(*initial_state, hessian = cbf_params2["Hh"], critical = cbf_params2["p0"])
 cbf3 = QuadraticBarrier(*initial_state, hessian = cbf_params3["Hh"], critical = cbf_params3["p0"])
 
-cbfs = [cbf1, cbf2, cbf3]
+cbfs = [cbf1]
 
 #################################################### Define controllers ####################################################
 sample_time = .005
