@@ -2,10 +2,12 @@
 Tests the computation of generalized eigenvalues with Affine Matrix Pencils
 '''
 import matplotlib.pyplot as plt
+plt.rcParams['text.usetex'] = True
+
 import numpy as np
 import scipy as sp
 from controllers.compatibility import solve_PEP1, solve_PEP2
-from examples.integrator_nominalQP import clf_params, cbf_params1
+from examples.integrator_nominalQP import clf_params, cbf_params1, cbf_params2, cbf_params3
 
 Hv = clf_params["Hv"]
 x0 = clf_params["x0"]
@@ -38,17 +40,19 @@ dim = 3
 selection = np.zeros(dim)
 selection[-1] = 1
 
-lambda2_0 = -10*np.random.rand()
-lambda1, lambda2, Z, lambda1_list, lambda2_list = solve_PEP1( Q, P, init_lambda = lambda2_0, max_iter = 1000 )
+lambda2_0 = 10*np.random.rand()
+lambda1, lambda2, Z, lambda1_list, lambda2_list = solve_PEP1( Q, P, step = 0.5, init_lambda = lambda2_0, max_iter = 1000 )
 
-fig = plt.figure()
+fig, ax = plt.subplots(tight_layout=True)
+ax.set_xlabel("$\kappa$")
+ax.set_ylabel("$\lambda$")
+
 for k in range(len(lambda1_list)):
 
     L = (lambda1[k] * Q - lambda2[k] * C - P)
     z = Z[:,k]
     
     error_pencil = np.linalg.norm(L @ z)
-    error_lambda = lambda1[k] - lambda2[k] - z @ P @ z
     last_kernel_elem = z @ C @ z
     error_boundaries = z @ Q @ z - 1
 
@@ -59,10 +63,10 @@ for k in range(len(lambda1_list)):
     print(phrase1+phrase2+phrase3+phrase4)
 
     print("Error pencil = " + str(error_pencil))
-    print("Error lambdas = " + str(error_lambda))
     print("Last kernel element = " + str(last_kernel_elem))
     print("Error boundary = " + str(error_boundaries))
 
-    plt.scatter( lambda2_list[k], lambda1_list[k], linewidth=0.2, marker='o' )
+    ax.plot( lambda2_list[k], lambda1_list[k], linewidth=0.2, marker='o', color='b' )
+    ax.plot( lambda2_list[k][0], lambda1_list[k][0], linewidth=0.2, marker='*', color='r' )
 
 plt.show()

@@ -58,7 +58,7 @@ def solve_PEP1(Q, P, **kwargs):
 
         F[0:n] = L @ z
         F[n] = 0.5 - 0.5 * z @ C @ z
-        F[n+1] = z @ Q @ z - 1
+        F[n+1] = 0.5 * z @ Q @ z - 0.5
 
         return F
 
@@ -102,16 +102,15 @@ def solve_PEP1(Q, P, **kwargs):
 
     print("Initial lambdas = " + str(lambda1))
 
-    for k in range(len(lambda1)):
-        z = Z[:,k]
-        normalization_const = 1/np.sqrt(z @ Q @ z)
-        Z[:,k] = normalization_const * z
+    # for k in range(len(lambda1)):
+    #     z = Z[:,k]
+    #     normalization_const = 1/np.sqrt(z @ Q @ z)
+    #     Z[:,k] = normalization_const * z
 
     num_solutions = len(lambda1)
 
     costs = np.zeros(num_solutions)
     solutions = np.zeros([matrix_shapes[0]+2, num_solutions])
-
     for k in range(num_solutions):
         solutions[0,k] = lambda1[k]
         solutions[1,k] = lambda2[k]
@@ -119,10 +118,14 @@ def solve_PEP1(Q, P, **kwargs):
         costs[k] = np.linalg.norm(compute_F(solutions[:,k]))
 
     lambda1_list, lambda2_list = [], []
-    for _ in range(num_solutions):
+    for k in range(num_solutions):
         lambda1_list.append([])
         lambda2_list.append([])
     
+    for k in range(num_solutions):
+        lambda1_list[k].append(lambda1[k])
+        lambda2_list[k].append(lambda2[k])
+
     # Main loop
     num_iter = 0
     while np.any( costs > tol*np.ones(num_solutions) ) and num_iter < max_iter:
@@ -132,12 +135,60 @@ def solve_PEP1(Q, P, **kwargs):
             solution = solutions[:,k]
 
             F = compute_F(solution)
+            # print("F = " + str(F))
             Jac = compute_Jacobian(solution)
+            # print("Jac = \n" + str(Jac))
+            # print("det(Jac) = " + str(np.linalg.det(Jac)))
             invJac = np.linalg.inv(Jac)
 
             new_solution = solution - step * (invJac @ F)
 
+            # Reprojection into pencil ------------------------------------------------
+
+            # new_lambda1 = new_solution[0]
+            # new_lambda2 = new_solution[1]
+            # new_Z = new_solution[2:]
+
+            # pencil = LinearMatrixPencil2( Q, new_lambda2 * C + P )
+            # new_lambda1 = pencil.eigenvalues
+            # new_Z = pencil.eigenvectors
+
+            # # Delete degenerate eigenvalues
+            # index_to_be_deleted = []
+            # for i in range(len(new_lambda1)):
+            #     if np.abs(new_lambda1[i]) == np.inf:
+            #         index_to_be_deleted.append(i)
+            #     z = new_Z[:,i]
+            #     if np.linalg.norm(C @ z) < accuracy or np.linalg.norm(Q @ z) < accuracy or np.linalg.norm(P @ z) < accuracy:
+            #         index_to_be_deleted.append(i)
+
+            # print(index_to_be_deleted)
+
+            # new_lambda1 = np.delete(new_lambda1, index_to_be_deleted)
+            # new_Z = np.delete(new_Z, index_to_be_deleted, axis = 1)
+
+            # distances = []
+            # for i in range(len(new_lambda1)):
+            #     distance = np.linalg.norm( new_Z[:,i] - new_solution[2:] )
+            #     distances.append( distance )
+
+            # if len(distances) > 0:
+            #     closest = np.argmin(np.array(distances))
+            #     new_lambda1 = new_lambda1[closest]
+            #     new_Z = new_Z[:,closest]
+            # else:
+            #     new_lambda1 = new_solution[0]
+            #     new_Z = new_solution[2:]
+
+            # new_solution[0] = new_lambda1
+            # new_solution[1] = new_lambda2
+            # new_solution[2:] = new_Z
+
+            #--------------------------------------------------------------------------
+
             costs[k] = np.linalg.norm(compute_F(new_solution))
+
+            print("Cost = " + str(costs[k]))
 
             lambda1[k] = new_solution[0]
             lambda2[k] = new_solution[1]
