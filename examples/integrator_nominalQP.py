@@ -5,7 +5,7 @@ from dynamic_systems import PolynomialSystem
 from controllers import NominalQP
 
 ######################################### Configure and create 2D plant ####################################################
-initial_state = [-1.73638977, 10.4183386]
+initial_state = [0.2, 5.0]
 
 G1 = np.array([[1,0],[0,1]])
 G2 = np.array([[0,0],[0,0]])
@@ -58,7 +58,7 @@ cbf1 = QuadraticBarrier(*initial_state, hessian = cbf_params1["Hh"], critical = 
 cbf2 = QuadraticBarrier(*initial_state, hessian = cbf_params2["Hh"], critical = cbf_params2["p0"])
 cbf3 = QuadraticBarrier(*initial_state, hessian = cbf_params3["Hh"], critical = cbf_params3["p0"])
 
-cbfs = [cbf1]
+cbfs = [cbf2]
 
 #################################################### Define controllers ####################################################
 sample_time = .005

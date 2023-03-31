@@ -2,7 +2,6 @@ import sys
 import json
 import importlib
 
-# simulation_file = "integrator_nominalQP"
 simulation_config = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples."+simulation_config, package=None)
 
