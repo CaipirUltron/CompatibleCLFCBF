@@ -28,6 +28,9 @@ plot_config = {
 }
 
 print('Animating simulation...')
+
+print("Equilibria = " + str(logs["equilibria"]))
+
 plotSim = Plot2DSimulation( logs, sim.clf, sim.cbfs, plot_config = plot_config )
 plotSim.animate()
 
