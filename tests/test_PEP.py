@@ -1,11 +1,14 @@
 '''
-Tests the computation of generalized eigenvalues with two-parameter Affine Matrix Pencils
+Tests the computation of generalized eigenvalues with two-parameter Affine Matrix Pencils.
+Can test with known matrices from simulations or random matrices (generated at runtime). 
+Can also save test matrices for latter testing. 
 '''
-import time
-
 import matplotlib.pyplot as plt
 plt.rcParams['text.usetex'] = True
 
+import sys
+import json
+import time
 import numpy as np
 import scipy as sp
 from controllers.compatibility import solve_PEP, LinearMatrixPencil2
@@ -13,6 +16,21 @@ from examples.integrator_nominalQP import clf_params, cbf_params1, cbf_params2, 
 
 is_from_simulation = False
 
+# Generate random matrices ------------------------------------------------------------------------
+n = 2
+dim = n + 1
+
+P = np.random.rand(dim,dim)
+P = P.T @ P
+eigP , _= np.linalg.eig(P)
+P = P/np.max(eigP)
+Q = np.random.rand(dim,dim)
+Q = Q.T @ Q
+eigQ , _= np.linalg.eig(Q)
+Q = Q/np.max(eigQ)
+
+# Use simulation matrices or previously saved ones ------------------------------------------------
+loaded = 0
 if is_from_simulation:
     cbf_params = cbf_params1
     Hv, Hh = clf_params["Hv"], cbf_params["Hh"]
@@ -27,32 +45,32 @@ if is_from_simulation:
     temp_Q = -(Hh @ p0).reshape(n,1)
     Q = np.block([[ Hh       , temp_Q       ], 
                   [ temp_Q.T , p0 @ Hh @ p0 ]])
-else:
-    n = 4
-    dim = n + 1
-
-    P = np.random.rand(dim,dim)
-    P = P.T @ P
-    Q = np.random.rand(dim,dim)
-    Q = Q.T @ Q
+elif len(sys.argv) > 1:
+    loaded = 1
+    test_config = sys.argv[1].replace(".json","")
+    with open(test_config + ".json") as file:
+        print("Loading test: " + test_config + ".json")
+        test_vars = json.load(file)
+    P = np.array(test_vars["P"])
+    Q = np.array(test_vars["Q"])
+    dim = np.shape(P)[0]
+    n = dim - 1
 
 C = sp.linalg.block_diag(np.zeros([n,n]), 1)
 
-# Plot level sets and initial line -----------------------------------------------------------
-init_line = { "angular_coef":  -0.5, "linear_coef" : 5.0 }
-m, p = init_line["angular_coef"], init_line["linear_coef"]
+# Initialize graph -------------------------------------------------------------------------------
+kappa_list, lambda_list = np.linspace(-20, 20, 500), np.linspace(-20, 20, 500)
+K, L = np.meshgrid( kappa_list, lambda_list )
 
 def compute_det(lambda_p, kappa_p):
     L = lambda_p * Q - kappa_p * C - P
     return np.linalg.det(L)
 det = np.frompyfunc(compute_det, 2, 1)
 
-kappa_list, lambda_list = np.linspace(-20, 20, 500), np.linspace(-20, 20, 500)
-K, L = np.meshgrid( kappa_list, lambda_list )
-
 fig, ax = plt.subplots(tight_layout=False)
+
+# Plot level sets -------------------------------------------------------------------------------
 cp = ax.contour(K, L, det( L, K ), 0, colors='black')
-ax.plot( [kappa_list[0], kappa_list[-1]], [ m*kappa_list[0]+p, m*kappa_list[-1]+p], '--', color='green' )
 
 # Plot asymptotes -------------------------------------------------------------------------------
 eigvalsQ_red, _ = np.linalg.eig(Q[0:-1,0:-1])
@@ -65,33 +83,20 @@ max_eigvalsP_red, min_eigvalsP_red = np.max(eigvalsP_red), np.min(eigvalsP_red)
 lambda_inf_min = min_eigvalsP_red/max_eigvalsQ_red
 lambda_inf_max = max_eigvalsP_red/min_eigvalsQ_red
 
-print(lambda_inf_min)
-print(lambda_inf_max)
+# ax.plot( [kappa_list[0], kappa_list[-1]], [ lambda_inf_min, lambda_inf_min ], '--', color='red' )
+# ax.plot( [kappa_list[0], kappa_list[-1]], [ lambda_inf_max, lambda_inf_max ], '--', color='red' )
 
-ax.plot( [kappa_list[0], kappa_list[-1]], [ lambda_inf_min, lambda_inf_min ], '--', color='red' )
-ax.plot( [kappa_list[0], kappa_list[-1]], [ lambda_inf_max, lambda_inf_max ], '--', color='red' )
-# -----------------------------------------------------------------------------------------------
+# General asymptotes
+pencil = LinearMatrixPencil2(Q, C)
+asymptote_angular_coefs = pencil.eigenvalues
+m, p = np.max(asymptote_angular_coefs), 0.0
+print(asymptote_angular_coefs)
+ax.plot( [ kappa_list[0], kappa_list[-1] ], [ m*kappa_list[0]+p, m*kappa_list[-1]+p ], '--', color='red' )
 
-# for k in range(dim):
-#     if np.abs(eigenvalues[k]) < 0.000000001:
-#         z = eigenvectors[:,k]
-#         kappa_inf = - (z @ P @ z) / (z @ C @ z)
-#         ax.plot( [kappa_inf, kappa_inf], [ lambda_list[0], lambda_list[-1] ], '--', color='red' )
-
-# eigenvalues, eigenvectors = np.linalg.eig(P)
-# for k in range(dim):
-#     if np.abs(eigenvalues[k]) < 0.000000001:
-#         z = eigenvectors[:,k]
-#         m_inf = (z @ C @ z) / (z @ Q @ z)
-#         ax.plot( [kappa_list[0], kappa_list[-1]], [ m_inf*kappa_list[0], m_inf*kappa_list[-1]], '--', color='red' )
-
-# eigenvalues, eigenvectors = np.linalg.eig(C)
-# for k in range(dim):
-#     if np.abs(eigenvalues[k]) < 0.000000001:
-#         z = eigenvectors[:,k]
-#         lambda_inf = (z @ P @ z) / (z @ Q @ z)
-#         ax.plot( [kappa_list[0], kappa_list[-1]], [ lambda_inf, lambda_inf ], '--', color='red' )
-# -----------------------------------------------------------------------------------------------
+# Plot level sets and initial line -----------------------------------------------------------
+init_line = { "angular_coef":  m, "linear_coef" : -p }
+m, p = init_line["angular_coef"], init_line["linear_coef"]
+# ax.plot( [kappa_list[0], kappa_list[-1]], [ m*kappa_list[0]+p, m*kappa_list[-1]+p], '--', color='green' )
 
 # Solve PEP and test results --------------------------------------------------------------------
 t = time.time()
@@ -124,4 +129,15 @@ ax.set_ylim(lambda_list[0], lambda_list[-1])
 ax.set_xlabel("$\kappa$")
 ax.set_ylabel("$\lambda$")
 ax.set_title("$\det( \lambda Q - \kappa C - P ) = 0$")
+
 plt.show()
+
+test_vars = {"P": P.tolist(), "Q": Q.tolist()}
+if (~is_from_simulation) and (loaded == 0):
+    print("Save file? Y/N")
+    if str(input()).lower() == "y":
+        print("File name: ")
+        file_name = str(input())
+        with open(file_name+".json", "w") as file:
+            print("Saving test data...")
+            json.dump(test_vars, file, indent=4)

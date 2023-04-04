@@ -69,8 +69,8 @@ def solve_PEP(Q, P, **kwargs):
 
     pencil = LinearMatrixPencil2( -m*Q + C, p*Q - P )
     init_kappas = pencil.eigenvalues
-    if np.any(init_kappas == np.inf):
-        raise Exception("Bad initialization line. Pencil returned +-inf eigenvalues.")
+    # if np.any(init_kappas == np.inf):
+    #     raise Exception("Bad initialization line. Pencil returned +-inf eigenvalues.")
     init_lambdas = m * init_kappas + p
     init_zs = pencil.eigenvectors
     init_guesses = np.vstack([ init_lambdas, init_kappas, init_zs ])
