@@ -210,3 +210,13 @@ def generate_monomials_from_symbols(symbols, d):
             mon = mon*symbols[dim]**row[dim]
         monomials.append( mon )
     return monomials
+
+    # n = len(symbols)
+    # alpha = generate_monomial_list(n, d)
+    # monomials = []
+    # for row in alpha:
+    #     mon = 1
+    #     for dim in range(n-1,0,-1):
+    #         mon = mon*symbols[dim]**row[dim]
+    #     monomials.append( mon )
+    # return monomials

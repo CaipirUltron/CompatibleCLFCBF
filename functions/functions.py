@@ -523,6 +523,12 @@ class PolynomialFunction(Function):
                 Hv[i,j] = delm_i @ ( self._coefficients + self._coefficients.T ) @ delm_j + m @ ( self._coefficients + self._coefficients.T ) @ hessian_m_ij
         return Hv
 
+    def get_shape(self):
+        '''
+        Return the polynomial coefficients.
+        '''
+        return self._coefficients
+
     def get_matrices(self):
         '''
         Return the A matrices.
@@ -535,7 +541,7 @@ class PolynomialFunction(Function):
         '''
         return self._symbols
 
-    def get_monomials(self):
+    def get_kernel(self):
         '''
         Return the monomial basis vector.
         '''
@@ -553,6 +559,14 @@ class PolynomialFunction(Function):
         '''
         return self._degree
 
+
+class PolynomialLyapunov():
+    '''
+    Class for functions that can be approximated by a quadratic.
+    '''
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args)
+        self.set_param(**kwargs)
 
 class ApproxFunction(Function):
     '''
