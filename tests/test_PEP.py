@@ -62,7 +62,9 @@ elif len(sys.argv) > 1:
     n = dim - 1
 
 # Create polynomial CLF-CBF pair -----------------------------------------------------------------
+t = time.time()
 pair = PolynomialCLFCBFPair(P, Q)
+print( "Elapsed " + str(time.time() - t) + " seconds." )
 
 # Initialize graph -------------------------------------------------------------------------------
 kappa_list, lambda_list = np.linspace(-200, 200, 500), np.linspace(-20, 20, 500)
@@ -80,43 +82,34 @@ cp = ax.contour(K, L, det( L, K ), 0, colors='black')
 
 # Plot asymptotes -------------------------------------------------------------------------------
 for m in pair.asymptotes.keys():
-    print(str(m) + ": " + str(pair.asymptotes[m]) + "\n")
     for p in pair.asymptotes[m]:
         if np.abs(m) == np.inf:
             ax.plot( [p, p], [ lambda_list[0], lambda_list[-1]], '--', color='green' )
             continue
         ax.plot( [kappa_list[0], kappa_list[-1]], [ m*kappa_list[0]+p, m*kappa_list[-1]+p], '--', color='green' )
 
-# Plot level sets and initial line --------------------------------------------------------------
-init_line = { "angular_coef":  -0.05, "linear_coef" : 4.0 }
-m, p = init_line["angular_coef"], init_line["linear_coef"]
-ax.plot( [kappa_list[0], kappa_list[-1]], [ m*kappa_list[0]+p, m*kappa_list[-1]+p], '--', color='red' )
+# Plot initial lines ----------------------------------------------------------------------------
+for line in pair.initial_lines:
+    m, p = line["angular_coef"], line["linear_coef"]
+    ax.plot( [kappa_list[0], kappa_list[-1]], [ m*kappa_list[0]+p, m*kappa_list[-1]+p], '--', color='red' )
 
-# Solve PEP and test results --------------------------------------------------------------------
-t = time.time()
-lambda_p, kappa_p, Z = solve_PEP( pair.Q, pair.P, initial_line = init_line, max_iter = 1000 )
-print( "Elapsed " + str(time.time() - t) + " seconds." )
+for k in range(len(pair.lambdas)):
 
-for k in range(len(lambda_p)):
-
-    L = ( lambda_p[k] * pair.Q - kappa_p[k] * pair.C - pair.P )
-    z = Z[:,k]
+    L = ( pair.lambdas[k] * pair.Q - pair.kappas[k] * pair.C - pair.P )
+    z = np.hstack([pair.equilibria[:,k], 1.0])
 
     error_pencil = np.linalg.norm(L @ z)
-    last_kernel_elem = z @ pair.C @ z
     error_boundaries = z @ pair.Q @ z - 1
 
-    phrase1 = str(k+1) + "-th solution with lambda = " + str(lambda_p[k]) + "\n"
-    phrase2 = "Kappa = " + str(kappa_p[k]) + "\n"
-    phrase3 = "with eigenvector = " + str(z)
-    print(phrase1+phrase2+phrase3)
+    phrase1 = str(k+1) + "-th solution with lambda = " + str(pair.lambdas[k]) + "\n"
+    phrase2 = "with equilibrium point = " + str(pair.equilibria[:,k])
+    print(phrase1+phrase2)
 
     print("Error pencil = " + str(error_pencil))
-    print("Last kernel element = " + str(last_kernel_elem))
     print("Error boundary = " + str(error_boundaries))
 
-    ax.plot( kappa_p[k], lambda_p[k], marker='o' )
-    ax.text( kappa_p[k], lambda_p[k], str(k+1))
+    ax.plot( pair.kappas[k], pair.lambdas[k], marker='o' )
+    ax.text( pair.kappas[k], pair.lambdas[k], str(k+1))
 
 ax.set_xlim(kappa_list[0], kappa_list[-1])
 ax.set_ylim(lambda_list[0], lambda_list[-1])

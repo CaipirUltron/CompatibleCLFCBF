@@ -28,8 +28,9 @@ plot_config = {
 }
 
 print('Animating simulation...')
-
-print("Equilibria = " + str(logs["equilibria"]))
+print("Equilibrium points = ")
+for eq in logs["equilibria"]:
+    print(str(eq)+"\n")
 
 plotSim = Plot2DSimulation( logs, sim.clf, sim.cbfs, plot_config = plot_config )
 plotSim.animate()

@@ -5,14 +5,17 @@ from scipy.linalg import null_space
 
 import numpy as np
 
+ZERO_ACCURACY = 0.000000001
+
+
 def solve_PEP(Q, P, **kwargs):
     '''
-    Solves the eigenproblem of the type: (lambda1 * Q - lambda2 * C - P) @ z = 0, lambda1 = lambda_2 + z.T @ P @ z
-    where P and Q are ( n x n ) p.s.d. matrices and C is a nilpotent matrix with index 2.
+    Solves the eigenproblem of the type: (\lambda * Q - \kappa * C - P) @ z = 0, z.T @ Q @ z = z.T @ C @ z = 1.0, \lambda > 0.
+    where P and Q are ( n x n ) p.s.d. matrices and C is a nilpotent matrix.
 
-    Returns: lambda1:    n-array of mu1 eigenvalues, repeated according to its multiplicity
-             lambda2:    n-array of mu2 eigenvalues, repeated according to its multiplicity
-             Z:          (n x n)-array of lambda values, each column corresponding to the corresponding eigenpair (mu1, mu2)
+    Returns: \lambda:   n-array, repeated according to its multiplicity
+             \kappa:    n-array, repeated according to its multiplicity
+             Z:         (n x n)-array, each column corresponding to the corresponding eigenvector z
     '''
     if np.shape(Q) != np.shape(P):
         raise Exception("Matrix shapes are not compatible with given initial value.")
@@ -24,7 +27,6 @@ def solve_PEP(Q, P, **kwargs):
     C = np.zeros(matrix_shapes)
     C[-1,-1] = 1
 
-    accuracy = 0.000001
     max_iter = 10000
     initial_line = { "angular_coef": -1.0,
                      "linear_coef" :  0.0 }
@@ -69,10 +71,14 @@ def solve_PEP(Q, P, **kwargs):
 
     pencil = LinearMatrixPencil2( -m*Q + C, p*Q - P )
     init_kappas = pencil.eigenvalues
-    # if np.any(init_kappas == np.inf):
-    #     raise Exception("Bad initialization line. Pencil returned +-inf eigenvalues.")
+    # Remove infinite eigenvalues
+    index_inf, = np.where(np.abs(init_kappas) == np.inf)
+    init_kappas = np.delete(init_kappas, index_inf)
+
     init_lambdas = m * init_kappas + p
     init_zs = pencil.eigenvectors
+    init_zs = np.delete(init_zs, index_inf, axis=1)
+
     init_guesses = np.vstack([ init_lambdas, init_kappas, init_zs ])
 
     # Main loop ---------------------------------------------------------------------------------
@@ -95,7 +101,7 @@ def solve_PEP(Q, P, **kwargs):
         z = Z[:,k]
         if z[-1] < 0:
             Z[:,k] = -Z[:,k]
-        if np.linalg.norm(L @ z) > accuracy or np.abs( z @ C @ z - 1 ) > accuracy or np.abs( z @ Q @ z - 1 ) > accuracy:
+        if np.linalg.norm(L @ z) > ZERO_ACCURACY or np.abs( z @ C @ z - 1 ) > ZERO_ACCURACY or np.abs( z @ Q @ z - 1 ) > ZERO_ACCURACY or lambdas[k] <= 0:
             index_to_be_deleted.append(k)
 
     lambdas = np.delete(lambdas, index_to_be_deleted)
@@ -105,12 +111,153 @@ def solve_PEP(Q, P, **kwargs):
     return lambdas, kappas, Z
 
 
+class PolynomialCLFCBFPair():
+    '''
+    Class for polynomial CLF-CBF pairs of the form:
+    V(x,P) = m(x) P m(x) and h(x,Q) = m(x) Q m(x) - 1. 
+    In this initial implementation, the pair is represented by their respective shape matrices P and Q.
+    '''
+    def __init__(self, P, Q, max_iter = 1000):
+        self.update(P = P, Q = Q, max_iter = max_iter)
+
+    def update(self, **kwargs):
+        '''
+        Updates the CLF-CBF pair.
+        '''
+        for key in kwargs:
+            if key == "P":
+                self.P = kwargs[key]
+                continue
+            if key == "Q":
+                self.Q = kwargs[key]
+                continue
+            if key == "max_iter":
+                self.max_iter = kwargs[key]
+                continue
+
+        self.pencil = LinearMatrixPencil2( self.Q, self.P )
+        self.n = self.pencil.dim-1
+
+        self.C = scipy.linalg.block_diag(np.zeros([self.n,self.n]), 1) # C matrix for PEP
+
+        self.asymptotes = self.compute_asymptotes()
+        self.lambdas, self.kappas, self.equilibria, self.initial_lines = self.compute_equilibrium()
+
+    def compute_asymptotes(self):
+        '''
+        Computes the asymptotes of the graph det( lambda Q - kappa C - P ) = 0.
+        Returns a dict whose keys are the angular coefficients of the asymptotes.
+        The values for each key are: the associated linear coefficient, in case that angular coefficient (key) is finite;
+                                     the associated horizontal position of the asymptote, in case the angular coefficient is +-inf (vertical asymptote).
+        '''
+        # Compute angular coefficients of the asymptotes
+        pencil_angular_coefs = LinearMatrixPencil2(self.Q, self.C)
+        angular_coefs = pencil_angular_coefs.eigenvalues
+        asymptotes = { angular_coef: [] for angular_coef in angular_coefs }
+
+        # Compute linear coefficients of the asymptotes
+        sorted_eigenvalues = np.sort(self.pencil.eigenvalues)
+        to_be_deleted = []
+        for i in range(len(sorted_eigenvalues)):
+            if np.abs(sorted_eigenvalues[i]) == np.inf:
+                to_be_deleted.append(i)
+        sorted_eigenvalues = np.delete(sorted_eigenvalues, to_be_deleted)
+        differences = np.diff(sorted_eigenvalues)
+        '''
+        Define initializers for the algorithm.
+        If +-inf eigenvalues were found, bound the initiliazers to be inside the limits of the finite spectra: important to prevent singularities.
+        '''
+        initializers = []
+        initializers.append( sorted_eigenvalues[0] - differences[0]/2 )
+        for k in range(len(differences)):
+            initializers.append( sorted_eigenvalues[k] + differences[k]/2 )
+        initializers.append( sorted_eigenvalues[-1] + differences[-1]/2 )
+
+        for i in range(len(angular_coefs)):
+            if np.abs(angular_coefs[i]) == np.inf:
+                null_space_Q = null_space(self.Q).reshape(self.n+1)
+                sol = - (null_space_Q @ self.P @ null_space_Q) / (null_space_Q @ self.C @ null_space_Q)
+                asymptotes[angular_coefs[i]].append(sol)
+                continue
+            def compute_trace(s):
+                    invPencil = np.linalg.inv(self.pencil.value(s))
+                    return np.trace( invPencil @ ( angular_coefs[i]*self.Q - self.C ) )
+            for k in range(len(initializers)):
+                sols, infodict, ier, mesg = fsolve( compute_trace, initializers[k], factor=0.1, full_output = True )
+                if ier == 1:
+                    for sol in sols:
+                        if np.any( np.abs(asymptotes[angular_coefs[i]] - sol) < 0.00001 ):
+                            continue
+                        asymptotes[angular_coefs[i]].append(sol)
+
+        return asymptotes
+
+    def compute_equilibrium(self):
+        '''
+        Computes all equilibrium points of the CLF-CBF pair, using the Parametric Eigenvalue Problem (PEP)
+        '''
+        # Separate horizontal from non-horizontal asymptotes.
+        # Non-horizontal asymptotes are represented by equation \kappa = m \lambda + p
+        lambda_positions = []
+        non_horizontal_lines = []
+        for key in self.asymptotes.keys():
+            if np.abs(key) < ZERO_ACCURACY:
+                lambda_positions = lambda_positions + self.asymptotes[key]
+            else:
+                if np.abs(key) == np.inf:
+                    non_horizontal = [ ( 0.0,lin_coef ) for lin_coef in self.asymptotes[key] ]
+                else:
+                    non_horizontal = [ ( 1/key, -lin_coef/key ) for lin_coef in self.asymptotes[key] ]
+                non_horizontal_lines = non_horizontal_lines + non_horizontal
+
+        # Compute intersections with non-horizontal asymptotes
+        diffs = np.diff(lambda_positions)
+        intersection_pts = []
+        # diffs = np.hstack([diffs])
+        # lambda_positions = np.hstack([lambda_positions[0], lambda_positions])
+        num_internal_lines = 1
+        lambda_line_positions = []
+        lambda_line_positions.append( lambda_positions[0] - diffs[0]/2 )
+        for k in range(len(diffs)):
+            two_line_positions = [ lambda_positions[k] + i*diffs[k]/(num_internal_lines+1) for i in range(1,num_internal_lines+1) ]
+            lambda_line_positions = lambda_line_positions + two_line_positions
+            for non_horizontal in non_horizontal_lines:
+                vert_pos = lambda_positions[k] + diffs[k]/2
+                m, p = non_horizontal[0], non_horizontal[1]
+                kappa_val, lambda_val = m*vert_pos + p, vert_pos
+                intersection_pts.append( (kappa_val, lambda_val) )
+        lambda_line_positions.append( lambda_positions[-1] + diffs[-1]/2 )
+
+        # Compute the initial lines
+        init_lines = []
+        for lambda_line_pos in lambda_line_positions:
+            init_lines.append( { "angular_coef":  0.0, "linear_coef" : lambda_line_pos } )
+
+        # Solves the PEP problem for many different initial lines and store non-repeating results
+        lambdas, kappas, equilibrium_points = np.array([], dtype=float), np.array([], dtype=float), np.array([], dtype=float).reshape(self.n,0)
+        for line in init_lines:
+            lambda_p, kappa_p, Z = solve_PEP( self.Q, self.P, initial_line = line, max_iter = self.max_iter )
+            for i in range(len(lambda_p)):
+                equal_lambda = np.any( np.abs( lambda_p[i] - lambdas ) < ZERO_ACCURACY )
+                equal_kappa = np.any( np.abs( kappa_p[i] - kappas ) < ZERO_ACCURACY )
+                if equal_lambda:
+                    continue
+                if equal_kappa:
+                    continue
+                eq = Z[0:-1,i].reshape(self.n,1)
+                # if np.any( np.linalg.norm( eq - equilibrium_points, axis=0 ) < ZERO_ACCURACY ):
+                #     continue
+                lambdas = np.hstack([lambdas, lambda_p[i]])
+                kappas = np.hstack([kappas, kappa_p[i]])
+                equilibrium_points = np.hstack([equilibrium_points, eq])
+
+        return lambdas, kappas, equilibrium_points, init_lines
+
+        
 class LinearMatrixPencil2():
     '''
     Class for regular, symmetric linear matrix pencils of the form P(\lambda) = \lambda A - B, where A and B are p.s.d. matrices.
-    '''
-    accuracy = 0.0000000001
-    
+    '''    
     def __init__(self, A, B, **kwargs):
 
         dimA = A.shape
@@ -141,7 +288,7 @@ class LinearMatrixPencil2():
 
         self.eigenvalues = np.zeros(self.dim)
         for k in range(self.dim):
-            if np.abs(self.schurB_vec[k]) > LinearMatrixPencil2.accuracy:
+            if np.abs(self.schurB_vec[k]) > ZERO_ACCURACY:
                 self.eigenvalues[k] = self.schurA_vec[k]/self.schurB_vec[k]
             else:
                 self.eigenvalues[k] = np.sign(self.schurA_vec[k]) * np.inf
@@ -154,7 +301,7 @@ class LinearMatrixPencil2():
             else:
                 eig, Q = np.linalg.eig( self.schurA_vec[k] * self._A - self.schurB_vec[k] * self._B )
             for i in range(len(eig)):
-                if np.abs(eig[i]) <= LinearMatrixPencil2.accuracy:
+                if np.abs(eig[i]) <= ZERO_ACCURACY:
                     self.eigenvectors[:,k] = Q[:,i]
 
     def solve_nonlinear(self, const):
@@ -185,86 +332,6 @@ class LinearMatrixPencil2():
         ret_str = ret_str + 'A = ' + self._A.__str__() + '\n'
         ret_str = ret_str + 'B = ' + self._B.__str__()
         return ret_str
-
-
-class PolynomialCLFCBFPair():
-    '''
-    Class for polynomial CLF-CBF pairs of the form:
-    V(x,P) = m(x) P m(x) and h(x,Q) = m(x) Q m(x) - 1. 
-    In this initial implementation, the pair is represented by their respective shape matrices P and Q.
-    '''
-    def __init__(self, P, Q):
-        self.update(P = P, Q = Q)
-
-    def update(self, **kwargs):
-        '''
-        Updates the CLF-CBF pair.
-        '''
-        for key in kwargs:
-            if key == "P":
-                self.P = kwargs[key]
-            if key == "Q":
-                self.Q = kwargs[key]
-
-        self.pencil = LinearMatrixPencil2( self.Q, self.P )
-        self.dim = self.pencil.dim
-
-        self.C = scipy.linalg.block_diag(np.zeros([self.dim-1,self.dim-1]), 1) # C matrix for PEP
-
-        self.asymptotes = self.compute_asymptotes()
-        self.compute_equilibrium()
-
-    def compute_asymptotes(self):
-        '''
-        Computes the asymptotes of the graph det( lambda Q - kappa C - P ) = 0
-        '''
-        # Compute angular coefficients of the asymptotes
-        pencil_angular_coefs = LinearMatrixPencil2(self.Q, self.C)
-        angular_coefs = pencil_angular_coefs.eigenvalues
-        asymptotes = { angular_coef: [] for angular_coef in angular_coefs }
-
-        # Compute linear coefficients of the asymptotes
-        sorted_eigenvalues = np.sort(self.pencil.eigenvalues)
-        to_be_deleted = []
-        for i in range(len(sorted_eigenvalues)):
-            if np.abs(sorted_eigenvalues[i]) == np.inf:
-                to_be_deleted.append(i)
-        sorted_eigenvalues = np.delete(sorted_eigenvalues, to_be_deleted)
-        differences = np.diff(sorted_eigenvalues)
-        '''
-        Define initializers for the algorithm.
-        If +-inf eigenvalues were found, bound the initiliazers to be inside the limits of the finite spectra: important to prevent singularities.
-        '''
-        initializers = []
-        initializers.append( sorted_eigenvalues[0] - differences[0]/2 )
-        for k in range(len(differences)):
-            initializers.append( sorted_eigenvalues[k] + differences[k]/2 )
-        initializers.append( sorted_eigenvalues[-1] + differences[-1]/2 )
-
-        for i in range(len(angular_coefs)):
-            if np.abs(angular_coefs[i]) == np.inf:
-                null_space_Q = null_space(self.Q).reshape(self.dim)
-                sol = - (null_space_Q @ self.P @ null_space_Q) / (null_space_Q @ self.C @ null_space_Q)
-                asymptotes[angular_coefs[i]].append(sol)
-                continue
-            def compute_trace(s):
-                    invPencil = np.linalg.inv(self.pencil.value(s))
-                    return np.trace( invPencil @ ( angular_coefs[i]*self.Q - self.C ) )
-            for k in range(len(initializers)):
-                sols, infodict, ier, mesg = fsolve( compute_trace, initializers[k], factor=0.1, full_output = True )
-                if ier == 1:
-                    for sol in sols:
-                        if np.any( np.abs(asymptotes[angular_coefs[i]] - sol) < 0.00001 ):
-                            continue
-                        asymptotes[angular_coefs[i]].append(sol)
-
-        return asymptotes
-
-    def compute_equilibrium(self):
-        '''
-        Computes all equilibrium points of the CLF-CBF pair, using the Parametric Eigenvalue Problem (PEP)
-        '''
-        pass
 
 
 class LinearMatrixPencil():
