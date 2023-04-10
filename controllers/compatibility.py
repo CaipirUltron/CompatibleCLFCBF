@@ -1,11 +1,10 @@
 import scipy
 from scipy import signal
-from scipy.optimize import fsolve
+from scipy.optimize import fsolve, minimize
 from scipy.linalg import null_space
-
 import numpy as np
 
-ZERO_ACCURACY = 0.000000001
+ZERO_ACCURACY = 0.00000001
 
 
 def solve_PEP(Q, P, **kwargs):
@@ -24,20 +23,36 @@ def solve_PEP(Q, P, **kwargs):
     if matrix_shapes[0] != matrix_shapes[1]:
         raise Exception("Matrices are not square.")
 
+    dim = matrix_shapes[0]
+
     C = np.zeros(matrix_shapes)
     C[-1,-1] = 1
 
     max_iter = 10000
-    initial_line = { "angular_coef": -1.0,
-                     "linear_coef" :  0.0 }
     for key in kwargs.keys():
         aux_key = key.lower()
         if aux_key == "initial_line":
             initial_line = kwargs[key]
             continue
+        if aux_key == "initial_points":
+            initial_points = kwargs[key]
+            continue
         if aux_key == "max_iter":
             max_iter = kwargs[key]
             continue
+
+    def compute_L(lambda_p, kappa_p):
+        return lambda_p * Q - kappa_p * C - P
+
+    def compute_det_gradient(lambda_p, kappa_p):
+        L = compute_L(lambda_p, kappa_p)
+        grad_det_kappa = -np.linalg.det(L)*np.trace( np.linalg.inv(L)*C )
+        grad_det_lambda = np.linalg.det(L)*np.trace( np.linalg.inv(L)*Q )
+        return np.array([grad_det_kappa, grad_det_lambda])
+
+    def compute_det(solution):
+        L = solution[1] * Q - solution[0] * C - P
+        return np.linalg.det(L)**2
 
     def compute_F(solution):
         '''
@@ -46,7 +61,7 @@ def solve_PEP(Q, P, **kwargs):
         lambda_p, kappa_p, z = solution[0], solution[1], solution[2:]
         n = len(z)
         F = np.zeros(n+2)
-        L = lambda_p * Q - kappa_p * C - P
+        L = compute_L(lambda_p, kappa_p)
         F[0:n] = L @ z
         F[n] = 0.5 - 0.5 * z @ C @ z
         F[n+1] = 0.5 * z @ Q @ z - 0.5
@@ -58,35 +73,56 @@ def solve_PEP(Q, P, **kwargs):
         '''        
         lambda_p, kappa_p, z = solution[0], solution[1], solution[2:]
         n = len(z)
-        L = lambda_p * Q - kappa_p * C - P
+        L = compute_L(lambda_p, kappa_p)
         Jac1 = np.vstack( [ (Q @ z).reshape(n,1), 0, 0 ] )
         Jac2 = np.vstack( [ -(C @ z).reshape(n,1), 0, 0 ] )
         Jac3 = np.vstack( [ L, -(C @ z).reshape(1,n), (Q @ z).reshape(1,n) ] )
         Jac = np.hstack([ Jac1, Jac2, Jac3 ])
         return Jac
 
+    init_lambdas = np.random.rand()
+    init_kappas = np.random.rand()
+    init_zs = np.random.rand(dim)
+
     # Initial guess using line-based projection
-    m = initial_line["angular_coef"]
-    p = initial_line["linear_coef"]
+    if 'initial_line' in locals():
+        m = initial_line["angular_coef"]
+        p = initial_line["linear_coef"]
 
-    pencil = LinearMatrixPencil2( -m*Q + C, p*Q - P )
-    init_kappas = pencil.eigenvalues
-    # Remove infinite eigenvalues
-    index_inf, = np.where(np.abs(init_kappas) == np.inf)
-    init_kappas = np.delete(init_kappas, index_inf)
+        pencil = LinearMatrixPencil2( -m*Q + C, p*Q - P )
+        init_kappas = pencil.eigenvalues
+        # Remove infinite eigenvalues
+        index_inf, = np.where(np.abs(init_kappas) == np.inf)
+        init_kappas = np.delete(init_kappas, index_inf)
 
-    init_lambdas = m * init_kappas + p
-    init_zs = pencil.eigenvectors
-    init_zs = np.delete(init_zs, index_inf, axis=1)
+        init_lambdas = m * init_kappas + p
+        init_zs = pencil.eigenvectors
+        init_zs = np.delete(init_zs, index_inf, axis=1)
+
+    # Initial guess using points in the kappa x lambda plane and random initial eigenvectors
+    if 'initial_points' in locals():
+        init_kappas = np.array([], dtype=float)
+        init_lambdas = np.array([], dtype=float)
+        init_zs = np.array([], dtype=float).reshape(dim,0)
+        for pt in initial_points.T:
+            res = minimize(compute_det, pt)
+            solution = res.x
+            init_kappas = np.hstack([init_kappas, solution[0]])
+            init_lambdas = np.hstack([init_lambdas, solution[1]])
+
+            L = compute_L(solution[1],solution[0])
+            eigens, eigenvecs = np.linalg.eig(L)
+            z = eigenvecs[np.where( np.abs(eigens) < ZERO_ACCURACY )]
+            init_zs = np.hstack([init_zs, z.reshape(dim,1)])
 
     init_guesses = np.vstack([ init_lambdas, init_kappas, init_zs ])
 
     # Main loop ---------------------------------------------------------------------------------
-    num_solutions = len(init_lambdas)
-    lambdas = np.zeros(num_solutions)
-    kappas = np.zeros(num_solutions)
-    Z = np.zeros([matrix_shapes[0], num_solutions])
-    for k in range(num_solutions):
+    num_points = len(init_lambdas)
+    lambdas = np.zeros(num_points)
+    kappas = np.zeros(num_points)
+    Z = np.zeros([matrix_shapes[0], num_points])
+    for k in range(num_points):
         solution = fsolve(compute_F, init_guesses[:,k], maxfev = max_iter, factor = 0.1)
         # solution = fsolve(compute_F, init_guesses[:,k], fprime = compute_Jac, maxfev = max_iter, factor = 0.1)
 
@@ -96,7 +132,7 @@ def solve_PEP(Q, P, **kwargs):
 
     # Filter bad points -------------------------------------------------------------------------
     index_to_be_deleted = []
-    for k in range(num_solutions):
+    for k in range(num_points):
         L = (lambdas[k] * Q - kappas[k] * C - P)
         z = Z[:,k]
         if z[-1] < 0:
@@ -108,7 +144,7 @@ def solve_PEP(Q, P, **kwargs):
     kappas = np.delete(kappas, index_to_be_deleted)
     Z = np.delete(Z, index_to_be_deleted, axis = 1)
 
-    return lambdas, kappas, Z
+    return lambdas, kappas, Z, init_kappas, init_lambdas
 
 
 class PolynomialCLFCBFPair():
@@ -141,7 +177,7 @@ class PolynomialCLFCBFPair():
         self.C = scipy.linalg.block_diag(np.zeros([self.n,self.n]), 1) # C matrix for PEP
 
         self.asymptotes = self.compute_asymptotes()
-        self.lambdas, self.kappas, self.equilibria, self.initial_lines = self.compute_equilibrium()
+        self.lambdas, self.kappas, self.equilibria, self.initial_points = self.compute_equilibrium()
 
     def compute_asymptotes(self):
         '''
@@ -211,47 +247,98 @@ class PolynomialCLFCBFPair():
                 non_horizontal_lines = non_horizontal_lines + non_horizontal
 
         # Compute intersections with non-horizontal asymptotes
-        diffs = np.diff(lambda_positions)
-        intersection_pts = []
-        # diffs = np.hstack([diffs])
-        # lambda_positions = np.hstack([lambda_positions[0], lambda_positions])
-        num_internal_lines = 1
-        lambda_line_positions = []
-        lambda_line_positions.append( lambda_positions[0] - diffs[0]/2 )
-        for k in range(len(diffs)):
-            two_line_positions = [ lambda_positions[k] + i*diffs[k]/(num_internal_lines+1) for i in range(1,num_internal_lines+1) ]
-            lambda_line_positions = lambda_line_positions + two_line_positions
+        intersection_pts = np.array([], dtype=float).reshape(2,0)
+        for k in range(len(lambda_positions)):
+            vert_pos = lambda_positions[k]
             for non_horizontal in non_horizontal_lines:
-                vert_pos = lambda_positions[k] + diffs[k]/2
                 m, p = non_horizontal[0], non_horizontal[1]
                 kappa_val, lambda_val = m*vert_pos + p, vert_pos
-                intersection_pts.append( (kappa_val, lambda_val) )
-        lambda_line_positions.append( lambda_positions[-1] + diffs[-1]/2 )
+                pt = np.array([kappa_val, lambda_val]).reshape(2,1)
+                intersection_pts = np.hstack([intersection_pts, pt])
+        diffs = np.diff(intersection_pts)
 
-        # Compute the initial lines
-        init_lines = []
-        for lambda_line_pos in lambda_line_positions:
-            init_lines.append( { "angular_coef":  0.0, "linear_coef" : lambda_line_pos } )
+        # Compute random initial points
+        def generate_pts(center, R, n):
+            '''
+            Generates n random points inside a circle of radius R centered on center, 
+            filtering points with negative y-value.
+            '''
+            pts = np.array([], dtype=float).reshape(2,0)
+            for _ in range(n):
+                pt = np.random.normal( center, R, 2 )
+                # if pt[1]>=0:
+                pts = np.hstack([pts, pt.reshape(2,1)])
+            return pts
+
+        # num_internal_points = 10
+        # intermediate_pts = np.array([], dtype=float).reshape(2,0)
+        # center = intersection_pts[:,0]
+        # radius = 0.5*np.linalg.norm(diffs[:,0])
+        # intermediate_pts = np.hstack([intermediate_pts, generate_pts(center, radius, num_internal_points) ])
+        # for k in range(diffs.shape[1]):
+        #     center = intersection_pts[:,k] + diffs[:,k]/2
+        #     radius = 0.5*np.linalg.norm(diffs[:,k])
+        #     intermediate_pts = np.hstack([intermediate_pts, generate_pts(center, radius, num_internal_points) ])
+        # center = intersection_pts[:,-1]
+        # radius = 0.5*np.linalg.norm(diffs[:,-1])
+        # intermediate_pts = np.hstack([intermediate_pts, generate_pts(center, radius, num_internal_points) ])
+
+        # Compute random initial points
+        num_internal_points = 10
+        intermediate_pts = np.array([], dtype=float).reshape(2,0)
+        # for i in range(num_internal_points):
+        #     first_pt = intersection_pts[:,0] - i*diffs[:,0]/(num_internal_points) + np.random.normal(0,0.1,2)
+        #     intermediate_pts = np.hstack([intermediate_pts, first_pt.reshape(2,1)])
+        for k in range(np.shape(diffs)[1]):
+            for i in range(num_internal_points):
+                d = np.linalg.norm(diffs[:,k])
+                vert_pt = intersection_pts[:,k] + i*diffs[:,k]/(num_internal_points)
+                hor_pt = intersection_pts[:,k] + (-num_internal_points/2 + i)*np.array([d, 0.0])/(num_internal_points)
+                intermediate_pts = np.hstack([intermediate_pts, vert_pt.reshape(2,1)])
+                intermediate_pts = np.hstack([intermediate_pts, hor_pt.reshape(2,1)])
+        for i in range(num_internal_points):
+            last_vert_pt = intersection_pts[:,-1] + i*diffs[:,-1]/(num_internal_points)
+            last_hor_pt = intersection_pts[:,-1] + (-num_internal_points/2 + i)*np.array([d, 0.0])/(num_internal_points)
+            intermediate_pts = np.hstack([intermediate_pts, last_vert_pt.reshape(2,1)])
+            intermediate_pts = np.hstack([intermediate_pts, last_hor_pt.reshape(2,1)])
+
+        # # Compute intermediary points for defining initial lines
+        # num_internal_lines = 2
+        # intermediate_pts = np.array([], dtype=float).reshape(2,0)
+        # first_pt = intersection_pts[:,0] - diffs[:,0]/2
+        # intermediate_pts = np.hstack([intermediate_pts, first_pt.reshape(2,1)])
+        # for k in range(np.shape(diffs)[1]):
+        #     for i in range(1,num_internal_lines+1):
+        #         pt = intersection_pts[:,k] + i*diffs[:,k]/(num_internal_lines+1)
+        #         intermediate_pts = np.hstack([intermediate_pts, pt.reshape(2,1)])
+        # last_pt = intersection_pts[:,-1] + diffs[:,-1]/2
+        # intermediate_pts = np.hstack([intermediate_pts, last_pt.reshape(2,1)])
+
+        # # Compute the initial lines
+        # init_lines = []
+        # for pt in intermediate_pts.T:
+        #     m = 0.6
+        #     p = pt[1] - m*pt[0]
+        #     init_lines.append( { "angular_coef": m, "linear_coef" : p } )
 
         # Solves the PEP problem for many different initial lines and store non-repeating results
         lambdas, kappas, equilibrium_points = np.array([], dtype=float), np.array([], dtype=float), np.array([], dtype=float).reshape(self.n,0)
-        for line in init_lines:
-            lambda_p, kappa_p, Z = solve_PEP( self.Q, self.P, initial_line = line, max_iter = self.max_iter )
-            for i in range(len(lambda_p)):
-                equal_lambda = np.any( np.abs( lambda_p[i] - lambdas ) < ZERO_ACCURACY )
-                equal_kappa = np.any( np.abs( kappa_p[i] - kappas ) < ZERO_ACCURACY )
-                if equal_lambda:
-                    continue
-                if equal_kappa:
-                    continue
-                eq = Z[0:-1,i].reshape(self.n,1)
-                # if np.any( np.linalg.norm( eq - equilibrium_points, axis=0 ) < ZERO_ACCURACY ):
-                #     continue
-                lambdas = np.hstack([lambdas, lambda_p[i]])
-                kappas = np.hstack([kappas, kappa_p[i]])
-                equilibrium_points = np.hstack([equilibrium_points, eq])
+        # for point in intermediate_pts:
+        lambda_p, kappa_p, Z, init_kappas, init_lambdas = solve_PEP( self.Q, self.P, initial_points = intermediate_pts, max_iter = self.max_iter )
+        for i in range(len(lambda_p)):
+            equal_lambda = np.any( np.abs( lambda_p[i] - lambdas ) < ZERO_ACCURACY )
+            equal_kappa = np.any( np.abs( kappa_p[i] - kappas ) < ZERO_ACCURACY )
+            eq = Z[0:-1,i].reshape(self.n,1)
+            equal_eigenvec = np.any( np.linalg.norm( eq - equilibrium_points, axis=0 ) < ZERO_ACCURACY )
+            if equal_lambda and equal_eigenvec:
+                continue
+            lambdas = np.hstack([lambdas, lambda_p[i]])
+            kappas = np.hstack([kappas, kappa_p[i]])
+            equilibrium_points = np.hstack([equilibrium_points, eq])
 
-        return lambdas, kappas, equilibrium_points, init_lines
+        init_pts = np.vstack([init_kappas, init_lambdas])
+
+        return lambdas, kappas, equilibrium_points, init_pts
 
         
 class LinearMatrixPencil2():

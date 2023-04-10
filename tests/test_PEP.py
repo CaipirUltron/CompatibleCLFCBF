@@ -89,9 +89,12 @@ for m in pair.asymptotes.keys():
         ax.plot( [kappa_list[0], kappa_list[-1]], [ m*kappa_list[0]+p, m*kappa_list[-1]+p], '--', color='green' )
 
 # Plot initial lines ----------------------------------------------------------------------------
-for line in pair.initial_lines:
-    m, p = line["angular_coef"], line["linear_coef"]
-    ax.plot( [kappa_list[0], kappa_list[-1]], [ m*kappa_list[0]+p, m*kappa_list[-1]+p], '--', color='red' )
+# for line in pair.initial_lines:
+#     m, p = line["angular_coef"], line["linear_coef"]
+#     ax.plot( [kappa_list[0], kappa_list[-1]], [ m*kappa_list[0]+p, m*kappa_list[-1]+p], '--', color='red' )
+
+# Plot initial points ---------------------------------------------------------------------------
+ax.plot( pair.initial_points[0,:], pair.initial_points[1,:], '*', color='red' )
 
 for k in range(len(pair.lambdas)):
 
