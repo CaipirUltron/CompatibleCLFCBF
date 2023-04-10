@@ -58,7 +58,7 @@ cbf1 = QuadraticBarrier(*initial_state, hessian = cbf_params1["Hh"], critical = 
 cbf2 = QuadraticBarrier(*initial_state, hessian = cbf_params2["Hh"], critical = cbf_params2["p0"])
 cbf3 = QuadraticBarrier(*initial_state, hessian = cbf_params3["Hh"], critical = cbf_params3["p0"])
 
-cbfs = [cbf2]
+cbfs = [cbf1]
 
 #################################################### Define controllers ####################################################
 sample_time = .005

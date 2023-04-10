@@ -14,8 +14,8 @@ from scipy.linalg import null_space
 from controllers.compatibility import solve_PEP, PolynomialCLFCBFPair
 from examples.integrator_nominalQP import clf_params, cbf_params1, cbf_params2, cbf_params3
 
-is_from_simulation = True
-cbf_params = cbf_params2
+is_from_simulation = False
+cbf_params = cbf_params1
 
 # Generate random matrices ------------------------------------------------------------------------
 n = 2
@@ -89,12 +89,12 @@ for m in pair.asymptotes.keys():
         ax.plot( [kappa_list[0], kappa_list[-1]], [ m*kappa_list[0]+p, m*kappa_list[-1]+p], '--', color='green' )
 
 # Plot initial lines ----------------------------------------------------------------------------
-# for line in pair.initial_lines:
-#     m, p = line["angular_coef"], line["linear_coef"]
-#     ax.plot( [kappa_list[0], kappa_list[-1]], [ m*kappa_list[0]+p, m*kappa_list[-1]+p], '--', color='red' )
+for line in pair.initial_lines:
+    m, p = line["angular_coef"], line["linear_coef"]
+    ax.plot( [kappa_list[0], kappa_list[-1]], [ m*kappa_list[0]+p, m*kappa_list[-1]+p], '--', color='red' )
 
 # Plot initial points ---------------------------------------------------------------------------
-ax.plot( pair.initial_points[0,:], pair.initial_points[1,:], '*', color='red' )
+# ax.plot( pair.initial_points[0,:], pair.initial_points[1,:], '*', color='red' )
 
 for k in range(len(pair.lambdas)):
 
