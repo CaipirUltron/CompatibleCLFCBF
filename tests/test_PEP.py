@@ -14,8 +14,8 @@ from scipy.linalg import null_space
 from controllers.compatibility import solve_PEP, PolynomialCLFCBFPair
 from examples.integrator_nominalQP import clf_params, cbf_params1, cbf_params2, cbf_params3
 
-is_from_simulation = False
-cbf_params = cbf_params1
+is_from_simulation = True
+cbf_params = cbf_params2
 
 # Generate random matrices ------------------------------------------------------------------------
 n = 2

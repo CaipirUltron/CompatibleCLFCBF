@@ -2,10 +2,36 @@ import math
 import numpy as np
 import sympy as sp
 
+from scipy.linalg import null_space
 from copy import copy
 from common import *
 from dynamic_systems import Integrator
 
+def commutation_matrix(n):
+    '''
+    Generate commutation matrix K relating the vectorization of a matrix n x n matrix A with the vectorization of its transpose A', as
+    vec(A') = K vec(A).
+    '''
+    # determine permutation applied by K
+    w = np.arange(n * n).reshape((n, n), order="F").T.ravel(order="F")
+    # apply this permutation to the rows (i.e. to each column) of identity matrix and return result
+    return np.eye(n * n)[w, :]
+
+def vec(A):
+    '''
+    Vectorize matrix in a column-major form (Fortran-style).
+    '''
+    return A.flatten('F')
+
+def mat(vec):
+    '''
+    De-vectorize a square matrix which was previously vectorized in a column-major form.
+    '''
+    n = np.sqrt(len(vec))
+    if (not n.is_integer()):
+        raise Exception('Input vector does not represent a vectorized square matrix.')
+    n = int(n)
+    return vec.reshape(n,n).T
 
 class Function():
     '''
@@ -430,6 +456,7 @@ class PolynomialFunction(Function):
         self.alpha = generate_monomial_list( self._dim, self._degree )
         self._monomials = generate_monomials_from_symbols( self._symbols, self._degree )
         self._num_monomials = len(self._monomials)
+        self._K = commutation_matrix(self._num_monomials)       # commutation matrix to be used later
 
         # Symbolic computations
         self._symP = sp.Matrix(sp.symarray('p',(self._num_monomials,self._num_monomials)))
@@ -443,8 +470,9 @@ class PolynomialFunction(Function):
 
         self._sym_fun = ( self._symP * self._sym_monomials ).dot(self._sym_monomials)
 
-        # Compute numeric A matrices
+        # Compute numeric A and N matrices
         self.compute_A()
+        self.compute_N()
 
         # Lambda functions
         self._lambda_monomials = sp.lambdify( list(self._symbols), self._monomials )
@@ -494,6 +522,25 @@ class PolynomialFunction(Function):
                             Ak[i,j] = jacobian_column[i].as_poly().coeffs()[0]
             self.A.append( Ak )
 
+    def compute_N(self):
+        '''
+        Compute the component matrices of the Jacobian transpose null-space.
+        '''
+        n = self._dim
+        p = self._num_monomials
+        I_p = np.eye(p)
+        M = np.zeros([(n+1)*p**2, p**2])
+        for k in range(n):
+            A = self.A[k]
+            M[k*(p**2):(k+1)*(p**2),:] = np.kron(I_p, A.T) + np.kron(A.T, I_p) @ self._K 
+        M[n*(p**2):(n+1)*(p**2),:] = np.eye(p**2) - self._K
+
+        solutions = null_space(M)
+
+        self.N = []
+        for k in range(solutions.shape[1]):
+            self.N.append( mat( solutions[:,k] ) )
+
     def function(self, point):
         '''
         Compute polynomial function numerically.
@@ -529,11 +576,17 @@ class PolynomialFunction(Function):
         '''
         return self._coefficients
 
-    def get_matrices(self):
+    def get_A_matrices(self):
         '''
         Return the A matrices.
         '''
         return self.A
+
+    def get_N_matrices(self):
+        '''
+        Return the N matrices.
+        '''
+        return self.N
 
     def get_symbols(self):
         '''
