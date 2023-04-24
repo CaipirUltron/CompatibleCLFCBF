@@ -4,9 +4,11 @@ Test polynomial functions
 import numpy as np
 from functions import PolynomialFunction
 from common import *
+import matplotlib.pyplot as plt
+plt.rcParams['text.usetex'] = True
 
 n = 2
-max_degree = 2
+max_degree = 8
 
 # P = np.random.rand(p,p)
 # P = P.T @ P
@@ -15,38 +17,38 @@ max_degree = 2
 
 state = np.random.rand(n)
 clf = PolynomialFunction(*state, degree = max_degree)
+kernel = clf.get_kernel()
+k_dim = len(kernel)
 
-print(clf.get_kernel())
+print("System dimension is "+str(n)+".")
+print("Kernel = " + str(kernel)+".")
+print("Kernel dimension is " + str(k_dim)+".")
+print("Therefore... I need at least " + str(k_dim-n) + " solutions.")
 # print( generate_monomial_list(n, max_degree) )
 
 A_list = clf.get_A_matrices()
-
-# N1 = np.array([ [ 1,0,0,0,0,0 ], 
-#                 [ 0,0,0,0,0,0 ],
-#                 [ 0,0,0,0,0,0 ], 
-#                 [ 0,0,0,0,0,0 ], 
-#                 [ 0,0,0,0,0,0 ], 
-#                 [ 0,0,0,0,0,0 ] ])
-
-# N2 = np.array([ [ 0,0,1,1,0,0 ], 
-#                 [ 0,0,0,0,1,0 ],
-#                 [ 1,0,0,0,0,0 ], 
-#                 [ 1,0,0,0,0,0 ], 
-#                 [ 0,1,0,0,0,1 ], 
-#                 [ 0,0,0,0,1,0 ] ])
-
 N_list = clf.get_N_matrices()
 roundness = 5
+
+print(str(len(N_list)) + " solutions were found.")
+
+p = [3, 6, 10, 15, 21, 28,36]
+sols = [3,9,22,45,81,133,204]
+
+# plt.plot(p, sols, '--', color = 'red')
+# plt.show()
+
 for k in range(len(N_list)):
-    N = N_list[k]/np.max(N_list[k])
+    N = N_list[k]
 
-    print('Symmetry:')
-    print( np.linalg.norm(N - N.T) )
+    # print(str(k+1)+'-th solution = \n')
+    # print(str(np.round(N,roundness))+'\n')
 
-    print('Skew-symmetric:')
-    for Ai in A_list:
-        print( np.round(Ai.T @ N,roundness) )
-        print("\n")
+    # print('Symmetry of N:')
+    # print( np.linalg.norm(N - N.T) )
+    # print("\n")
 
-    print('N'+str(k+1)+' = \n')
-    print(str(np.round(N,roundness))+'\n')
+    # print('Skew-symmetry of A\'N:')
+    # for Ai in A_list:
+    #     print( np.linalg.norm(Ai.T @ N + N.T @ Ai) )
+    #     print("\n")

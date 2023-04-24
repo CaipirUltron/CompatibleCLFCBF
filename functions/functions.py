@@ -533,7 +533,8 @@ class PolynomialFunction(Function):
         for k in range(n):
             A = self.A[k]
             M[k*(p**2):(k+1)*(p**2),:] = np.kron(I_p, A.T) + np.kron(A.T, I_p) @ self._K 
-        M[n*(p**2):(n+1)*(p**2),:] = np.eye(p**2) - self._K
+            # M[k*(p**2):(k+1)*(p**2),:] = np.kron(I_p, A.T) + np.kron(A.T, I_p)
+        M[n*(p**2):(n+1)*(p**2),:] = self._K - np.eye(p**2)
 
         solutions = null_space(M)
 

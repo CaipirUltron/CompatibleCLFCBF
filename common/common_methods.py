@@ -77,6 +77,20 @@ def triangular_basis(n):
                 tri_basis.append(np.outer(EYE[:,i], EYE[:,j]))
     return tri_basis
 
+def ret_basis(n):
+    '''
+    Returns the canonical basis of the space of (n x n) matrices.
+    '''
+    ret_basis = list()
+    EYE = np.eye(n)
+    for i in range(n):
+        for j in range(n):
+            # if i == j:
+            ret_basis.append(np.outer(EYE[:,i], EYE[:,j]))
+            # else:
+            #     ret_basis.append(np.outer(EYE[:,i], EYE[:,j]) + np.outer(EYE[:,j], EYE[:,i]))
+    return ret_basis
+
 def symmetric_basis(n):
     '''
     Returns the canonical basis of the space of symmetric (n x n) matrices.
