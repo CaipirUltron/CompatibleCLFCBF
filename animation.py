@@ -35,4 +35,6 @@ for eq in logs["equilibria"]:
 plotSim = Plot2DSimulation( logs, sim.clf, sim.cbfs, plot_config = plot_config )
 plotSim.animate()
 
+# plotSim.animation.save(simulation_file + ".mp4", writer=anim.FFMpegWriter(fps=30, codec='h264'), dpi=100)
+
 plt.show()

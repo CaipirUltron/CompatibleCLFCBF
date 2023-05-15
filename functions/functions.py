@@ -495,7 +495,11 @@ class PolynomialFunction(Function):
                 self._coefficients = np.zeros([self._num_monomials, self._num_monomials])
             if key == "P":
                 self._coefficients = np.array(kwargs[key])
-
+                Pshape = np.shape(self._coefficients)
+                if Pshape[0] != Pshape[1]:
+                    raise Exception("P must be a square matrix.")
+                self._num_monomials = Pshape[0]
+            
         if np.shape(self._coefficients) != (self._num_monomials, self._num_monomials):
             raise Exception("P must be (N x N), where N is the dimension of the monomial basis!")
 

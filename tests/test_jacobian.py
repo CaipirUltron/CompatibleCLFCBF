@@ -1,28 +1,30 @@
 '''
 Tests the theorems about the eigenspaces of the general Jacobian matrix. 
 '''
-import sys
-import json
-import time
 import numpy as np
 from common import symmetric_basis
-from scipy.linalg import null_space
 
-n = 3
+import matplotlib.pyplot as plt
+plt.rcParams['text.usetex'] = True
+
+n = 2
 m = 3
 
 num_examples = 100
+plotting = False
 
-result_matrix = np.zeros([num_examples, 2])
-outliers = {'Jac': [], 'G M': []}
+result_matrix = np.zeros([num_examples, 4])
+outliers = []
 for k in range(num_examples):
 
     #------- G matrix
     g = np.random.rand(n,m)
     G = g @ g.T
 
+    p1 = np.random.rand(n,n)
+    P1 = p1 @ p1.T
+
     #------- M matrix
-    M = np.random.rand(n,n)
     M = np.zeros([n,n])
     for b in symmetric_basis(n):
         M = M + np.random.randn()*b
@@ -30,8 +32,8 @@ for k in range(num_examples):
     alpha = np.random.rand()
     p = np.random.rand()
 
-    z1 = np.random.rand(n)
-    z2 = np.random.rand(n)
+    z1 = np.random.randn(n)
+    z2 = np.random.randn(n)
 
     hz1 = z1/np.sqrt(z1.T @ G @ z1)
     hz2 = z2/np.sqrt(z2.T @ G @ z2)
@@ -46,17 +48,46 @@ for k in range(num_examples):
 
     Jac = ( np.eye(n) - G @ Z @ H @ Z.T ) @ G @ M - alpha * G @ Z @ np.diag([1, beta]) @ Z.T
 
+    Q = M @ G @ P1 + P1 @ G @ M
+
     eigenvals_Jac, eigenvecs_Jac = np.linalg.eig( Jac )
     eigenvals_GM, eigenvecs_GM = np.linalg.eig( G @ M )
+    eigenvals_Q, eigenvecs_Q = np.linalg.eig( Q )
+    eigenvals_M, eigenvecs_M = np.linalg.eig( M   )
+
+    if plotting and n==3:
+        fig = plt.figure()
+        ax = fig.gca(projection='3d')
+
+        ax.quiver( *np.zeros([n,n]), eigenvecs_Q[0,:], eigenvecs_Q[1,:], eigenvecs_Q[2,:], length = 0.1, normalize=True )
+        ax.quiver( *np.zeros([n,n]), eigenvecs_M[0,:], eigenvecs_M[1,:], eigenvecs_M[2,:], color = 'r', length = 0.1, normalize=True )
+
+    print(eigenvals_Jac)
 
     Jac_pos_index, = np.where( eigenvals_Jac.real > 0 )
     num_pos_eig_Jac = len( Jac_pos_index )
     result_matrix[k,0] = num_pos_eig_Jac
 
-    GM_pos_index, = np.where( eigenvals_GM.real > 0 )
+    Q_pos_index, = np.where( eigenvals_Q > 0 )
+    num_pos_eig_Q = len( Q_pos_index )
+    result_matrix[k,1] = num_pos_eig_Q
+
+    GM_pos_index, = np.where( eigenvals_GM > 0 )
     num_pos_eig_GM = len( GM_pos_index )
-    result_matrix[k,1] = num_pos_eig_GM
+    result_matrix[k,2] = num_pos_eig_GM
+
+    M_pos_index, = np.where( eigenvals_M > 0 )
+    num_pos_eig_M = len( M_pos_index )
+    result_matrix[k,3] = num_pos_eig_M
+
+    if (num_pos_eig_Jac == 0) or (num_pos_eig_M == 0):
+        outliers.append( result_matrix[k,:] )
 
 print("Printing the number of positive eigenvalues of: ")
-print("Jac | G M")
+print(" Jcl | Q | GM | M ")
 print(result_matrix)
+
+print("The following outliers were observed: ")
+print(outliers)
+
+plt.show()
