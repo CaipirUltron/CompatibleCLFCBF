@@ -1,5 +1,6 @@
 import numpy as np
 from controllers import CLFCBFPair
+from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 
 
@@ -15,7 +16,14 @@ class CompatibleQPController():
         self.cbfs = cbfs
         self.num_cbfs = len(self.cbfs)
 
-        self.state_dim = self.plant.n
+        clf_dim = self.clf._dim
+        cbf_dims = []
+        for cbf in self.cbfs:
+            cbf_dims.append( cbf._dim )
+        if not all(dim == cbf_dims[0] for dim in cbf_dims): raise Exception("CBF dimensions are not equal.")
+        if cbf_dims[0] != clf_dim: raise Exception("CLF and CBF dimensions are not equal.")
+
+        self.state_dim = clf_dim
         self.control_dim = self.plant.m
         self.sym_dim = int(( self.state_dim * ( self.state_dim + 1 ) )/2)
         self.skewsym_dim = int(( self.state_dim * ( self.state_dim - 1 ) )/2)
@@ -129,9 +137,14 @@ class CompatibleQPController():
         Sets the Lyapunov constraint.
         '''
         # Affine plant dynamics
-        f = self.plant.get_f()
-        g = self.plant.get_g()
-        state = self.plant.get_state()
+        if type(self.plant) == Unicycle:
+            f = self.plant.get_f()[:2]
+            g = self.plant.get_g()[:2,:]
+            state = self.plant.get_state()[:2]
+        else:
+            f = self.plant.get_f()
+            g = self.plant.get_g()
+            state = self.plant.get_state()
 
         # Lyapunov function and gradient
         self.V = self.clf.evaluate_function(*state)[0]
@@ -159,9 +172,14 @@ class CompatibleQPController():
         Sets the barrier constraint.
         '''
         # Affine plant dynamics
-        f = self.plant.get_f()
-        g = self.plant.get_g()
-        state = self.plant.get_state()
+        if type(self.plant) == Unicycle:
+            f = self.plant.get_f()[:2]
+            g = self.plant.get_g()[:2,:]
+            state = self.plant.get_state()[:2]
+        else:
+            f = self.plant.get_f()
+            g = self.plant.get_g()
+            state = self.plant.get_state()
 
         # Barrier function and gradient
         h = cbf.evaluate_function(*state)[0]
