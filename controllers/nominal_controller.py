@@ -45,6 +45,7 @@ class NominalQP():
         self.QP = QuadraticProgram(P=P, q=q)
 
         self.ctrl_dt = dt
+        self.set_parameters = { "radius": 1.0, "center": 0.0, "angle": 0.0 }
 
     def get_control(self):
         '''
@@ -103,22 +104,31 @@ class NominalQP():
         '''
         Sets the i-th barrier constraint.
         '''
-        # Affine plant dynamics
         if type(self.plant) == Unicycle:
-            f = self.plant.get_f()[:2]
-            g = self.plant.get_g()[:2,:]
             state = self.plant.get_state()[:2]
+            phi = self.plant.get_state()[2]
+
+            r = self.set_parameters["radius"]
+            self.set_parameters["center"] = state
+            self.set_parameters["angle"] = phi
+            h, nablah, closest_pt, gamma_opt = cbf.barrier_set(self.set_parameters)
+
+            f = self.plant.get_f()[:2]
+            g = np.array([[ np.cos(phi), -r*np.sin(phi+gamma_opt) ],[ np.sin(phi), r*np.cos(phi+gamma_opt) ]])
+
         else:
             f = self.plant.get_f()
             g = self.plant.get_g()
             state = self.plant.get_state()
 
-        # Barrier function and gradient
-        h = cbf.evaluate_function(*state)[0]
-        nablah = cbf.evaluate_gradient(*state)[0]
+            # Barrier function and gradient
+            h = cbf.evaluate_function(*state)[0]
+            nablah = cbf.evaluate_gradient(*state)[0]
 
         self.Lfh = nablah.dot(f)
-        self.Lgh = g.T.dot(nablah)
+        self.Lgh = g.T @ nablah
+
+
 
         # CBF contraint for the QP
         a_cbf = -np.hstack( [ self.Lgh, 0.0 ])
@@ -132,11 +142,11 @@ class NominalQP():
         '''
         self.clf.update(piv_ctrl, self.ctrl_dt)
 
-    def update_cbf_dynamics(self, pih_ctrl):
+    def update_cbf_dynamics(self, cbf, pih_ctrl):
         '''
         Integrates the dynamic system for the CBF Hessian matrix.
         '''
-        self.cbf.update(pih_ctrl, self.ctrl_dt)
+        cbf.update(pih_ctrl, self.ctrl_dt)
 
 """  def get_lambda(self):
         '''

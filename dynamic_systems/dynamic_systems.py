@@ -1,6 +1,7 @@
 import scipy
 import numpy as np
 import sympy as sp
+import scipy.optimize as opt
 
 from scipy.integrate import ode
 from abc import ABC, abstractmethod
@@ -217,7 +218,7 @@ class Unicycle(AffineSystem):
         if len(initial_control) != 2:
             raise Exception('Control dimension is different from 2.')
         super().__init__(initial_state, initial_control)
-        self.d = distance
+        self.distance = distance
         self.f()
         self.g()
 
@@ -225,10 +226,8 @@ class Unicycle(AffineSystem):
         self._f = np.zeros(self.n)
 
     def g(self):
-        # x = self._state[0]
-        # y = self._state[1]
         phi = self._state[2]
-        self._g = np.array([[ np.cos(phi), -self.d*np.sin(phi) ],[ np.sin(phi), self.d*np.cos(phi) ],[0.0, 1.0]])
+        self._g = np.array([[ np.cos(phi), -self.distance*np.sin(phi) ],[ np.sin(phi), self.distance*np.cos(phi) ],[0.0, 1.0]])
 
 
 class PolynomialSystem(AffineSystem):

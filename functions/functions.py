@@ -1,6 +1,7 @@
 import math
 import numpy as np
 import sympy as sp
+import scipy.optimize as opt
 
 from scipy.linalg import null_space
 from copy import copy
@@ -376,6 +377,30 @@ class QuadraticBarrier(Quadratic):
         self.dynamics.actuate(dt)
         self.set_param(self.dynamics.get_state())
 
+    def barrier_set(self, set_parameters):
+        '''
+        Computes the barrier with respect to a set define by set_parameters
+        '''
+        r = set_parameters["radius"]
+        p_center = set_parameters["center"]
+        theta = set_parameters["angle"]
+
+        def compute_pt(gamma):
+            return p_center + r*rot2D(theta) @ np.array([np.cos(gamma), np.sin(gamma)])
+
+        def cost(gamma):
+            p_gamma = compute_pt(gamma)
+            return self.evaluate_function(*p_gamma)[0]
+
+        # Solve optimization problem
+        results = opt.minimize( cost, 0.0 )
+        gamma_opt = results.x[0]
+        set_solution = compute_pt( gamma_opt )
+
+        h = cost(results.x)
+        nablah = self.evaluate_gradient(*set_solution)[0]
+
+        return h, nablah, set_solution, gamma_opt
 
 class Gaussian(Function):
     '''

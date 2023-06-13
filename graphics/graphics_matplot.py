@@ -2,8 +2,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
 import matplotlib.colors as mcolors
+
+from common import rot2D
 from matplotlib import gridspec, patches
 from matplotlib.patches import Rectangle
+
 
 class Plot2DSimulation():
     '''
@@ -295,7 +298,6 @@ class PlotUnicycleSimulation(Plot2DSimulation):
                                 angle=np.rad2deg(robot_angle), rotation_point="xy", color = self.robot_color )
 
         self.robot_pos, = self.main_ax.plot([],[],lw=1,color='black',marker='o',markersize=4.0)
-
         self.angle_line, = self.main_ax.plot([],[],lw=2, color = mcolors.TABLEAU_COLORS['tab:green'])
 
     def update(self, i):
@@ -318,6 +320,8 @@ class PlotUnicycleSimulation(Plot2DSimulation):
             self.robot_geometry.angle = np.rad2deg(robot_angle)
 
             self.main_ax.add_patch(self.robot_geometry)
+
+            # p_gamma = np.array([robot_x, robot_y]) + self.robot_geometry.dis * rot2D(robot_angle) @ np.array([np.cos(gamma), np.sin(gamma)])
 
             if hasattr(self, 'clf_log'):
                 current_piv_state = [ self.clf_log[k][i] for k in range(self.clf_param_dim) ]

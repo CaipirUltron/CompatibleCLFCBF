@@ -6,7 +6,7 @@ from functions import QuadraticLyapunov, QuadraticBarrier
 from controllers import CompatibleQPController
 
 ######################################### Configure and create unicycle plant ##############################################
-distance = 1.0
+distance = 0.5
 initial_state = [ -4.1, 5.0, np.radians(0.0) ]
 plant = Unicycle(initial_state = initial_state, initial_control = np.zeros(2), distance = distance)
 ############################################################################################################################
