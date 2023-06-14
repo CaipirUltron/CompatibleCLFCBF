@@ -1,3 +1,4 @@
+import os
 import sys
 import json
 import importlib
@@ -7,14 +8,17 @@ simulation_config = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples."+simulation_config, package=None)
 
 # Simulation loop -------------------------------------------------------------------
-T = 20
+T = 10
 num_steps = int(T/sim.sample_time)
 time = [0]
 print('Running simulation...')
 for step in range(1, num_steps+1):
 
     # Simulation time
-    time.append( step*sim.sample_time )
+    t = step*sim.sample_time
+    os.system('clear')
+    print("Simulating instant t = " + str(float(f'{t:.2f}')) + " s")
+    time.append( t )
 
     # Control
     u_control = sim.controller.get_control()

@@ -355,6 +355,9 @@ class QuadraticBarrier(Quadratic):
 
         self.param = sym2vector( self._hessian )
         self.dynamics = Integrator(self.param,np.zeros(len(self.param)))
+        self.last_gamma_sol = 0.0
+        self.gamma_min = -np.pi/2
+        self.gamma_max = +np.pi/2
 
     def get_param(self):
         '''
@@ -393,14 +396,18 @@ class QuadraticBarrier(Quadratic):
             return self.evaluate_function(*p_gamma)[0]
 
         # Solve optimization problem
-        results = opt.minimize( cost, 0.0 )
+        results = opt.minimize( cost, self.last_gamma_sol )
+        # results = opt.minimize( cost, self.last_gamma_sol, constraints=opt.LinearConstraint( np.array(1), lb=self.gamma_min, ub=self.gamma_max ) )
         gamma_opt = results.x[0]
 
-        print(gamma_opt/(2*np.pi))
+        # print("Gamma = " + str(gamma_opt))
+
+        h = cost(gamma_opt)
 
         set_solution = compute_pt( gamma_opt )
-        h = cost(gamma_opt)
         nablah = self.evaluate_gradient(*set_solution)[0]
+
+        self.last_gamma_sol = gamma_opt
 
         return h, nablah, set_solution, gamma_opt
 

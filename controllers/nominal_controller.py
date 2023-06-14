@@ -111,10 +111,10 @@ class NominalQP():
             robot_pose = ( state[0], state[1], phi )
             robot_center = self.plant.geometry.get_center(robot_pose)
 
-            h, nablah, closest_pt, gamma_opt = cbf.barrier_set({"radius": self.radius, "center": robot_center,"orientation": phi})
+            h, nablah, closest_pt, gamma_opt = cbf.barrier_set({"radius": self.radius, "center": robot_center, "orientation": phi})
 
-            if h < 0:
-                print("Barrier " + str(cbf) + " = " + str(h))
+            # if h < 0:
+            #     print("Barrier " + str(cbf) + " = " + str(h))
 
             f = self.plant.get_f()[:2]
             g = np.array([[ np.cos(phi), -self.radius*np.sin(phi+gamma_opt) ],[ np.sin(phi), self.radius*np.cos(phi+gamma_opt) ]])

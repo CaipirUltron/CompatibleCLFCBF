@@ -5,7 +5,7 @@ import scipy.optimize as opt
 
 from scipy.integrate import ode
 from abc import ABC, abstractmethod
-from common import Rect
+from common import Rect, generate_monomials_from_symbols
 
 
 class DynamicSystem(ABC):

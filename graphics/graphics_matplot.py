@@ -194,7 +194,6 @@ class Plot2DSimulation():
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
-        # graphical_elements.append(self.mode_text)
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
         graphical_elements.append(self.equilibria_plot)
@@ -210,7 +209,7 @@ class Plot2DSimulation():
             self.current_step += int(max(1,np.ceil(self.anim_step)))
 
     def animate(self):
-        self.animation = anim.FuncAnimation(self.fig, func=self.update, frames=self.gen_function(), init_func=self.init, interval=1000/self.fps, repeat=False, blit=True)
+        self.animation = anim.FuncAnimation(self.fig, func=self.update, frames=self.gen_function(), init_func=self.init, interval=1000/self.fps, repeat=False, blit=True, cache_frame_data=False)
 
     def plot_frame(self, t):
         '''
