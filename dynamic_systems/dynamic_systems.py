@@ -5,8 +5,7 @@ import scipy.optimize as opt
 
 from scipy.integrate import ode
 from abc import ABC, abstractmethod
-from common import *
-from itertools import product
+from common import Rect
 
 
 class DynamicSystem(ABC):
@@ -207,18 +206,20 @@ class Periodic(AffineSystem):
             for k in range(self.n):
                 self._g += self._gains[k,i] * np.sin( self._frequencies[k,i] * self._state[k] + self._phases[k,i] )
 
+
 class Unicycle(AffineSystem):
     '''
     Implements the unicycle dynamics: dx = v cos(phi), dy = v sin(phi), dphi = omega.
     State and control are given by [x, y, z] and [v, omega], respectively.
     '''
-    def __init__(self, initial_state, initial_control, distance):
+    def __init__(self, initial_state, initial_control, geometric_params=Rect([1.0, 1.0], 0.0)):
         if len(initial_state) != 3:
             raise Exception('State dimension is different from 3.')
         if len(initial_control) != 2:
             raise Exception('Control dimension is different from 2.')
         super().__init__(initial_state, initial_control)
-        self.distance = distance
+        self.geometry = geometric_params
+        self.pos_offset = self.geometry.center_offset
         self.f()
         self.g()
 
@@ -227,7 +228,7 @@ class Unicycle(AffineSystem):
 
     def g(self):
         phi = self._state[2]
-        self._g = np.array([[ np.cos(phi), -self.distance*np.sin(phi) ],[ np.sin(phi), self.distance*np.cos(phi) ],[0.0, 1.0]])
+        self._g = np.array([[ np.cos(phi), -self.pos_offset*np.sin(phi) ],[ np.sin(phi), self.pos_offset*np.cos(phi) ],[0.0, 1.0]])
 
 
 class PolynomialSystem(AffineSystem):

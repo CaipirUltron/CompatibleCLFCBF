@@ -78,7 +78,8 @@ class CompatibleQPController():
         self.u = np.zeros(self.control_dim)
         self.u_v = np.zeros(self.sym_dim)
 
-        self.set_parameters = { "radius": 1.0, "center": 0.0, "angle": 0.0 }
+        if type(self.plant) == Unicycle:
+            self.radius = 1.0
 
     def get_control(self):
         '''
@@ -179,13 +180,13 @@ class CompatibleQPController():
             state = self.plant.get_state()[:2]
             phi = self.plant.get_state()[2]
 
-            r = self.set_parameters["radius"]
-            self.set_parameters["center"] = state
-            self.set_parameters["angle"] = phi
-            h, nablah, closest_pt, gamma_opt = cbf.set_barrier(self.set_parameters)
+            robot_pose = ( state[0], state[1], phi )
+            robot_center = self.plant.geometry.get_center(robot_pose)
+
+            h, nablah, closest_pt, gamma_opt = cbf.barrier_set({"radius": self.radius, "center": robot_center,"orientation": phi})
 
             f = self.plant.get_f()[:2]
-            g = np.array([[ np.cos(phi), -r*np.sin(phi+gamma_opt) ],[ np.sin(phi), r*np.cos(phi+gamma_opt) ]])
+            g = np.array([[ np.cos(phi), -self.radius*np.sin(phi+gamma_opt) ],[ np.sin(phi), self.radius*np.cos(phi+gamma_opt) ]])
 
         else:
             f = self.plant.get_f()

@@ -383,7 +383,7 @@ class QuadraticBarrier(Quadratic):
         '''
         r = set_parameters["radius"]
         p_center = set_parameters["center"]
-        theta = set_parameters["angle"]
+        theta = set_parameters["orientation"]
 
         def compute_pt(gamma):
             return p_center + r*rot2D(theta) @ np.array([np.cos(gamma), np.sin(gamma)])
@@ -395,9 +395,11 @@ class QuadraticBarrier(Quadratic):
         # Solve optimization problem
         results = opt.minimize( cost, 0.0 )
         gamma_opt = results.x[0]
-        set_solution = compute_pt( gamma_opt )
 
-        h = cost(results.x)
+        print(gamma_opt/(2*np.pi))
+
+        set_solution = compute_pt( gamma_opt )
+        h = cost(gamma_opt)
         nablah = self.evaluate_gradient(*set_solution)[0]
 
         return h, nablah, set_solution, gamma_opt

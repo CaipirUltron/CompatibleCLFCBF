@@ -1,6 +1,7 @@
 import sys
 import json
 import importlib
+from dynamic_systems import Unicycle
 
 simulation_config = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples."+simulation_config, package=None)
@@ -32,7 +33,6 @@ logs = {
     "control": sim.plant.control_log,
     "clf_log": sim.controller.clf.dynamics.state_log,
     "equilibria": sim.controller.equilibrium_points.tolist(),
-    "mode": sim.controller.mode_log
 }
 
 with open(simulation_config+".json", "w") as file:

@@ -32,10 +32,10 @@ plot_config = {
 }
 
 if type(sim.plant) == Unicycle:
-    plot_config["geometry"] = Rect([1.0, 0.5], sim.distance)
-    plotSim = PlotUnicycleSimulation( logs, sim.clf, sim.cbfs, plot_config = plot_config )
+    plot_config["radius"] = sim.controller.radius
+    plotSim = PlotUnicycleSimulation( logs, sim.plant, sim.clf, sim.cbfs, plot_config = plot_config )
 else:
-    plotSim = Plot2DSimulation( logs, sim.clf, sim.cbfs, plot_config = plot_config )
+    plotSim = Plot2DSimulation( logs, sim.plant, sim.clf, sim.cbfs, plot_config = plot_config )
 
 plotSim.animate()
 # plotSim.animation.save(simulation_file + ".mp4", writer=anim.FFMpegWriter(fps=30, codec='h264'), dpi=100)

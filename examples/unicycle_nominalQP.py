@@ -4,11 +4,11 @@ from dynamic_systems import Unicycle
 from functions import canonical2D
 from functions import QuadraticLyapunov, QuadraticBarrier
 from controllers import NominalQP
+from common import Rect
 
 ######################################### Configure and create unicycle plant ##############################################
-distance = 0.5
 initial_state = [ -4.1, 5.0, np.radians(0.0) ]
-plant = Unicycle(initial_state = initial_state, initial_control = np.zeros(2), distance = distance)
+plant = Unicycle(initial_state = initial_state, initial_control = np.zeros(2), geometric_params=Rect([2.0, 1.0], 0.5) )
 ############################################################################################################################
 
 ############################################# Configure and create CLF #####################################################

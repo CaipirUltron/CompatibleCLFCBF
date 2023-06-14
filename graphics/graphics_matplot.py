@@ -12,7 +12,7 @@ class Plot2DSimulation():
     '''
     Class for matplotlib-based simulation of a point-like 2D dynamical system.
     '''
-    def __init__(self, logs, clf, cbfs, **kwargs):
+    def __init__(self, logs, robot, clf, cbfs, **kwargs):
         
         plot_config = {
             "figsize": (5,5),
@@ -29,6 +29,7 @@ class Plot2DSimulation():
             self.plot_config = kwargs["plot_config"]
         
         self.logs = logs
+        self.robot = robot
         self.clf, self.cbfs = clf, cbfs
 
         self.fig = plt.figure(figsize = plot_config["figsize"], constrained_layout=True)
@@ -47,10 +48,8 @@ class Plot2DSimulation():
         if "clf_log" in self.logs.keys():
             self.clf_log = self.logs["clf_log"]
             self.clf_param_dim = np.shape(np.array(self.clf_log))[0]
-        # if "cbf_log" in logs.keys():
-        #     self.cbf_log = logs["cbf_log"]
-        #     self.cbf_param_dim = np.shape(np.array(self.cbf_log))[0]
-        self.mode_log = self.logs["mode"]
+
+        # self.mode_log = self.logs["mode"]
         self.equilibria = np.array(self.logs["equilibria"])
         self.num_steps = len(self.state_log[0])
         self.anim_step = (self.num_steps/self.time[-1])/self.fps
@@ -61,7 +60,7 @@ class Plot2DSimulation():
 
         # Initalize some graphical objects
         self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str("Time = "), fontsize=14)
-        self.mode_text = self.main_ax.text(self.x_lim[0]+0.5, self.y_lim[0]-1, "", fontweight="bold",  fontsize=18)
+        # self.mode_text = self.main_ax.text(self.x_lim[0]+0.5, self.y_lim[0]-1, "", fontweight="bold",  fontsize=18)
 
         self.origin, = self.main_ax.plot([],[],lw=4, marker='*', color=[0.,0.,0.])
         self.trajectory, = self.main_ax.plot([],[],lw=2)
@@ -73,7 +72,6 @@ class Plot2DSimulation():
 
         self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[0.0], colors=self.clf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.5)
         self.cbf_contours = []
-        # self.cbf_contours = self.cbf.contour_plot(self.main_ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.1)
 
     def configure(self):
         '''
@@ -137,7 +135,7 @@ class Plot2DSimulation():
         self.runs = True
 
         self.time_text.text = str("Time = ")
-        self.mode_text.text = ""
+        # self.mode_text.text = ""
         self.trajectory.set_data([],[])
 
         self.origin.set_data([self.clf.critical_point[0]],[self.clf.critical_point[1]])
@@ -156,7 +154,7 @@ class Plot2DSimulation():
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
-        graphical_elements.append(self.mode_text)
+        # graphical_elements.append(self.mode_text)
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
         graphical_elements.append(self.equilibria_plot)
@@ -182,30 +180,13 @@ class Plot2DSimulation():
 
             self.time_text.set_text("Time = " + str(current_time) + "s")
 
-            # if self.mode_log:
-            #     if self.mode_log[i] == 1:
-            #         self.mode_text.set_text("Compatibility")
-            #     elif self.mode_log[i] == 0:
-            #         self.mode_text.set_text("Rate")
-
             if self.draw_level:
                 V = self.clf.evaluate_function(*current_state)[0]
-                # h = self.cbf.evaluate_function(*current_state)[0]
                 for coll in self.clf_contours.collections:
                     coll.remove()
-                # for coll in self.cbf_contours.collections:
-                #     coll.remove()
+
                 perimeter = 4*abs(current_state[0]) + 4*abs(current_state[1])
                 self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[V], colors=self.clf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.008*perimeter+0.1)
-                # self.cbf_contours = self.cbf.contour_plot(self.main_ax, levels=[h], colors=self.cbf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.008*perimeter+0.1)
-
-            # if hasattr(self, 'cbf_log'):
-            #     current_pih_state = [ self.cbf_log[k][i] for k in range(self.cbf_param_dim) ]
-            #     self.cbf.set_param(current_pih_state)
-
-            # for coll in self.cbf_contours.collections:
-                # coll.remove()
-            # self.cbf_contours = self.cbf.contour_plot(self.main_ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.2)
 
         else:
             self.runs = False
@@ -213,7 +194,7 @@ class Plot2DSimulation():
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
-        graphical_elements.append(self.mode_text)
+        # graphical_elements.append(self.mode_text)
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
         graphical_elements.append(self.equilibria_plot)
@@ -246,8 +227,8 @@ class PlotUnicycleSimulation(Plot2DSimulation):
     '''
     Class for matplotlib-based simulation of the unicycle robot.
     '''
-    def __init__(self, logs, clf, cbfs, **kwargs):
-        super().__init__(logs, clf, cbfs, **kwargs)
+    def __init__(self, logs, robot, clf, cbfs, **kwargs):
+        super().__init__(logs, robot, clf, cbfs, **kwargs)
 
     def create_graphical_objs(self):
         '''
@@ -259,10 +240,7 @@ class PlotUnicycleSimulation(Plot2DSimulation):
         if "clf_log" in self.logs.keys():
             self.clf_log = self.logs["clf_log"]
             self.clf_param_dim = np.shape(np.array(self.clf_log))[0]
-        # if "cbf_log" in logs.keys():
-        #     self.cbf_log = logs["cbf_log"]
-        #     self.cbf_param_dim = np.shape(np.array(self.cbf_log))[0]
-        self.mode_log = self.logs["mode"]
+        # self.mode_log = self.logs["mode"]
         self.equilibria = np.array(self.logs["equilibria"])
         self.num_steps = len(self.state_log[0])
         self.anim_step = (self.num_steps/self.time[-1])/self.fps
@@ -273,12 +251,14 @@ class PlotUnicycleSimulation(Plot2DSimulation):
 
         # Initalize some graphical objects
         self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str("Time = "), fontsize=14)
-        self.mode_text = self.main_ax.text(self.x_lim[0]+0.5, self.y_lim[0]-1, "", fontweight="bold",  fontsize=18)
+        self.cbf_text_numbers = [ self.main_ax.text(0, 0, "", fontsize=10) for k in range(self.num_cbfs) ]
+        self.cbf_text_numbers_closests = [ self.main_ax.text(0, 0, "", fontsize=10) for k in range(self.num_cbfs) ]
 
         self.origin, = self.main_ax.plot([],[],lw=4, marker='*', color=[0.,0.,0.])
         self.trajectory, = self.main_ax.plot([],[],lw=2)
         self.init_state, = self.main_ax.plot([],[],'bo',lw=2)
         self.equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
+        self.closests = self.main_ax.scatter([],[], marker='o', color=mcolors.TABLEAU_COLORS['tab:green'])
 
         self.robot_color = mcolors.TABLEAU_COLORS['tab:blue']
         self.clf_contour_color = mcolors.TABLEAU_COLORS['tab:blue']
@@ -286,19 +266,20 @@ class PlotUnicycleSimulation(Plot2DSimulation):
 
         self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[0.0], colors=self.clf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.5)
         self.cbf_contours = []
-        # self.cbf_contours = self.cbf.contour_plot(self.main_ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.1)
 
         robot_x = self.state_log[0][0]
         robot_y = self.state_log[1][0]
         robot_angle = self.state_log[2][0]
-        center = self.plot_config["geometry"].get_center( (robot_x, robot_y, robot_angle) )
+        center = self.robot.geometry.get_center( (robot_x, robot_y, robot_angle) )
         self.robot_geometry = Rectangle( center,
-                                width = self.plot_config["geometry"].length,
-                                height = self.plot_config["geometry"].width, 
+                                width = self.robot.geometry.length,
+                                height = self.robot.geometry.width, 
                                 angle=np.rad2deg(robot_angle), rotation_point="xy", color = self.robot_color )
 
         self.robot_pos, = self.main_ax.plot([],[],lw=1,color='black',marker='o',markersize=4.0)
         self.angle_line, = self.main_ax.plot([],[],lw=2, color = mcolors.TABLEAU_COLORS['tab:green'])
+
+        self.circle = plt.Circle((robot_x, robot_y), self.plot_config["radius"], color=mcolors.TABLEAU_COLORS['tab:green'], linestyle = '--', fill=False)
 
     def update(self, i):
 
@@ -307,7 +288,7 @@ class PlotUnicycleSimulation(Plot2DSimulation):
             xdata, ydata = self.state_log[0][0:i], self.state_log[1][0:i]
             self.trajectory.set_data(xdata, ydata)
             current_time = np.around(self.time[i], decimals = 2)
-            current_state = [ self.state_log[0][i], self.state_log[1][i] ]
+            current_position = [ self.state_log[0][i], self.state_log[1][i] ]
 
             robot_x = self.state_log[0][i]
             robot_y = self.state_log[1][i]
@@ -316,12 +297,14 @@ class PlotUnicycleSimulation(Plot2DSimulation):
             self.robot_pos.set_data(robot_x, robot_y)
 
             pose = (robot_x, robot_y, robot_angle)
-            self.robot_geometry.xy = self.plot_config["geometry"].get_corners(pose, "bottomleft")
+            current_center = self.robot.geometry.get_center( pose )
+
+            self.robot_geometry.xy = self.robot.geometry.get_corners(pose, "bottomleft")
             self.robot_geometry.angle = np.rad2deg(robot_angle)
+            self.circle.center = current_center
 
             self.main_ax.add_patch(self.robot_geometry)
-
-            # p_gamma = np.array([robot_x, robot_y]) + self.robot_geometry.dis * rot2D(robot_angle) @ np.array([np.cos(gamma), np.sin(gamma)])
+            self.main_ax.add_patch(self.circle)
 
             if hasattr(self, 'clf_log'):
                 current_piv_state = [ self.clf_log[k][i] for k in range(self.clf_param_dim) ]
@@ -330,11 +313,25 @@ class PlotUnicycleSimulation(Plot2DSimulation):
             self.time_text.set_text("Time = " + str(current_time) + "s")
 
             if self.draw_level:
-                V = self.clf.evaluate_function(*current_state)[0]
+                V = self.clf.evaluate_function(*current_position)[0]
                 for coll in self.clf_contours.collections:
                     coll.remove()
-                perimeter = 4*abs(current_state[0]) + 4*abs(current_state[1])
+                perimeter = 4*abs(current_position[0]) + 4*abs(current_position[1])
                 self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[V], colors=self.clf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.008*perimeter+0.1)
+
+            data = np.zeros([self.num_cbfs, 2])
+            for k in range(self.num_cbfs):
+                self.cbf_text_numbers[k].set_text( str(k) )
+                self.cbf_text_numbers[k].set_position( self.cbfs[k].get_critical().tolist() )
+
+                h, nablah, closest_pt, gamma_opt = self.cbfs[k].barrier_set({"radius": self.plot_config["radius"], "center": current_center, "orientation": robot_angle})
+
+                self.cbf_text_numbers_closests[k].set_text( str(k) )
+                self.cbf_text_numbers_closests[k].set_position( closest_pt )
+
+                data[k,0], data[k,1] = closest_pt[0], closest_pt[1]
+            self.closests.set_offsets(data)
+
 
         else:
             self.runs = False
@@ -342,12 +339,18 @@ class PlotUnicycleSimulation(Plot2DSimulation):
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
-        graphical_elements.append(self.mode_text)
+        # graphical_elements.append(self.mode_text)
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
         graphical_elements.append(self.equilibria_plot)
         graphical_elements.append(self.robot_geometry)
         graphical_elements.append(self.robot_pos)
+        graphical_elements.append(self.circle)
+        graphical_elements.append(self.closests)
+
+        graphical_elements += self.cbf_text_numbers
+        graphical_elements += self.cbf_text_numbers_closests
+
         graphical_elements += self.clf_contours.collections
         for cbf_countour in self.cbf_contours:
             graphical_elements += cbf_countour.collections
