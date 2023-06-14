@@ -8,17 +8,23 @@ from common import symmetric_basis
 fig = plt.figure(constrained_layout=True)
 ax = fig.add_subplot(111)
 
-min_lim, max_lim = -10, 10
+min_lim, max_lim = -6, 6
 ax.set_xlim(min_lim, max_lim)
 ax.set_ylim(min_lim, max_lim)
+ax.set_title("Barrier Shaping")
+ax.grid(True)
 
 fps = 30
 n = 2
 state = np.random.rand(n)
 
 maxdegree = 3
+num_cbfs = 1
+
 clf = PolynomialFunction(*state, degree = maxdegree)
-cbf = PolynomialFunction(*state, degree = maxdegree)
+cbfs = []
+for k in range(num_cbfs):
+    cbfs.append( PolynomialFunction(*state, degree = maxdegree) )
 kernel = clf.get_kernel()
 k_dim = len(kernel)
 
@@ -31,7 +37,9 @@ clf_contour_color = mcolors.TABLEAU_COLORS['tab:green']
 cbf_contour_color = mcolors.TABLEAU_COLORS['tab:green']
 
 clf_contours = clf.contour_plot(ax, levels=[1.0], colors=clf_contour_color, min=min_lim, max=max_lim, resolution=0.5)
-cbf_contours = cbf.contour_plot(ax, levels=[1.0], colors=cbf_contour_color, min=min_lim, max=max_lim, resolution=0.5)
+cbf_contours = []
+for cbf in cbfs:
+    cbf_contours.append( cbf.contour_plot(ax, levels=[1.0], colors=cbf_contour_color, min=min_lim, max=max_lim, resolution=0.5) )
 
 basis = symmetric_basis(k_dim)
 A = np.random.rand(len(basis))
@@ -41,11 +49,14 @@ b = np.random.rand(len(basis))
 def init():
 
     Pi = 0*P0
-    clf.set_param(P = Pi)
-    clf_contours = clf.contour_plot(ax, [1.0], colors=clf_contour_color, min=min_lim, max=max_lim, resolution=0.5)
-
+    cbf_contours = []
+    for cbf in cbfs:
+        cbf.set_param(P = Pi)
+        cbf_contours.append( cbf.contour_plot(ax, levels=[1.0], colors=cbf_contour_color, min=min_lim, max=max_lim, resolution=0.5) )
+    
     graphical_elements = []
-    graphical_elements += clf_contours.collections
+    for cbf_contour in cbf_contours:
+        graphical_elements += cbf_contour.collections
     return graphical_elements
 
 def update(i):
@@ -54,19 +65,16 @@ def update(i):
     for k in range(len(basis)):
         Pi += A[k]*np.sin(a[k]*i + b[k]) * basis[k]
     eig, V = np.linalg.eig(Pi)
-    Pi = Pi.T @ Pi/(100*max(eig)**2)
-    Pi[0,0] += 0.2
+    Pi = Pi.T @ Pi/(1000*max(eig)**2)
 
-    print(i)
-
-    clf.set_param(P = Pi)
-
-    # for coll in clf_contours.collections:
-    #     coll.remove()
-    clf_contours = clf.contour_plot(ax, [1.0], colors=clf_contour_color, min=min_lim, max=max_lim, resolution=0.2)
+    cbf_contours = []
+    for cbf in cbfs:
+        cbf.set_param(P = Pi)
+        cbf_contours.append( cbf.contour_plot(ax, levels=[1.0], colors=cbf_contour_color, min=min_lim, max=max_lim, resolution=0.3) )
 
     graphical_elements = []
-    graphical_elements += clf_contours.collections
+    for cbf_contour in cbf_contours:
+        graphical_elements += cbf_contour.collections
 
     return graphical_elements
 
