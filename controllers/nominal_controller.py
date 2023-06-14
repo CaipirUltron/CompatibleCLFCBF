@@ -1,5 +1,6 @@
 import numpy as np
 from controllers import CLFCBFPair
+from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 
 
@@ -12,16 +13,24 @@ class NominalQP():
         # Dimensions and system model initialization
         self.plant = plant
         self.clf, self.cbfs = clf, cbfs
-        self.clf_cbf_pairs = []
+        
         self.mode_log = None
+        
+        clf_dim = self.clf._dim
+        cbf_dims = []
+        for cbf in self.cbfs:
+            cbf_dims.append( cbf._dim )
+        if not all(dim == cbf_dims[0] for dim in cbf_dims): raise Exception("CBF dimensions are not equal.")
+        if cbf_dims[0] != clf_dim: raise Exception("CLF and CBF dimensions are not equal.")
 
-        self.state_dim = self.plant.n
+        self.state_dim = clf_dim
         self.control_dim = self.plant.m
         self.sym_dim = int(( self.state_dim * ( self.state_dim + 1 ) )/2)
         self.skewsym_dim = int(( self.state_dim * ( self.state_dim - 1 ) )/2)
-        
+
         # Compute equilibrium points
-        self.equilibrium_points = np.zeros([0,self.state_dim])
+        self.clf_cbf_pairs = []
+        self.equilibrium_points = np.zeros([0,clf_dim])
         for cbf in cbfs:
             clf_cbf_pair = CLFCBFPair(self.clf, cbf)
             self.clf_cbf_pairs.append( clf_cbf_pair )
@@ -36,6 +45,7 @@ class NominalQP():
         self.QP = QuadraticProgram(P=P, q=q)
 
         self.ctrl_dt = dt
+        self.set_parameters = { "radius": 1.0, "center": 0.0, "angle": 0.0 }
 
     def get_control(self):
         '''
@@ -67,9 +77,14 @@ class NominalQP():
         Sets the Lyapunov constraint.
         '''
         # Affine plant dynamics
-        f = self.plant.get_f()
-        g = self.plant.get_g()
-        state = self.plant.get_state()
+        if type(self.plant) == Unicycle:
+            f = self.plant.get_f()[:2]
+            g = self.plant.get_g()[:2,:]
+            state = self.plant.get_state()[:2]
+        else:
+            f = self.plant.get_f()
+            g = self.plant.get_g()
+            state = self.plant.get_state()
 
         # Lyapunov function and gradient
         self.V = self.clf.evaluate_function(*state)[0]
@@ -89,17 +104,31 @@ class NominalQP():
         '''
         Sets the i-th barrier constraint.
         '''
-        # Affine plant dynamics
-        f = self.plant.get_f()
-        g = self.plant.get_g()
-        state = self.plant.get_state()
+        if type(self.plant) == Unicycle:
+            state = self.plant.get_state()[:2]
+            phi = self.plant.get_state()[2]
 
-        # Barrier function and gradient
-        h = cbf.evaluate_function(*state)[0]
-        nablah = cbf.evaluate_gradient(*state)[0]
+            r = self.set_parameters["radius"]
+            self.set_parameters["center"] = state
+            self.set_parameters["angle"] = phi
+            h, nablah, closest_pt, gamma_opt = cbf.barrier_set(self.set_parameters)
+
+            f = self.plant.get_f()[:2]
+            g = np.array([[ np.cos(phi), -r*np.sin(phi+gamma_opt) ],[ np.sin(phi), r*np.cos(phi+gamma_opt) ]])
+
+        else:
+            f = self.plant.get_f()
+            g = self.plant.get_g()
+            state = self.plant.get_state()
+
+            # Barrier function and gradient
+            h = cbf.evaluate_function(*state)[0]
+            nablah = cbf.evaluate_gradient(*state)[0]
 
         self.Lfh = nablah.dot(f)
-        self.Lgh = g.T.dot(nablah)
+        self.Lgh = g.T @ nablah
+
+
 
         # CBF contraint for the QP
         a_cbf = -np.hstack( [ self.Lgh, 0.0 ])
@@ -113,11 +142,11 @@ class NominalQP():
         '''
         self.clf.update(piv_ctrl, self.ctrl_dt)
 
-    def update_cbf_dynamics(self, pih_ctrl):
+    def update_cbf_dynamics(self, cbf, pih_ctrl):
         '''
         Integrates the dynamic system for the CBF Hessian matrix.
         '''
-        self.cbf.update(pih_ctrl, self.ctrl_dt)
+        cbf.update(pih_ctrl, self.ctrl_dt)
 
 """  def get_lambda(self):
         '''

@@ -2,7 +2,10 @@ import sys
 import json
 import importlib
 import matplotlib.pyplot as plt
-from graphics import Plot2DSimulation
+
+from common import Rect
+from dynamic_systems import Unicycle
+from graphics import Plot2DSimulation, PlotUnicycleSimulation
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -13,8 +16,9 @@ try:
         print("Loading graphical simulation with "+simulation_file + ".json")
         logs = json.load(file)
 except IOError:
-    print("Couldn't locate "+simulation_file + ".json")
+    print("Couldn't locate " + simulation_file + ".json")
 
+print('Animating simulation...')
 plot_config = {
     "figsize": (5,5),
     "gridspec": (1,1,1),
@@ -27,14 +31,12 @@ plot_config = {
     "pad":2.0
 }
 
-print('Animating simulation...')
-print("Equilibrium points = ")
-for eq in logs["equilibria"]:
-    print(str(eq)+"\n")
+if type(sim.plant) == Unicycle:
+    plot_config["geometry"] = Rect([1.0, 0.5], sim.distance)
+    plotSim = PlotUnicycleSimulation( logs, sim.clf, sim.cbfs, plot_config = plot_config )
+else:
+    plotSim = Plot2DSimulation( logs, sim.clf, sim.cbfs, plot_config = plot_config )
 
-plotSim = Plot2DSimulation( logs, sim.clf, sim.cbfs, plot_config = plot_config )
 plotSim.animate()
-
 # plotSim.animation.save(simulation_file + ".mp4", writer=anim.FFMpegWriter(fps=30, codec='h264'), dpi=100)
-
 plt.show()

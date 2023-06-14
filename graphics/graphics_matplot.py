@@ -2,7 +2,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
 import matplotlib.colors as mcolors
+
+from common import rot2D
 from matplotlib import gridspec, patches
+from matplotlib.patches import Rectangle
 
 
 class Plot2DSimulation():
@@ -23,13 +26,13 @@ class Plot2DSimulation():
             "pad":2.0
         }
         if "plot_config" in kwargs.keys():
-            plot_config = kwargs["plot_config"]
+            self.plot_config = kwargs["plot_config"]
         
         self.logs = logs
         self.clf, self.cbfs = clf, cbfs
 
         self.fig = plt.figure(figsize = plot_config["figsize"], constrained_layout=True)
-        self.configure( plot_config )
+        self.configure()
         
         # self.fig.tight_layout(pad=plot_config["pad"])
         self.animation = None
@@ -72,17 +75,17 @@ class Plot2DSimulation():
         self.cbf_contours = []
         # self.cbf_contours = self.cbf.contour_plot(self.main_ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.1)
 
-    def configure(self, plot_config):
+    def configure(self):
         '''
         Configure axes.
         '''
-        self.ax_struct = plot_config["gridspec"][0:2]
-        width_ratios = plot_config["widthratios"]
-        height_ratios = plot_config["heightratios"]
+        self.ax_struct = self.plot_config["gridspec"][0:2]
+        width_ratios = self.plot_config["widthratios"]
+        height_ratios = self.plot_config["heightratios"]
         gs = gridspec.GridSpec(self.ax_struct[0], self.ax_struct[1], width_ratios = width_ratios, height_ratios = height_ratios)
 
         # Specify main ax
-        main_ax = plot_config["gridspec"][-1]
+        main_ax = self.plot_config["gridspec"][-1]
 
         def order2indexes(k, m):
             i = int((k-1)/m)
@@ -114,7 +117,7 @@ class Plot2DSimulation():
             else:
                 self.main_ax = self.fig.add_subplot(gs[i[0]:(i[-1]+1),j[0]:(j[-1]+1)])
 
-        axes_lim = plot_config["axeslim"]
+        axes_lim = self.plot_config["axeslim"]
         self.x_lim = axes_lim[0:2]
         self.y_lim = axes_lim[2:4]
 
@@ -123,9 +126,9 @@ class Plot2DSimulation():
         self.main_ax.set_title('Trajectory', fontsize=18)
         self.main_ax.set_aspect('equal', adjustable='box')
 
-        self.draw_level = plot_config["drawlevel"]
-        self.fps = plot_config["fps"]
-        self.numpoints = plot_config["resolution"]
+        self.draw_level = self.plot_config["drawlevel"]
+        self.fps = self.plot_config["fps"]
+        self.numpoints = self.plot_config["resolution"]
 
         self.create_graphical_objs()
 
@@ -246,50 +249,107 @@ class PlotUnicycleSimulation(Plot2DSimulation):
     def __init__(self, logs, clf, cbfs, **kwargs):
         super().__init__(logs, clf, cbfs, **kwargs)
 
-        self.radius = 0.2
-        self.color = mcolors.TABLEAU_COLORS['tab:blue']
-        if "radius" in kwargs.keys():
-            self.radius = kwargs["radius"]
-        if "color" in kwargs.keys():
-            self.color = kwargs["color"]
+    def create_graphical_objs(self):
+        '''
+        Create graphical objects into the correct axes.
+        '''
+        # Get logs
+        self.time = np.array(self.logs["time"])
+        self.state_log = self.logs["state"]
+        if "clf_log" in self.logs.keys():
+            self.clf_log = self.logs["clf_log"]
+            self.clf_param_dim = np.shape(np.array(self.clf_log))[0]
+        # if "cbf_log" in logs.keys():
+        #     self.cbf_log = logs["cbf_log"]
+        #     self.cbf_param_dim = np.shape(np.array(self.cbf_log))[0]
+        self.mode_log = self.logs["mode"]
+        self.equilibria = np.array(self.logs["equilibria"])
+        self.num_steps = len(self.state_log[0])
+        self.anim_step = (self.num_steps/self.time[-1])/self.fps
+        self.current_step = 0
+        self.runs = False
 
-        self.circle = patches.Circle( (0.0, 0.0), radius = self.radius, color = self.color, alpha = 0.7)
-        self.main_ax.add_patch(self.circle)
+        self.num_cbfs = len(self.cbfs)
 
+        # Initalize some graphical objects
+        self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str("Time = "), fontsize=14)
+        self.mode_text = self.main_ax.text(self.x_lim[0]+0.5, self.y_lim[0]-1, "", fontweight="bold",  fontsize=18)
+
+        self.origin, = self.main_ax.plot([],[],lw=4, marker='*', color=[0.,0.,0.])
+        self.trajectory, = self.main_ax.plot([],[],lw=2)
+        self.init_state, = self.main_ax.plot([],[],'bo',lw=2)
+        self.equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
+
+        self.robot_color = mcolors.TABLEAU_COLORS['tab:blue']
+        self.clf_contour_color = mcolors.TABLEAU_COLORS['tab:blue']
+        self.cbf_contour_color = mcolors.TABLEAU_COLORS['tab:green']
+
+        self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[0.0], colors=self.clf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.5)
+        self.cbf_contours = []
+        # self.cbf_contours = self.cbf.contour_plot(self.main_ax, levels=[0.0], colors=['green'], min=self.x_lim[0], max=self.x_lim[1], resolution=0.1)
+
+        robot_x = self.state_log[0][0]
+        robot_y = self.state_log[1][0]
+        robot_angle = self.state_log[2][0]
+        center = self.plot_config["geometry"].get_center( (robot_x, robot_y, robot_angle) )
+        self.robot_geometry = Rectangle( center,
+                                width = self.plot_config["geometry"].length,
+                                height = self.plot_config["geometry"].width, 
+                                angle=np.rad2deg(robot_angle), rotation_point="xy", color = self.robot_color )
+
+        self.robot_pos, = self.main_ax.plot([],[],lw=1,color='black',marker='o',markersize=4.0)
         self.angle_line, = self.main_ax.plot([],[],lw=2, color = mcolors.TABLEAU_COLORS['tab:green'])
 
-    def init(self):
-        graphical_elements = super().init()
-
-        x = self.state_log[0][0]
-        y = self.state_log[1][0]
-        theta = self.state_log[2][0]
-
-        center_x = x - self.radius*np.cos(theta)
-        center_y = y - self.radius*np.sin(theta)
-
-        self.circle.center = center_x, center_y
-        self.angle_line.set_data( [ center_x, x ], [ center_y, y ] )
-
-        graphical_elements.append(self.circle)
-        graphical_elements.append(self.angle_line)
-
-        return graphical_elements
-
     def update(self, i):
-        graphical_elements = super().update(i)
 
-        x = self.state_log[0][i]
-        y = self.state_log[1][i]
-        theta = self.state_log[2][i]
+        if i <= self.num_steps:
 
-        center_x = x - self.radius*np.cos(theta)
-        center_y = y - self.radius*np.sin(theta)
+            xdata, ydata = self.state_log[0][0:i], self.state_log[1][0:i]
+            self.trajectory.set_data(xdata, ydata)
+            current_time = np.around(self.time[i], decimals = 2)
+            current_state = [ self.state_log[0][i], self.state_log[1][i] ]
 
-        self.circle.center = center_x, center_y
-        self.angle_line.set_data( [ center_x, x ], [ center_y, y ] )
+            robot_x = self.state_log[0][i]
+            robot_y = self.state_log[1][i]
+            robot_angle = self.state_log[2][i]
 
-        graphical_elements.append(self.circle)
-        graphical_elements.append(self.angle_line)
+            self.robot_pos.set_data(robot_x, robot_y)
+
+            pose = (robot_x, robot_y, robot_angle)
+            self.robot_geometry.xy = self.plot_config["geometry"].get_corners(pose, "bottomleft")
+            self.robot_geometry.angle = np.rad2deg(robot_angle)
+
+            self.main_ax.add_patch(self.robot_geometry)
+
+            # p_gamma = np.array([robot_x, robot_y]) + self.robot_geometry.dis * rot2D(robot_angle) @ np.array([np.cos(gamma), np.sin(gamma)])
+
+            if hasattr(self, 'clf_log'):
+                current_piv_state = [ self.clf_log[k][i] for k in range(self.clf_param_dim) ]
+                self.clf.set_param(current_piv_state)
+
+            self.time_text.set_text("Time = " + str(current_time) + "s")
+
+            if self.draw_level:
+                V = self.clf.evaluate_function(*current_state)[0]
+                for coll in self.clf_contours.collections:
+                    coll.remove()
+                perimeter = 4*abs(current_state[0]) + 4*abs(current_state[1])
+                self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[V], colors=self.clf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.008*perimeter+0.1)
+
+        else:
+            self.runs = False
+            self.animation.event_source.stop()
+
+        graphical_elements = []
+        graphical_elements.append(self.time_text)
+        graphical_elements.append(self.mode_text)
+        graphical_elements.append(self.trajectory)
+        graphical_elements.append(self.init_state)
+        graphical_elements.append(self.equilibria_plot)
+        graphical_elements.append(self.robot_geometry)
+        graphical_elements.append(self.robot_pos)
+        graphical_elements += self.clf_contours.collections
+        for cbf_countour in self.cbf_contours:
+            graphical_elements += cbf_countour.collections
 
         return graphical_elements
