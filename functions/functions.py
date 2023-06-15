@@ -389,7 +389,12 @@ class QuadraticBarrier(Quadratic):
         theta = set_parameters["orientation"]
 
         def compute_pt(gamma):
-            return p_center + r*rot2D(theta) @ np.array([np.cos(gamma), np.sin(gamma)])
+            return np.array(p_center) + r*rot2D(theta) @ np.array([np.cos(gamma), np.sin(gamma)]).reshape(2)
+
+        def necessary_cond(gamma):
+            p_gamma = compute_pt( gamma )
+            nablah = self.evaluate_gradient(*p_gamma)[0]
+            return nablah.dot(np.array([-np.sin(theta+gamma), np.cos(theta+gamma)]))
 
         def cost(gamma):
             p_gamma = compute_pt(gamma)
@@ -397,19 +402,16 @@ class QuadraticBarrier(Quadratic):
 
         # Solve optimization problem
         results = opt.minimize( cost, self.last_gamma_sol )
-        # results = opt.minimize( cost, self.last_gamma_sol, constraints=opt.LinearConstraint( np.array(1), lb=self.gamma_min, ub=self.gamma_max ) )
         gamma_opt = results.x[0]
-
-        # print("Gamma = " + str(gamma_opt))
 
         h = cost(gamma_opt)
 
-        set_solution = compute_pt( gamma_opt )
-        nablah = self.evaluate_gradient(*set_solution)[0]
+        p_gamma_opt = compute_pt( gamma_opt )
+        nablah = self.evaluate_gradient(*p_gamma_opt)[0]
 
         self.last_gamma_sol = gamma_opt
 
-        return h, nablah, set_solution, gamma_opt
+        return h, nablah, p_gamma_opt, gamma_opt
 
 class Gaussian(Function):
     '''

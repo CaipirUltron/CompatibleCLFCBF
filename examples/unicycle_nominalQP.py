@@ -12,7 +12,7 @@ plant = Unicycle(initial_state = initial_state, initial_control = np.zeros(2), g
 ############################################################################################################################
 
 ############################################# Configure and create CLF #####################################################
-clf_lambda_x, clf_lambda_y = 6.0, 1.0
+clf_lambda_x, clf_lambda_y = 1.0, 3.0
 clf_angle = np.radians(0.0)
 clf_params = {
     "Hv": canonical2D([ clf_lambda_x , clf_lambda_y ], clf_angle),

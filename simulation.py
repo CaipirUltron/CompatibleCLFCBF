@@ -2,7 +2,6 @@ import os
 import sys
 import json
 import importlib
-from dynamic_systems import Unicycle
 
 simulation_config = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples."+simulation_config, package=None)
