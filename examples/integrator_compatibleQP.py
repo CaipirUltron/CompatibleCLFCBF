@@ -2,7 +2,7 @@ import numpy as np
 from functions import canonical2D
 from functions import QuadraticLyapunov, QuadraticBarrier
 from dynamic_systems import PolynomialSystem
-from controllers import CompatibleQPController
+from controllers import CompatibleQP
 
 ######################################### Configure and create 2D plant ####################################################
 initial_state = [4.1, 5.0]
@@ -62,4 +62,21 @@ cbfs = [cbf1, cbf2, cbf3]
 
 #################################################### Define controllers ####################################################
 sample_time = .005
-controller = CompatibleQPController(plant, clf, ref_clf, cbfs, gamma = [1.0, 10.0], alpha = [1.0, 10.0], p = [1.0, 1.0], dt = sample_time)
+controller = CompatibleQP(plant, clf, ref_clf, cbfs, alpha = [1.0, 10.0], beta = [1.0, 10.0], p = [1.0, 1.0], dt = sample_time)
+
+####################################################### Configure plot #####################################################
+xlimits = [-10, 10]
+ylimits = [-10, 10]
+plot_config = {
+    "figsize": (5,5),
+    "gridspec": (1,1,1),
+    "widthratios": [1],
+    "heightratios": [1],
+    "axeslim": tuple(xlimits+ylimits),
+    "path_length": 10,
+    "numpoints": 1000,
+    "drawlevel": True,
+    "resolution": 50,
+    "fps":120,
+    "pad":2.0
+}

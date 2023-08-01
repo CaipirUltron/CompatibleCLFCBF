@@ -43,6 +43,7 @@ class Plot2DSimulation():
         Create graphical objects into the correct axes.
         '''
         # Get logs
+        self.sample_time = self.logs["sample_time"]
         self.time = np.array(self.logs["time"])
         self.state_log = self.logs["state"]
         if "clf_log" in self.logs.keys():
@@ -150,7 +151,7 @@ class Plot2DSimulation():
         self.equilibria_plot.set_data(x_eq, y_eq)
 
         for cbf in self.cbfs:
-            self.cbf_contours.append( cbf.contour_plot(self.main_ax, levels=[0.0], colors=self.cbf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.2) )
+            self.cbf_contours.append( cbf.contour_plot(self.main_ax, levels=[0.0], colors=self.cbf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.1) )
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
@@ -186,7 +187,7 @@ class Plot2DSimulation():
                     coll.remove()
 
                 perimeter = 4*abs(current_state[0]) + 4*abs(current_state[1])
-                self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[V], colors=self.clf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.008*perimeter+0.1)
+                self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[V], colors=self.clf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.005*perimeter+0.1)
 
         else:
             self.runs = False
@@ -203,21 +204,92 @@ class Plot2DSimulation():
 
         return graphical_elements
 
-    def gen_function(self):
+    def gen_function(self, initial_step):
+        self.current_step = initial_step
         while self.runs:
             yield self.current_step
             self.current_step += int(max(1,np.ceil(self.anim_step)))
 
-    def animate(self):
-        self.animation = anim.FuncAnimation(self.fig, func=self.update, frames=self.gen_function(), init_func=self.init, interval=1000/self.fps, repeat=False, blit=True, cache_frame_data=False)
+    def animate(self, *args):
+        '''
+        Show animation starting from specific time (passed as optional argument)
+        '''
+        initial_time = 0
+        if len(args) > 0:
+            initial_time = args[0]
+        initial_step = int(np.floor(initial_time/self.sample_time))
+        self.animation = anim.FuncAnimation(self.fig, func=self.update, frames=self.gen_function(initial_step), init_func=self.init, interval=1000/self.fps, repeat=False, blit=True, cache_frame_data=False)
+
+    def get_frame(self, t):
+        '''
+        Returns graphical elements at time t.
+        '''
+        self.init()
+        step = int(np.floor(t/self.sample_time))
+        graphical_elements = self.update(step)
+
+        return graphical_elements
 
     def plot_frame(self, t):
         '''
         Updates frame at time t.
         '''
-        self.init()
-        step = np.argmin( (self.time - t)**2 )
-        graphical_elements = self.update(step)
+        self.get_frame(t)
+
+
+class PlotPF2DSimulation(Plot2DSimulation):
+    '''
+    Class for matplotlib-based simulation of the vehicle performing path following.
+    '''
+    def __init__(self, path, logs, robot, clf, cbfs, **kwargs):
+        super().__init__(logs, robot, clf, cbfs, **kwargs)
+        self.path = path
+
+    def create_graphical_objs(self):
+        super().create_graphical_objs()
+
+        self.gamma_log = self.logs["gamma_log"]
+        self.path_length = self.plot_config["path_length"]
+        self.path_color = mcolors.TABLEAU_COLORS['tab:green']
+        self.path_graph, self.virtual_pts = [], []
+        self.path_graph, = self.main_ax.plot([],[], linestyle='dashed', lw=0.8, alpha=0.8, color=self.path_color)
+        self.virtual_pt,  = self.main_ax.plot([],[],lw=1,color='red',marker='o',markersize=4.0)
+
+    def init(self):
+        graphical_elements = super().init()
+
+        self.robot_pos, = self.main_ax.plot([],[],lw=1,color='b',marker='o',markersize=4.0)
+
+        xpath, ypath = [], []
+        for k in range(self.numpoints):
+            gamma = k*self.path_length/self.numpoints
+            pos = self.path.get_path_point(gamma)
+            xpath.append(pos[0])
+            ypath.append(pos[1])
+        self.path_graph.set_data(xpath, ypath)
+        self.virtual_pt.set_data([],[])
+
+        graphical_elements.append(self.path_graph)
+        graphical_elements.append(self.virtual_pt)
+        graphical_elements.append(self.robot_pos)
+
+        return graphical_elements
+    
+    def update(self, i):
+
+        if len(self.gamma_log) > 0:
+            gamma = self.gamma_log[i]
+            pos = self.path.get_path_point(gamma)
+            self.virtual_pt.set_data(pos[0], pos[1])
+            self.clf.set_critical( pos )
+
+        self.robot_pos.set_data(self.state_log[0][i], self.state_log[1][i])
+
+        graphical_elements = super().update(i)
+
+        graphical_elements.append(self.path_graph)
+        graphical_elements.append( self.virtual_pt )
+        graphical_elements.append(self.robot_pos)
 
         return graphical_elements
     
@@ -330,8 +402,6 @@ class PlotUnicycleSimulation(Plot2DSimulation):
 
                 data[k,0], data[k,1] = closest_pt[0], closest_pt[1]
             self.closests.set_offsets(data)
-
-
         else:
             self.runs = False
             self.animation.event_source.stop()

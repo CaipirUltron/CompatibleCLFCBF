@@ -322,7 +322,13 @@ class QuadraticLyapunov(Quadratic):
         Lv = vector2triangular(param)
         Hv = Lv.T @ Lv + self.epsilon*np.eye(self._dim)
         super().set_param(hessian = Hv)
-    
+
+    def set_critical(self, pt):
+        '''
+        Sets the Lyapunov function critical point.
+        '''
+        super().set_param(critical = pt)
+
     def update(self, param_ctrl, dt):
         '''
         Integrates the parameters.
@@ -353,7 +359,7 @@ class QuadraticBarrier(Quadratic):
         super().__init__(*args, **kwargs)
         super().set_param(height = -0.5)
 
-        self.param = sym2vector( self._hessian )
+        self.param = sym2vector(self._hessian)
         self.dynamics = Integrator(self.param,np.zeros(len(self.param)))
         self.last_gamma_sol = 0.0
         self.gamma_min = -np.pi/2
@@ -371,6 +377,12 @@ class QuadraticBarrier(Quadratic):
         '''
         self.param = param
         super().set_param(hessian = vector2sym(param))
+
+    def set_critical(self, pt):
+        '''
+        Sets the barrier function critical point.
+        '''
+        super().set_param(critical = pt)
 
     def update(self, param_ctrl, dt):
         '''

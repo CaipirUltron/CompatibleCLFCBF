@@ -2,13 +2,14 @@ import numpy as np
 from controllers import CLFCBFPair
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
+from common import sat
 
 
 class NominalQP():
     '''
     Class for the nominal QP controller.
     '''
-    def __init__(self, plant, clf, cbfs, gamma = 1.0, alpha = 1.0, p = 10.0, dt = 0.001):
+    def __init__(self, plant, clf, cbfs, alpha = 1.0, beta = 1.0, p = 10.0, dt = 0.001):
 
         # Dimensions and system model initialization
         self.plant = plant
@@ -37,7 +38,7 @@ class NominalQP():
             self.equilibrium_points = np.vstack([ self.equilibrium_points, clf_cbf_pair.equilibrium_points.T ])
 
         # QP parameters
-        self.p, self.gamma, self.alpha = p, gamma, alpha
+        self.p, self.alpha, self.beta = p, alpha, beta
         self.QP_dim = self.control_dim + 1
         P = np.eye(self.QP_dim)
         P[self.control_dim,self.control_dim] = self.p
@@ -97,7 +98,7 @@ class NominalQP():
 
         # CLF contraint for the QP
         a_clf = np.hstack( [ self.LgV, -1.0 ])
-        b_clf = -self.gamma * self.V - self.LfV
+        b_clf = -self.alpha * self.V - self.LfV
 
         return a_clf, b_clf
 
@@ -112,9 +113,6 @@ class NominalQP():
             robot_center = self.plant.geometry.get_center(robot_pose)
 
             h, nablah, closest_pt, gamma_opt = cbf.barrier_set({"radius": self.radius, "center": robot_center, "orientation": phi})
-
-            # if h < 0:
-            #     print("Barrier " + str(cbf) + " = " + str(h))
 
             f = self.plant.get_f()[:2]
             g = np.array([[ np.cos(phi), -self.radius*np.sin(phi+gamma_opt) ],[ np.sin(phi), self.radius*np.cos(phi+gamma_opt) ]])
@@ -133,7 +131,7 @@ class NominalQP():
 
         # CBF contraint for the QP
         a_cbf = -np.hstack( [ self.Lgh, 0.0 ])
-        b_cbf = self.alpha * h + self.Lfh
+        b_cbf = self.beta * h + self.Lfh
 
         return a_cbf, b_cbf
 
@@ -149,20 +147,68 @@ class NominalQP():
         '''
         cbf.update(pih_ctrl, self.ctrl_dt)
 
-"""  def get_lambda(self):
-        '''
-        Computes the KKT multipliers of the Optimization problem.
-        '''
-        LgV2 = self.LgV.dot(self.LgV)
-        Lgh2 = self.Lgh.dot(self.Lgh)
-        LgVLgh = self.LgV.dot(self.Lgh)
-        
-        delta = ( (1/self.p) + LgV2 ) * Lgh2 - LgVLgh**2
-        
-        FV = self.LfV + self.gamma * self.V
-        Fh = self.Lfh + self.alpha * self.h
-        
-        lambda1 = (1/delta) * ( FV * Lgh2 - Fh * LgVLgh )
-        lambda2 = (1/delta) * ( FV * LgVLgh - Fh * ( (1/self.p) + LgV2 )  )
 
-        return lambda1, lambda2, delta """
+class NominalPF(NominalQP):
+    '''
+    Class for the nominal path following QP-based controller.
+    '''
+    def __init__(self, path, plant, clf, cbfs, alpha = 1.0, beta = 1.0, p = 10.0, dt = 0.001):
+        super().__init__(plant, clf, cbfs, alpha = 1.0, beta = 1.0, p = 10.0, dt = 0.001)
+        self.path = path
+        self.path_speed = 4.0
+        self.toggle_threshold = 1.0
+        self.kappa = 1.0
+        self.dgamma = 0.0
+
+    def get_control(self):
+        '''
+        Modifies get_control() function for path following functionality.
+        '''
+        control = super().get_control()
+
+        # Updates path dynamics
+        gamma = self.path.get_path_state()
+        # xd = self.path.get_path_point( gamma )
+        dxd = self.path.get_path_gradient( gamma )
+
+        # tilde_x = self.plant.get_state() - xd
+        # if np.linalg.norm(tilde_x) >= self.toggle_threshold:
+        #     eta_e = -tilde_x.dot( dxd )
+        #     self.dgamma = - self.kappa * sat(eta_e, limits=[-10.0,10.0])
+        # else:
+        #     self.dgamma = self.path_speed/np.linalg.norm( dxd )
+
+        self.dgamma = self.path_speed/np.linalg.norm( dxd )
+        self.path.update(self.dgamma, self.ctrl_dt)
+
+        # Updates the clf with new critical point
+        gamma = self.path.get_path_state()
+        xd = self.path.get_path_point( gamma )
+        self.clf.set_critical( xd )
+
+        return control
+    
+    def get_clf_constraint(self):
+        '''
+        Sets the Lyapunov constraint.
+        '''
+        # Affine plant dynamics
+        f = self.plant.get_f()
+        g = self.plant.get_g()
+        state = self.plant.get_state()
+
+        # Lyapunov function and gradient
+        self.V = self.clf.evaluate_function(*state)[0]
+        self.nablaV = self.clf.evaluate_gradient(*state)[0]
+        
+        # Lie derivatives
+        gamma = self.path.get_path_state()
+        dxd = self.path.get_path_gradient( gamma )
+        self.LfV = self.nablaV @ ( f - dxd * self.dgamma )
+        self.LgV = g.T.dot(self.nablaV)
+
+        # CLF contraint for the QP
+        a_clf = np.hstack( [ self.LgV, -1.0 ])
+        b_clf = -self.alpha * self.V - self.LfV
+
+        return a_clf, b_clf

@@ -3,6 +3,18 @@ import numpy as np
 import itertools
 from scipy.optimize import fsolve
 
+def sat(u, limits):
+    '''
+    Scalar saturation.
+    '''
+    min = limits[0]
+    max = limits[1]
+    if u > max:
+        return max
+    if u < min:
+        return min
+    return u
+
 def vector2triangular(vector):
     '''
     Transforms numpy vector to corresponding upper triangular matrix.

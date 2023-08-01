@@ -35,17 +35,24 @@ class DynamicSystem(ABC):
         '''
         Sets system state.
         '''
-        self._state = np.array(state)
+        if type(state) == list or type(state) == np.ndarray:
+            self._state = np.array(state)
+        else:
+            self._state = np.array([state])
+
         self._dstate = np.zeros(self.n)
         self.mODE.set_initial_value(self._state)
-        self.log_state()
+        # self.log_state()
 
     def set_control(self, control_input):
         '''
         Sets system control.
         '''
-        self._control = np.array(control_input)
-        self.log_control()
+        if type(control_input) == list or type(control_input) == np.ndarray:
+            self._control = np.array(control_input)
+        else:
+            self._control = np.array([control_input])
+        # self.log_control()
 
     def actuate(self, dt):
         '''
@@ -54,6 +61,7 @@ class DynamicSystem(ABC):
         self.dynamics()
         self._state = self.mODE.integrate(self.mODE.t+dt)
         self.log_state()
+        self.log_control()
 
     def log_state(self):
         '''

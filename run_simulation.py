@@ -7,7 +7,7 @@ simulation_config = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples."+simulation_config, package=None)
 
 # Simulation loop -------------------------------------------------------------------
-T = 10
+T = 50
 num_steps = int(T/sim.sample_time)
 time = [0]
 print('Running simulation...')
@@ -37,6 +37,9 @@ logs = {
     "clf_log": sim.controller.clf.dynamics.state_log,
     "equilibria": sim.controller.equilibrium_points.tolist(),
 }
+
+if hasattr(sim, 'path'):
+    logs["gamma_log"] = sim.path.logs["gamma"]
 
 with open(simulation_config+".json", "w") as file:
     print("Saving simulation data...")

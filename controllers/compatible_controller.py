@@ -2,13 +2,14 @@ import numpy as np
 from controllers import CLFCBFPair
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
+from common import sat
 
 
-class CompatibleQPController():
+class CompatibleQP():
     '''
     Class for the compatible QP controller.
     '''
-    def __init__(self, plant, clf, ref_clf, cbfs, gamma = [1.0, 1.0], alpha = [1.0, 1.0], p = [10.0, 10.0], dt = 0.001):
+    def __init__(self, plant, clf, ref_clf, cbfs, alpha = [1.0, 1.0], beta = [1.0, 1.0], p = [10.0, 10.0], dt = 0.001):
 
         # Dimensions and system model initialization
         self.plant = plant
@@ -54,7 +55,7 @@ class CompatibleQPController():
             self.equilibrium_points = np.vstack([ self.equilibrium_points, ref_clf_cbf_pair.equilibrium_points.T ])
 
         # Parameters for the inner and outer QPs
-        self.gamma, self.alpha, self.p = gamma, alpha, p
+        self.alpha, self.beta, self.p = alpha, beta, p
 
         # Parameters for the inner QP controller (QP1)
         self.QP1_dim = self.control_dim + 1
@@ -158,15 +159,15 @@ class CompatibleQPController():
         LgV = g.T.dot(nablaV)
 
         # Gradient w.r.t. pi
-        partial_Hv = self.clf.get_partial_Hv()
-        self.nablaV_pi = np.zeros(self.sym_dim)
-        delta_x = ( state - self.clf.get_critical() ).reshape(self.state_dim,1)
-        for k in range(self.sym_dim):
-            self.nablaV_pi[k] = 0.5 * ( delta_x.T @ partial_Hv[k] @ delta_x )[0,0]
+        # partial_Hv = self.clf.get_partial_Hv()
+        # self.nablaV_pi = np.zeros(self.sym_dim)
+        # delta_x = ( state - self.clf.get_critical() ).reshape(self.state_dim,1)
+        # for k in range(self.sym_dim):
+        #     self.nablaV_pi[k] = 0.5 * ( delta_x.T @ partial_Hv[k] @ delta_x )[0,0]
 
         # CLF constraint for the first QP
         a_clf = np.hstack([ LgV, -1.0 ])
-        b_clf = - self.gamma[0]*self.V - LfV
+        b_clf = - self.alpha[0]*self.V - LfV
 
         return a_clf, b_clf
 
@@ -202,7 +203,7 @@ class CompatibleQPController():
 
         # CBF contraint for the QP
         a_cbf = -np.hstack([ Lgh, 0.0 ])
-        b_cbf = self.alpha[0] * h + Lfh
+        b_cbf = self.beta[0] * h + Lfh
 
         return a_cbf, b_cbf
 
@@ -269,7 +270,7 @@ class CompatibleQPController():
 
         # Sets rate constraint
         a_clf_pi = np.hstack( [ self.gradient_Vpi, -1.0 ])
-        b_clf_pi = -self.gamma[1] * self.Vpi
+        b_clf_pi = -self.alpha[1] * self.Vpi
 
         return a_clf_pi, b_clf_pi
 
@@ -301,7 +302,7 @@ class CompatibleQPController():
         '''
         self.h_gamma, gradient_h_gamma = self.compatibility_barrier()
         a_cbf_pi = -np.hstack([ gradient_h_gamma, np.zeros([self.state_dim-1, 1]) ])
-        b_cbf_pi = self.alpha[1]*self.h_gamma
+        b_cbf_pi = self.beta[1]*self.h_gamma
 
         return a_cbf_pi, b_cbf_pi
 
@@ -334,3 +335,69 @@ class CompatibleQPController():
                 gradient_h_gamma[k,i] = C*(term1 - term2)
 
         return h_gamma, gradient_h_gamma
+    
+
+class CompatiblePF(CompatibleQP):
+    '''
+    Class for the compatible path following QP-based controller.
+    '''
+    def __init__(self, path, plant, clf, ref_clf, cbfs, alpha = [1.0, 1.0], beta = [1.0, 1.0], p = [10.0, 10.0], dt = 0.001):
+        super().__init__(plant, clf, ref_clf, cbfs, alpha = [1.0, 1.0], beta = [1.0, 1.0], p = [10.0, 10.0], dt = 0.001)
+        self.path = path
+        self.path_speed = 4.0
+        self.toggle_threshold = 1.0
+        self.kappa = 1.0
+        self.dgamma = 0.0
+
+    def get_control(self):
+        '''
+        Modifies get_control() function for path following functionality 
+        '''
+        control = super().get_control()
+
+        # Updates path dynamics
+        gamma = self.path.get_path_state()
+        # xd = self.path.get_path_point( gamma )
+        dxd = self.path.get_path_gradient( gamma )
+
+        # tilde_x = self.plant.get_state() - xd
+        # if np.linalg.norm(tilde_x) >= self.toggle_threshold:
+        #     eta_e = -tilde_x.dot( dxd )
+        #     self.dgamma = - self.kappa * sat(eta_e, limits=[-10.0,10.0])
+        # else:
+        #     self.dgamma = self.path_speed/np.linalg.norm( dxd )
+
+        self.dgamma = self.path_speed/np.linalg.norm( dxd )
+        self.path.update(self.dgamma, self.ctrl_dt)
+
+        # Updates the clf with new critical point
+        gamma = self.path.get_path_state()
+        xd = self.path.get_path_point( gamma )
+        self.clf.set_critical( xd )
+
+        return control
+
+    def get_clf_constraint(self):
+        '''
+        Sets the Lyapunov constraint.
+        '''
+        # Affine plant dynamics
+        f = self.plant.get_f()
+        g = self.plant.get_g()
+        state = self.plant.get_state()
+
+        # Lyapunov function and gradient
+        self.V = self.clf.evaluate_function(*state)[0]
+        nablaV = self.clf.evaluate_gradient(*state)[0]
+
+        # Lie derivatives
+        gamma = self.path.get_path_state()
+        dxd = self.path.get_path_gradient( gamma )
+        LfV = nablaV @ ( f - dxd * self.dgamma )
+        LgV = g.T.dot(nablaV)
+
+        # CLF constraint for the first QP
+        a_clf = np.hstack([ LgV, -1.0 ])
+        b_clf = - self.alpha[0]*self.V - LfV
+
+        return a_clf, b_clf
