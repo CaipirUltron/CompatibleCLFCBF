@@ -2,7 +2,7 @@ import sys
 import json
 import importlib
 import matplotlib.pyplot as plt
-from graphics import Plot2DSimulation, PlotPF2DSimulation
+from graphics import Plot2DSimulation, PlotPFSimulation
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -18,11 +18,14 @@ except IOError:
 print('Animating simulation...')
 
 if hasattr(sim, 'path'):
-    plotSim = PlotPF2DSimulation( sim.path, logs, sim.plant, sim.clf, sim.cbfs, plot_config = sim.plot_config )
+    plotSim = PlotPFSimulation( sim.path, logs, sim.plant, sim.clf, sim.cbfs, plot_config = sim.plot_config )
     plotSim.main_ax.set_title("Path Following with Obstacle Avoidance using CLF-CBFs", fontsize=12)
 else:
     plotSim = Plot2DSimulation( logs, sim.plant, sim.clf, sim.cbfs, plot_config = sim.plot_config )    
 
-plotSim.animate()
+initial_time = 0
+if len(sys.argv) > 2:
+    initial_time = float(sys.argv[2])
+plotSim.animate(initial_time)
 # plotSim.animation.save(simulation_file + ".mp4", writer=anim.FFMpegWriter(fps=30, codec='h264'), dpi=100)
 plt.show()

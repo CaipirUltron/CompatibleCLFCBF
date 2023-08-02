@@ -5,7 +5,7 @@ from dynamic_systems import PolynomialSystem
 from controllers import CompatibleQP
 
 ######################################### Configure and create 2D plant ####################################################
-initial_state = [4.1, 5.0]
+initial_state = [0.1, 5.0]
 
 G1 = np.array([[1,0],[0,1]])
 G2 = np.array([[0,0],[0,0]])
@@ -15,14 +15,14 @@ plant = PolynomialSystem(initial_state = initial_state, initial_control = np.zer
 ############################################################################################################################
 
 ############################################# Configure and create CLF #####################################################
-clf_lambda_x, clf_lambda_y, clf_angle = 6.0, 1.0, np.radians(45.0)
+clf_lambda_x, clf_lambda_y, clf_angle = 6.0, 1.0, np.radians(0.0)
 clf_params = {
     "Hv": canonical2D([ clf_lambda_x , clf_lambda_y ], clf_angle),
     "x0": [ 0.0, 0.0 ] }
 ############################################################################################################################
 
 ######################################## Configure and create reference CLF ################################################
-ref_clf_lambda_x, ref_clf_lambda_y, ref_clf_angle = 6.0, 1.0, np.radians(-45.0)
+ref_clf_lambda_x, ref_clf_lambda_y, ref_clf_angle = 6.0, 1.0, np.radians(0.0)
 ref_clf_params = {
     "Hv": canonical2D([ ref_clf_lambda_x , ref_clf_lambda_y ], ref_clf_angle),
     "x0": [ 0.0, 0.0 ] }
@@ -65,8 +65,7 @@ sample_time = .005
 controller = CompatibleQP(plant, clf, ref_clf, cbfs, alpha = [1.0, 10.0], beta = [1.0, 10.0], p = [1.0, 1.0], dt = sample_time)
 
 ####################################################### Configure plot #####################################################
-xlimits = [-10, 10]
-ylimits = [-10, 10]
+xlimits, ylimits = [-8, 8], [-8, 8]
 plot_config = {
     "figsize": (5,5),
     "gridspec": (1,1,1),

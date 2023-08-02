@@ -204,10 +204,12 @@ class Quadratic(Function):
             self.A = np.zeros([self._dim,self._dim])
             self.b = np.zeros(self._dim)
             self.critical_point = np.zeros(self._dim)
+            self.dcritical = np.zeros(self._dim)
         else:
             self.A = 0.0
             self.b = 0.0
             self.critical_point = 0.0
+            self.dcritical = 0.0
         self.c = 0.0
         self.height = 0.0
 
@@ -230,6 +232,8 @@ class Quadratic(Function):
                 self.critical_point = np.array(kwargs[key])
             if key == "height":
                 self.height = kwargs[key]
+            if key == "dcritical":
+                self.dcritical = np.array(kwargs[key])
 
         self.A = 0.5 * self._hessian
         self.b = - 0.5*( self._hessian + self._hessian.T ) @ self.critical_point
@@ -280,6 +284,9 @@ class Quadratic(Function):
     def get_height(self):
         return self.height
 
+    def get_critical_derivative(self):
+        return self.dcritical
+
     def compute_eig(self):
         eigen, Q = np.linalg.eig(self.hessian(0))
         angle = np.arctan2(Q[0, 1], Q[0, 0])
@@ -327,7 +334,13 @@ class QuadraticLyapunov(Quadratic):
         '''
         Sets the Lyapunov function critical point.
         '''
-        super().set_param(critical = pt)
+        super().set_param(critical = pt)        
+
+    def set_critical_derivative(self, dcritical):
+        '''
+        Sets the derivative of the Lyapunov function critical point.
+        '''
+        super().set_param(dcritical = dcritical)
 
     def update(self, param_ctrl, dt):
         '''

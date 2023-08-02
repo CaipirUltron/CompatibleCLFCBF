@@ -4,7 +4,7 @@ import matplotlib.animation as anim
 import matplotlib.colors as mcolors
 
 from common import rot2D
-from matplotlib import gridspec, patches
+from matplotlib import gridspec
 from matplotlib.patches import Rectangle
 
 
@@ -14,7 +14,7 @@ class Plot2DSimulation():
     '''
     def __init__(self, logs, robot, clf, cbfs, **kwargs):
         
-        plot_config = {
+        self.plot_config = {
             "figsize": (5,5),
             "gridspec": (1,1,1),
             "widthratios": [1],
@@ -32,7 +32,7 @@ class Plot2DSimulation():
         self.robot = robot
         self.clf, self.cbfs = clf, cbfs
 
-        self.fig = plt.figure(figsize = plot_config["figsize"], constrained_layout=True)
+        self.fig = plt.figure(figsize = self.plot_config["figsize"], constrained_layout=True)
         self.configure()
         
         # self.fig.tight_layout(pad=plot_config["pad"])
@@ -237,7 +237,7 @@ class Plot2DSimulation():
         self.get_frame(t)
 
 
-class PlotPF2DSimulation(Plot2DSimulation):
+class PlotPFSimulation(Plot2DSimulation):
     '''
     Class for matplotlib-based simulation of the vehicle performing path following.
     '''

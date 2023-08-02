@@ -17,7 +17,7 @@ try:
 except IOError:
     print("Couldn't locate "+simulation_file + ".json")
 
-plotSim = Plot2DSimulation(logs, sim.clf, sim.cbfs)
+plotSim = Plot2DSimulation(logs, sim.plant, sim.clf, sim.cbfs)
 plotSim.plot_frame(5.0)
 
 plt.savefig(simulation_file + ".eps", format='eps', transparent=True)

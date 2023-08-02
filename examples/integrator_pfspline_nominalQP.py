@@ -1,11 +1,12 @@
+import json
 import numpy as np
 from functions import canonical2D
 from functions import QuadraticLyapunov, QuadraticBarrier
 from dynamic_systems import PolynomialSystem
-from controllers import NominalPF, Path, Circle
+from controllers import NominalPF, SplinePath
 
 ######################################### Configure and create 2D plant ####################################################
-initial_state = [-4.2, 5.0]
+initial_state = [-7, -5.0]
 
 G1 = np.array([[1,0],[0,1]])
 G2 = np.array([[0,0],[0,0]])
@@ -14,8 +15,14 @@ G = [ G1 ]
 plant = PolynomialSystem(initial_state = initial_state, initial_control = np.zeros(2), degree=0, G_list = G)
 
 # ------------------------------------------- Configure and create path -----------------------------------------------------
-path_params = {"center": [0.0, 0.0], "radius": 4}
-path = Path(Circle, params=path_params, init_path_state=[np.deg2rad(300)])
+# Load spline
+path_name = "graphics/splines/path.json"
+with open(path_name,'r') as file:
+    print("Loading: " + path_name)
+    path_params = json.load(file)
+    path_params["points"] = np.array( path_params["points"] )
+
+path = SplinePath(params=path_params, init_path_state=[np.deg2rad(0)])
 
 # ------------------------------------------- Configure and create CLF -----------------------------------------------------
 clf_lambda_x, clf_lambda_y, clf_angle = 1.0, 4.0, np.radians(0.0)
@@ -24,28 +31,26 @@ clf_params = {
     "x0": [ 0.0, 0.0 ] }
 
 # ---------------------------------------- Configure and create reference CLF ----------------------------------------------
-ref_clf_lambda_x, ref_clf_lambda_y, ref_clf_angle = 4.0, 1.0, np.radians(0.0)
+ref_clf_lambda_x, ref_clf_lambda_y, ref_clf_angle = 1.0, 4.0, np.radians(0.0)
 ref_clf_params = {
     "Hv": canonical2D([ ref_clf_lambda_x , ref_clf_lambda_y ], ref_clf_angle),
     "x0": [ 0.0, 0.0 ] }
 
 ############################################## Configure and create CBFs ###################################################
-gamma1, gamma2, gamma3 = np.deg2rad(0), np.deg2rad(120), np.deg2rad(240)
-
 cbf_lambda_x, cbf_lambda_y, cbf_angle = 4.0, 1.0, np.radians(0.0)
 cbf_params1 = {
     "Hh": canonical2D([ cbf_lambda_x , cbf_lambda_y ], cbf_angle),
-    "p0": path.get_path_point(gamma1).tolist() }
+    "p0": [-4.0, 0.0] }
 
-cbf_lambda_x, cbf_lambda_y, cbf_angle = 1.0, 4.0, np.radians(-30.0)
+cbf_lambda_x, cbf_lambda_y, cbf_angle = 4.0, 1.0, np.radians(0.0)
 cbf_params2 = {
     "Hh": canonical2D([ cbf_lambda_x , cbf_lambda_y ], cbf_angle),
-    "p0": path.get_path_point(gamma2).tolist() }
+    "p0": [0.0, 0.0] }
 
-cbf_lambda_x, cbf_lambda_y, cbf_angle = 1.0, 4.0, np.radians(30.0)
+cbf_lambda_x, cbf_lambda_y, cbf_angle = 4.0, 1.0, np.radians(0.0)
 cbf_params3 = {
     "Hh": canonical2D([ cbf_lambda_x , cbf_lambda_y ], cbf_angle),
-    "p0": path.get_path_point(gamma3).tolist() }
+    "p0": [4.0, 0.0] }
 ############################################################################################################################
 
 ########################################## Define quadratic Lyapunov and barriers ##########################################
@@ -59,11 +64,11 @@ cbf3 = QuadraticBarrier(*initial_state, hessian = cbf_params3["Hh"], critical = 
 cbfs = [cbf1, cbf2, cbf3]
 
 ############################################## Configure and create controllers ############################################
-sample_time = .005
-controller = NominalPF(path, plant, clf, cbfs, alpha = 10.0, beta = 1.0, p = 10.0, dt = sample_time)
+sample_time = .004
+controller = NominalPF(path, plant, clf, cbfs, alpha = 10.0, beta = 10.0, p = 1.0, dt = sample_time)
 
 ####################################################### Configure plot #####################################################
-xlimits, ylimits = [-6, 6], [-6, 6]
+xlimits, ylimits = [-10, 10], [-10, 10]
 plot_config = {
     "figsize": (5,5),
     "gridspec": (1,1,1),

@@ -37,7 +37,7 @@ class CompatibleQP():
         self.mode_log = []                   # mode = 1 for compatibility, mode = 0 for rate
         self.pencil_dict = {}
         self.f_params_dict = {
-            "epsilon": 0.4,
+            "epsilon": 0.1,
             "min_CLF_eigenvalue": 0.2
         }
         self.clf.set_epsilon(self.f_params_dict["min_CLF_eigenvalue"])
@@ -53,6 +53,7 @@ class CompatibleQP():
             ref_clf_cbf_pair = CLFCBFPair(self.ref_clf, cbf)
             self.ref_clf_cbf_pairs.append( ref_clf_cbf_pair )
             self.equilibrium_points = np.vstack([ self.equilibrium_points, ref_clf_cbf_pair.equilibrium_points.T ])
+        self.h_gamma = np.zeros(self.state_dim-1)
 
         # Parameters for the inner and outer QPs
         self.alpha, self.beta, self.p = alpha, beta, p
@@ -176,27 +177,13 @@ class CompatibleQP():
         Sets the barrier constraint.
         '''
         # Affine plant dynamics
-        if type(self.plant) == Unicycle:
+        f = self.plant.get_f()
+        g = self.plant.get_g()
+        state = self.plant.get_state()
 
-            state = self.plant.get_state()[:2]
-            phi = self.plant.get_state()[2]
-
-            robot_pose = ( state[0], state[1], phi )
-            robot_center = self.plant.geometry.get_center(robot_pose)
-
-            h, nablah, closest_pt, gamma_opt = cbf.barrier_set({"radius": self.radius, "center": robot_center, "orientation": phi})
-
-            f = self.plant.get_f()[:2]
-            g = np.array([[ np.cos(phi), -self.radius*np.sin(phi+gamma_opt) ],[ np.sin(phi), self.radius*np.cos(phi+gamma_opt) ]])
-
-        else:
-            f = self.plant.get_f()
-            g = self.plant.get_g()
-            state = self.plant.get_state()
-
-            # Barrier function and gradient
-            h = cbf.evaluate_function(*state)[0]
-            nablah = cbf.evaluate_gradient(*state)[0]
+        # Barrier function and gradient
+        h = cbf.evaluate_function(*state)[0]
+        nablah = cbf.evaluate_gradient(*state)[0]
 
         Lfh = nablah.dot(f)
         Lgh = g.T.dot(nablah)
@@ -222,6 +209,8 @@ class CompatibleQP():
             # self.active_cbf = None
             self.active_pair = None        
         
+        # print(self.active_pair)
+
     # def update_cbf_dynamics(self, pih_ctrl):
     #     '''
     #     Integrates the dynamic system for the CBF Hessian matrix.
@@ -300,9 +289,9 @@ class CompatibleQP():
         '''
         Sets the barrier constraints for compatibility.
         '''
-        self.h_gamma, gradient_h_gamma = self.compatibility_barrier()
-        a_cbf_pi = -np.hstack([ gradient_h_gamma, np.zeros([self.state_dim-1, 1]) ])
-        b_cbf_pi = self.beta[1]*self.h_gamma
+        self.h_gamma, Lg_h_gamma, Lf_h_gamma = self.compatibility_barrier()
+        a_cbf_pi = -np.hstack([ Lg_h_gamma, np.zeros([self.state_dim-1, 1]) ])
+        b_cbf_pi = self.beta[1]*self.h_gamma + Lf_h_gamma
 
         return a_cbf_pi, b_cbf_pi
 
@@ -310,13 +299,15 @@ class CompatibleQP():
         '''
         Computes compatibility barrier constraint, for keeping the critical values of f above 1.
         '''
+        Hv = self.active_pair.clf.get_hessian()
         partial_Hv = self.active_pair.clf.get_partial_Hv()
         pencil_eig = self.active_pair.pencil.eigenvalues
         Z = self.active_pair.pencil.eigenvectors
 
         # Compatibility barrier
         h_gamma = np.zeros(self.state_dim-1)
-        gradient_h_gamma = np.zeros([self.state_dim-1, self.sym_dim])
+        Lg_h_gamma = np.zeros([self.state_dim-1, self.sym_dim])
+        Lf_h_gamma = np.zeros(self.state_dim-1)
 
         # Barrier function
         for k in range(self.state_dim-1):
@@ -328,52 +319,77 @@ class CompatibleQP():
             h_gamma[k] = np.log(h1) - self.f_params_dict["epsilon"]
             
             # Barrier function gradient
-            C = 2*residue/(delta_lambda**2)/h1
+            # C = 2*residue/(delta_lambda**2)/h1
+            C = 2/residue
             for i in range(self.sym_dim):
                 term1 = ( Z[:,max_index].T @ partial_Hv[i] @ ( self.active_pair.p0 - self.active_pair.x0 ) )
                 term2 = (residue/delta_lambda)*( Z[:,k+1].T @ partial_Hv[i] @ Z[:,k+1] - Z[:,k].T @ partial_Hv[i] @ Z[:,k] )
-                gradient_h_gamma[k,i] = C*(term1 - term2)
+                Lg_h_gamma[k,i] = C*(term1 - term2)
 
-        return h_gamma, gradient_h_gamma
+            dx0 = self.active_pair.clf.get_critical_derivative()
+            dp0 = self.active_pair.cbf.get_critical_derivative()
+            Lf_h_gamma[k] = C * Z[:,max_index].T @ Hv @ ( dp0 - dx0 )
+
+        return h_gamma, Lg_h_gamma, Lf_h_gamma
     
 
 class CompatiblePF(CompatibleQP):
     '''
     Class for the compatible path following QP-based controller.
     '''
-    def __init__(self, path, plant, clf, ref_clf, cbfs, alpha = [1.0, 1.0], beta = [1.0, 1.0], p = [10.0, 10.0], dt = 0.001):
-        super().__init__(plant, clf, ref_clf, cbfs, alpha = [1.0, 1.0], beta = [1.0, 1.0], p = [10.0, 10.0], dt = 0.001)
+    def __init__(self, path, plant, clf, ref_clf, cbfs, alpha = [1.0, 1.0], beta = [1.0, 1.0], p = [1.0, 1.0], dt = 0.001):
+        super().__init__(plant, clf, ref_clf, cbfs, alpha = alpha, beta = beta, p = p, dt = dt)
         self.path = path
         self.path_speed = 4.0
         self.toggle_threshold = 1.0
         self.kappa = 1.0
         self.dgamma = 0.0
 
+        self.evolving = True
+        self.in_unsafe_region = False
+
     def get_control(self):
         '''
         Modifies get_control() function for path following functionality 
         '''
-        control = super().get_control()
-
-        # Updates path dynamics
+        # Updates path state
         gamma = self.path.get_path_state()
-        # xd = self.path.get_path_point( gamma )
+        xd = self.path.get_path_point( gamma )
         dxd = self.path.get_path_gradient( gamma )
 
+        if self.active_pair != None:
+            h_at_xd = self.active_pair.cbf.evaluate_function(*xd)[0]
+
+            if h_at_xd < 0:
+                self.in_unsafe_region = True
+
+        if self.in_unsafe_region and self.active_pair == None:
+            self.evolving = False
+            self.in_unsafe_region = False
+
+        if np.linalg.norm(self.plant.get_state() - xd) <= self.toggle_threshold:
+            self.evolving = True
+
+        self.dgamma = 0.0
+        if self.evolving:
+            self.dgamma = self.path_speed/np.linalg.norm( dxd )
+
+        # self.dgamma = self.path_speed/np.linalg.norm( dxd )
         # tilde_x = self.plant.get_state() - xd
         # if np.linalg.norm(tilde_x) >= self.toggle_threshold:
         #     eta_e = -tilde_x.dot( dxd )
         #     self.dgamma = - self.kappa * sat(eta_e, limits=[-10.0,10.0])
-        # else:
-        #     self.dgamma = self.path_speed/np.linalg.norm( dxd )
 
-        self.dgamma = self.path_speed/np.linalg.norm( dxd )
         self.path.update(self.dgamma, self.ctrl_dt)
 
-        # Updates the clf with new critical point
+        # Updates the clf with new critical point and velocity
         gamma = self.path.get_path_state()
         xd = self.path.get_path_point( gamma )
-        self.clf.set_critical( xd )
+        self.clf.set_critical(  xd )
+        self.clf.set_critical_derivative( dxd * self.dgamma )
+
+        # Computes the PF control
+        control = super().get_control()
 
         return control
 
@@ -391,10 +407,8 @@ class CompatiblePF(CompatibleQP):
         nablaV = self.clf.evaluate_gradient(*state)[0]
 
         # Lie derivatives
-        gamma = self.path.get_path_state()
-        dxd = self.path.get_path_gradient( gamma )
-        LfV = nablaV @ ( f - dxd * self.dgamma )
-        LgV = g.T.dot(nablaV)
+        LfV = nablaV @ ( f - self.clf.get_critical_derivative() )
+        LgV = g.T.dot( nablaV )
 
         # CLF constraint for the first QP
         a_clf = np.hstack([ LgV, -1.0 ])

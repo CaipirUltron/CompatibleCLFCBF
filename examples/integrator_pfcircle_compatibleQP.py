@@ -60,11 +60,11 @@ cbf3 = QuadraticBarrier(*initial_state, hessian = cbf_params3["Hh"], critical = 
 cbfs = [cbf1, cbf2, cbf3]
 
 ############################################## Configure and create controllers ############################################
-sample_time = .005
+sample_time = .002
 controller = CompatiblePF(path, plant, clf, ref_clf, cbfs, alpha = 10.0, beta = 1.0, p = 10.0, dt = sample_time)
 
 ####################################################### Configure plot #####################################################
-xlimits, ylimits = [-6, 6], [-6, 6]
+xlimits, ylimits = [-8, 8], [-8, 8]
 plot_config = {
     "figsize": (5,5),
     "gridspec": (1,1,1),

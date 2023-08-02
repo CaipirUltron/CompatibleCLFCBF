@@ -30,6 +30,7 @@ class NominalQP():
         self.skewsym_dim = int(( self.state_dim * ( self.state_dim - 1 ) )/2)
 
         # Compute equilibrium points
+        self.active_pair = None
         self.clf_cbf_pairs = []
         self.equilibrium_points = np.zeros([0,clf_dim])
         for cbf in cbfs:
@@ -44,6 +45,7 @@ class NominalQP():
         P[self.control_dim,self.control_dim] = self.p
         q = np.zeros(self.QP_dim)
         self.QP = QuadraticProgram(P=P, q=q)
+        self.QP_sol = np.zeros(self.QP_dim)
 
         self.ctrl_dt = dt
         if type(self.plant) == Unicycle:
@@ -63,8 +65,8 @@ class NominalQP():
 
         # Solve QP
         self.QP.set_inequality_constraints(A, b)
-        QP_sol = self.QP.get_solution()
-        control = QP_sol[0:self.control_dim,]
+        self.QP_sol = self.QP.get_solution()
+        control = self.QP_sol[0:self.control_dim,]
 
         return control
 
@@ -153,12 +155,42 @@ class NominalPF(NominalQP):
     Class for the nominal path following QP-based controller.
     '''
     def __init__(self, path, plant, clf, cbfs, alpha = 1.0, beta = 1.0, p = 10.0, dt = 0.001):
-        super().__init__(plant, clf, cbfs, alpha = 1.0, beta = 1.0, p = 10.0, dt = 0.001)
+        super().__init__(plant, clf, cbfs, alpha = alpha, beta = beta, p = p, dt = dt)
         self.path = path
         self.path_speed = 4.0
         self.toggle_threshold = 1.0
         self.kappa = 1.0
         self.dgamma = 0.0
+
+        self.evolving = True
+        self.in_unsafe_region = False
+
+    def active_cbf_index(self):
+        '''
+        Returns the index of the current active CBF, if only one CBF is active.
+        Returns -1 otherwise.
+        '''
+        cbf_constraints = []
+        for cbf in self.cbfs:
+            a_cbf, b_cbf = self.get_cbf_constraint(cbf)
+            cbf_constraints.append( -a_cbf @ self.QP_sol + b_cbf )
+
+        arr = np.array(cbf_constraints) <= np.array([ 0.000001 for _ in range(len(self.cbfs)) ])
+
+        count_sum = False
+        for i in range(len(arr)):
+            count_mult = True
+            for j in range(len(arr)):
+                if i != j:
+                    count_mult = count_mult and not(arr[j])
+            count_sum = count_sum or count_mult
+
+        if count_sum:
+            for index in range(len(arr)):
+                if arr[index] == True:
+                    return index
+        
+        return -1
 
     def get_control(self):
         '''
@@ -168,17 +200,36 @@ class NominalPF(NominalQP):
 
         # Updates path dynamics
         gamma = self.path.get_path_state()
-        # xd = self.path.get_path_point( gamma )
+        xd = self.path.get_path_point( gamma )
         dxd = self.path.get_path_gradient( gamma )
 
+        index = self.active_cbf_index()
+        self.active_pair = None
+        if index >= 0:
+            self.active_pair = self.clf_cbf_pairs[index]               
+
+        if self.active_pair != None:
+            h_at_xd = self.active_pair.cbf.evaluate_function(*xd)[0]
+            if h_at_xd < 0:
+                self.in_unsafe_region = True
+
+        if self.in_unsafe_region and self.active_pair == None:
+            self.evolving = False
+            self.in_unsafe_region = False
+
+        if np.linalg.norm(self.plant.get_state() - xd) <= self.toggle_threshold:
+            self.evolving = True
+
+        self.dgamma = 0.0
+        if self.evolving:
+            self.dgamma = self.path_speed/np.linalg.norm( dxd )
+
+        # self.dgamma = self.path_speed/np.linalg.norm( dxd )
         # tilde_x = self.plant.get_state() - xd
         # if np.linalg.norm(tilde_x) >= self.toggle_threshold:
         #     eta_e = -tilde_x.dot( dxd )
         #     self.dgamma = - self.kappa * sat(eta_e, limits=[-10.0,10.0])
-        # else:
-        #     self.dgamma = self.path_speed/np.linalg.norm( dxd )
 
-        self.dgamma = self.path_speed/np.linalg.norm( dxd )
         self.path.update(self.dgamma, self.ctrl_dt)
 
         # Updates the clf with new critical point
