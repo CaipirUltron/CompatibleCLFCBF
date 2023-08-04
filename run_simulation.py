@@ -9,9 +9,9 @@ sim = importlib.import_module("examples."+simulation_config, package=None)
 # Simulation loop -------------------------------------------------------------------
 T = 20
 num_steps = int(T/sim.sample_time)
-time = [0]
+time = []
 print('Running simulation...')
-for step in range(1, num_steps+1):
+for step in range(0, num_steps):
 
     # Simulation time
     t = step*sim.sample_time

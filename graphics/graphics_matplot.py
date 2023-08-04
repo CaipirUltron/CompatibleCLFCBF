@@ -63,10 +63,10 @@ class Plot2DSimulation():
         self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str("Time = "), fontsize=14)
         # self.mode_text = self.main_ax.text(self.x_lim[0]+0.5, self.y_lim[0]-1, "", fontweight="bold",  fontsize=18)
 
-        self.origin, = self.main_ax.plot([],[],lw=4, marker='*', color=[0.,0.,0.])
+        # self.origin, = self.main_ax.plot([],[],lw=4, marker='*', color=[0.,0.,0.])
         self.trajectory, = self.main_ax.plot([],[],lw=2)
         self.init_state, = self.main_ax.plot([],[],'bo',lw=2)
-        self.equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
+        # self.equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
 
         self.clf_contour_color = mcolors.TABLEAU_COLORS['tab:blue']
         self.cbf_contour_color = mcolors.TABLEAU_COLORS['tab:green']
@@ -122,7 +122,7 @@ class Plot2DSimulation():
 
         self.main_ax.set_xlim(*self.x_lim)
         self.main_ax.set_ylim(*self.y_lim)
-        self.main_ax.set_title('Trajectory', fontsize=18)
+        self.main_ax.set_title("", fontsize=18)
         self.main_ax.set_aspect('equal', adjustable='box')
 
         self.draw_level = self.plot_config["drawlevel"]
@@ -139,7 +139,7 @@ class Plot2DSimulation():
         # self.mode_text.text = ""
         self.trajectory.set_data([],[])
 
-        self.origin.set_data([self.clf.critical_point[0]],[self.clf.critical_point[1]])
+        # self.origin.set_data([self.clf.critical_point[0]],[self.clf.critical_point[1]])
 
         x_init, y_init = self.state_log[0][0], self.state_log[1][0]
         self.init_state.set_data(x_init, y_init)
@@ -148,7 +148,7 @@ class Plot2DSimulation():
         x_eq, y_eq = np.zeros(num_eq), np.zeros(num_eq)
         for k in range(num_eq):
             x_eq[k], y_eq[k] = self.equilibria[k,0], self.equilibria[k,1]
-        self.equilibria_plot.set_data(x_eq, y_eq)
+        # self.equilibria_plot.set_data(x_eq, y_eq)
 
         for cbf in self.cbfs:
             self.cbf_contours.append( cbf.contour_plot(self.main_ax, levels=[0.0], colors=self.cbf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.1) )
@@ -158,7 +158,7 @@ class Plot2DSimulation():
         # graphical_elements.append(self.mode_text)
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
-        graphical_elements.append(self.equilibria_plot)
+        # graphical_elements.append(self.equilibria_plot)
         graphical_elements += self.clf_contours.collections
         for cbf_countour in self.cbf_contours:
             graphical_elements += cbf_countour.collections
@@ -197,7 +197,7 @@ class Plot2DSimulation():
         graphical_elements.append(self.time_text)
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
-        graphical_elements.append(self.equilibria_plot)
+        # graphical_elements.append(self.equilibria_plot)
         graphical_elements += self.clf_contours.collections
         for cbf_countour in self.cbf_contours:
             graphical_elements += cbf_countour.collections
@@ -250,9 +250,9 @@ class PlotPFSimulation(Plot2DSimulation):
 
         self.gamma_log = self.logs["gamma_log"]
         self.path_length = self.plot_config["path_length"]
-        self.path_color = mcolors.TABLEAU_COLORS['tab:green']
+        self.path_color = mcolors.TABLEAU_COLORS['tab:red']
         self.path_graph, self.virtual_pts = [], []
-        self.path_graph, = self.main_ax.plot([],[], linestyle='dashed', lw=0.8, alpha=0.8, color=self.path_color)
+        self.path_graph, = self.main_ax.plot([],[], linestyle='dashed', lw=1.2, alpha=0.8, color=self.path_color)
         self.virtual_pt,  = self.main_ax.plot([],[],lw=1,color='red',marker='o',markersize=4.0)
 
     def init(self):
@@ -325,10 +325,10 @@ class PlotUnicycleSimulation(Plot2DSimulation):
         self.cbf_text_numbers = [ self.main_ax.text(0, 0, "", fontsize=10) for k in range(self.num_cbfs) ]
         self.cbf_text_numbers_closests = [ self.main_ax.text(0, 0, "", fontsize=10) for k in range(self.num_cbfs) ]
 
-        self.origin, = self.main_ax.plot([],[],lw=4, marker='*', color=[0.,0.,0.])
+        # self.origin, = self.main_ax.plot([],[],lw=4, marker='*', color=[0.,0.,0.])
         self.trajectory, = self.main_ax.plot([],[],lw=2)
         self.init_state, = self.main_ax.plot([],[],'bo',lw=2)
-        self.equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
+        # self.equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
         self.closests = self.main_ax.scatter([],[], marker='o', color=mcolors.TABLEAU_COLORS['tab:green'])
 
         self.robot_color = mcolors.TABLEAU_COLORS['tab:blue']
@@ -411,7 +411,7 @@ class PlotUnicycleSimulation(Plot2DSimulation):
         # graphical_elements.append(self.mode_text)
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
-        graphical_elements.append(self.equilibria_plot)
+        # graphical_elements.append(self.equilibria_plot)
         graphical_elements.append(self.robot_geometry)
         graphical_elements.append(self.robot_pos)
         graphical_elements.append(self.circle)

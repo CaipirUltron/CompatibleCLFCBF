@@ -20,10 +20,10 @@ except IOError:
 font_size = 14
 configuration = {
     "figsize": (8,8),
-    "gridspec": (3,2,1),
+    "gridspec": (2,2,1),
     "widthratios": [1, 1],
-    "heightratios": [2.5, 2.5, 1],
-    "axeslim": (-6,6,-6,6),
+    "heightratios": [1.0, 1.0],
+    "axeslim": (-10,10,-10,10),
     "path_length": 10,
     "numpoints": 1000,
     "drawlevel": True,
@@ -34,36 +34,36 @@ configuration = {
 
 if hasattr(sim, 'path'):
     plotSim = PlotPFSimulation( sim.path, logs, sim.plant, sim.clf, sim.cbfs, plot_config = configuration )
-    plotSim.main_ax.set_title("Path Following with Obstacle Avoidance using CLF-CBFs", fontsize=12)
+    plotSim.main_ax.set_title("", fontsize=12)
 else:
     plotSim = Plot2DSimulation(logs, sim.plant, sim.clf, sim.cbfs, plot_config = configuration)
     plotSim.main_ax.set_title("")
-    
-plotSim.fig.suptitle("Compatible CLF-CBF Controller", fontsize=18)
+
+plotSim.fig.suptitle("Path Following with Obstacle Avoidance using Compatible CLF-CBFs", fontsize=18)
 
 # Plot 221
-configuration["gridspec"] = (3,2,1)
+configuration["gridspec"] = (2,2,1)
 plotSim.configure()
 plotSim.main_ax.set_title("")
-plotSim.plot_frame(0.1)
+plotSim.plot_frame(2.03)
 
 # Subplot 222
-configuration["gridspec"] = (3,2,2)
+configuration["gridspec"] = (2,2,2)
 plotSim.configure()
 plotSim.main_ax.set_title("")
-plotSim.plot_frame(1.5)
+plotSim.plot_frame(3.1)
 
 # Subplot 223
-configuration["gridspec"] = (3,2,3)
+configuration["gridspec"] = (2,2,3)
 plotSim.configure()
 plotSim.main_ax.set_title("")
-plotSim.plot_frame(4.0)
+plotSim.plot_frame(4.1)
 
 # Subplot 224
-configuration["gridspec"] = (3,2,4)
+configuration["gridspec"] = (2,2,4)
 plotSim.configure()
 plotSim.main_ax.set_title("")
-plotSim.plot_frame(15.0)
+plotSim.plot_frame(6.0)
 
 time = logs["time"]
 
@@ -75,33 +75,44 @@ control_x = logs["control"][0]
 control_y = logs["control"][1]
 all_controls = np.hstack([control_x, control_y])
 
-max_time = 10
+gamma = logs["gamma_log"]
+error_x, error_y = [], []
+for i in range(len(gamma)):
+    pt = sim.path.get_path_point( gamma[i] )
+    error_x.append( state_x[i] - pt[0] )
+    error_y.append( state_y[i] - pt[1] )
+all_errors = np.hstack([error_x, error_y])
+
+plt.savefig(simulation_file + "_traj.eps", format='eps', transparent=True)
+
+max_time = 7.0
+fig = plt.figure(figsize = (6,6), constrained_layout=True)
 
 # Subplot 325
-# ax1 = plotSim.fig.add_subplot(325)
-# # ax1.set_aspect('equal', adjustable='box')
-# ax1.set_title('State', fontsize=font_size)
-# ax1.plot(time, state_x, "--", label='$x_1$', linewidth=2, markersize=10)
-# ax1.plot(time, state_y, "--", label='$x_2$', linewidth=2, markersize=10)
-# ax1.legend(fontsize=14, loc='upper right')
-# ax1.set_xlim(0, max_time)
-# ax1.set_ylim(np.min(all_states)-1, np.max(all_states)+1)
+ax1 = fig.add_subplot(211)
+# ax1.set_aspect('equal', adjustable='box')
+ax1.set_title('Path following error', fontsize=font_size)
+ax1.plot(time, error_x, "--", label='$e_x$', linewidth=2, markersize=10)
+ax1.plot(time, error_y, "--", label='$e_y$', linewidth=2, markersize=10)
+ax1.legend(fontsize=14, loc='upper right')
+ax1.set_xlim(0, max_time)
+ax1.set_ylim(np.min(all_errors)-1, np.max(all_errors)+1)
 # ax1.set_xlabel('Time [s]', fontsize=14)
-# # plt.grid()
+plt.grid()
 
-# # Subplot 326
-# ax2 = plotSim.fig.add_subplot(326)
-# # ax2.set_aspect('equal', adjustable='box')
-# ax2.set_title('Control', fontsize=font_size)
-# ax2.plot(time, control_x, "--", label='$u_1$', linewidth=2, markersize=10, alpha=1.0)
-# ax2.plot(time, control_y, "--", label='$u_2$', linewidth=2, markersize=10, alpha=0.6) 
-# ax2.legend(fontsize=14, loc='upper right')
-# ax2.set_xlim(0, max_time)
-# ax2.set_ylim(np.min(all_controls)-1, np.max(all_controls)+1)
-# ax2.set_xlabel('Time [s]', fontsize=14)
-# plt.grid()
+# Subplot 326
+ax2 = fig.add_subplot(212)
+# ax2.set_aspect('equal', adjustable='box')
+ax2.set_title('Control signal', fontsize=font_size)
+ax2.plot(time, control_x, "--", label='$u_x$', linewidth=2, markersize=10, alpha=1.0)
+ax2.plot(time, control_y, "--", label='$u_y$', linewidth=2, markersize=10, alpha=0.6) 
+ax2.legend(fontsize=14, loc='upper right')
+ax2.set_xlim(0, max_time)
+ax2.set_ylim(np.min(all_controls)-1, np.max(all_controls)+1)
+ax2.set_xlabel('Time [s]', fontsize=14)
+plt.grid()
 
-plt.savefig(simulation_file + ".eps", format='eps', transparent=True)
+plt.savefig(simulation_file + "_plots.eps", format='eps', transparent=True)
 # plt.savefig(simulation_file + ".svg", format="svg",transparent=True)
 
 plt.show()

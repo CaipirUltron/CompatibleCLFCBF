@@ -59,8 +59,8 @@ cbf3 = QuadraticBarrier(*initial_state, hessian = cbf_params3["Hh"], critical = 
 cbfs = [cbf1, cbf2, cbf3]
 
 ############################################## Configure and create controllers ############################################
-sample_time = .005
-controller = NominalPF(path, plant, clf, cbfs, alpha = 10.0, beta = 1.0, p = 10.0, dt = sample_time)
+sample_time = .004
+controller = NominalPF(path, plant, clf, cbfs, alpha = 10.0, beta = 10.0, p = 1.0, dt = sample_time)
 
 ####################################################### Configure plot #####################################################
 xlimits, ylimits = [-8, 8], [-8, 8]
