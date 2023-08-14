@@ -5,7 +5,7 @@ from dynamic_systems import PolynomialSystem
 from controllers import CompatibleQP
 
 ######################################### Configure and create 2D plant ####################################################
-initial_state = [0.1, 5.0]
+initial_state = [4.2, 5.0]
 
 G1 = np.array([[1,0],[0,1]])
 G2 = np.array([[0,0],[0,0]])
@@ -15,14 +15,14 @@ plant = PolynomialSystem(initial_state = initial_state, initial_control = np.zer
 ############################################################################################################################
 
 ############################################# Configure and create CLF #####################################################
-clf_lambda_x, clf_lambda_y, clf_angle = 6.0, 1.0, np.radians(0.0)
+clf_lambda_x, clf_lambda_y, clf_angle = 6.0, 1.0, np.radians(-45.0)
 clf_params = {
     "Hv": canonical2D([ clf_lambda_x , clf_lambda_y ], clf_angle),
     "x0": [ 0.0, 0.0 ] }
 ############################################################################################################################
 
 ######################################## Configure and create reference CLF ################################################
-ref_clf_lambda_x, ref_clf_lambda_y, ref_clf_angle = 6.0, 1.0, np.radians(0.0)
+ref_clf_lambda_x, ref_clf_lambda_y, ref_clf_angle = 6.0, 1.0, np.radians(-45.0)
 ref_clf_params = {
     "Hv": canonical2D([ ref_clf_lambda_x , ref_clf_lambda_y ], ref_clf_angle),
     "x0": [ 0.0, 0.0 ] }
@@ -61,8 +61,8 @@ cbf3 = QuadraticBarrier(*initial_state, hessian = cbf_params3["Hh"], critical = 
 cbfs = [cbf1, cbf2, cbf3]
 
 #################################################### Define controllers ####################################################
-sample_time = .005
-controller = CompatibleQP(plant, clf, ref_clf, cbfs, alpha = [1.0, 10.0], beta = [1.0, 10.0], p = [1.0, 1.0], dt = sample_time)
+sample_time = .001
+controller = CompatibleQP(plant, clf, ref_clf, cbfs, alpha = [10.0, 1.0], beta = [10.0, 10.0], p = [1.0, 1.0], dt = sample_time)
 
 ####################################################### Configure plot #####################################################
 xlimits, ylimits = [-8, 8], [-8, 8]
@@ -77,5 +77,6 @@ plot_config = {
     "drawlevel": True,
     "resolution": 50,
     "fps":120,
-    "pad":2.0
+    "pad":2.0,
+    "equilibria": True
 }

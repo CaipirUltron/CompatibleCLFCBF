@@ -61,8 +61,8 @@ cbf3 = QuadraticBarrier(*initial_state, hessian = cbf_params3["Hh"], critical = 
 cbfs = [cbf1, cbf2, cbf3]
 
 #################################################### Define controllers ####################################################
-sample_time = .005
-controller = NominalQP(plant, clf, cbfs, alpha = 1.0, beta = 1.0, p = 10.0)
+sample_time = .001
+controller = NominalQP(plant, clf, cbfs, alpha = 10.0, beta = 10.0, p = 1.0)
 
 ####################################################### Configure plot #####################################################
 xlimits, ylimits = [-8, 8], [-8, 8]
@@ -77,5 +77,6 @@ plot_config = {
     "drawlevel": True,
     "resolution": 50,
     "fps":120,
-    "pad":2.0
+    "pad":2.0,
+    "equilibria": True
 }

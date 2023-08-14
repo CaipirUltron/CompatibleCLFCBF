@@ -23,7 +23,8 @@ class Plot2DSimulation():
             "drawlevel": False,
             "resolution": 50,
             "fps":50,
-            "pad":2.0
+            "pad":2.0,
+            "equilibria": True
         }
         if "plot_config" in kwargs.keys():
             self.plot_config = kwargs["plot_config"]
@@ -66,7 +67,7 @@ class Plot2DSimulation():
         # self.origin, = self.main_ax.plot([],[],lw=4, marker='*', color=[0.,0.,0.])
         self.trajectory, = self.main_ax.plot([],[],lw=2)
         self.init_state, = self.main_ax.plot([],[],'bo',lw=2)
-        # self.equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
+        self.equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
 
         self.clf_contour_color = mcolors.TABLEAU_COLORS['tab:blue']
         self.cbf_contour_color = mcolors.TABLEAU_COLORS['tab:green']
@@ -144,11 +145,12 @@ class Plot2DSimulation():
         x_init, y_init = self.state_log[0][0], self.state_log[1][0]
         self.init_state.set_data(x_init, y_init)
 
-        num_eq = self.equilibria.shape[0]
-        x_eq, y_eq = np.zeros(num_eq), np.zeros(num_eq)
-        for k in range(num_eq):
-            x_eq[k], y_eq[k] = self.equilibria[k,0], self.equilibria[k,1]
-        # self.equilibria_plot.set_data(x_eq, y_eq)
+        if self.plot_config["equilibria"]:
+            num_eq = self.equilibria.shape[0]
+            x_eq, y_eq = np.zeros(num_eq), np.zeros(num_eq)
+            for k in range(num_eq):
+                x_eq[k], y_eq[k] = self.equilibria[k,0], self.equilibria[k,1]
+            self.equilibria_plot.set_data(x_eq, y_eq)
 
         for cbf in self.cbfs:
             self.cbf_contours.append( cbf.contour_plot(self.main_ax, levels=[0.0], colors=self.cbf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.1) )
@@ -158,7 +160,7 @@ class Plot2DSimulation():
         # graphical_elements.append(self.mode_text)
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
-        # graphical_elements.append(self.equilibria_plot)
+        graphical_elements.append(self.equilibria_plot)
         graphical_elements += self.clf_contours.collections
         for cbf_countour in self.cbf_contours:
             graphical_elements += cbf_countour.collections
@@ -197,7 +199,7 @@ class Plot2DSimulation():
         graphical_elements.append(self.time_text)
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
-        # graphical_elements.append(self.equilibria_plot)
+        graphical_elements.append(self.equilibria_plot)
         graphical_elements += self.clf_contours.collections
         for cbf_countour in self.cbf_contours:
             graphical_elements += cbf_countour.collections

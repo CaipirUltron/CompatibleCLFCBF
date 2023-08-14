@@ -65,7 +65,7 @@ cbfs = [cbf1, cbf2, cbf3]
 
 ############################################## Configure and create controllers ############################################
 sample_time = .001
-controller = CompatiblePF(path, plant, clf, ref_clf, cbfs, alpha = [10.0, 1.0], beta = [10.0, 10.0], p = [50.0, 1.0], dt = sample_time)
+controller = CompatiblePF(path, plant, clf, ref_clf, cbfs, alpha = [10.0, 1.0], beta = [10.0, 10.0], p = [1.0, 1.0], dt = sample_time)
 
 ####################################################### Configure plot #####################################################
 xlimits, ylimits = [-10, 10], [-10, 10]
@@ -80,5 +80,6 @@ plot_config = {
     "drawlevel": True,
     "resolution": 100,
     "fps":60,
-    "pad":2.0
+    "pad":2.0,
+    "equilibria": True
 }
