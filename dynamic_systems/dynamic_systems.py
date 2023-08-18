@@ -7,7 +7,6 @@ from scipy.integrate import ode
 from abc import ABC, abstractmethod
 from common import Rect, generate_monomials_from_symbols
 
-
 class DynamicSystem(ABC):
     '''
     Abstract class for dynamic systems. This class has all the functionality for simulating dynamic systems using scipy integration methods.
@@ -99,7 +98,6 @@ class DynamicSystem(ABC):
     def dynamics(self):
         pass
 
-
 class AffineSystem(DynamicSystem):
     '''
     General class for an affine system dx = f(x) + g(x) u.
@@ -137,7 +135,6 @@ class AffineSystem(DynamicSystem):
     def g(self):
         pass
 
-
 class Integrator(AffineSystem):
     '''
     Implements a simple n-order integrator.
@@ -155,7 +152,6 @@ class Integrator(AffineSystem):
     def g(self):
         self._g = np.eye(self.n)
 
-
 class LinearSystem(AffineSystem):
     '''
     Implements a linear system dx = A x + B u.
@@ -170,7 +166,6 @@ class LinearSystem(AffineSystem):
 
     def g(self):
         self._g = self._B
-
 
 class Periodic(AffineSystem):
     '''
@@ -214,7 +209,6 @@ class Periodic(AffineSystem):
             for k in range(self.n):
                 self._g += self._gains[k,i] * np.sin( self._frequencies[k,i] * self._state[k] + self._phases[k,i] )
 
-
 class Unicycle(AffineSystem):
     '''
     Implements the unicycle dynamics: dx = v cos(phi), dy = v sin(phi), dphi = omega.
@@ -237,7 +231,6 @@ class Unicycle(AffineSystem):
     def g(self):
         phi = self._state[2]
         self._g = np.array([[ np.cos(phi), -self.pos_offset*np.sin(phi) ],[ np.sin(phi), self.pos_offset*np.cos(phi) ],[0.0, 1.0]])
-
 
 class PolynomialSystem(AffineSystem):
     '''

@@ -23,7 +23,7 @@ configuration = {
     "gridspec": (2,2,1),
     "widthratios": [1, 1],
     "heightratios": [1.0, 1.0],
-    "axeslim": (-10,10,-10,10),
+    "axeslim": (-9,9,-9,9),
     "path_length": 10,
     "numpoints": 1000,
     "drawlevel": True,
@@ -46,7 +46,7 @@ plotSim.fig.suptitle("Path Following with Obstacle Avoidance using Compatible CL
 configuration["gridspec"] = (2,2,1)
 plotSim.configure()
 plotSim.main_ax.set_title("")
-plotSim.plot_frame(2.03)
+plotSim.plot_frame(1.92)
 
 # Subplot 222
 configuration["gridspec"] = (2,2,2)
@@ -93,8 +93,8 @@ fig = plt.figure(figsize = (6,6), constrained_layout=True)
 ax1 = fig.add_subplot(211)
 # ax1.set_aspect('equal', adjustable='box')
 ax1.set_title('Path following error', fontsize=font_size)
-ax1.plot(time, error_x, "--", label='$e_x$', linewidth=2, markersize=10)
-ax1.plot(time, error_y, "--", label='$e_y$', linewidth=2, markersize=10)
+ax1.plot(time, error_x, "--", label='$e_1$', linewidth=2, markersize=10)
+ax1.plot(time, error_y, "--", label='$e_2$', linewidth=2, markersize=10)
 ax1.legend(fontsize=14, loc='upper right')
 ax1.set_xlim(0, max_time)
 ax1.set_ylim(np.min(all_errors)-1, np.max(all_errors)+1)
@@ -105,8 +105,8 @@ plt.grid()
 ax2 = fig.add_subplot(212)
 # ax2.set_aspect('equal', adjustable='box')
 ax2.set_title('Control signal', fontsize=font_size)
-ax2.plot(time, control_x, "--", label='$u_x$', linewidth=2, markersize=10, alpha=1.0)
-ax2.plot(time, control_y, "--", label='$u_y$', linewidth=2, markersize=10, alpha=0.6) 
+ax2.plot(time, control_x, "--", label='$u_1$', linewidth=2, markersize=10, alpha=1.0)
+ax2.plot(time, control_y, "--", label='$u_2$', linewidth=2, markersize=10, alpha=0.6) 
 ax2.legend(fontsize=14, loc='upper right')
 ax2.set_xlim(0, max_time)
 ax2.set_ylim(np.min(all_controls)-1, np.max(all_controls)+1)

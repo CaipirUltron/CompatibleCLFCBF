@@ -190,7 +190,6 @@ class Function():
         cs = ax.contour(xv, yv, mesh_fvalues, levels=levels, colors=colors)
         return cs
 
-
 class Quadratic(Function):
     '''
     Class for quadratic function representing x'Ax + b'x + c = 0.5 (x - p)'H(x-p) + height = 0.5 x'Hx - 0.5 p'(H + H')x + 0.5 p'Hp + height
@@ -292,7 +291,6 @@ class Quadratic(Function):
         angle = np.arctan2(Q[0, 1], Q[0, 0])
         return eigen, angle, Q
 
-
 class QuadraticLyapunov(Quadratic):
     '''
     Class for Quadratic Lyapunov functions of the type (x-x0)'Hv(x-x0), parametrized by vector pi_v.
@@ -361,7 +359,6 @@ class QuadraticLyapunov(Quadratic):
                 partial_Hv[i,:,:] = partial_Hv[i,:,:] + ( tri_basis[i].T @ tri_basis[j] + tri_basis[j].T @ tri_basis[i] )*self.param[j]
 
         return partial_Hv
-
 
 class QuadraticBarrier(Quadratic):
     '''
@@ -497,10 +494,9 @@ class Gaussian(Function):
         v = np.array(point) - self.mu
         return - self.c * np.exp( -v.T @ self.Sigma @ v ) * ( self.Sigma - np.outer( self.Sigma @ v, self.Sigma @ v ) )
 
-
-class PolynomialFunction(Function):
+class Kernel(Function):
     '''
-    Class for polynomial functions of the type m(x)' P m(x) of maximum degree 2*d, where m(x) is a vector of (n+d,d) known monomials.
+    Class for kernel functions m(x) of maximum degree 2*d, where m(x) is a vector of (n+d,d) known monomials.
     '''
     def __init__(self, *args, **kwargs):
 
@@ -529,8 +525,6 @@ class PolynomialFunction(Function):
             for j in range(self._dim):
                 self._hessian_monomials[i][j] = sp.diff(self._sym_jacobian_monomials[:,j], self._symbols[i])
 
-        self._sym_fun = ( self._symP * self._sym_monomials ).dot(self._sym_monomials)
-
         # Compute numeric A and N matrices
         self.compute_A()
         self.compute_N()
@@ -547,22 +541,12 @@ class PolynomialFunction(Function):
         self._degree = 0
         self._num_monomials = 1
         self._maxdegree = 2*self._degree
-        self._coefficients = np.zeros([self._num_monomials, self._num_monomials])
 
         for key in kwargs:
             if key == "degree":
                 self._degree = kwargs[key]
                 self._num_monomials = num_comb(self._dim, self._degree)
                 self._coefficients = np.zeros([self._num_monomials, self._num_monomials])
-            if key == "P":
-                self._coefficients = np.array(kwargs[key])
-                Pshape = np.shape(self._coefficients)
-                if Pshape[0] != Pshape[1]:
-                    raise Exception("P must be a square matrix.")
-                self._num_monomials = Pshape[0]
-            
-        if np.shape(self._coefficients) != (self._num_monomials, self._num_monomials):
-            raise Exception("P must be (N x N), where N is the dimension of the monomial basis!")
 
     def compute_A(self):
         '''
@@ -612,35 +596,14 @@ class PolynomialFunction(Function):
         Compute polynomial function numerically.
         '''
         m = np.array(self._lambda_monomials(*point))
-        return m @ self._coefficients @ m
+        return m
 
-    def gradient(self, point):
+    def jacobian(self, point):
         '''
-        Compute gradient of polynomial function numerically.
+        Compute kernel Jacobian.
         '''
-        m = np.array(self._lambda_monomials(*point))
-        del_m = np.array(self._lambda_jacobian_monomials(*point))
-        return m @ self._coefficients @ del_m + del_m.T @ self._coefficients @ m
-
-    def hessian(self, point):
-        '''
-        Compute hessian of polynomial function numerically.
-        '''
-        m = np.array(self._lambda_monomials(*point))
-        Hv = np.zeros([self._dim, self._dim])
-        for i in range(self._dim):
-            for j in range(self._dim):
-                delm_i = np.array(self._lambda_jacobian_monomials(*point))[:,i].reshape(self._num_monomials)
-                delm_j = np.array(self._lambda_jacobian_monomials(*point))[:,j].reshape(self._num_monomials)
-                hessian_m_ij = self._lambda_hessian_monomials(*point)[i][j].reshape(self._num_monomials)
-                Hv[i,j] = delm_i @ ( self._coefficients + self._coefficients.T ) @ delm_j + m @ ( self._coefficients + self._coefficients.T ) @ hessian_m_ij
-        return Hv
-
-    def get_shape(self):
-        '''
-        Return the polynomial coefficients.
-        '''
-        return self._coefficients
+        Jac_m = np.array(self._lambda_jacobian_monomials(*point))
+        return Jac_m
 
     def get_A_matrices(self):
         '''
@@ -654,38 +617,103 @@ class PolynomialFunction(Function):
         '''
         return self.N
 
-    def get_symbols(self):
+    def __str__(self):
         '''
-        Return the sympy variables.
+        Prints kernel
         '''
-        return self._symbols
+        variables = str(self._symbols)
+        kernel = str(self._monomials)
+        text = "m: R^" + str(self._dim) + " --> R^" + str(self._num_monomials) + "\nKernel map on variables " + variables + "\nm(x) = " + kernel
+        return text
+
+class PolynomialFunction(Function):
+    '''
+    Class for polynomial functions of the type m(x)' P m(x) for a given kernel function m(x).
+    '''
+    def __init__(self, *args, **kwargs):
+
+        # Initialization
+        super().__init__(*args)
+        self.set_param(**kwargs)
+
+    def set_param(self, **kwargs):
+        '''
+        Sets the function parameters.
+        '''        
+        for key in kwargs:
+
+            # If degree was passed, create Kernel 
+            if key == "degree":
+                self.kernel = Kernel(*self._args, degree = kwargs[key])
+                self.kernel_dim = self.kernel._num_monomials
+                self.P = np.zeros([self.kernel_dim, self.kernel_dim])
+
+            # If kernel function was passed, initialize it
+            if key == "kernel":
+                if type(kwargs[key]) != Kernel:
+                    raise Exception("Argument must be a valid Kernel function.")
+                self.kernel = kwargs[key]
+                self.kernel_dim = self.kernel._num_monomials
+                self.P = np.zeros([self.kernel_dim, self.kernel_dim])
+
+            # If shape matrix was passed, initialize it
+            if key == "P":
+                self.P = np.array(kwargs[key])
+                Pshape = np.shape(self.P)
+                if Pshape[0] != Pshape[1]:
+                    raise Exception("P must be a square matrix.")
+            
+        if np.shape(self.P) != (self.kernel_dim, self.kernel_dim):
+            raise Exception("P must be (p x p), where p is the kernel dimension!")
+
+    def function(self, point):
+        '''
+        Compute polynomial function numerically.
+        '''
+        m = self.kernel.function(point)
+        return 0.5 * m.T @ self.P @ m
+
+    def gradient(self, point):
+        '''
+        Compute gradient of polynomial function numerically.
+        '''
+        m = self.kernel.function(point)
+        Jac_m = self.kernel.jacobian(point)
+        return Jac_m.T @ self.P @ m
+
+    def hessian(self, point):
+        '''
+        Compute hessian of polynomial function numerically.
+        '''
+        m = self.kernel.function(point)
+        Jac_m = self.kernel.jacobian(point)
+        Hessian = np.zeros([self._dim, self._dim])
+        for i in range(self._dim):
+            for j in range(self._dim):
+                Jac_m_i = Jac_m[:,i].reshape(self.kernel_dim)
+                Jac_m_j = Jac_m[:,j].reshape(self.kernel_dim)
+                hessian_m_ij = self.kernel._lambda_hessian_monomials(*point)[i][j].reshape(self.kernel_dim)
+                Hessian[i,j] = Jac_m_i @ self.P @ Jac_m_j + m @ self.P @ hessian_m_ij
+        return Hessian
+
+    def get_shape(self):
+        '''
+        Return the polynomial coefficients.
+        '''
+        return self.P
 
     def get_kernel(self):
         '''
         Return the monomial basis vector.
         '''
-        return self._monomials
+        return self.kernel
 
-    def get_polynomial(self):
+    def __str__(self):
         '''
-        Return the complete symbolic polynomial of the function
+        Print method
         '''
-        return self._sym_fun
-
-    def get_degree(self):
-        '''
-        Return the maximum polynomial degree. 
-        '''
-        return self._degree
-
-
-class PolynomialLyapunov():
-    '''
-    Class for functions that can be approximated by a quadratic.
-    '''
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args)
-        self.set_param(**kwargs)
+        text = "Polynomial function m(x)' P m(x) , where the kernel function m(x) is given by \n" + self.kernel.__str__()
+        return text
 
 class ApproxFunction(Function):
     '''
@@ -710,7 +738,6 @@ class ApproxFunction(Function):
         self.quadratic.set_param(height = -0.5)
         self.quadratic.set_param(gradient = value - v)
         self.quadratic.set_param(hessian = H)
-
 
 class CassiniOval(ApproxFunction):
     '''
@@ -760,7 +787,6 @@ class CassiniOval(ApproxFunction):
         hessian_v[1,0] = 8*v1*v2
 
         return hessian_v @ self.R
-
 
 # class CLBF(Function):
 #     '''
