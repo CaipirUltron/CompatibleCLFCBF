@@ -1,10 +1,6 @@
 import math
 import numpy as np
-import sympy as sp
-import scipy.optimize as opt
 
-from scipy.linalg import null_space
-from copy import copy
 from common import *
 from dynamic_systems import Integrator
 
@@ -161,6 +157,7 @@ class Function():
         if not isinstance(func, Function):
             raise Exception("Only Function objects can be summed.")
 
+        from copy import copy
         function = copy(self)
         function.functions.append(func)
 
@@ -212,7 +209,7 @@ class Quadratic(Function):
         self.c = 0.0
         self.height = 0.0
 
-        Quadratic.set_param(self, **kwargs)
+        self.set_param(self, **kwargs)
 
         # Set eigenbasis for hessian matrix
         _, _, Q = self.compute_eig()
@@ -423,6 +420,7 @@ class QuadraticBarrier(Quadratic):
             return self.evaluate_function(*p_gamma)[0]
 
         # Solve optimization problem
+        import scipy.optimize as opt
         results = opt.minimize( cost, self.last_gamma_sol )
         gamma_opt = results.x[0]
 
@@ -505,6 +503,7 @@ class Kernel(Function):
         self.set_param(**kwargs)
 
         # Create symbols
+        import sympy as sp
         self._symbols = []
         for dim in range(self._dim):
             self._symbols.append( sp.Symbol('x' + str(dim+1)) )
@@ -547,6 +546,8 @@ class Kernel(Function):
                 self._degree = kwargs[key]
                 self._num_monomials = num_comb(self._dim, self._degree)
                 self._coefficients = np.zeros([self._num_monomials, self._num_monomials])
+                
+        self.kernel_dim = self._num_monomials
 
     def compute_A(self):
         '''
@@ -585,6 +586,7 @@ class Kernel(Function):
             # M[k*(p**2):(k+1)*(p**2),:] = np.kron(I_p, A.T) + np.kron(A.T, I_p)
         M[n*(p**2):(n+1)*(p**2),:] = self._K - np.eye(p**2)
 
+        from scipy.linalg import null_space
         solutions = null_space(M)
 
         self.N = []
@@ -626,52 +628,91 @@ class Kernel(Function):
         text = "m: R^" + str(self._dim) + " --> R^" + str(self._num_monomials) + "\nKernel map on variables " + variables + "\nm(x) = " + kernel
         return text
 
-class PolynomialFunction(Function):
+class KernelQuadratic(Function):
     '''
-    Class for polynomial functions of the type m(x)' P m(x) for a given kernel function m(x).
+    Class for kernel quadratic functions of the type m(x)' P m(x) for a given kernel m(x).
     '''
     def __init__(self, *args, **kwargs):
 
         # Initialization
         super().__init__(*args)
         self.set_param(**kwargs)
+        self.dynamics = Integrator([0.0],[0.0])
+
+        # SDP optimization
+        import cvxpy as cp
+        n = self._dim
+        p = self.kernel_dim
+        self.P_variable = cp.Variable( (p,p), symmetric=True ) # Create p x p symmetric variable
+        self.Pn_param = cp.Parameter( (p,p), symmetric=True )
+        self.Pc_param = cp.Parameter( (p,p), symmetric=True )
+        self.m_param = cp.Parameter(p)
+
+        self.objective = cp.Minimize( cp.norm(self.P_variable - self.Pn_param) )
+        constraints = [ self.P_variable >> 0, 
+                        self.P_variable >> self.Pc_param, 
+                        self.m_param.T @ self.P_variable @ self.m_param == 0 ]
+        self.define_zeros_problem = cp.Problem(self.objective, constraints)
 
     def set_param(self, **kwargs):
         '''
         Sets the function parameters.
-        '''        
+        '''
         for key in kwargs:
 
             # If degree was passed, create Kernel 
             if key == "degree":
                 self.kernel = Kernel(*self._args, degree = kwargs[key])
-                self.kernel_dim = self.kernel._num_monomials
-                self.P = np.zeros([self.kernel_dim, self.kernel_dim])
+                self.kernel_dim = self.kernel.kernel_dim
+                # self.matrix_coefs = np.zeros([self.kernel_dim, self.kernel_dim])
 
             # If kernel function was passed, initialize it
             if key == "kernel":
                 if type(kwargs[key]) != Kernel:
                     raise Exception("Argument must be a valid Kernel function.")
                 self.kernel = kwargs[key]
-                self.kernel_dim = self.kernel._num_monomials
-                self.P = np.zeros([self.kernel_dim, self.kernel_dim])
+                self.kernel_dim = self.kernel.kernel_dim
+                # self.matrix_coefs = np.zeros([self.kernel_dim, self.kernel_dim])
 
             # If shape matrix was passed, initialize it
-            if key == "P":
-                self.P = np.array(kwargs[key])
-                Pshape = np.shape(self.P)
-                if Pshape[0] != Pshape[1]:
+            if key == "coefficients":
+                self.matrix_coefs = kwargs[key]
+                matrix_shape = np.shape(self.matrix_coefs)
+                if matrix_shape[0] != matrix_shape[1]:
                     raise Exception("P must be a square matrix.")
+
+            # If center was passed, initialize it
+            if key == "centers":
+                self.centers = kwargs[key]
             
-        if np.shape(self.P) != (self.kernel_dim, self.kernel_dim):
-            raise Exception("P must be (p x p), where p is the kernel dimension!")
+        if np.shape(self.matrix_coefs) != (self.kernel_dim, self.kernel_dim):
+            raise Exception("P must be (p x p), where p is the kernel dimension!") 
+
+    def define_zeros(self, point):
+        '''
+        This method tries to find the closest matrix coefficients such that F(x_c) = 0, for a given list of [x_c] points
+        '''
+        std_centered_quadratic = np.zeros([self.kernel_dim, self.kernel_dim])
+        std_centered_quadratic[0,0] = np.linalg.norm(point)**2
+        for k in range(self._dim):
+            std_centered_quadratic[0,k+1] = -point[k]
+            std_centered_quadratic[k+1,0] = -point[k]
+            std_centered_quadratic[k+1,k+1] = 1
+
+        self.m_param.value = self.kernel.function(point)
+        self.Pn_param.value = self.matrix_coefs
+        self.Pc_param.value = std_centered_quadratic
+        self.define_zeros_problem.solve()
+        self.set_param(coefficients = self.P_variable.value)
+
+        return self.function( point )
 
     def function(self, point):
         '''
         Compute polynomial function numerically.
         '''
         m = self.kernel.function(point)
-        return 0.5 * m.T @ self.P @ m
+        return 0.5 * m.T @ self.matrix_coefs @ m
 
     def gradient(self, point):
         '''
@@ -679,7 +720,7 @@ class PolynomialFunction(Function):
         '''
         m = self.kernel.function(point)
         Jac_m = self.kernel.jacobian(point)
-        return Jac_m.T @ self.P @ m
+        return Jac_m.T @ self.matrix_coefs @ m
 
     def hessian(self, point):
         '''
@@ -693,14 +734,14 @@ class PolynomialFunction(Function):
                 Jac_m_i = Jac_m[:,i].reshape(self.kernel_dim)
                 Jac_m_j = Jac_m[:,j].reshape(self.kernel_dim)
                 hessian_m_ij = self.kernel._lambda_hessian_monomials(*point)[i][j].reshape(self.kernel_dim)
-                Hessian[i,j] = Jac_m_i @ self.P @ Jac_m_j + m @ self.P @ hessian_m_ij
+                Hessian[i,j] = Jac_m_i @ self.matrix_coefs @ Jac_m_j + m @ self.matrix_coefs @ hessian_m_ij
         return Hessian
 
     def get_shape(self):
         '''
         Return the polynomial coefficients.
         '''
-        return self.P
+        return self.matrix_coefs
 
     def get_kernel(self):
         '''
@@ -714,6 +755,69 @@ class PolynomialFunction(Function):
         '''
         text = "Polynomial function m(x)' P m(x) , where the kernel function m(x) is given by \n" + self.kernel.__str__()
         return text
+
+class KernelLyapunov(KernelQuadratic):
+    '''
+    Class for kernel-based Lyapunov functions.
+    '''
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if ~self.is_valid():
+            raise Exception("Kernel Lyapunov function must be SoS")
+
+    def change_kwargs(self, **kwargs):
+        for key in kwargs:
+            if key == "P":
+                kwargs["coefficients"] = kwargs.pop(key)
+                break
+        return kwargs
+
+    def set_param(self, **kwargs):
+        new_kwargs = self.change_kwargs(**kwargs)
+        super().set_param(**new_kwargs)
+        self.P = self.matrix_coefs
+
+    def is_valid(self):
+        '''
+        Check if matrix of coefficients makes the function bounded from below
+        '''
+        eig, eigenvec = np.linalg.eig( self.P )
+        return np.all(eig >= 0)
+    
+class KernelBarrier(KernelQuadratic):
+    '''
+    Class for kernel-based barrier functions.
+    '''
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if ~self.is_valid():
+            raise Exception("Kernel Barrier function must be bounded from below")
+        
+    def change_kwargs(self, **kwargs):
+        for key in kwargs:
+            if key == "Q":
+                kwargs["coefficients"] = kwargs.pop(key)
+                break
+        return kwargs
+
+    def set_param(self, **kwargs):
+        new_kwargs = self.change_kwargs(**kwargs)
+        super().set_param(**new_kwargs)
+        self.Q = self.matrix_coefs
+
+    def is_valid(self):
+        '''
+        Check if matrix of coefficients is positive semidefinite
+        '''
+        eig, eigenvec = np.linalg.eig( self.Q )
+        return np.all(eig >= 0)
+
+    def function(self, point):
+        '''
+        Compute polynomial function numerically.
+        '''
+        half_mQm = super().function(point)
+        return half_mQm - 0.5
 
 class ApproxFunction(Function):
     '''

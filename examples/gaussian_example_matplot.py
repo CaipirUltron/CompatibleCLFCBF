@@ -3,12 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from examples.integrator_nominalQP import plant, clf, cbf
-from controllers import NominalQP
+from controllers import NominalQuadraticQP
 from graphics import SimulationMatplot
 
 # Create QP controller and graphical simulation.
 dt = .005
-qp_controller = NominalQP(plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0)
+qp_controller = NominalQuadraticQP(plant, clf, cbf, gamma = 1.0, alpha = 1.0, p = 10.0)
 
 # Simulation loop -------------------------------------------------------------------
 T = 20

@@ -6,6 +6,14 @@ import numpy as np
 
 ZERO_ACCURACY = 0.0000001
 
+def compute_equilibria(F, P, Q, **kwargs):
+    '''
+    Solve the general eigenproblem of the type: 
+    ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0, l2 >= 0
+    l1 = c V(z) P z
+    z \in Im(m)
+    '''
+    pass
 
 def solve_PEP(Q, P, **kwargs):
     '''

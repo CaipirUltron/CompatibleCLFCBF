@@ -4,7 +4,6 @@ from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 from common import sat
 
-
 class NominalQP():
     '''
     Class for the nominal QP controller.
@@ -13,14 +12,147 @@ class NominalQP():
 
         # Dimensions and system model initialization
         self.plant = plant
-        self.clf, self.cbfs = clf, cbfs
+        self.clf = clf
         
+        if type(cbfs) == list:
+            self.cbfs = cbfs
+        else:
+            self.cbfs = []
+            self.cbfs.append(cbfs)
+        
+        clf_dim = self.clf._dim
+        cbf_dims = []
+
+        for cbf in self.cbfs:
+            cbf_dims.append( cbf._dim )
+
+        if not all(dim == cbf_dims[0] for dim in cbf_dims): raise Exception("CBF dimensions are not equal.")
+        # if cbf_dims[0] != clf_dim: raise Exception("CLF and CBF dimensions are not equal.")
+
+        self.state_dim = clf_dim
+        self.control_dim = self.plant.m
+
+        # QP parameters
+        self.p, self.alpha, self.beta = p, alpha, beta
+        self.QP_dim = self.control_dim + 1
+        P = np.eye(self.QP_dim)
+        P[self.control_dim,self.control_dim] = self.p
+        q = np.zeros(self.QP_dim)
+        self.QP = QuadraticProgram(P=P, q=q)
+        self.QP_sol = np.zeros(self.QP_dim)
+
+        self.ctrl_dt = dt
+        self.equilibrium_points = np.zeros(self.state_dim)
+
+    def get_control(self):
+        '''
+        Computes the QP control.
+        '''
+        a_clf, b_clf = self.get_clf_constraint()
+
+        # Stacking the CLF and CBF constraints
+        a_cbfs, b_cbfs = np.array([]).reshape(0,self.QP_dim), []
+        for cbf in self.cbfs:
+            a_cbf, b_cbf = self.get_cbf_constraint(cbf)
+            a_cbfs = np.vstack( [ a_cbfs, a_cbf ])
+            b_cbfs = np.hstack( [ b_cbfs, b_cbf ])
+
+        A = np.vstack([ a_clf, a_cbfs ])
+        b = np.hstack([ b_clf, b_cbfs ])
+
+        # Solve QP
+        self.QP.set_inequality_constraints(A, b)
+        self.QP_sol = self.QP.get_solution()
+        control = self.QP_sol[0:self.control_dim,]
+
+        return control
+
+    def get_clf_control(self):
+        '''
+        This controller will not modify the CLF.
+        '''
+        return 0.0
+
+    def get_clf_constraint(self):
+        '''
+        Sets the Lyapunov constraint.
+        '''
+        # Affine plant dynamics
+        f = self.plant.get_f()
+        g = self.plant.get_g()
+        state = self.plant.get_state()
+
+        # Lyapunov function and gradient
+        self.V = self.clf.evaluate_function(*state)[0]
+        self.nablaV = self.clf.evaluate_gradient(*state)[0]
+        
+        # Lie derivatives
+        self.LfV = self.nablaV.dot(f)
+        self.LgV = g.T.dot(self.nablaV)
+
+        # CLF contraint for the QP
+        a_clf = np.hstack( [ self.LgV, -1.0 ])
+        b_clf = -self.alpha * self.V - self.LfV
+
+        return a_clf, b_clf
+
+    def get_cbf_constraint(self, cbf):
+        '''
+        Sets the i-th barrier constraint.
+        '''
+        f = self.plant.get_f()
+        g = self.plant.get_g()
+        state = self.plant.get_state()
+
+        # Barrier function and gradient
+        h = cbf.evaluate_function(*state)[0]
+        nablah = cbf.evaluate_gradient(*state)[0]
+
+        self.Lfh = nablah.dot(f)
+        self.Lgh = g.T @ nablah
+
+        # CBF contraint for the QP
+        a_cbf = -np.hstack( [ self.Lgh, 0.0 ])
+        b_cbf = self.beta * h + self.Lfh
+
+        return a_cbf, b_cbf
+
+    def update_clf_dynamics(self, piv_ctrl):
+        '''
+        Integrates the dynamic system for the CLF Hessian matrix.
+        '''
+        pass
+
+    def update_cbf_dynamics(self, cbf, pih_ctrl):
+        '''
+        Integrates the dynamic system for the CBF Hessian matrix.
+        '''
+        cbf.update(pih_ctrl, self.ctrl_dt)
+
+class NominalQuadraticQP():
+    '''
+    Class for the nominal QP controller.
+    '''
+    def __init__(self, plant, clf, cbfs, alpha = 1.0, beta = 1.0, p = 10.0, dt = 0.001):
+
+        # Dimensions and system model initialization
+        self.plant = plant
+        self.clf = clf
+        
+        if type(cbfs) == list:
+            self.cbfs = cbfs
+        else:
+            self.cbfs = []
+            self.cbfs.append(cbfs)
+
         self.mode_log = None
         
         clf_dim = self.clf._dim
         cbf_dims = []
+
         for cbf in self.cbfs:
             cbf_dims.append( cbf._dim )
+
         if not all(dim == cbf_dims[0] for dim in cbf_dims): raise Exception("CBF dimensions are not equal.")
         if cbf_dims[0] != clf_dim: raise Exception("CLF and CBF dimensions are not equal.")
 
@@ -33,7 +165,7 @@ class NominalQP():
         self.active_pair = None
         self.clf_cbf_pairs = []
         self.equilibrium_points = np.zeros([0,clf_dim])
-        for cbf in cbfs:
+        for cbf in self.cbfs:
             clf_cbf_pair = CLFCBFPair(self.clf, cbf)
             self.clf_cbf_pairs.append( clf_cbf_pair )
             self.equilibrium_points = np.vstack([ self.equilibrium_points, clf_cbf_pair.equilibrium_points.T ])
@@ -149,8 +281,7 @@ class NominalQP():
         '''
         cbf.update(pih_ctrl, self.ctrl_dt)
 
-
-class NominalPF(NominalQP):
+class NominalPF(NominalQuadraticQP):
     '''
     Class for the nominal path following QP-based controller.
     '''

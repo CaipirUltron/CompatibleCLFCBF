@@ -2,28 +2,28 @@
 Test polynomial functions
 '''
 import numpy as np
-from functions import Kernel, PolynomialFunction
-from common import *
 import matplotlib.pyplot as plt
+
+from common import *
+from dynamic_systems import ConservativeAffineSystem
+from functions import Kernel, KernelQuadratic
+
 plt.rcParams['text.usetex'] = True
 
-n = 2
-max_degree = 6
-
-# P = np.random.rand(p,p)
-# P = P.T @ P
-# eigP , _= np.linalg.eig(P)
-# P = P/np.max(eigP)
+n, m = 2, 2
+max_degree = 2
 
 state = np.random.rand(n)
+control = np.random.rand(m)
+
 kernel = Kernel(*state, degree = max_degree)
-kernel_dim = kernel._num_monomials
+kernel_dim = kernel.kernel_dim
 print(kernel)
 
 print("\n")
 
 Proot = np.random.rand(kernel_dim, kernel_dim)
-clf = PolynomialFunction(*state, kernel = kernel, P = Proot.T @ Proot)
+clf = KernelQuadratic(*state, kernel = kernel, coefficients = Proot.T @ Proot)
 print(clf)
 
 V = clf.function(state)
@@ -33,6 +33,21 @@ HV = clf.hessian(state)
 print("V = " + str(V))
 print("nablaV = " + str(nablaV))
 print("HessianV = " + str(HV))
+
+print("\n")
+
+F = np.random.rand(kernel_dim, kernel_dim)
+def g(state):
+    return np.eye(n)
+
+system = ConservativeAffineSystem(initial_state=state, initial_control=control, kernel = kernel, F = F, g_method = g )
+print(system)
+
+sample_time = 0.001
+system.set_control(control) 
+system.actuate(sample_time)
+
+Psol = clf.define_zeros( np.array([3.0, 4.0]) )
 
 # kernel = clf.get_kernel()
 # k_dim = clf.kernel_dim

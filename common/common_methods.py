@@ -221,7 +221,19 @@ def generate_monomial_list(n, d):
     for ele in sorted(to_be_removed, reverse = True):
         del combinations[ele]
 
-    return np.array(combinations)
+    alpha = np.array(combinations)
+    p = num_comb(n, d)
+    EYE = np.eye(n, dtype=int)
+    for i in range(n):
+        row = EYE[i,:]
+        for j in range(1,p):
+            if np.all(alpha[j,:] == row):
+                aux = alpha[i+1,:]
+                alpha[j,:] = aux
+                alpha[i+1,:] = row
+                break
+
+    return alpha
 
 def generate_monomials_from_symbols(symbols, d):
     '''
@@ -246,7 +258,6 @@ def generate_monomials_from_symbols(symbols, d):
     #         mon = mon*symbols[dim]**row[dim]
     #     monomials.append( mon )
     # return monomials
-
 
 class Rect():
     '''

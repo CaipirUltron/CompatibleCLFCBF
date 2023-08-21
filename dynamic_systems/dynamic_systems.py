@@ -1,11 +1,6 @@
 import scipy
 import numpy as np
-import sympy as sp
-import scipy.optimize as opt
-
-from scipy.integrate import ode
 from abc import ABC, abstractmethod
-from common import Rect, generate_monomials_from_symbols
 
 class DynamicSystem(ABC):
     '''
@@ -17,6 +12,8 @@ class DynamicSystem(ABC):
         # Sets integration method from scipy
         self.n = len(initial_state)
         self.m = len(initial_control)
+
+        from scipy.integrate import ode
         self.mODE = ode(self.get_flow).set_integrator('dopri5')
 
         self.state_log = []
@@ -214,6 +211,7 @@ class Unicycle(AffineSystem):
     Implements the unicycle dynamics: dx = v cos(phi), dy = v sin(phi), dphi = omega.
     State and control are given by [x, y, z] and [v, omega], respectively.
     '''
+    from common import Rect
     def __init__(self, initial_state, initial_control, geometric_params=Rect([1.0, 1.0], 0.0)):
         if len(initial_state) != 3:
             raise Exception('State dimension is different from 3.')
@@ -243,6 +241,7 @@ class PolynomialSystem(AffineSystem):
     are lists of vector and matrix coefficients describing f(x) and g(x).
     '''
     def __init__(self, initial_state, initial_control, **kwargs):
+        
         super().__init__(initial_state, initial_control)
         self.set_param(**kwargs)
         
@@ -250,9 +249,12 @@ class PolynomialSystem(AffineSystem):
         # self._monomials = Basis.from_degree(self.n, self._degree).to_sym(self._symbols)
         # self._num_monomials = len(self._monomials)
 
+        import sympy as sp
         self._symbols = []
         for dim in range(self.n):
             self._symbols.append( sp.Symbol('x' + str(dim+1)) )
+
+        from common import generate_monomials_from_symbols
         self._monomials = generate_monomials_from_symbols( self._symbols, self._degree )
         self._num_monomials = len(self._monomials)
 
@@ -356,3 +358,49 @@ class PolynomialSystem(AffineSystem):
         Return the monomial dimension of g(x).
         '''
         return len(self._G_list)
+    
+class ConservativeAffineSystem(AffineSystem):
+    '''
+    Class for affine nonlinear systems of the type xdot = f(x) + g(x) u, where f(x) is given by the gradient
+        f(x) = g(x) g'(x) d ( m(x)' F m(x) ) / dx
+    where m(x) is a kernel function and F is a suitable matrix of the kernel dimension.
+    '''
+    def __init__(self, initial_state, initial_control, kernel, F, g_method):
+
+        # Initialize kernel function
+        from functions import Kernel
+        if type(kernel) != Kernel:
+            raise Exception("Argument must be a valid Kernel function.")
+        self.kernel = kernel
+        self.kernel_dim = self.kernel._num_monomials
+
+        # Initialize F matrix
+        if np.shape(F) != (self.kernel_dim, self.kernel_dim):
+            raise Exception('F must be a matrix of the same dimension as the kernel.')
+        self.F = F
+
+        # Initialize g method
+        self.g_method = g_method
+      
+        super().__init__(initial_state, initial_control)
+
+    def f(self):
+        self.g()
+        g = self._g
+        G = g @ g.T
+        m = self.kernel.function(self._state)
+        Jac = self.kernel.jacobian(self._state)
+        self._f = G @ Jac.T @ self.F @ m
+
+    def g(self):
+        '''
+        g(x) is initialized as a an passed method argument
+        '''
+        self._g = self.g_method(self._state)
+
+    def __str__(self):
+        text = "Conservative affine nonlinear system of the type dx = f(x) + g(x) u ,\n"
+        text += "where f(x) = g(x) g'(x) d( m'(x) F m(x) )/dx, \n"
+        text += "with kernel function as \n"
+        text += self.kernel.__str__()
+        return text

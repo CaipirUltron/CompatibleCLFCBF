@@ -2,7 +2,7 @@ import numpy as np
 from functions import canonical2D
 from functions import QuadraticLyapunov, QuadraticBarrier
 from dynamic_systems import PolynomialSystem
-from controllers import NominalQP
+from controllers import NominalQuadraticQP
 
 ######################################### Configure and create 2D plant ####################################################
 initial_state = [4.2, 5.0]
@@ -62,7 +62,7 @@ cbfs = [cbf1, cbf2, cbf3]
 
 #################################################### Define controllers ####################################################
 sample_time = .001
-controller = NominalQP(plant, clf, cbfs, alpha = 10.0, beta = 10.0, p = 1.0)
+controller = NominalQuadraticQP(plant, clf, cbfs, alpha = 10.0, beta = 10.0, p = 1.0)
 
 ####################################################### Configure plot #####################################################
 xlimits, ylimits = [-8, 8], [-8, 8]
