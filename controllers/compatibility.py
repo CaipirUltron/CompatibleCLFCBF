@@ -6,14 +6,64 @@ import numpy as np
 
 ZERO_ACCURACY = 0.0000001
 
-def compute_equilibria(F, P, Q, **kwargs):
+def compute_equilibria(F, clf, cbf, **kwargs):
     '''
-    Solve the general eigenproblem of the type: 
+    Solve the general eigenproblem of the type:
     ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0, l2 >= 0
     l1 = c V(z) P z
     z \in Im(m)
     '''
-    pass
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "max_iter":
+            max_iter = kwargs[key]
+            continue
+        if aux_key == "c":
+            c = kwargs[key]
+            continue
+
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    n = clf._dim
+
+    P = clf.P
+    Q = cbf.Q
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    p = clf.kernel_dim
+
+    # A_list = clf.kernel.get_A_matrices()
+    N_list = clf.kernel.get_N_matrices()
+
+    def linear_pencil(linear_combs):
+        '''
+        linear_combs = [ lambda1, lambda2, kappa1, kappa2, ... ]
+        Computes the linear matrix pencil.
+        '''
+        L = F + linear_combs[1] * Q - linear_combs[0] * P
+        for k in range(2, p - n):
+            L += linear_combs[k] * N_list[k]
+        return L
+
+    def linear_pencil_det(linear_combs):
+        '''
+        linear_combs = [ lambda1, lambda2, kappa1, kappa2, ... ]
+        Computes determinant of linear matrix pencil.
+        '''
+        return np.linalg.det( linear_pencil(linear_combs) )
+
+    def compute_F(solution):
+        '''
+        This inner method computes the vector field F(lambda, kappa, z) and returns its value.
+        '''        
+        linear_combs, z = solution[0:p-n+2], solution[p-n+2:]
+        F = np.zeros(p+1)
+        L = linear_pencil(linear_combs)
+        F[0:p] = L @ z
+        V = 0.5 * z.T @ P @ z
+        F[p] = linear_combs[0] - c*V
+        F[p+1] = linear_pencil_det(linear_combs)
+        return F
 
 def solve_PEP(Q, P, **kwargs):
     '''
@@ -169,7 +219,6 @@ def solve_PEP(Q, P, **kwargs):
     Z = np.delete(Z, index_to_be_deleted, axis = 1)
 
     return lambdas, kappas, Z, init_kappas, init_lambdas
-
 
 class PolynomialCLFCBFPair():
     '''
@@ -346,8 +395,7 @@ class PolynomialCLFCBFPair():
         # init_pts = np.vstack([init_kappas, init_lambdas])
 
         return lambdas, kappas, equilibrium_points, init_lines
-
-        
+   
 class LinearMatrixPencil2():
     '''
     Class for regular, symmetric linear matrix pencils of the form P(\lambda) = \lambda A - B, where A and B are p.s.d. matrices.
@@ -426,7 +474,6 @@ class LinearMatrixPencil2():
         ret_str = ret_str + 'A = ' + self._A.__str__() + '\n'
         ret_str = ret_str + 'B = ' + self._B.__str__()
         return ret_str
-
 
 class LinearMatrixPencil():
     '''
@@ -507,7 +554,6 @@ class LinearMatrixPencil():
         ret_str = ret_str + 'A = ' + self._A.__str__() + '\n'
         ret_str = ret_str + 'B = ' + self._B.__str__()
         return ret_str
-
 
 class CLFCBFPair():
     '''

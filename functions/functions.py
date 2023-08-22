@@ -619,6 +619,12 @@ class Kernel(Function):
         '''
         return self.N
 
+    def __eq__(self, other):
+        '''
+        Determines if two kernels are the same.
+        '''
+        return np.all( self.alpha == other.alpha )
+
     def __str__(self):
         '''
         Prints kernel

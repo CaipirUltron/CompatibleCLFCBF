@@ -34,7 +34,7 @@ if gen_random:
     cbf_center = np.array([-2.0, -2.0])
 else:
     simulation_file = sys.argv[1].replace(".json","")
-    location = simulation_file+".json"
+    location = "logs/"+simulation_file+".json"
     try:
         with open(location,'r') as file:
             print("here")
