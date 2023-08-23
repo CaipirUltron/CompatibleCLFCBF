@@ -89,19 +89,20 @@ def triangular_basis(n):
                 tri_basis.append(np.outer(EYE[:,i], EYE[:,j]))
     return tri_basis
 
-def ret_basis(n):
+def ret_basis(n, index_tuple):
     '''
-    Returns the canonical basis of the space of (n x n) matrices.
+    Returns the a n x n matrix of zeros, with 1 at index_tuple, where index_tuple indexation starts from 1 
     '''
-    ret_basis = list()
     EYE = np.eye(n)
-    for i in range(n):
-        for j in range(n):
-            # if i == j:
-            ret_basis.append(np.outer(EYE[:,i], EYE[:,j]))
-            # else:
-            #     ret_basis.append(np.outer(EYE[:,i], EYE[:,j]) + np.outer(EYE[:,j], EYE[:,i]))
-    return ret_basis
+    i, j = index_tuple[0], index_tuple[1]
+    if i < 1 or j < 1:
+        raise Exception("Indexation starts from 1") 
+    if i > n:
+        raise Exception("Index out of bounds for axis 0") 
+    if j > n:
+        raise Exception("Index out of bounds for axis 1")
+    
+    return np.outer(EYE[:,i-1], EYE[:,j-1])
 
 def symmetric_basis(n):
     '''
@@ -209,55 +210,89 @@ def num_comb(n, d):
     '''
     return math.comb(n+d,d)
 
-def generate_monomial_list(n, d):
+def generate_monomial_list(n, max_degree):
     '''
-    Returns the matrix of monomial powers of dimension n up to degree d.
+    Returns the matrix of monomial powers of dimension n up to degree max_degree, with terms in increasing order of degree.
     '''
-    to_be_removed = []
-    combinations = list( itertools.product( list(range(d+1)), repeat=n ) )
-    for k in range(len(combinations)):
-        if sum(combinations[k])>d:
-            to_be_removed.append(k)
-    for ele in sorted(to_be_removed, reverse = True):
-        del combinations[ele]
+    powers = np.array(list(itertools.product(*[range(max_degree+1)]*n))) # all possible powers of each variable up to degree max_degree
 
-    alpha = np.array(combinations)
-    p = num_comb(n, d)
-    EYE = np.eye(n, dtype=int)
-    for i in range(n):
-        row = EYE[i,:]
-        for j in range(1,p):
-            if np.all(alpha[j,:] == row):
-                aux = alpha[i+1,:]
-                alpha[j,:] = aux
-                alpha[i+1,:] = row
-                break
+    # Stores terms by order of maximum powers, up to max_degree
+    alpha = np.array([], dtype='int64').reshape(0,n)
+    powers_by_degree = []
+    for k in range(max_degree+1):
+        k_th_degree_term = powers[np.where(np.fromiter(map(sum, powers),dtype='int64')==k)]
+        powers_by_degree.append( k_th_degree_term )
+        alpha = np.vstack([alpha, k_th_degree_term])
 
-    return alpha
+    return alpha, powers_by_degree
 
-def generate_monomials_from_symbols(symbols, d):
+def kernel_constraints( z, terms_by_degree ):
     '''
-    Returns the vector of monomial powers of dimension n up to degree d.
+    This algorithm generates the matrices needed to implement all constraints keeping a vector z 
+    inside the kernel space of a polynomial kernel represented by powers_by_degree.
     '''
-    n = len(symbols)
-    alpha = generate_monomial_list(n, d)
+    max_degree = len(terms_by_degree)-1
+    n, p = np.shape(terms_by_degree[0])[1], 0
+    for k_th_degree_term in terms_by_degree:
+        k_th_shape = np.shape(k_th_degree_term)
+        if n != k_th_shape[1]:
+            raise Exception("List of terms is invalid.")
+        p += k_th_shape[0]
+
+    # Function F(z) is the collection of p-n+1 kernel constraints
+    F = np.zeros(p-n+1)
+    F[0] = np.eye(p)[0,:] @ z - 1.0
+
+    k = 0
+    # matrix_constraints = []
+    for degree in range(2,max_degree+1):
+        for term in terms_by_degree[degree]:
+            k += 1
+
+            # If degree = 2, just look at the terms of degree - 1 (first degree terms)
+            if degree == 2:
+                first_degree_terms = terms_by_degree[1]
+                break_flag = False
+                for k1 in range(n):
+                    for k2 in range(n):
+                        if np.all(term == first_degree_terms[k1,:] + first_degree_terms[k2,:]):
+                            i, j = k1+2, k2+2
+                            break_flag = True
+                            break
+                    if break_flag: break
+
+            # If degree > 2, look at the terms of degree-1 and degree-2, and build combinations of them 
+            if degree > 2:
+                d_minus_1_terms = terms_by_degree[degree-1]
+                d_minus_2_terms = terms_by_degree[degree-2]
+                break_flag = False
+                for k1 in range(len(d_minus_1_terms)): # first loop: terms of degree - 1
+                    for k2 in range(len(d_minus_2_terms)):  # second loop: terms of degree - 2
+                        if np.all( term == d_minus_1_terms[k1,:] + d_minus_2_terms[k2,:] ):
+                            i = k1+num_comb(n, degree-2)+1
+                            j = k2+num_comb(n, degree-3)+1
+                            break_flag = True
+                            break
+                    if break_flag: break
+
+            E = ret_basis(p, (1,k+n+1)) - ret_basis(p, (i,j))
+            # matrix_constraints.append( E )
+            F[k] = z.T @ E @ z
+
+    return F
+
+def generate_monomials_from_symbols(symbol_list, alpha):
+    '''
+    Returns the vector of monomial powers corresponding to alpha, with symbols given by symbol_list
+    '''
+    n = len(symbol_list)
     monomials = []
     for row in alpha:
         mon = 1
         for dim in range(n):
-            mon = mon*symbols[dim]**row[dim]
+            mon = mon*symbol_list[dim]**row[dim]
         monomials.append( mon )
     return monomials
-
-    # n = len(symbols)
-    # alpha = generate_monomial_list(n, d)
-    # monomials = []
-    # for row in alpha:
-    #     mon = 1
-    #     for dim in range(n-1,0,-1):
-    #         mon = mon*symbols[dim]**row[dim]
-    #     monomials.append( mon )
-    # return monomials
 
 class Rect():
     '''
@@ -293,3 +328,29 @@ class Rect():
                 return [ topleft, topright, bottomleft, bottomright ]
         else:
             return [ topleft, topright, bottomleft, bottomright ]
+        
+# def generate_monomial_list(n, d):
+#     '''
+#     Returns the matrix of monomial powers of dimension n up to degree d.
+#     '''
+#     to_be_removed = []
+#     combinations = list( itertools.product( list(range(d+1)), repeat=n ) )
+#     for k in range(len(combinations)):
+#         if sum(combinations[k])>d:
+#             to_be_removed.append(k)
+#     for ele in sorted(to_be_removed, reverse = True):
+#         del combinations[ele]
+
+#     alpha = np.array(combinations)
+#     p = num_comb(n, d)
+#     EYE = np.eye(n, dtype=int)
+#     for i in range(n):
+#         row = EYE[i,:]
+#         for j in range(1,p):
+#             if np.all(alpha[j,:] == row):
+#                 aux = alpha[i+1,:]
+#                 alpha[j,:] = aux
+#                 alpha[i+1,:] = row
+#                 break
+
+#     return alpha

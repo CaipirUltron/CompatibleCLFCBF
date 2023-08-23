@@ -21,9 +21,14 @@ for k in range(num_examples):
     G = G.T @ G
 
     M = np.zeros([n,n])
-    for b in ret_basis(n):
-        M = M + np.random.randn()*b
+    for i in range(n):
+        for j in range(n):
+            M = M + np.random.randn()*ret_basis(n, (i,j))
     eigM , _ = np.linalg.eig(M)
+
+    # for b in ret_basis(n):
+    #     M = M + np.random.randn()*b
+    # eigM , _ = np.linalg.eig(M)
 
     M_pos_index, = np.where( eigM.real > 0 )
     num_pos_eig_M = len( M_pos_index )

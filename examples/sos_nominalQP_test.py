@@ -6,16 +6,17 @@ from dynamic_systems import ConservativeAffineSystem
 from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
 
-initial_state = [4.2, 5.0]
-initial_control = [0.0, 0.0]
+initial_state = [4.2, 5.0, 3.0]
+initial_control = [0.0, 0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
-max_degree = 2
+max_degree = 3
 kernel = Kernel(*initial_state, degree = max_degree)
 p = kernel.kernel_dim
 print(kernel)
+print(kernel.alpha)
 
 # -------------------------------------------------- Define system ---------------------------------------------------------
 F = np.zeros([p,p])

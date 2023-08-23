@@ -509,8 +509,8 @@ class Kernel(Function):
             self._symbols.append( sp.Symbol('x' + str(dim+1)) )
 
         # Generate monomial list and symbolic monomials
-        self.alpha = generate_monomial_list( self._dim, self._degree )
-        self._monomials = generate_monomials_from_symbols( self._symbols, self._degree )
+        self.alpha, self.powers_by_degree = generate_monomial_list( self._dim, self._degree )
+        self._monomials = generate_monomials_from_symbols( self._symbols, self.alpha )
         self._num_monomials = len(self._monomials)
         self._K = commutation_matrix(self._num_monomials)       # commutation matrix to be used later
 
@@ -618,6 +618,19 @@ class Kernel(Function):
         Return the N matrices.
         '''
         return self.N
+
+    def is_in_kernel_space(self, point):
+        '''
+        This function checks whether a given point is inside the kernel space.
+        '''
+        if len(point) != self.kernel_dim:
+            raise Exception("Point must be of the kernel dimension.")
+
+        from common import kernel_constraints
+        if np.linalg.norm( kernel_constraints( point, self.powers_by_degree ) ) < 0.00000001:
+            return True
+        else:
+            return False
 
     def __eq__(self, other):
         '''
