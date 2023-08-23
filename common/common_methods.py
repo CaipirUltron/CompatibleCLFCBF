@@ -226,6 +226,19 @@ def generate_monomial_list(n, max_degree):
 
     return alpha, powers_by_degree
 
+def generate_monomials_from_symbols(symbol_list, alpha):
+    '''
+    Returns the vector of monomial powers corresponding to alpha, with symbols given by symbol_list
+    '''
+    n = len(symbol_list)
+    monomials = []
+    for row in alpha:
+        mon = 1
+        for dim in range(n):
+            mon = mon*symbol_list[dim]**row[dim]
+        monomials.append( mon )
+    return monomials
+
 def kernel_constraints( z, terms_by_degree ):
     '''
     This algorithm generates the matrices needed to implement all constraints keeping a vector z 
@@ -244,7 +257,7 @@ def kernel_constraints( z, terms_by_degree ):
     F[0] = np.eye(p)[0,:] @ z - 1.0
 
     k = 0
-    # matrix_constraints = []
+    matrix_constraints = [ [] for _ in range( p-n-1 ) ]
     for degree in range(2,max_degree+1):
         for term in terms_by_degree[degree]:
             k += 1
@@ -275,24 +288,11 @@ def kernel_constraints( z, terms_by_degree ):
                             break
                     if break_flag: break
 
-            E = ret_basis(p, (1,k+n+1)) - ret_basis(p, (i,j))
-            # matrix_constraints.append( E )
+            E = ret_basis(p, (1,k+n+1)) - ret_basis(p, (i,j))            
             F[k] = z.T @ E @ z
+            matrix_constraints[k-1] = E
 
-    return F
-
-def generate_monomials_from_symbols(symbol_list, alpha):
-    '''
-    Returns the vector of monomial powers corresponding to alpha, with symbols given by symbol_list
-    '''
-    n = len(symbol_list)
-    monomials = []
-    for row in alpha:
-        mon = 1
-        for dim in range(n):
-            mon = mon*symbol_list[dim]**row[dim]
-        monomials.append( mon )
-    return monomials
+    return F, matrix_constraints
 
 class Rect():
     '''

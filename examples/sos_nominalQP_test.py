@@ -5,14 +5,15 @@ import numpy as np
 from dynamic_systems import ConservativeAffineSystem
 from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
+from common import rot2D
 
-initial_state = [4.2, 5.0, 3.0]
-initial_control = [0.0, 0.0, 0.0]
+initial_state = [4.2, 5.0]
+initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
-max_degree = 3
+max_degree = 2
 kernel = Kernel(*initial_state, degree = max_degree)
 p = kernel.kernel_dim
 print(kernel)
@@ -24,37 +25,66 @@ def g(state):
     return np.eye(m)
 plant = ConservativeAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
 
-gen_random = False
-if gen_random:
-    Proot = np.random.rand(p,p)
-    P = Proot.T @ Proot
-    clf_center = np.array([-6.0, -6.0])
+clf_eig = [1.0, 5.0]
+clf_center = np.array([-6.0, 0.0])
+P = np.zeros([p,p])
+P[0,0] = clf_center.T @ np.diag(clf_eig) @ clf_center
+for k in range(n):
+    P[0,k+1] = -clf_center[k]*clf_eig[k]
+    P[k+1,0] = -clf_center[k]*clf_eig[k]
+    P[k+1,k+1] = clf_eig[k]
 
-    Qroot = 0.1*np.random.rand(p,p)
-    Q = 0.1*Qroot.T @ Qroot
-    cbf_center = np.array([-2.0, -2.0])
-else:
-    simulation_file = sys.argv[1].replace(".json","")
-    location = "logs/"+simulation_file+".json"
-    try:
-        with open(location,'r') as file:
-            print("here")
-            print("Loading simulation with "+simulation_file + ".json")
-            logs = json.load(file)
-            P, Q = np.array( logs["P"] ), np.array( logs["Q"] )
-            clf_center, cbf_center = np.array( logs["clf_center"] ), np.array( logs["cbf_center"] )
-    except IOError:
-        print("Couldn't locate " + simulation_file + ".json")
+cbf_eig = [4.0, 1.0]
+cbf_center = np.array([0.0, 0.0])
+Q = np.zeros([p,p])
+Q[0,0] = cbf_center.T @ np.diag(cbf_eig) @ cbf_center
+for k in range(n):
+    Q[0,k+1] = -cbf_center[k]*cbf_eig[k]
+    Q[k+1,0] = -cbf_center[k]*cbf_eig[k]
+    Q[k+1,k+1] = cbf_eig[k]
+
+# P = np.zeros([p,p])
+# angle = np.random.rand()
+# P[0,0], P[1:n+1,1:n+1] = 0, rot2D(angle).T @ np.diag([10.0, 1.0]) @ rot2D(angle)
+
+# Q = np.zeros([p,p])
+# Q[0,0], Q[1:n+1,1:n+1] = 0, 0.1*np.diag([1.0, 50.0])
+# cbf_center = np.array([-2.0, -2.0])
+
+# gen_random = True
+# if gen_random:
+#     Proot = np.random.rand(p,p)
+#     P = Proot.T @ Proot
+#     clf_center = np.array([-6.0, -6.0])
+
+#     Qroot = 0.1*np.random.rand(p,p)
+#     Q = 0.1*Qroot.T @ Qroot
+#     cbf_center = np.array([-2.0, -2.0])
+# else:
+#     simulation_file = sys.argv[1].replace(".json","")
+#     location = "logs/"+simulation_file+".json"
+#     try:
+#         with open(location,'r') as file:
+#             print("here")
+#             print("Loading simulation with "+simulation_file + ".json")
+#             logs = json.load(file)
+#             P, Q = np.array( logs["P"] ), np.array( logs["Q"] )
+#             clf_center, cbf_center = np.array( logs["clf_center"] ), np.array( logs["cbf_center"] )
+#     except IOError:
+#         print("Couldn't locate " + simulation_file + ".json")
 
 # ---------------------------------------------------- Define CLF ----------------------------------------------------------
 clf = KernelLyapunov(*initial_state, kernel=kernel, P=P)
-print( clf.define_zeros( clf_center ) )
+# print( clf.define_zeros( clf_center ) )
 
 # ---------------------------------------------------- Define CBF ----------------------------------------------------------
 cbf = KernelBarrier(*initial_state, kernel=kernel, Q=Q)
-print( cbf.define_zeros( cbf_center ) )
+# print( cbf.define_zeros( cbf_center ) )
 
 cbfs = [cbf]
+from controllers import compute_equilibria_algorithm1
+eq = compute_equilibria_algorithm1( F, clf, cbf, c = 1, initial = np.random.rand(p+2+p-n) )
+print("Equilibrium point = " + str(eq))
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .001

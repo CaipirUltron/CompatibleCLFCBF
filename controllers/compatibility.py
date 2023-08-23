@@ -6,13 +6,14 @@ import numpy as np
 
 ZERO_ACCURACY = 0.0000001
 
-def compute_equilibria(F, clf, cbf, **kwargs):
+def compute_equilibria_algorithm1(F, clf, cbf, **kwargs):
     '''
     Solve the general eigenproblem of the type:
-    ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0, l2 >= 0
-    l1 = c V(z) P z
+    ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0,
+    l1 = c V(z) P z,
     z \in Im(m)
     '''
+    max_iter = 1000
     for key in kwargs.keys():
         aux_key = key.lower()
         if aux_key == "max_iter":
@@ -21,6 +22,8 @@ def compute_equilibria(F, clf, cbf, **kwargs):
         if aux_key == "c":
             c = kwargs[key]
             continue
+        if aux_key == "initial":
+            initial_guess = kwargs[key]
 
     if clf._dim != cbf._dim:
         raise Exception("CLF and CBF must have the same dimension.")
@@ -30,10 +33,11 @@ def compute_equilibria(F, clf, cbf, **kwargs):
     Q = cbf.Q
     if clf.kernel != cbf.kernel:
         raise Exception("CLF and CBF must be based on the same kernel.")
-    p = clf.kernel_dim
+    kernel = clf.kernel
+    p = kernel.kernel_dim
 
     # A_list = clf.kernel.get_A_matrices()
-    N_list = clf.kernel.get_N_matrices()
+    N_list = kernel.get_N_matrices()
 
     def linear_pencil(linear_combs):
         '''
@@ -57,13 +61,192 @@ def compute_equilibria(F, clf, cbf, **kwargs):
         This inner method computes the vector field F(lambda, kappa, z) and returns its value.
         '''        
         linear_combs, z = solution[0:p-n+2], solution[p-n+2:]
-        F = np.zeros(p+1)
+        kernel_constraints = kernel.get_constraints(z)
+        num_kernel_constraints = len(kernel_constraints)
+
+        F = np.zeros(p+num_kernel_constraints+2)
         L = linear_pencil(linear_combs)
         F[0:p] = L @ z
         V = 0.5 * z.T @ P @ z
         F[p] = linear_combs[0] - c*V
         F[p+1] = linear_pencil_det(linear_combs)
+        F[p+2:] = kernel_constraints
+
         return F
+    
+    # t = time.time()
+    solution = root(compute_F, initial_guess, method='lm', tol = 0.00001)
+    # solution = fsolve(compute_F, initial_guess, maxfev = max_iter)
+    # elapsed = time.time() - t
+
+    l1 = solution.x[0]
+    l2 = solution.x[1]
+    kappas = solution.x[2:p-n+2]
+    z = solution.x[p-n+2:]
+
+    equilibrium_point = z[1:n+1].tolist()
+
+    return equilibrium_point
+
+def compute_equilibria_algorithm2(F, clf, cbf, **kwargs):
+    '''
+    Solve the general eigenproblem of the type:
+    ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0, l2 >= 0,
+    l1 = c V(z) P z,
+    z \in Im(m)
+    '''
+    max_iter = 1000
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "max_iter":
+            max_iter = kwargs[key]
+            continue
+        if aux_key == "c":
+            c = kwargs[key]
+            continue
+        if aux_key == "initial":
+            initial_guess = kwargs[key]
+
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    n = clf._dim
+
+    P = clf.P
+    Q = cbf.Q
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    kernel = clf.kernel
+    p = kernel.kernel_dim
+
+    # A_list = clf.kernel.get_A_matrices()
+    N_list = kernel.get_N_matrices()
+
+    # Optimization
+    import cvxpy as cp
+
+    # General optimization problem
+
+    # ----- Variables ------
+    delta_var = cp.Variable()
+    l1_var = cp.Variable()
+    l2_var = cp.Variable()
+    kappa_var = cp.Variable(p-n)
+    z_var = cp.Variable(p)
+    L_var = cp.Variable((p,p))
+    
+    # ----- Prob definition ------
+    L_var = F + l1_var * Q - l2_var * P
+    for k in range(p-n):
+        L_var += kappa_var[k] * N_list[k]
+
+    matrices = kernel.get_matrix_constraints()
+    kernel_constraints = [ z_var[0] == 1 ]
+    kernel_constraints += [ z_var.T @ matrices[k] @ z_var == 0 for k in range(len(matrices)) ]
+
+    objective = cp.Minimize( cp.norm(delta_var)**2 )
+    constraints = [ L_var @ z_var == 0,
+                    l1_var == 0.5 * c * z_var.T @ P @ z_var,
+                    l2_var >= delta_var,
+                    delta_var >= 0 ]
+    constraints += kernel_constraints
+    problem = cp.Problem(objective, constraints)
+
+    problem.solve()
+    if problem.status not in ["infeasible", "unbounded"]:
+        # Otherwise, problem.value is inf or -inf, respectively.
+        print("Optimal value: %s" % problem.value)
+        for variable in problem.variables():
+            print("Variable %s: value %s" % (variable.name(), variable.value))
+
+    # CONCLUSION: problem is fundamentally nonconvex. Cannot be solved through CVXPY.
+
+def compute_equilibria_algorithm3(F, clf, cbf, **kwargs):
+    '''
+    Solve the general eigenproblem of the type:
+    ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0, l2 >= 0,
+    l1 = c V(z) P z,
+    z \in Im(m)
+    '''
+    max_iter = 1000
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "max_iter":
+            max_iter = kwargs[key]
+            continue
+        if aux_key == "c":
+            c = kwargs[key]
+            continue
+        if aux_key == "initial":
+            initial_guess = kwargs[key]
+
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    n = clf._dim
+
+    P = clf.P
+    Q = cbf.Q
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    kernel = clf.kernel
+    p = kernel.kernel_dim
+
+    # A_list = clf.kernel.get_A_matrices()
+    N_list = kernel.get_N_matrices()
+
+    # Optimization
+    import cvxpy as cp
+
+    # First optimization: QP
+
+    # ----- Variables ------
+    delta_var = cp.Variable()
+    l1_var = cp.Variable()
+    l2_var = cp.Variable()
+    kappa_var = cp.Variable(p-n)
+    L_var = cp.Variable((p,p))
+
+    # ----- Parameters ------
+    z_param = cp.Parameter(p)
+
+    # ----- Prob definition ------
+    L_var = F + l1_var * Q - l2_var * P
+    for k in range(p-n):
+        L_var += kappa_var[k] * N_list[k]
+
+    QP_objective = cp.Minimize( cp.norm(delta_var)**2 )
+    QP_constraints = [ L_var @ z_param == 0,
+                       l1_var == 0.5 * c * z_param.T @ P @ z_param, 
+                       l2_var >= 0,
+                       delta_var >= 0 ]
+    QP = cp.Problem(QP_objective, QP_constraints)
+
+    # Second optimization: almost QCQP
+
+    # ----- Variables ------
+    z_var = cp.Variable(p)
+
+    # ----- Parameters ------
+    l1_param = cp.Parameter()
+    l2_param = cp.Parameter()
+    kappa_param = cp.Parameter(p-n)
+    L_param = cp.Parameter((p,p))
+    z_param = cp.Parameter(p)
+
+    # ----- Prob definition ------
+    L_param = F + l1_param * Q - l2_param * P
+    for k in range(p-n):
+        L_param += kappa_param[k] * N_list[k]
+
+    matrices = kernel.get_matrix_constraints()
+    kernel_constraints = [ z_var[0] == 1 ]
+    kernel_constraints += [ z_var.T @ matrices[k] @ z_var == 0 for k in range(len(matrices)) ]
+
+    quasiQCQP_objective = cp.Minimize( cp.norm(z_var - z_param)**2 )
+    quasiQCQP_constraints = [ L_param @ z_var == 0,
+                              0.5 * c * z_var.T @ P @ z_var == l1_param ] + kernel_constraints
+    quasiQCQP = cp.Problem(quasiQCQP_objective, quasiQCQP_constraints)
+
+    pass
 
 def solve_PEP(Q, P, **kwargs):
     '''

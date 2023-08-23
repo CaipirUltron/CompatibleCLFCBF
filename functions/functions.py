@@ -619,6 +619,22 @@ class Kernel(Function):
         '''
         return self.N
 
+    def get_constraints(self, point):
+        '''
+        Returns kernel constraints
+        '''
+        from common import kernel_constraints
+        F, matrices = kernel_constraints( point, self.powers_by_degree )
+        return F
+
+    def get_matrix_constraints(self):
+        '''
+        Returns kernel constraints
+        '''
+        from common import kernel_constraints
+        F, matrices = kernel_constraints( np.zeros(self.kernel_dim), self.powers_by_degree )
+        return matrices
+
     def is_in_kernel_space(self, point):
         '''
         This function checks whether a given point is inside the kernel space.
@@ -722,6 +738,7 @@ class KernelQuadratic(Function):
         self.Pn_param.value = self.matrix_coefs
         self.Pc_param.value = std_centered_quadratic
         self.define_zeros_problem.solve()
+
         self.set_param(coefficients = self.P_variable.value)
 
         return self.function( point )
@@ -801,7 +818,7 @@ class KernelLyapunov(KernelQuadratic):
         Check if matrix of coefficients makes the function bounded from below
         '''
         eig, eigenvec = np.linalg.eig( self.P )
-        return np.all(eig >= 0)
+        return np.all(eig >= -0.00000000000001)
     
 class KernelBarrier(KernelQuadratic):
     '''

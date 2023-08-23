@@ -32,11 +32,11 @@ for step in range(0, num_steps):
 sim.logs["time"] = time
 sim.logs["state"] = sim.plant.state_log
 sim.logs["control"] = sim.plant.control_log
-sim.logs["equilibria"] = sim.controller.equilibrium_points.tolist()
+sim.logs["equilibria"] = sim.controller.equilibrium_points_log
 
 if hasattr(sim, 'path'):
     sim.logs["gamma_log"] = sim.path.logs["gamma"]
 
-with open(simulation_config+".json", "w") as file:
+with open("logs/"+simulation_config+".json", "w") as file:
     print("Saving simulation data...")
     json.dump(sim.logs, file, indent=4)

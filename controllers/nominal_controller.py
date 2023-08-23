@@ -1,8 +1,9 @@
 import numpy as np
-from controllers import CLFCBFPair
+from controllers import CLFCBFPair, compute_equilibria_algorithm1
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 from common import sat
+import time
 
 class NominalQP():
     '''
@@ -42,7 +43,26 @@ class NominalQP():
         self.QP_sol = np.zeros(self.QP_dim)
 
         self.ctrl_dt = dt
+
+        self.t = 0.0
+        self.eq_dt = 0.5
         self.equilibrium_points = np.zeros(self.state_dim)
+        self.equilibrium_points_log = []
+        
+    def get_equilibria(self):
+        '''
+        Computes the equilibrium points
+        '''
+        elapsed_time = time.time() - self.t
+        if elapsed_time > self.eq_dt:
+            self.t = time.time()
+            l1 = self.p * self.alpha * self.V
+            l2 = self.nablaV @ self.nablah / ( self.nablah @ self.nablah )
+            kappas = np.random.rand(self.clf.kernel.kernel_dim-self.state_dim)
+            z = self.clf.kernel.function( self.plant.get_state() )
+            initial_guess = np.hstack([l1, l2, kappas, z])
+            self.equilibrium_points = compute_equilibria_algorithm1( self.plant.F, self.clf, self.cbfs[0], c = self.p * self.alpha, initial = initial_guess)
+        self.equilibrium_points_log.append( self.equilibrium_points )
 
     def get_control(self):
         '''
@@ -64,6 +84,8 @@ class NominalQP():
         self.QP.set_inequality_constraints(A, b)
         self.QP_sol = self.QP.get_solution()
         control = self.QP_sol[0:self.control_dim,]
+
+        self.get_equilibria()
 
         return control
 
@@ -106,10 +128,10 @@ class NominalQP():
 
         # Barrier function and gradient
         h = cbf.evaluate_function(*state)[0]
-        nablah = cbf.evaluate_gradient(*state)[0]
+        self.nablah = cbf.evaluate_gradient(*state)[0]
 
-        self.Lfh = nablah.dot(f)
-        self.Lgh = g.T @ nablah
+        self.Lfh = self.nablah.dot(f)
+        self.Lgh = g.T @ self.nablah
 
         # CBF contraint for the QP
         a_cbf = -np.hstack( [ self.Lgh, 0.0 ])
