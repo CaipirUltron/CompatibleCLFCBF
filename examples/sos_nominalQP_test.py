@@ -82,9 +82,9 @@ cbf = KernelBarrier(*initial_state, kernel=kernel, Q=Q)
 # print( cbf.define_zeros( cbf_center ) )
 
 cbfs = [cbf]
-from controllers import compute_equilibria_algorithm1
-eq = compute_equilibria_algorithm1( F, clf, cbf, c = 1, initial = np.random.rand(p+2+p-n) )
-print("Equilibrium point = " + str(eq))
+from controllers import compute_equilibria_algorithm3
+sol = compute_equilibria_algorithm3( F, clf, cbf, [0.1, 2.0], l2_bound = 0.1 )
+print(sol)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .001

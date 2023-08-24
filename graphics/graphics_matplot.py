@@ -184,7 +184,7 @@ class Plot2DSimulation():
 
             self.time_text.set_text("Time = " + str(current_time) + "s")
 
-            x_eq, y_eq = self.equilibria[i,1], self.equilibria[i,0]
+            x_eq, y_eq = self.equilibria[i,0], self.equilibria[i,1]
             self.equilibria_plot.set_data(x_eq, y_eq)
 
             if self.draw_level:

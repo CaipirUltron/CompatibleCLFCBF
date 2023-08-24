@@ -84,7 +84,7 @@ def compute_equilibria_algorithm1(F, clf, cbf, **kwargs):
     kappas = solution.x[2:p-n+2]
     z = solution.x[p-n+2:]
 
-    equilibrium_point = z[1:n+1].tolist()
+    equilibrium_point = np.flip(z[1:n+1]).tolist()
 
     return equilibrium_point
 
@@ -160,24 +160,27 @@ def compute_equilibria_algorithm2(F, clf, cbf, **kwargs):
 
     # CONCLUSION: problem is fundamentally nonconvex. Cannot be solved through CVXPY.
 
-def compute_equilibria_algorithm3(F, clf, cbf, **kwargs):
+def compute_equilibria_algorithm3(F, clf, cbf, initial_point, **kwargs):
     '''
     Solve the general eigenproblem of the type:
     ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0, l2 >= 0,
     l1 = c V(z) P z,
     z \in Im(m)
     '''
+    c = 1
+    l2_bound = 1.0
     max_iter = 1000
     for key in kwargs.keys():
         aux_key = key.lower()
-        if aux_key == "max_iter":
-            max_iter = kwargs[key]
+        if aux_key == "l2_bound":
+            l2_bound = kwargs[key]
             continue
         if aux_key == "c":
             c = kwargs[key]
             continue
-        if aux_key == "initial":
-            initial_guess = kwargs[key]
+        if aux_key == "max_iter":
+            max_iter = kwargs[key]
+            continue
 
     if clf._dim != cbf._dim:
         raise Exception("CLF and CBF must have the same dimension.")
@@ -196,57 +199,101 @@ def compute_equilibria_algorithm3(F, clf, cbf, **kwargs):
     # Optimization
     import cvxpy as cp
 
-    # First optimization: QP
+    ACCURACY = 0.0001
 
-    # ----- Variables ------
-    delta_var = cp.Variable()
-    l1_var = cp.Variable()
-    l2_var = cp.Variable()
-    kappa_var = cp.Variable(p-n)
-    L_var = cp.Variable((p,p))
+    it = 0
+    z_old = np.inf
+    z = kernel.function( initial_point )
+    while np.linalg.norm( z - z_old ) > ACCURACY or it < max_iter:
+        it += 1
 
-    # ----- Parameters ------
-    z_param = cp.Parameter(p)
+        # First optimization: QP
 
-    # ----- Prob definition ------
-    L_var = F + l1_var * Q - l2_var * P
-    for k in range(p-n):
-        L_var += kappa_var[k] * N_list[k]
+        # ----- Variables ------
+        delta_var = cp.Variable()
+        l1_var = cp.Variable()
+        l2_var = cp.Variable()
+        kappa_var = cp.Variable(p-n)
+        L_var = cp.Variable((p,p))
 
-    QP_objective = cp.Minimize( cp.norm(delta_var)**2 )
-    QP_constraints = [ L_var @ z_param == 0,
-                       l1_var == 0.5 * c * z_param.T @ P @ z_param, 
-                       l2_var >= 0,
-                       delta_var >= 0 ]
-    QP = cp.Problem(QP_objective, QP_constraints)
+        # ----- Parameters ------
+        z_param = cp.Parameter(p)
+        l1_param = cp.Variable()
 
-    # Second optimization: almost QCQP
+        # ----- Prob definition ------
+        l1_param = 0.5 * c * z_param.T @ P @ z_param
 
-    # ----- Variables ------
-    z_var = cp.Variable(p)
+        L_var = F + l1_var * Q - l2_var * P
+        for k in range(p-n):
+            L_var += kappa_var[k] * N_list[k]
 
-    # ----- Parameters ------
-    l1_param = cp.Parameter()
-    l2_param = cp.Parameter()
-    kappa_param = cp.Parameter(p-n)
-    L_param = cp.Parameter((p,p))
-    z_param = cp.Parameter(p)
+        QP_objective = cp.Minimize( cp.norm(l2_var)**2 )
+        # QP_objective = cp.Minimize( cp.norm(l2_var)**2 + cp.norm(kappa_var)**2 )
+        QP_constraints = [ L_var @ z_param == 0 ,
+                           l1_var == 0.5 * c * z_param.T @ P @ z_param , 
+                        #    l2_var >= delta_var ,
+                           l2_var >= l2_bound ]
+        QP = cp.Problem(QP_objective, QP_constraints)
 
-    # ----- Prob definition ------
-    L_param = F + l1_param * Q - l2_param * P
-    for k in range(p-n):
-        L_param += kappa_param[k] * N_list[k]
+        # ------- Solve QP --------
+        z_param.value = z
+        QP.solve()
+        
+        p_var = np.zeros(p-n+2)
+        p_var[0] = l1_var.value
+        p_var[1] = l2_var.value
+        p_var[2:] = kappa_var.value
 
-    matrices = kernel.get_matrix_constraints()
-    kernel_constraints = [ z_var[0] == 1 ]
-    kernel_constraints += [ z_var.T @ matrices[k] @ z_var == 0 for k in range(len(matrices)) ]
+        if QP.status in ["infeasible", "unbounded"]:
+            raise Exception("QP is " + QP.status)
 
-    quasiQCQP_objective = cp.Minimize( cp.norm(z_var - z_param)**2 )
-    quasiQCQP_constraints = [ L_param @ z_var == 0,
-                              0.5 * c * z_var.T @ P @ z_var == l1_param ] + kernel_constraints
-    quasiQCQP = cp.Problem(quasiQCQP_objective, quasiQCQP_constraints)
+        # Second problem: nonlinear Newton-Raphson method
 
-    pass
+        def linear_pencil(p_var):
+            '''
+            linear_combs = [ lambda1, lambda2, kappa1, kappa2, ... ]
+            Computes the linear matrix pencil.
+            '''
+            L = F + p_var[1] * Q - p_var[0] * P
+            for k in range(2, p - n):
+                L += p_var[k] * N_list[k]
+            return L
+
+        def linear_pencil_det(p_var):
+            '''
+            linear_combs = [ lambda1, lambda2, kappa1, kappa2, ... ]
+            Computes determinant of linear matrix pencil.
+            '''
+            return np.linalg.det( linear_pencil(p_var) )
+
+        def compute_F(z):
+            '''
+            This inner method computes the vector field F(sol) and returns its value.
+            '''        
+            kernel_constraints = kernel.get_constraints(z)
+            num_kernel_constraints = len(kernel_constraints)
+
+            F = np.zeros(p+2+num_kernel_constraints)
+            L = linear_pencil(p_var)
+            F[0:p] = L @ z
+            F[p] = p_var[0] - 0.5 * c * z.T @ P @ z
+            F[p+1] = np.eye(p)[0,:].T @ z - 1
+            F[p+2:] = kernel_constraints
+
+            return F
+
+        z_old = z
+        solution = root(compute_F, z, method='lm', tol = ACCURACY)
+        z = solution.x
+
+    equilibrium_point = np.flip(z[1:n+1]).tolist()
+    sol_dict = { "equilibrium_point": equilibrium_point,
+                 "lambda1": l1_var.value.tolist(),
+                 "lambda2": l2_var.value.tolist(),
+                 "kappas": kappa_var.value.tolist(),
+                 "z": z.tolist() }
+    
+    return sol_dict
 
 def solve_PEP(Q, P, **kwargs):
     '''
