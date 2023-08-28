@@ -82,14 +82,10 @@ cbf = KernelBarrier(*initial_state, kernel=kernel, Q=Q)
 
 cbfs = [cbf]
 from controllers import compute_equilibria_algorithm5
-t = time.time()
 sol = compute_equilibria_algorithm5( plant, clf, cbf, [0.0, 5.6] )
-
-print("Solved in " + str( time.time() - t ) + str(" s"))
 print(sol)
 
-z = np.array(sol["z"])
-print( 0.5 * z.T @ P @ z )
+z = np.array(sol["boundary"]["z"])
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .001

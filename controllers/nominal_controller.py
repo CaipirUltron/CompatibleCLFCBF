@@ -58,7 +58,7 @@ class NominalQP():
             initial_guess = self.plant.get_state()
             sol = compute_equilibria_algorithm5( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
             self.t = time.time()
-            self.equilibrium_point = sol["equilibrium_point"]
+            self.equilibrium_point = sol["boundary"]["equilibrium"]
         self.equilibrium_points_log.append( self.equilibrium_point )
 
     def get_control(self):

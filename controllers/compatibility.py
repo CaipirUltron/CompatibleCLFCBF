@@ -1,9 +1,9 @@
-import os
+import time
 import scipy
 import numpy as np
 
 from scipy import signal
-from scipy.optimize import fsolve, minimize, root
+from scipy.optimize import fsolve, root, least_squares
 from scipy.linalg import null_space
 
 ZERO_ACCURACY = 0.0000001
@@ -450,19 +450,17 @@ def compute_equilibria_algorithm5(plant, clf, cbf, initial_point, **kwargs):
     p = kernel.kernel_dim
     N_list = kernel.get_N_matrices()
 
-    g = plant.get_g()
-    nablaV = np.array( clf.get_gradient()[0] )
-    nablah = np.array( cbf.get_gradient()[0] )
-    # initial_l2 = nablaV.T @ g @ g.T @ nablaV / nablah.T @ g @ g.T @ nablah
-    initial_l2 = 1.0
-
     # Optimization
-    from scipy.optimize import least_squares
 
     ACCURACY = 0.000000001
 
     z = kernel.function( initial_point )
-    p_var = np.hstack([ 0.5 * c * z.T @ P @ z, initial_l2, np.zeros(p-n) ])
+
+    initial_l1 = 0.5 * c * z.T @ P @ z
+    initial_l2 = 0.0
+    initial_kappas = np.zeros(p-n)
+
+    p_var = np.hstack([ initial_l1, initial_l2, initial_kappas ])
 
     # Least squares with bound on lambda2
     def linear_pencil(p_var):
@@ -482,9 +480,9 @@ def compute_equilibria_algorithm5(plant, clf, cbf, initial_point, **kwargs):
         '''
         return np.linalg.det( linear_pencil(p_var) )
 
-    def function(variables):
+    def boundary_equilibria(variables):
         '''
-        Function for constrained least squares
+        Constraints for boundary equilibrium points 
         '''
         z = variables[0:p]
         p_var = variables[p:]
@@ -496,27 +494,66 @@ def compute_equilibria_algorithm5(plant, clf, cbf, initial_point, **kwargs):
                            z.T @ Q @ z - 1,
                            kernel_constraints ])
 
+    def interior_equilibria(variables):
+        '''
+        Constraints for interior equilibrium points 
+        '''
+        z = variables[0:p]
+        p_var = variables[p:]
+        kernel_constraints = kernel.get_constraints(z)
+
+        return np.hstack([ linear_pencil_det(p_var), 
+                           linear_pencil(p_var) @ z, 
+                           p_var[0] - 0.5 * c * z.T @ P @ z, 
+                           p_var[1],
+                           kernel_constraints ])
+
     # ------- Solve constrained least squares --------
     initial_variables = np.hstack([ z, p_var ])
     lower_bounds = [ -np.inf for _ in range(p) ] + [ -np.inf, 0.0 ] + [ -np.inf for _ in range(p-n) ] # forces inequality lambda2 >= 0
-    solution = least_squares( function, initial_variables, bounds=(lower_bounds, np.inf) )
 
-    z = solution.x[0:p]
-    p_var = solution.x[p:]
+    # Solves for boundary equilibrium points
+    t = time.time()
+    boundary_solution = least_squares( boundary_equilibria, initial_variables, bounds=(lower_bounds, np.inf) )
+    boundary_delta = time.time() - t
 
-    # print( kernel.get_constraints(z) )
-    # print( kernel.is_in_kernel_space(np.array(z)) )
-    # print(cost)
+    boundary_z = boundary_solution.x[0:p]
+    boundary_p_var = boundary_solution.x[p:]
+    boundary_equilibrium = np.flip(boundary_z[1:n+1]).tolist()
 
-    equilibrium_point = np.flip(z[1:n+1]).tolist()
-    sol_dict = { "equilibrium_point": equilibrium_point,
-                 "lambda1": p_var[0],
-                 "lambda2": p_var[1],
-                 "kappas": p_var[2:].tolist(),
-                 "z": z.tolist(),
-                 "cost": solution.cost }
+    if np.linalg.norm( F ) != 0:
+        t = time.time()
+        interior_solution = least_squares( interior_equilibria, initial_variables, bounds=(lower_bounds, np.inf) )
+        interior_delta = time.time() - t
 
-    return sol_dict
+        interior_z = interior_solution.x[0:p]
+        interior_p_var = interior_solution.x[p:]
+        interior_equilibrium = np.flip(interior_z[1:n+1]).tolist()
+        interior_cost = interior_solution.cost
+    else:
+        interior_z = [ None for _ in range(p) ]
+        interior_p_var = np.array([ None for _ in range(p-n+2) ])
+        interior_equilibrium = [ None for _ in range(n) ]
+        interior_cost = None
+        interior_delta = 0.0
+
+    boundary_sol = { "equilibrium": boundary_equilibrium,
+                     "z": boundary_z,
+                     "lambda1": boundary_p_var[0],
+                     "lambda2": boundary_p_var[1],
+                     "kappas": boundary_p_var[2:].tolist(),
+                     "cost": boundary_solution.cost,
+                     "time": boundary_delta }
+    
+    interior_sol = { "equilibrium": interior_equilibrium,
+                     "z": interior_z,
+                     "lambda1": interior_p_var[0],
+                     "lambda2": interior_p_var[1],
+                     "kappas": interior_p_var[2:].tolist(),
+                     "cost": interior_cost,
+                     "time": interior_delta }
+
+    return { "boundary": boundary_sol, "interior": interior_sol }
 
 def solve_PEP(Q, P, **kwargs):
     '''
