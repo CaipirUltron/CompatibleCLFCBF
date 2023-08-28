@@ -1,5 +1,4 @@
-import sys
-import json
+import time
 import numpy as np
 
 from dynamic_systems import ConservativeAffineSystem
@@ -82,9 +81,15 @@ cbf = KernelBarrier(*initial_state, kernel=kernel, Q=Q)
 # print( cbf.define_zeros( cbf_center ) )
 
 cbfs = [cbf]
-from controllers import compute_equilibria_algorithm3
-sol = compute_equilibria_algorithm3( F, clf, cbf, [0.1, 2.0], l2_bound = 0.1 )
+from controllers import compute_equilibria_algorithm5
+t = time.time()
+sol = compute_equilibria_algorithm5( plant, clf, cbf, [0.0, 5.6] )
+
+print("Solved in " + str( time.time() - t ) + str(" s"))
 print(sol)
+
+z = np.array(sol["z"])
+print( 0.5 * z.T @ P @ z )
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .001

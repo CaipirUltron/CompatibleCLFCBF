@@ -66,6 +66,11 @@ class Function():
     def get_value(self):
         return self._var
 
+    def evaluate(self):
+        self.evaluate_function(*self._var)
+        self.evaluate_gradient(*self._var)
+        self.evaluate_hessian(*self._var)
+
     def evaluate_function(self, *args):
         self.set_value(*args)
         self.function_values()
@@ -82,12 +87,21 @@ class Function():
         return self.get_hessian()
 
     def get_function(self):
+        '''
+        Get last computed function
+        '''
         return self._function
 
     def get_gradient(self):
+        '''
+        Get last computed gradient
+        '''
         return self._gradient
 
     def get_hessian(self):
+        '''
+        Get last computed hessian
+        '''
         return self._hessian
 
     def function_values(self):
@@ -624,7 +638,7 @@ class Kernel(Function):
         Returns kernel constraints
         '''
         from common import kernel_constraints
-        F, matrices = kernel_constraints( point, self.powers_by_degree )
+        F, _ = kernel_constraints( point, self.powers_by_degree )
         return F
 
     def get_matrix_constraints(self):
@@ -632,7 +646,7 @@ class Kernel(Function):
         Returns kernel constraints
         '''
         from common import kernel_constraints
-        F, matrices = kernel_constraints( np.zeros(self.kernel_dim), self.powers_by_degree )
+        _, matrices = kernel_constraints( np.zeros(self.kernel_dim), self.powers_by_degree )
         return matrices
 
     def is_in_kernel_space(self, point):
@@ -643,7 +657,8 @@ class Kernel(Function):
             raise Exception("Point must be of the kernel dimension.")
 
         from common import kernel_constraints
-        if np.linalg.norm( kernel_constraints( point, self.powers_by_degree ) ) < 0.00000001:
+        F, _ = kernel_constraints( point, self.powers_by_degree )
+        if np.linalg.norm(F) < 0.00000001:
             return True
         else:
             return False
@@ -672,6 +687,7 @@ class KernelQuadratic(Function):
         # Initialization
         super().__init__(*args)
         self.set_param(**kwargs)
+        self.evaluate()
         self.dynamics = Integrator([0.0],[0.0])
 
         # SDP optimization

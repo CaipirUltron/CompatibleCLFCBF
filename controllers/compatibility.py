@@ -1,8 +1,10 @@
+import os
 import scipy
+import numpy as np
+
 from scipy import signal
 from scipy.optimize import fsolve, minimize, root
 from scipy.linalg import null_space
-import numpy as np
 
 ZERO_ACCURACY = 0.0000001
 
@@ -293,6 +295,227 @@ def compute_equilibria_algorithm3(F, clf, cbf, initial_point, **kwargs):
                  "kappas": kappa_var.value.tolist(),
                  "z": z.tolist() }
     
+    return sol_dict
+
+def compute_equilibria_algorithm4(plant, clf, cbf, initial_point, **kwargs):
+    '''
+    Solve the general eigenproblem of the type:
+    ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0, l2 >= 0,
+    l1 = c V(z) P z,
+    z \in Im(m)
+    '''
+    c = 1
+    max_iter = 100
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "c":
+            c = kwargs[key]
+            continue
+        if aux_key == "max_iter":
+            max_iter = kwargs[key]
+            continue
+
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    n = clf._dim
+
+    F = plant.get_F()
+    P = clf.P
+    Q = cbf.Q
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    kernel = clf.kernel
+    p = kernel.kernel_dim
+    N_list = kernel.get_N_matrices()
+
+    g = plant.get_g()
+    nablaV = clf.get_gradient()
+    nablah = cbf.get_gradient()
+    # initial_l2 = nablaV.T @ g @ g.T @ nablaV / nablah.T @ g @ g.T @ nablah
+    initial_l2 = 1.0
+
+    print("Initial lambda2 = " + str(initial_l2))
+
+    # Optimization
+    import cvxpy as cp
+    from scipy.optimize import least_squares
+
+    ACCURACY = 0.000000001
+
+    it = 0
+    z_old = np.inf
+    z = kernel.function( initial_point )
+
+    cost = np.linalg.norm( z - z_old )
+    while cost > ACCURACY and it < max_iter:
+        it += 1
+
+        # First optimization: least squares with bound on lambda2 
+        def linear_pencil(p_var):
+            '''
+            p_var = [ lambda1, lambda2, kappa1, kappa2, ... ]
+            Computes the linear matrix pencil.
+            '''
+            L = F + p_var[1] * Q - p_var[0] * P
+            for k in range(p - n):
+                L += p_var[k+2] * N_list[k]
+            return L
+
+        def linear_pencil_det(p_var):
+            '''
+            p_var = [ lambda1, lambda2, kappa1, kappa2, ... ]
+            Computes determinant of linear matrix pencil.
+            '''
+            return np.linalg.det( linear_pencil(p_var) )
+
+        def F1(p_var):
+            '''
+            Function for constrained least squares
+            '''
+            return np.array([ linear_pencil_det(p_var), p_var[0] - 0.5 * c * z.T @ P @ z ])
+
+        # ------- Solve constrained least squares --------
+        initial_p_var = np.hstack([ 0.5 * c * z.T @ P @ z, initial_l2, np.zeros(p-n) ])
+        lower_bounds = [ -np.inf, 0.0 ] + [ -np.inf for _ in range(p-n) ]
+        solution1 = least_squares( F1, initial_p_var, bounds=(lower_bounds, np.inf) )
+        
+        p_var = np.zeros(p-n+2)
+        p_var[0] = solution1.x[0]
+        p_var[1] = solution1.x[1]
+        p_var[2:] = solution1.x[2:]
+
+        print("p = " + str(p_var))
+        print("F1 = " + str(F1(p_var)))
+
+        # Second problem: nonlinear Newton-Raphson method
+
+        def F2(z):
+            '''
+            This inner method computes the vector field F(sol) and returns its value.
+            '''        
+            kernel_constraints = kernel.get_constraints(z)
+            num_kernel_constraints = len(kernel_constraints)
+
+            F2 = np.zeros(p+1+num_kernel_constraints)
+            L = linear_pencil(p_var)
+            F2[0:p] = L @ z
+            F2[p] = p_var[0] - 0.5 * c * z.T @ P @ z
+            F2[p+1:] = kernel_constraints
+
+            return F2
+
+        z_old = z
+        solution2 = root(F2, z_old, method='lm', tol = ACCURACY)
+        z = solution2.x
+        cost = np.linalg.norm( z - z_old )
+
+        # print( kernel.get_constraints(z) )
+        # print( kernel.is_in_kernel_space(np.array(z)) )
+        # print(cost)
+
+    equilibrium_point = np.flip(z[1:n+1]).tolist()
+    sol_dict = { "equilibrium_point": equilibrium_point,
+                 "lambda1": p_var[0],
+                 "lambda2": p_var[1],
+                 "kappas": p_var[2:].tolist(),
+                 "z": z.tolist(),
+                 "cost": cost }
+
+    return sol_dict
+
+def compute_equilibria_algorithm5(plant, clf, cbf, initial_point, **kwargs):
+    '''
+    Solve the general eigenproblem of the type:
+    ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0, l2 >= 0,
+    l1 = c V(z) P z,
+    z \in Im(m)
+    '''
+    c = 1
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "c":
+            c = kwargs[key]
+            continue
+
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    n = clf._dim
+
+    F = plant.get_F()
+    P = clf.P
+    Q = cbf.Q
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    kernel = clf.kernel
+    p = kernel.kernel_dim
+    N_list = kernel.get_N_matrices()
+
+    g = plant.get_g()
+    nablaV = np.array( clf.get_gradient()[0] )
+    nablah = np.array( cbf.get_gradient()[0] )
+    # initial_l2 = nablaV.T @ g @ g.T @ nablaV / nablah.T @ g @ g.T @ nablah
+    initial_l2 = 1.0
+
+    # Optimization
+    from scipy.optimize import least_squares
+
+    ACCURACY = 0.000000001
+
+    z = kernel.function( initial_point )
+    p_var = np.hstack([ 0.5 * c * z.T @ P @ z, initial_l2, np.zeros(p-n) ])
+
+    # Least squares with bound on lambda2
+    def linear_pencil(p_var):
+        '''
+        p_var = [ lambda1, lambda2, kappa1, kappa2, ... ]
+        Computes the linear matrix pencil.
+        '''
+        L = F + p_var[1] * Q - p_var[0] * P
+        for k in range(p - n):
+            L += p_var[k+2] * N_list[k]
+        return L
+
+    def linear_pencil_det(p_var):
+        '''
+        p_var = [ lambda1, lambda2, kappa1, kappa2, ... ]
+        Computes determinant of linear matrix pencil.
+        '''
+        return np.linalg.det( linear_pencil(p_var) )
+
+    def function(variables):
+        '''
+        Function for constrained least squares
+        '''
+        z = variables[0:p]
+        p_var = variables[p:]
+        kernel_constraints = kernel.get_constraints(z)
+
+        return np.hstack([ linear_pencil_det(p_var), 
+                           linear_pencil(p_var) @ z, 
+                           p_var[0] - 0.5 * c * z.T @ P @ z, 
+                           z.T @ Q @ z - 1,
+                           kernel_constraints ])
+
+    # ------- Solve constrained least squares --------
+    initial_variables = np.hstack([ z, p_var ])
+    lower_bounds = [ -np.inf for _ in range(p) ] + [ -np.inf, 0.0 ] + [ -np.inf for _ in range(p-n) ] # forces inequality lambda2 >= 0
+    solution = least_squares( function, initial_variables, bounds=(lower_bounds, np.inf) )
+
+    z = solution.x[0:p]
+    p_var = solution.x[p:]
+
+    # print( kernel.get_constraints(z) )
+    # print( kernel.is_in_kernel_space(np.array(z)) )
+    # print(cost)
+
+    equilibrium_point = np.flip(z[1:n+1]).tolist()
+    sol_dict = { "equilibrium_point": equilibrium_point,
+                 "lambda1": p_var[0],
+                 "lambda2": p_var[1],
+                 "kappas": p_var[2:].tolist(),
+                 "z": z.tolist(),
+                 "cost": solution.cost }
+
     return sol_dict
 
 def solve_PEP(Q, P, **kwargs):

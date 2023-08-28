@@ -383,6 +383,10 @@ class ConservativeAffineSystem(AffineSystem):
         self.g_method = g_method
       
         super().__init__(initial_state, initial_control)
+        self.f()
+
+    def get_F(self):
+        return self.F
 
     def f(self):
         self.g()

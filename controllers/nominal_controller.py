@@ -1,5 +1,5 @@
 import numpy as np
-from controllers import CLFCBFPair, compute_equilibria_algorithm1
+from controllers import CLFCBFPair, compute_equilibria_algorithm5
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 from common import sat
@@ -44,9 +44,9 @@ class NominalQP():
 
         self.ctrl_dt = dt
 
-        self.t = 0.0
+        self.t = time.time()
         self.eq_dt = 0.5
-        self.equilibrium_points = np.zeros(self.state_dim)
+        self.equilibrium_point = [ 0.0, 0.0 ]
         self.equilibrium_points_log = []
         
     def get_equilibria(self):
@@ -55,14 +55,11 @@ class NominalQP():
         '''
         elapsed_time = time.time() - self.t
         if elapsed_time > self.eq_dt:
+            initial_guess = self.plant.get_state()
+            sol = compute_equilibria_algorithm5( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
             self.t = time.time()
-            l1 = self.p * self.alpha * self.V
-            l2 = self.nablaV @ self.nablah / ( self.nablah @ self.nablah )
-            kappas = np.random.rand(self.clf.kernel.kernel_dim-self.state_dim)
-            z = self.clf.kernel.function( self.plant.get_state() )
-            initial_guess = np.hstack([l1, l2, kappas, z])
-            self.equilibrium_points = compute_equilibria_algorithm1( self.plant.F, self.clf, self.cbfs[0], c = self.p * self.alpha, initial = initial_guess)
-        self.equilibrium_points_log.append( self.equilibrium_points )
+            self.equilibrium_point = sol["equilibrium_point"]
+        self.equilibrium_points_log.append( self.equilibrium_point )
 
     def get_control(self):
         '''
