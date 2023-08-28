@@ -44,11 +44,15 @@ class NominalQP():
 
         self.ctrl_dt = dt
 
-        self.t = time.time()
         self.eq_dt = 0.5
-        self.equilibrium_point = [ 0.0, 0.0 ]
         self.equilibrium_points_log = []
-        
+
+        initial_guess = self.plant.get_state()
+        sol = compute_equilibria_algorithm5( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
+        self.equilibrium_point = sol["boundary"]["equilibrium"]
+
+        self.t = time.time()
+
     def get_equilibria(self):
         '''
         Computes the equilibrium points

@@ -183,6 +183,8 @@ class Plot2DSimulation():
                 self.clf.set_param(current_piv_state)
 
             self.time_text.set_text("Time = " + str(current_time) + "s")
+            # h = self.cbfs[0].evaluate_function(*current_state)[0]
+            # self.time_text.set_text("h = " + str(h) + "s")
 
             if len(self.equilibria) != 0 :
                 x_eq, y_eq = self.equilibria[i,0], self.equilibria[i,1]

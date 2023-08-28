@@ -452,7 +452,7 @@ def compute_equilibria_algorithm5(plant, clf, cbf, initial_point, **kwargs):
 
     # Optimization
 
-    ACCURACY = 0.000000001
+    ACCURACY = 0.000001
 
     z = kernel.function( initial_point )
 
@@ -513,36 +513,44 @@ def compute_equilibria_algorithm5(plant, clf, cbf, initial_point, **kwargs):
     lower_bounds = [ -np.inf for _ in range(p) ] + [ -np.inf, 0.0 ] + [ -np.inf for _ in range(p-n) ] # forces inequality lambda2 >= 0
 
     # Solves for boundary equilibrium points
+    boundary_z = [ None for _ in range(p) ]
+    boundary_p_var = np.array([ None for _ in range(p-n+2) ])
+    boundary_equilibrium = [ None for _ in range(n) ]
+    boundary_cost = None
+
     t = time.time()
-    boundary_solution = least_squares( boundary_equilibria, initial_variables, bounds=(lower_bounds, np.inf) )
+    boundary_solution = least_squares( boundary_equilibria, initial_variables, bounds=(lower_bounds, np.inf), xtol = ACCURACY )
     boundary_delta = time.time() - t
 
-    boundary_z = boundary_solution.x[0:p]
-    boundary_p_var = boundary_solution.x[p:]
-    boundary_equilibrium = np.flip(boundary_z[1:n+1]).tolist()
+    z = boundary_solution.x[0:p]
+    if np.abs( z.T @ Q @ z - 1 ) < ACCURACY:
+        boundary_z = boundary_solution.x[0:p]
+        boundary_p_var = boundary_solution.x[p:]
+        boundary_equilibrium = np.flip(boundary_z[1:n+1]).tolist()
+        boundary_cost = boundary_solution.cost
 
-    if np.linalg.norm( F ) != 0:
-        t = time.time()
-        interior_solution = least_squares( interior_equilibria, initial_variables, bounds=(lower_bounds, np.inf) )
-        interior_delta = time.time() - t
+    interior_z = [ None for _ in range(p) ]
+    interior_p_var = np.array([ None for _ in range(p-n+2) ])
+    interior_equilibrium = [ None for _ in range(n) ]
+    interior_cost = None
+    interior_delta = 0.0
 
+    t = time.time()
+    interior_solution = least_squares( interior_equilibria, initial_variables, bounds=(lower_bounds, np.inf), xtol = ACCURACY )
+    interior_delta = time.time() - t
+
+    if interior_solution.cost < ACCURACY:
         interior_z = interior_solution.x[0:p]
         interior_p_var = interior_solution.x[p:]
         interior_equilibrium = np.flip(interior_z[1:n+1]).tolist()
         interior_cost = interior_solution.cost
-    else:
-        interior_z = [ None for _ in range(p) ]
-        interior_p_var = np.array([ None for _ in range(p-n+2) ])
-        interior_equilibrium = [ None for _ in range(n) ]
-        interior_cost = None
-        interior_delta = 0.0
-
+        
     boundary_sol = { "equilibrium": boundary_equilibrium,
                      "z": boundary_z,
                      "lambda1": boundary_p_var[0],
                      "lambda2": boundary_p_var[1],
                      "kappas": boundary_p_var[2:].tolist(),
-                     "cost": boundary_solution.cost,
+                     "cost": boundary_cost,
                      "time": boundary_delta }
     
     interior_sol = { "equilibrium": interior_equilibrium,

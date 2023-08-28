@@ -690,21 +690,6 @@ class KernelQuadratic(Function):
         self.evaluate()
         self.dynamics = Integrator([0.0],[0.0])
 
-        # SDP optimization
-        import cvxpy as cp
-        n = self._dim
-        p = self.kernel_dim
-        self.P_variable = cp.Variable( (p,p), symmetric=True ) # Create p x p symmetric variable
-        self.Pn_param = cp.Parameter( (p,p), symmetric=True )
-        self.Pc_param = cp.Parameter( (p,p), symmetric=True )
-        self.m_param = cp.Parameter(p)
-
-        self.objective = cp.Minimize( cp.norm(self.P_variable - self.Pn_param) )
-        constraints = [ self.P_variable >> 0, 
-                        self.P_variable >> self.Pc_param, 
-                        self.m_param.T @ self.P_variable @ self.m_param == 0 ]
-        self.define_zeros_problem = cp.Problem(self.objective, constraints)
-
     def set_param(self, **kwargs):
         '''
         Sets the function parameters.
@@ -739,10 +724,23 @@ class KernelQuadratic(Function):
         if np.shape(self.matrix_coefs) != (self.kernel_dim, self.kernel_dim):
             raise Exception("P must be (p x p), where p is the kernel dimension!") 
 
-    def define_zeros(self, point):
+    def define_center(self, point):
         '''
         This method tries to find the closest matrix coefficients such that F(x_c) = 0, for a given list of [x_c] points
         '''
+        import cvxpy as cp
+        p = self.kernel_dim
+        P_variable = cp.Variable( (p,p), symmetric=True ) # Create p x p symmetric variable
+        Pn_param = cp.Parameter( (p,p), symmetric=True )
+        Pc_param = cp.Parameter( (p,p), symmetric=True )
+        m_param = cp.Parameter(p)
+
+        objective = cp.Minimize( cp.norm(P_variable - Pn_param) )
+        constraints = [ P_variable >> 0, 
+                        # P_variable >> Pc_param, 
+                        m_param.T @ P_variable @ m_param == 0 ]
+        define_zeros_problem = cp.Problem(objective, constraints)
+
         std_centered_quadratic = np.zeros([self.kernel_dim, self.kernel_dim])
         std_centered_quadratic[0,0] = np.linalg.norm(point)**2
         for k in range(self._dim):
@@ -750,12 +748,15 @@ class KernelQuadratic(Function):
             std_centered_quadratic[k+1,0] = -point[k]
             std_centered_quadratic[k+1,k+1] = 1
 
-        self.m_param.value = self.kernel.function(point)
-        self.Pn_param.value = self.matrix_coefs
-        self.Pc_param.value = std_centered_quadratic
-        self.define_zeros_problem.solve()
+        m_param.value = self.kernel.function(point)
+        Pn_param.value = self.matrix_coefs
+        Pc_param.value = std_centered_quadratic
+        define_zeros_problem.solve()
 
-        self.set_param(coefficients = self.P_variable.value)
+        if define_zeros_problem.status == "infeasible" or define_zeros_problem.status == "unbounded":
+            raise Exception("Problem is unfeasible.")
+
+        self.set_param(coefficients = P_variable.value)
 
         return self.function( point )
 
@@ -843,8 +844,28 @@ class KernelBarrier(KernelQuadratic):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if ~self.is_valid():
-            raise Exception("Kernel Barrier function must be bounded from below")
-        
+            raise Exception("Kernel Barrier function must be bounded from below")      
+
+    def define_boundary(self, points):
+        '''
+        Defines the CBF boundary, given a list of points 
+        '''
+        import cvxpy as cp
+        p = self.kernel_dim
+        Q_variable = cp.Variable( (p,p), symmetric=True ) # Create p x p symmetric variable
+        Qn_param = cp.Parameter( (p,p), symmetric=True )
+
+        objective = cp.Minimize( cp.norm(Q_variable - Qn_param) )
+        constraints = [ Q_variable >> 0 ]
+        for point in points:
+            z = self.kernel.function(point)
+            constraints += [ z.T @ Q_variable @ z == 1 ]
+        define_boundary_problem = cp.Problem(objective, constraints)
+
+        Qn_param.value = self.Q
+        define_boundary_problem.solve()
+        self.set_param(coefficients = Q_variable.value)
+
     def change_kwargs(self, **kwargs):
         for key in kwargs:
             if key == "Q":
