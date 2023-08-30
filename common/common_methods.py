@@ -221,6 +221,8 @@ def generate_monomial_list(n, max_degree):
     powers_by_degree = []
     for k in range(max_degree+1):
         k_th_degree_term = powers[np.where(np.fromiter(map(sum, powers),dtype='int64')==k)]
+        if k == 1:
+            k_th_degree_term = np.eye(n, dtype='int64')
         powers_by_degree.append( k_th_degree_term )
         alpha = np.vstack([alpha, k_th_degree_term])
 
@@ -294,6 +296,25 @@ def kernel_constraints( z, terms_by_degree ):
 
     return F, matrix_constraints
 
+def create_quadratic(eigen, R, center, kernel_dim):
+    '''
+    This function creates a matrix P for a generic quadratic function 
+    with eigenvalues eigen and rotation matrix R, centered in center
+    '''
+    n = len(eigen)
+    if np.shape(R) != (n,n) or len(center) != n:
+        raise Exception("Entered dimensions are not correct.")
+
+    H = R.T @ np.diag(eigen) @ R
+    std_centered_quadratic = np.zeros([kernel_dim, kernel_dim])
+    std_centered_quadratic[0,0] = center.T @ H @ center
+    for k in range(n):
+        std_centered_quadratic[0,k+1] = -H[k,:].T @ center
+        std_centered_quadratic[k+1,0] = -H[k,:].T @ center
+    std_centered_quadratic[1:n+1,1:n+1] = H
+
+    return std_centered_quadratic
+
 class Rect():
     '''
     Simple rectangle.
@@ -328,29 +349,3 @@ class Rect():
                 return [ topleft, topright, bottomleft, bottomright ]
         else:
             return [ topleft, topright, bottomleft, bottomright ]
-        
-# def generate_monomial_list(n, d):
-#     '''
-#     Returns the matrix of monomial powers of dimension n up to degree d.
-#     '''
-#     to_be_removed = []
-#     combinations = list( itertools.product( list(range(d+1)), repeat=n ) )
-#     for k in range(len(combinations)):
-#         if sum(combinations[k])>d:
-#             to_be_removed.append(k)
-#     for ele in sorted(to_be_removed, reverse = True):
-#         del combinations[ele]
-
-#     alpha = np.array(combinations)
-#     p = num_comb(n, d)
-#     EYE = np.eye(n, dtype=int)
-#     for i in range(n):
-#         row = EYE[i,:]
-#         for j in range(1,p):
-#             if np.all(alpha[j,:] == row):
-#                 aux = alpha[i+1,:]
-#                 alpha[j,:] = aux
-#                 alpha[i+1,:] = row
-#                 break
-
-#     return alpha

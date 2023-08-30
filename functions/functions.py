@@ -738,6 +738,7 @@ class KernelQuadratic(Function):
         This method tries to find the closest matrix coefficients such that F(x_c) = 0, for a given list of [x_c] points
         '''
         import cvxpy as cp
+        n = self._dim
         p = self.kernel_dim
         P_variable = cp.Variable( (p,p), symmetric=True ) # Create p x p symmetric variable
         Pn_param = cp.Parameter( (p,p), symmetric=True )
@@ -749,12 +750,7 @@ class KernelQuadratic(Function):
                         m_param.T @ P_variable @ m_param == 0 ]
         define_zeros_problem = cp.Problem(objective, constraints)
 
-        std_centered_quadratic = np.zeros([self.kernel_dim, self.kernel_dim])
-        std_centered_quadratic[0,0] = np.linalg.norm(point)**2
-        for k in range(self._dim, 0, -1):
-            std_centered_quadratic[0,k] = -point[self._dim - k]
-            std_centered_quadratic[k,0] = -point[self._dim - k]
-            std_centered_quadratic[k,k] = 1
+        std_centered_quadratic = create_quadratic( np.ones(n), np.eye(n), point, p )
 
         m_param.value = self.kernel.function(point)
         Pn_param.value = self.matrix_coefs
