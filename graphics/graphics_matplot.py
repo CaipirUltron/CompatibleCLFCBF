@@ -52,7 +52,7 @@ class Plot2DSimulation():
             self.clf_param_dim = np.shape(np.array(self.clf_log))[0]
 
         # self.mode_log = self.logs["mode"]
-        self.equilibria = np.array(self.logs["equilibria"])
+        self.equilibria = self.logs["equilibria"]
         self.num_steps = len(self.state_log[0])
         self.anim_step = (self.num_steps/self.time[-1])/self.fps
         self.current_step = 0
@@ -186,8 +186,8 @@ class Plot2DSimulation():
             # h = self.cbfs[0].evaluate_function(*current_state)[0]
             # self.time_text.set_text("h = " + str(h) + "s")
 
-            if len(self.equilibria) != 0 :
-                x_eq, y_eq = self.equilibria[i,0], self.equilibria[i,1]
+            if len(self.equilibria) != 0 and self.equilibria[i] != None:
+                x_eq, y_eq = self.equilibria[i][0], self.equilibria[i][1]
                 self.equilibria_plot.set_data(x_eq, y_eq)
 
             if self.draw_level:

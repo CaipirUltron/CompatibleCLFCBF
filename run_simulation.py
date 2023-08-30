@@ -15,8 +15,8 @@ for step in range(0, num_steps):
 
     # Simulation time
     t = step*sim.sample_time
-    os.system('clear')
-    print("Simulating instant t = " + str(float(f'{t:.2f}')) + " s")
+    # os.system('clear')
+    print("Simulating instant t = " + str(float(f'{t:.3f}')) + " s")
     time.append( t )
 
     # Control

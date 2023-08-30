@@ -1,5 +1,5 @@
 import numpy as np
-from controllers import CLFCBFPair, compute_equilibria_algorithm5
+from controllers import CLFCBFPair, compute_equilibria_algorithm7, find_nearest_boundary
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 from common import sat
@@ -44,13 +44,21 @@ class NominalQP():
 
         self.ctrl_dt = dt
 
-        self.eq_dt = 0.5
+        self.eq_dt = 0.1
         self.equilibrium_points_log = []
+        self.equilibrium_point = None
 
         initial_guess = self.plant.get_state()
-        sol = compute_equilibria_algorithm5( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
-        self.equilibrium_point = sol["boundary"]["equilibrium"]
+        print(initial_guess)
+        self.equilibrium_point = compute_equilibria_algorithm7( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
 
+        print(self.equilibrium_point)
+
+        # self.equilibrium_point = find_nearest_boundary(self.cbfs[0], initial_guess)
+        if np.any(self.equilibrium_point) != None:
+            self.equilibrium_point = self.equilibrium_point.tolist()
+        self.equilibrium_points_log.append( self.equilibrium_point )
+        
         self.t = time.time()
 
     def get_equilibria(self):
@@ -60,10 +68,11 @@ class NominalQP():
         elapsed_time = time.time() - self.t
         if elapsed_time > self.eq_dt:
             initial_guess = self.plant.get_state()
-            sol = compute_equilibria_algorithm5( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
+            self.equilibrium_point = compute_equilibria_algorithm7( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
+            # self.equilibrium_point = find_nearest_boundary(self.cbfs[0], initial_guess)
+            if np.any(self.equilibrium_point) != None:
+                self.equilibrium_point = self.equilibrium_point.tolist()
             self.t = time.time()
-            self.equilibrium_point = sol["boundary"]["equilibrium"]
-        self.equilibrium_points_log.append( self.equilibrium_point )
 
     def get_control(self):
         '''
@@ -87,6 +96,7 @@ class NominalQP():
         control = self.QP_sol[0:self.control_dim,]
 
         self.get_equilibria()
+        self.equilibrium_points_log.append( self.equilibrium_point )
 
         return control
 

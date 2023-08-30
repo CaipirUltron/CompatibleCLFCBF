@@ -1,12 +1,10 @@
-import time
 import numpy as np
 
 from dynamic_systems import ConservativeAffineSystem
 from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
-from common import rot2D
 
-initial_state = [-4.2, 5.0]
+initial_state = [-4.2, -5.0]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
@@ -25,7 +23,7 @@ def g(state):
 plant = ConservativeAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
 
 clf_eig = np.flip([5.0, 1.0])
-clf_center = np.flip([4.0, -4.0])
+clf_center = np.flip([-4.0, -4.0])
 P = np.zeros([p,p])
 P[0,0] = clf_center.T @ np.diag(clf_eig) @ clf_center
 for k in range(n):
@@ -42,9 +40,9 @@ for k in range(n):
     Q[k+1,0] = -cbf_center[k]*cbf_eig[k]
     Q[k+1,k+1] = cbf_eig[k]
 
-# Proot = 0.1*np.random.rand(p,p)
-# P = Proot.T @ Proot
-# clf_center = np.array([4.0, -4.0])
+Proot = 0.1*np.random.rand(p,p)
+P = Proot.T @ Proot
+clf_center = np.array([4.0, 5.0])
 
 # Qroot = 0.1*np.random.rand(p,p)
 # Q = Qroot.T @ Qroot
@@ -52,17 +50,20 @@ boundary_points = np.array([ [-4.0, 0.0], [-4.0, -1.0], [2.0, 0.5], [4.0, -1.0],
 
 # ---------------------------------------------------- Define CLF ----------------------------------------------------------
 clf = KernelLyapunov(*initial_state, kernel=kernel, P=P)
-# clf.define_center( clf_center )
+clf.define_center( clf_center )
 
 # ---------------------------------------------------- Define CBF ----------------------------------------------------------
 cbf = KernelBarrier(*initial_state, kernel=kernel, Q=Q)
 cbf.define_boundary( boundary_points )
 
 cbfs = [cbf]
-# from controllers import compute_equilibria_algorithm5
-# sol = compute_equilibria_algorithm5( plant, clf, cbf, np.random.rand(2).tolist() )
-# print(sol)
-# z = np.array(sol["boundary"]["z"])
+from controllers import find_nearest_boundary, compute_equilibria_algorithm7
+
+# equilibrium = compute_equilibria_algorithm7(plant, clf, cbf, initial_state, c = 1)
+# print(equilibrium)
+
+# boundary_pt = find_nearest_boundary(cbf, initial_state)
+# print(boundary_pt)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .001

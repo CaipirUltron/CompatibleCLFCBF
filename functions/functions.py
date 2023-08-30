@@ -649,6 +649,15 @@ class Kernel(Function):
         _, matrices = kernel_constraints( np.zeros(self.kernel_dim), self.powers_by_degree )
         return matrices
 
+    def kernel2state(self, kernel_point):
+        '''
+        This function converts from kernel space to state space, if given point is valid.
+        '''
+        # if not self.is_in_kernel_space(kernel_point):
+        #     raise Exception("Given point is not in the kernel image.")
+        
+        return np.flip(kernel_point[1:self._dim+1])
+
     def is_in_kernel_space(self, point):
         '''
         This function checks whether a given point is inside the kernel space.
@@ -736,17 +745,16 @@ class KernelQuadratic(Function):
         m_param = cp.Parameter(p)
 
         objective = cp.Minimize( cp.norm(P_variable - Pn_param) )
-        constraints = [ P_variable >> 0, 
-                        # P_variable >> Pc_param, 
+        constraints = [ P_variable >> Pc_param, 
                         m_param.T @ P_variable @ m_param == 0 ]
         define_zeros_problem = cp.Problem(objective, constraints)
 
         std_centered_quadratic = np.zeros([self.kernel_dim, self.kernel_dim])
         std_centered_quadratic[0,0] = np.linalg.norm(point)**2
-        for k in range(self._dim):
-            std_centered_quadratic[0,k+1] = -point[k]
-            std_centered_quadratic[k+1,0] = -point[k]
-            std_centered_quadratic[k+1,k+1] = 1
+        for k in range(self._dim, 0, -1):
+            std_centered_quadratic[0,k] = -point[self._dim - k]
+            std_centered_quadratic[k,0] = -point[self._dim - k]
+            std_centered_quadratic[k,k] = 1
 
         m_param.value = self.kernel.function(point)
         Pn_param.value = self.matrix_coefs
