@@ -315,6 +315,15 @@ def create_quadratic(eigen, R, center, kernel_dim):
 
     return std_centered_quadratic
 
+def sontag_formula(a, b):
+    '''
+    General Sontag's formula for stabilization.
+    '''
+    kappa = 0
+    if b != 0:
+        kappa = - (a + np.sqrt(a**2 + b**4))/b
+    return kappa
+
 class Rect():
     '''
     Simple rectangle.

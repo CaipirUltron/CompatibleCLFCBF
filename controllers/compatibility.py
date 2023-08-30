@@ -743,12 +743,12 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_point, **kwargs):
         return np.hstack([ detL_constraint(vars), Lz_constraint(vars), s_constraint(vars), lambda2_constraint(vars), complementary_slackness(vars) ])
 
     # Initialization    
-    nearest_boundary = find_nearest_boundary( cbf, initial_point )
+    # nearest_boundary = find_nearest_boundary( cbf, initial_point )
 
-    z = kernel.function(nearest_boundary)
+    z = kernel.function(initial_point)
     s = z.T @ Q @ z - 1
     l2 = np.max([ z.T @ ( 0.5 * c * np.outer(P @ z, P @ z) - F ) @ z , 0.0 ])
-    initial_vars = np.hstack([ nearest_boundary, np.zeros(p-n), 0.0, l2 ])
+    initial_vars = np.hstack([ initial_point, np.zeros(p-n), s, l2 ])
 
     # constr1 = {'type': 'eq', 'fun': detL_constraint}
     # constr2 = {'type': 'eq', 'fun': Lz_constraint}
@@ -770,6 +770,58 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_point, **kwargs):
         print("Algorithm did not converge: \n")
         print(sol.message)
         return None
+
+def get_boundary_points(cbf, points, **kwargs):
+    '''
+    Returns points on the CBF boundary. points is a N x n array containing N x n-dimensional initial points  
+    '''
+    alpha = 0.1
+    tol = 0.0001
+    max_iter = 200
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "max_iter":
+            max_iter = kwargs[key]
+            continue
+        if aux_key == "alpha":
+            alpha = kwargs[key]
+            continue
+
+    shape = np.shape(points)
+    num_points = shape[0]
+    n = shape[1]
+
+    if n != cbf._dim:
+        raise Exception("Dimensions do not match.")
+
+    Q = cbf.Q
+    kernel = cbf.kernel
+
+    # Algorithm initialization
+    ONES = np.ones(num_points)
+    boundary_pts = points
+
+    ZQZ = np.zeros(num_points)
+    for k in range(num_points):
+        z = kernel.function(boundary_pts[k,:])
+        ZQZ[k] = z.T @ Q @ z
+    
+    it = 0
+    while it < max_iter and np.all(ZQZ - ONES) > tol:
+        it += 1
+        for k in range(num_points):
+
+            pt = boundary_pts[k,:]
+            h = cbf.evaluate_function(*pt)[0]
+            nablah = cbf.evaluate_gradient(*pt)[0]
+
+            # Update points
+            boundary_pts[k,:] += - alpha * h * nablah/np.linalg.norm(nablah)
+
+            z = kernel.function(boundary_pts[k,:])
+            ZQZ[k] = z.T @ Q @ z
+
+    return boundary_pts
 
 def find_nearest_boundary(cbf, initial_point):
     '''
