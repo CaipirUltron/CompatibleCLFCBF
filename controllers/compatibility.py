@@ -668,7 +668,7 @@ def compute_equilibria_algorithm6(plant, clf, cbf, initial_point, **kwargs):
         print(sol.message)
         return None
 
-def compute_equilibria_algorithm7(plant, clf, cbf, initial_point, **kwargs):
+def compute_equilibria_algorithm7(plant, clf, cbf, initial_points, **kwargs):
     '''
     Solve the general eigenproblem of the type:
     ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0, l2 >= 0,
@@ -725,14 +725,25 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_point, **kwargs):
         z = kernel.function(vars[0:n])
         return s - (z.T @ Q @ z - 1)
     
+    def lambda2_fun(z, kappas):
+        sum = np.zeros([p,p])
+        for k in range(len(N_list)):
+            sum += kappas[k] * N_list[k]
+        return z.T @ ( 0.5 * c * np.outer(P @ z, P @ z) - F - sum ) @ z
+
     def lambda2_constraint(vars):
         z = kernel.function(vars[0:n])
         kappas = vars[n:p]
         lambda2 = vars[-1]
+        return lambda2 - lambda2_fun(z, kappas)
+
+    def kappa_constraint(vars):
+        z = kernel.function(vars[0:n])
+        kappas = vars[n:p]
         sum = 0.0
         for k in range(len(N_list)):
-            sum += kappas[k] * N_list[k]
-        return lambda2 - z.T @ ( 0.5 * c * np.outer(P @ z, P @ z) - F - sum ) @ z
+            sum += kappas[k] * z.T @ ( N_list[k] -  N_list[k].T ) @ z
+        return sum
 
     def complementary_slackness(vars):
         s = vars[-2]
@@ -740,36 +751,44 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_point, **kwargs):
         return lambda2*s
 
     def objective(vars):
-        return np.hstack([ detL_constraint(vars), Lz_constraint(vars), s_constraint(vars), lambda2_constraint(vars), complementary_slackness(vars) ])
+        return np.hstack([ detL_constraint(vars),
+                           Lz_constraint(vars), 
+                           s_constraint(vars), 
+                           lambda2_constraint(vars), 
+                           kappa_constraint(vars), 
+                           complementary_slackness(vars) ])
 
     # Initialization    
-    # nearest_boundary = find_nearest_boundary( cbf, initial_point )
+    boundary_pts = get_boundary_points( cbf, initial_points )
+    num_pts = np.shape(boundary_pts)[0]
 
-    z = kernel.function(initial_point)
-    s = z.T @ Q @ z - 1
-    l2 = np.max([ z.T @ ( 0.5 * c * np.outer(P @ z, P @ z) - F ) @ z , 0.0 ])
-    initial_vars = np.hstack([ initial_point, np.zeros(p-n), s, l2 ])
+    solutions = {"costs": [], "points": [], "lambda2": [], "s": [], "indexes": []}
+    error_counter = 0
+    for k in range(num_pts):
 
-    # constr1 = {'type': 'eq', 'fun': detL_constraint}
-    # constr2 = {'type': 'eq', 'fun': Lz_constraint}
-    # constr3 = {'type': 'ineq', 'fun': boundary_constraint}
-    # constr4 = {'type': 'ineq', 'fun': lambda2}
-    # constr5 = {'type': 'eq', 'fun': complementary_slackness}
+        x = boundary_pts[k,:]
+        z = kernel.function(x)
+        kappas = np.zeros(p-n)
+        l2 = lambda2_fun(z, kappas)
+        s = z.T @ Q @ z - 1
+        initial_vars = np.hstack([ x, kappas, s, l2 ])
 
-    # sol = minimize(objective, initializer, method='trust-constr', constraints=[ constr1, constr3, constr4, constr5, constr7 ])
+        # Solve least squares problem with bounds on s and l2
+        lower_bounds = [ -np.inf for _ in range(p) ] + [ 0.0, 0.0 ]
+        try:
+            LS_sol = least_squares( objective, initial_vars, bounds=(lower_bounds, np.inf), max_nfev=100 )
+            if LS_sol.cost < ACCURACY:
+                solutions["costs"].append( LS_sol.cost )
+                solutions["points"].append( LS_sol.x[0:n] )
+                solutions["lambda2"].append( LS_sol.x[-1] )
+                solutions["s"].append( LS_sol.x[-2] )
+                solutions["indexes"].append( k )
+        except ValueError as verror:
+            error_counter += 1
+            print(verror)
+            print("Errors = "+str(error_counter))
 
-    # Solve least squares problem with bounds on s and l2
-    lower_bounds = [ -np.inf for _ in range(p) ] + [ 0.0, 0.0 ] 
-    sol = least_squares( objective, initial_vars, bounds=(lower_bounds, np.inf), max_nfev=200 )
-
-    print(sol)
-
-    if sol.cost < ACCURACY:
-        return sol.x[0:n]
-    else:
-        print("Algorithm did not converge: \n")
-        print(sol.message)
-        return None
+    return solutions
 
 def get_boundary_points(cbf, points, **kwargs):
     '''
@@ -823,7 +842,7 @@ def get_boundary_points(cbf, points, **kwargs):
 
     return boundary_pts
 
-def find_nearest_boundary(cbf, initial_point):
+# def find_nearest_boundary(cbf, initial_point):
     '''
     This method finds the nearest point on the boundary of the CBF (initialization for finding equilibria)
     '''

@@ -1,5 +1,5 @@
 import numpy as np
-from controllers import CLFCBFPair, compute_equilibria_algorithm7, find_nearest_boundary
+from controllers import CLFCBFPair, compute_equilibria_algorithm7
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 from common import sat

@@ -4,7 +4,7 @@ import importlib
 import numpy as np
 import matplotlib.pyplot as plt
 from graphics import Plot2DSimulation
-from controllers import find_nearest_boundary, compute_equilibria_algorithm7, get_boundary_points
+from controllers import compute_equilibria_algorithm7, get_boundary_points
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -32,10 +32,20 @@ plotSim.plot_frame(5.0)
 #     print("Found equilibrium points at :\n" + str(equilibrium))
 #     plotSim.main_ax.plot( equilibrium[0], equilibrium[1], 'ro')
 
-N = 100
+N = 500
 initial_guesses = 4*2*(np.random.rand(N,2)-0.5)
 boundary_pts = get_boundary_points(sim.cbf, initial_guesses)
+plotSim.main_ax.plot( boundary_pts[:,0], boundary_pts[:,1], 'g*' )
 
-plotSim.main_ax.plot( boundary_pts[:,0], boundary_pts[:,1], 'r*' )
+solutions = compute_equilibria_algorithm7(sim.plant, sim.clf, sim.cbf, initial_guesses, c = 1)
+
+pts = np.array( solutions["points"] )
+num_convergences = np.shape(pts)[0]
+
+print("From " + str(N) + " points, algorithm converged " + str(num_convergences) + " times.")
+print("Algorithm efficiency = " + str(num_convergences/N*100) + "%" )
+
+initial_pts = initial_guesses[ solutions["indexes"], : ]
+plotSim.main_ax.plot( initial_pts[:,0], initial_pts[:,1], 'r*' )
 
 plt.show()
