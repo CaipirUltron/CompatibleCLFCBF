@@ -5,8 +5,8 @@ from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
 from common import create_quadratic, rot2D
 
-# initial_state = [-4.2, 5.0]
-initial_state = [-8.0, -2.15]
+initial_state = [-4.2, 5.0]
+# initial_state = [-8.0, -2.15]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
@@ -54,7 +54,7 @@ cbfs = [cbf]
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .001
-# controller = NominalQP(plant, clf, cbfs, alpha = 10.0, beta = 10.0, p = 1.0)
+controller = NominalQP(plant, clf, cbfs, alpha = 10.0, beta = 10.0, p = 1.0)
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 xlimits, ylimits = [-8, 8], [-8, 8]

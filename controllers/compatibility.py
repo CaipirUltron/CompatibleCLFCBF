@@ -563,7 +563,7 @@ def compute_equilibria_algorithm5(plant, clf, cbf, initial_point, **kwargs):
 
     return { "boundary": boundary_sol, "interior": interior_sol }
 
-def compute_equilibria_algorithm6(plant, clf, cbf, initial_point, **kwargs):
+def compute_equilibria_algorithm6(plant, clf, cbf, initial_points, **kwargs):
     '''
     Solve the general eigenproblem of the type:
     ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0, l2 >= 0,
@@ -589,84 +589,103 @@ def compute_equilibria_algorithm6(plant, clf, cbf, initial_point, **kwargs):
     kernel = clf.kernel
     p = kernel.kernel_dim
     N_list = kernel.get_N_matrices()
-    matrices = kernel.get_matrix_constraints()
-    num_matrices = len(matrices)
+    # matrices = kernel.get_matrix_constraints()
+    # num_matrices = len(matrices)
 
     # Optimization
     ACCURACY = 0.0000001
-    boundary_initializer = find_nearest_boundary( cbf, initial_point )
 
-    # vars = [ z, kappas ]
-    def linear_pencil(vars):
-        '''
-        p_var = [ lambda1, lambda2, kappa1, kappa2, ... ]
-        Computes the linear matrix pencil.
-        '''
-        z = vars[0:p]
-        lambda1 = 0.5 * c * z.T @ P @ z
-        L = F + lambda1 * Q - lambda2(vars) * P
+    # ----------------------- Auxiliary functions ------------------
+    def commutator(A,B,z):
+        ZZt = np.outer(z,z)
+        return A @ ZZt @ B - B @ ZZt @ A
+
+    # def linear_pencil(vars):
+    #     z = kernel.function(vars[0:n])
+    #     kappas = vars[n:p]
+    #     sum = np.zeros([p,p])
+    #     for k in range(len(N_list)):
+    #         sum += kappas[k] * commutator(Q,N_list[k],z)
+    #     L = 0.5 * c * commutator( commutator(Q,P,z), P, z) - commutator(Q,F,z) - sum
+    #     return L
+
+    def lambda2_fun(z, kappas):
+        sum = np.zeros([p,p])
         for k in range(len(N_list)):
-            L += vars[k+p] * N_list[k]
-        return L
-
-    def detL_constraint(vars):
-        return np.linalg.det( linear_pencil(vars) )
-
-    def Lz_constraint(vars):
-        z = vars[0:p]
-        return linear_pencil(vars) @ z
-
-    def boundary_constraint(vars):
-        z = vars[0:p]
-        return z.T @ Q @ z - 1
-    
-    def lambda2(vars):
-        z = vars[0:p]
-        sum = 0.0
-        for k in range(len(N_list)):
-            sum += vars[k+p] * N_list[k]
+            sum += kappas[k] * N_list[k]
         return z.T @ ( 0.5 * c * np.outer(P @ z, P @ z) - F - sum ) @ z
 
-    def complementary_slackness(vars):
-        return lambda2(vars) * boundary_constraint(vars)
-
-    def kappa_constraints(vars):
-        z = vars[0:p]
-        kappas = vars[p:]
-        sum = 0.0
+    def linear_pencil(vars):
+        z = kernel.function(vars[0:n])
+        kappas = vars[n:p]
+        l1 = 0.5 * c * z.T @ P @ z
+        l2 = vars[-1]
+        L = F + l1 * Q - l2 * P
         for k in range(len(N_list)):
-            sum += kappas[k] * z.T @ ( N_list[k] -  N_list[k].T ) @ z
-        return sum
+            L += kappas[k] * N_list[k]
+        return L
 
-    def kernel_constraints(vars):
-        z = vars[0:p]
-        kernel_constr = [ np.eye(p)[0,:] @ z - 1 ]
-        kernel_constr += [ z.T @ matrices[k] @ z for k in range(num_matrices) ]
-        return kernel_constr
+    # def detL_constraint(vars):
+    #     return np.linalg.det( linear_pencil_commutator(vars) )
 
-    z_n = kernel.function(boundary_initializer)
-    def objective(vars):
-        z = vars[0:p]
-        return np.linalg.norm(z - z_n)**2
+    # ------------------- Constraints on vars = [ x, kappas, l2 ] ----------------------
 
-    constr1 = {'type': 'eq', 'fun': detL_constraint}
-    constr2 = {'type': 'eq', 'fun': Lz_constraint}
-    constr3 = {'type': 'ineq', 'fun': boundary_constraint}
-    constr4 = {'type': 'ineq', 'fun': lambda2}
-    constr5 = {'type': 'eq', 'fun': complementary_slackness}
-    constr6 = {'type': 'eq', 'fun': kappa_constraints}
-    constr7 = {'type': 'eq', 'fun': kernel_constraints}
+    def Lz_eq_constraint(vars):
+        z = kernel.function(vars[0:n])
+        return linear_pencil(vars) @ z
 
-    initializer = np.hstack([ z_n, np.zeros(p-n) ])
-    sol = minimize(objective, initializer, method='trust-constr', constraints=[ constr1, constr3, constr4, constr5, constr7 ])
-    z = sol.x[0:p]
+    def lambda2_eq_constraint(vars):
+        z = kernel.function(vars[0:n])
+        kappas = vars[n:p]
+        l2 = vars[-1]
+        return l2 - lambda2_fun(z, kappas)
+    
+    def lambda2_ineq_constraint(vars):
+        l2 = vars[-1]
+        return l2 # >> 0
 
-    if sol.success:
-        return kernel.kernel2state(z)
-    else:
-        print("Initialization algorithm exit with the following error: \n")
-        print(sol.message)
-        return None
+    def boundary_ineq_constraint(vars):
+        z = kernel.function(vars[0:n])
+        return z.T @ Q @ z - 1 # >> 0
+
+    def complementary_slackness_constraint(vars):
+        return lambda2_ineq_constraint(vars) * boundary_ineq_constraint(vars)
+
+    eq_constr1 = {'type': 'eq', 'fun': Lz_eq_constraint}
+    eq_constr2 = {'type': 'eq', 'fun': lambda2_eq_constraint}
+    
+    ineq_constr1 = {'type': 'ineq', 'fun': boundary_ineq_constraint}
+    ineq_constr2 = {'type': 'ineq', 'fun': lambda2_ineq_constraint}
+
+    # Initialize with boundary points
+    # boundary_pts = get_boundary_points( cbf, initial_points )
+    num_pts = np.shape(initial_points)[0]
+
+    # Try minimization
+    solutions = {"points": [], "lambda2": [], "indexes": []}
+    error_counter = 0
+    for k in range(num_pts):
+
+        x_n = initial_points[k,:]
+        def objective(vars):
+            x = vars[0:n]
+            return np.linalg.norm(x - x_n)**2
+
+        z = kernel.function(x_n)
+        kappas = np.zeros(p-n)
+        l2 = lambda2_fun(z, kappas)
+        initial_vars = np.hstack([ x_n, kappas, l2 ])
+
+        # Solve optimization problem
+        min_sol = minimize(objective, initial_vars, constraints=[ eq_constr1, eq_constr2, ineq_constr1, ineq_constr2 ])
+        if min_sol.success:
+            solutions["points"].append( min_sol.x[0:n] )
+            solutions["lambda2"].append( min_sol.x[-1] )
+            solutions["indexes"].append( k )
+        else:
+            error_counter += 1
+            
+    return solutions
 
 def compute_equilibria_algorithm7(plant, clf, cbf, initial_points, **kwargs):
     '''
@@ -751,12 +770,14 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_points, **kwargs):
         return lambda2*s
 
     def objective(vars):
-        return np.hstack([ detL_constraint(vars),
+        return np.hstack([ 
+                        #    detL_constraint(vars),
                            Lz_constraint(vars), 
                            s_constraint(vars), 
                            lambda2_constraint(vars), 
-                           kappa_constraint(vars), 
-                           complementary_slackness(vars) ])
+                        #    kappa_constraint(vars), 
+                        #    complementary_slackness(vars) 
+                        ])
 
     # Initialization    
     boundary_pts = get_boundary_points( cbf, initial_points )
@@ -774,9 +795,9 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_points, **kwargs):
         initial_vars = np.hstack([ x, kappas, s, l2 ])
 
         # Solve least squares problem with bounds on s and l2
-        lower_bounds = [ -np.inf for _ in range(p) ] + [ 0.0, 0.0 ]
         try:
-            LS_sol = least_squares( objective, initial_vars, bounds=(lower_bounds, np.inf), max_nfev=100 )
+            lower_bounds = [ -np.inf for _ in range(p) ] + [ 0.0, 0.0 ]
+            LS_sol = least_squares( objective, initial_vars, bounds=(lower_bounds, np.inf), max_nfev=200 )
             if LS_sol.cost < ACCURACY:
                 solutions["costs"].append( LS_sol.cost )
                 solutions["points"].append( LS_sol.x[0:n] )
@@ -794,7 +815,7 @@ def get_boundary_points(cbf, points, **kwargs):
     '''
     Returns points on the CBF boundary. points is a N x n array containing N x n-dimensional initial points  
     '''
-    alpha = 0.1
+    alpha = 0.01
     tol = 0.0001
     max_iter = 200
     for key in kwargs.keys():
@@ -818,10 +839,11 @@ def get_boundary_points(cbf, points, **kwargs):
 
     # Algorithm initialization
     ONES = np.ones(num_points)
-    boundary_pts = points
 
+    boundary_pts = np.zeros([num_points, n])
     ZQZ = np.zeros(num_points)
     for k in range(num_points):
+        boundary_pts[k,:] = points[k,:]
         z = kernel.function(boundary_pts[k,:])
         ZQZ[k] = z.T @ Q @ z
     

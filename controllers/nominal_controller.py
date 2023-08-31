@@ -48,11 +48,10 @@ class NominalQP():
         self.equilibrium_points_log = []
         self.equilibrium_point = None
 
-        initial_guess = self.plant.get_state()
-        print(initial_guess)
-        self.equilibrium_point = compute_equilibria_algorithm7( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
+        # initial_guess = self.plant.get_state()
+        # self.equilibrium_point = compute_equilibria_algorithm7( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
 
-        print(self.equilibrium_point)
+        # print(self.equilibrium_point)
 
         # self.equilibrium_point = find_nearest_boundary(self.cbfs[0], initial_guess)
         if np.any(self.equilibrium_point) != None:
