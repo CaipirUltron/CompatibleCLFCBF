@@ -4,7 +4,7 @@ import importlib
 import numpy as np
 import matplotlib.pyplot as plt
 from graphics import Plot2DSimulation
-from controllers import compute_equilibria_algorithm6, get_boundary_points
+from controllers import compute_equilibria_algorithm7, get_boundary_points
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -19,7 +19,7 @@ except IOError:
 
 # -----------------------------------Plots starting of simulation ------------------------------------------
 plotSim = Plot2DSimulation( logs, sim.plant, sim.clf, sim.cbfs, plot_config = sim.plot_config )
-plotSim.plot_frame(5.0)
+plotSim.plot_frame(9.0)
 
 # boundary_pt = find_nearest_boundary(sim.cbf, [-7.0, 0.0])
 # print("Boundary initializer = " + str(boundary_pt))
@@ -36,7 +36,7 @@ initial_guesses = 8*2*(np.random.rand(N,2)-0.5)
 # boundary_pts = get_boundary_points(sim.cbf, initial_guesses)
 plotSim.main_ax.plot( initial_guesses[:,0], initial_guesses[:,1], 'g*' )
 
-solutions = compute_equilibria_algorithm6(sim.plant, sim.clf, sim.cbf, initial_guesses, c = 1)
+solutions = compute_equilibria_algorithm7(sim.plant, sim.clf, sim.cbf, initial_guesses, c = 1)
 
 pts = np.array( solutions["points"] )
 initial_pts = initial_guesses[ solutions["indexes"], : ]

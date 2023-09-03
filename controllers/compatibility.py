@@ -61,7 +61,7 @@ def compute_equilibria_algorithm1(F, clf, cbf, **kwargs):
     def compute_F(solution):
         '''
         This inner method computes the vector field F(lambda, kappa, z) and returns its value.
-        '''        
+        '''
         linear_combs, z = solution[0:p-n+2], solution[p-n+2:]
         kernel_constraints = kernel.get_constraints(z)
         num_kernel_constraints = len(kernel_constraints)
@@ -75,7 +75,7 @@ def compute_equilibria_algorithm1(F, clf, cbf, **kwargs):
         F[p+2:] = kernel_constraints
 
         return F
-    
+
     # t = time.time()
     solution = root(compute_F, initial_guess, method='lm', tol = 0.00001)
     # solution = fsolve(compute_F, initial_guess, maxfev = max_iter)
@@ -135,7 +135,7 @@ def compute_equilibria_algorithm2(F, clf, cbf, **kwargs):
     kappa_var = cp.Variable(p-n)
     z_var = cp.Variable(p)
     L_var = cp.Variable((p,p))
-    
+
     # ----- Prob definition ------
     L_var = F + l1_var * Q - l2_var * P
     for k in range(p-n):
@@ -232,7 +232,7 @@ def compute_equilibria_algorithm3(F, clf, cbf, initial_point, **kwargs):
         QP_objective = cp.Minimize( cp.norm(l2_var)**2 )
         # QP_objective = cp.Minimize( cp.norm(l2_var)**2 + cp.norm(kappa_var)**2 )
         QP_constraints = [ L_var @ z_param == 0 ,
-                           l1_var == 0.5 * c * z_param.T @ P @ z_param , 
+                           l1_var == 0.5 * c * z_param.T @ P @ z_param ,
                         #    l2_var >= delta_var ,
                            l2_var >= l2_bound ]
         QP = cp.Problem(QP_objective, QP_constraints)
@@ -240,7 +240,7 @@ def compute_equilibria_algorithm3(F, clf, cbf, initial_point, **kwargs):
         # ------- Solve QP --------
         z_param.value = z
         QP.solve()
-        
+
         p_var = np.zeros(p-n+2)
         p_var[0] = l1_var.value
         p_var[1] = l2_var.value
@@ -271,7 +271,7 @@ def compute_equilibria_algorithm3(F, clf, cbf, initial_point, **kwargs):
         def compute_F(z):
             '''
             This inner method computes the vector field F(sol) and returns its value.
-            '''        
+            '''
             kernel_constraints = kernel.get_constraints(z)
             num_kernel_constraints = len(kernel_constraints)
 
@@ -294,7 +294,7 @@ def compute_equilibria_algorithm3(F, clf, cbf, initial_point, **kwargs):
                  "lambda2": l2_var.value.tolist(),
                  "kappas": kappa_var.value.tolist(),
                  "z": z.tolist() }
-    
+
     return sol_dict
 
 def compute_equilibria_algorithm4(plant, clf, cbf, initial_point, **kwargs):
@@ -350,7 +350,7 @@ def compute_equilibria_algorithm4(plant, clf, cbf, initial_point, **kwargs):
     while cost > ACCURACY and it < max_iter:
         it += 1
 
-        # First optimization: least squares with bound on lambda2 
+        # First optimization: least squares with bound on lambda2
         def linear_pencil(p_var):
             '''
             p_var = [ lambda1, lambda2, kappa1, kappa2, ... ]
@@ -378,7 +378,7 @@ def compute_equilibria_algorithm4(plant, clf, cbf, initial_point, **kwargs):
         initial_p_var = np.hstack([ 0.5 * c * z.T @ P @ z, initial_l2, np.zeros(p-n) ])
         lower_bounds = [ -np.inf, 0.0 ] + [ -np.inf for _ in range(p-n) ]
         solution1 = least_squares( F1, initial_p_var, bounds=(lower_bounds, np.inf) )
-        
+
         p_var = np.zeros(p-n+2)
         p_var[0] = solution1.x[0]
         p_var[1] = solution1.x[1]
@@ -392,7 +392,7 @@ def compute_equilibria_algorithm4(plant, clf, cbf, initial_point, **kwargs):
         def F2(z):
             '''
             This inner method computes the vector field F(sol) and returns its value.
-            '''        
+            '''
             kernel_constraints = kernel.get_constraints(z)
             num_kernel_constraints = len(kernel_constraints)
 
@@ -482,29 +482,29 @@ def compute_equilibria_algorithm5(plant, clf, cbf, initial_point, **kwargs):
 
     def boundary_equilibria(variables):
         '''
-        Constraints for boundary equilibrium points 
+        Constraints for boundary equilibrium points
         '''
         z = variables[0:p]
         p_var = variables[p:]
         kernel_constraints = kernel.get_constraints(z)
 
-        return np.hstack([ linear_pencil_det(p_var), 
-                           linear_pencil(p_var) @ z, 
-                           p_var[0] - 0.5 * c * z.T @ P @ z, 
+        return np.hstack([ linear_pencil_det(p_var),
+                           linear_pencil(p_var) @ z,
+                           p_var[0] - 0.5 * c * z.T @ P @ z,
                            z.T @ Q @ z - 1,
                            kernel_constraints ])
 
     def interior_equilibria(variables):
         '''
-        Constraints for interior equilibrium points 
+        Constraints for interior equilibrium points
         '''
         z = variables[0:p]
         p_var = variables[p:]
         kernel_constraints = kernel.get_constraints(z)
 
-        return np.hstack([ linear_pencil_det(p_var), 
-                           linear_pencil(p_var) @ z, 
-                           p_var[0] - 0.5 * c * z.T @ P @ z, 
+        return np.hstack([ linear_pencil_det(p_var),
+                           linear_pencil(p_var) @ z,
+                           p_var[0] - 0.5 * c * z.T @ P @ z,
                            p_var[1],
                            kernel_constraints ])
 
@@ -544,7 +544,7 @@ def compute_equilibria_algorithm5(plant, clf, cbf, initial_point, **kwargs):
         interior_p_var = interior_solution.x[p:]
         interior_equilibrium = kernel.kernel2state(boundary_z).tolist()
         interior_cost = interior_solution.cost
-        
+
     boundary_sol = { "equilibrium": boundary_equilibrium,
                      "z": boundary_z,
                      "lambda1": boundary_p_var[0],
@@ -552,7 +552,7 @@ def compute_equilibria_algorithm5(plant, clf, cbf, initial_point, **kwargs):
                      "kappas": boundary_p_var[2:].tolist(),
                      "cost": boundary_cost,
                      "time": boundary_delta }
-    
+
     interior_sol = { "equilibrium": interior_equilibrium,
                      "z": interior_z,
                      "lambda1": interior_p_var[0],
@@ -643,7 +643,7 @@ def compute_equilibria_algorithm6(plant, clf, cbf, initial_points, **kwargs):
     #     kappas = vars[n:n+p]
     #     l2 = vars[-1]
     #     return l2 - lambda2_fun(z, kappas)
-    
+
     # def lambda2_ineq_constraint(vars):
     #     l2 = vars[-1]
     #     return l2 # >> 0
@@ -714,6 +714,7 @@ def compute_equilibria_algorithm6(plant, clf, cbf, initial_points, **kwargs):
 
         # Solve optimization problem
         min_sol = minimize(objective, initial_vars, method='trust-constr', constraints=[ eq_constr1, eq_constr2, eq_constr3, ineq_constr1 ])
+
         if min_sol.success:
             solutions["points"].append( min_sol.x[0:n] )
             solutions["lambda2"].append( min_sol.x[-1] )
@@ -721,7 +722,7 @@ def compute_equilibria_algorithm6(plant, clf, cbf, initial_points, **kwargs):
         else:
             error_counter += 1
             print(min_sol.message)
-            
+
     return solutions
 
 def compute_equilibria_algorithm7(plant, clf, cbf, initial_points, **kwargs):
@@ -752,22 +753,34 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_points, **kwargs):
     N_list = kernel.get_N_matrices()
 
     # Optimization
-    ACCURACY = 0.0000001
+    ACCURACY = 0.000000000001
 
-    # vars = [ x, kappas, s, l2 ]
+    # vars = [ x, kappas, l2 ]
 
-    def commutator(A,B,z):
-        ZZt = np.outer(z,z)
-        return A @ ZZt @ B - B @ ZZt @ A
+    # def commutator(A,B,z):
+    #     ZZt = np.outer(z,z)
+    #     return A @ ZZt @ B - B @ ZZt @ A
+
+    # def linear_pencil(vars):
+    #     z = kernel.function(vars[0:n])
+    #     kappas = vars[n:p]
+    #     sum = np.zeros([p,p])
+    #     for k in range(len(N_list)):
+    #         sum += kappas[k] * commutator(Q,N_list[k],z)
+    #     L = 0.5 * c * commutator( commutator(Q,P,z), P, z) - commutator(Q,F,z) - sum
+    #     return L
+
+    def lambda2_matrix(z, kappas):
+        sum = np.zeros([p,p])
+        for k in range(p):
+            sum += kappas[k] * N_list[k]
+        return 0.5 * c * np.outer(P @ z, P @ z) - F - sum
 
     def linear_pencil(vars):
         z = kernel.function(vars[0:n])
-        kappas = vars[n:p]
-        sum = np.zeros([p,p])
-        for k in range(len(N_list)):
-            sum += kappas[k] * commutator(Q,N_list[k],z)
-        L = 0.5 * c * commutator( commutator(Q,P,z), P, z) - commutator(Q,F,z) - sum
-        return L
+        kappas = vars[n:n+p]
+        l2 = vars[-1]
+        return lambda2_matrix(z, kappas) - l2 * Q
 
     def detL_constraint(vars):
         return np.linalg.det( linear_pencil(vars) )
@@ -776,70 +789,68 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_points, **kwargs):
         z = kernel.function(vars[0:n])
         return linear_pencil(vars) @ z
 
-    def s_constraint(vars):
-        s = vars[-2]
-        z = kernel.function(vars[0:n])
-        return s - (z.T @ Q @ z - 1)
-    
     def lambda2_fun(z, kappas):
         sum = np.zeros([p,p])
-        for k in range(len(N_list)):
+        for k in range(p):
             sum += kappas[k] * N_list[k]
-        return z.T @ ( 0.5 * c * np.outer(P @ z, P @ z) - F - sum ) @ z
+        return z.T @ lambda2_matrix(z, kappas) @ z
 
     def lambda2_constraint(vars):
         z = kernel.function(vars[0:n])
-        kappas = vars[n:p]
+        kappas = vars[n:n+p]
         lambda2 = vars[-1]
         return lambda2 - lambda2_fun(z, kappas)
 
     def kappa_constraint(vars):
         z = kernel.function(vars[0:n])
-        kappas = vars[n:p]
+        kappas = vars[n:n+p]
         sum = 0.0
-        for k in range(len(N_list)):
+        for k in range(p):
             sum += kappas[k] * z.T @ ( N_list[k] -  N_list[k].T ) @ z
         return sum
 
-    def complementary_slackness(vars):
-        s = vars[-2]
-        lambda2 = vars[-1]
-        return lambda2*s
+    def boundary_constraint(vars):
+        z = kernel.function(vars[0:n])
+        return z.T @ Q @ z - 1 # >= 0
 
     def objective(vars):
-        return np.hstack([ 
-                        #    detL_constraint(vars),
-                           Lz_constraint(vars), 
-                           s_constraint(vars), 
-                           lambda2_constraint(vars), 
-                        #    kappa_constraint(vars), 
-                        #    complementary_slackness(vars) 
-                        ])
+        return np.hstack([
+                           Lz_constraint(vars),
+                           kappa_constraint(vars),
+                           boundary_constraint(vars),
+                           lambda2_constraint(vars)
+                         ])
 
-    # Initialization    
-    boundary_pts = get_boundary_points( cbf, initial_points )
-    num_pts = np.shape(boundary_pts)[0]
+    # Initialization
+    # boundary_pts = get_boundary_points( cbf, initial_points )
+    num_pts = np.shape(initial_points)[0]
 
-    solutions = {"costs": [], "points": [], "lambda2": [], "s": [], "indexes": []}
+    solutions = {"costs": [], "points": [], "lambda2": [], "indexes": []}
     error_counter = 0
     for k in range(num_pts):
 
-        x = boundary_pts[k,:]
-        z = kernel.function(x)
-        kappas = np.zeros(p-n)
-        l2 = lambda2_fun(z, kappas)
-        s = z.T @ Q @ z - 1
-        initial_vars = np.hstack([ x, kappas, s, l2 ])
+        init_x = initial_points[k,:]
+        init_z = kernel.function(init_x)
+        a = np.zeros([1,p])
+        for i in range(p):
+            a[:,i] = init_z.T @ ( N_list[i] -  N_list[i].T ) @ init_z
+
+        init_kappas = np.zeros(p)
+        for col in null_space(a).T:
+            init_kappas += np.random.randn() * col
+
+        init_l2 = init_z.T @ lambda2_matrix(init_z, init_kappas) @ init_z
+        initial_vars = np.hstack([ init_x, init_kappas, init_l2 ])
 
         # Solve least squares problem with bounds on s and l2
         try:
-            lower_bounds = [ -np.inf for _ in range(p) ] + [ 0.0, 0.0 ]
-            LS_sol = least_squares( objective, initial_vars, bounds=(lower_bounds, np.inf), max_nfev=200 )
+            lower_bounds = [ -np.inf for _ in range(n+p) ] + [ 0.0 ]
+            LS_sol = least_squares( objective, initial_vars, method='trf', bounds=(lower_bounds, np.inf), max_nfev=1000 )
+            print(LS_sol.message)
             if LS_sol.cost < ACCURACY:
                 solutions["costs"].append( LS_sol.cost )
                 solutions["points"].append( LS_sol.x[0:n] )
                 solutions["lambda2"].append( LS_sol.x[-1] )
-                solutions["s"].append( LS_sol.x[-2] )
                 solutions["indexes"].append( k )
         except ValueError as verror:
             error_counter += 1
@@ -850,7 +861,7 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_points, **kwargs):
 
 def get_boundary_points(cbf, points, **kwargs):
     '''
-    Returns points on the CBF boundary. points is a N x n array containing N x n-dimensional initial points  
+    Returns points on the CBF boundary. points is a N x n array containing N x n-dimensional initial points
     '''
     alpha = 0.01
     tol = 0.0001
@@ -883,7 +894,7 @@ def get_boundary_points(cbf, points, **kwargs):
         boundary_pts[k,:] = points[k,:]
         z = kernel.function(boundary_pts[k,:])
         ZQZ[k] = z.T @ Q @ z
-    
+
     it = 0
     while it < max_iter and np.all(ZQZ - ONES) > tol:
         it += 1
@@ -921,7 +932,7 @@ def get_boundary_points(cbf, points, **kwargs):
     def objective(vars):
         x = vars[0:n]
         return np.hstack([ x - initial_point, s_constraint(vars) ])
-    
+
     def s_constraint(vars):
         x = vars[0:n]
         s = vars[-1]
@@ -932,13 +943,13 @@ def get_boundary_points(cbf, points, **kwargs):
         x = vars[0:n]
         z = kernel.function(x)
         return z.T @ Q @ z - 1
-    
+
     # def kernel_constraints(x):
     #     z = kernel.function(x)
     #     kernel_constr = [ np.eye(p)[0,:] @ z - 1 ]
     #     kernel_constr += [ z.T @ matrices[k] @ z for k in range(num_matrices) ]
     #     return kernel_constr
-    
+
     # constr1 = {'type': 'eq', 'fun': boundary_constraint}
     # constr2 = {'type': 'eq', 'fun': kernel_constraints}
 
@@ -965,7 +976,7 @@ def solve_PEP(Q, P, **kwargs):
     '''
     if np.shape(Q) != np.shape(P):
         raise Exception("Matrix shapes are not compatible with given initial value.")
-    
+
     matrix_shapes = np.shape(Q)
     if matrix_shapes[0] != matrix_shapes[1]:
         raise Exception("Matrices are not square.")
@@ -1004,7 +1015,7 @@ def solve_PEP(Q, P, **kwargs):
     def compute_F(solution):
         '''
         This inner method computes the vector field F(lambda, kappa, z) and returns its value.
-        '''        
+        '''
         lambda_p, kappa_p, z = solution[0], solution[1], solution[2:]
         n = len(z)
         F = np.zeros(n+3)
@@ -1014,11 +1025,11 @@ def solve_PEP(Q, P, **kwargs):
         F[n+1] = 0.5 * z @ Q @ z - 0.5
         F[n+2] = compute_det([kappa_p, lambda_p])
         return F
-    
+
     def compute_Jac(solution):
         '''
         This inner method computes the vector field F(lambda, kappa, z) and returns its value.
-        '''        
+        '''
         lambda_p, kappa_p, z = solution[0], solution[1], solution[2:]
         n = len(z)
         L = compute_L(lambda_p, kappa_p)
@@ -1112,7 +1123,7 @@ def solve_PEP(Q, P, **kwargs):
 class PolynomialCLFCBFPair():
     '''
     Class for polynomial CLF-CBF pairs of the form:
-    V(x,P) = m(x) P m(x) and h(x,Q) = m(x) Q m(x) - 1. 
+    V(x,P) = m(x) P m(x) and h(x,Q) = m(x) Q m(x) - 1.
     In this initial implementation, the pair is represented by their respective shape matrices P and Q.
     '''
     def __init__(self, P, Q, max_iter = 1000):
@@ -1226,7 +1237,7 @@ class PolynomialCLFCBFPair():
         # Compute random initial points
         # def generate_pts(center, R, n):
         #     '''
-        #     Generates n random points inside a circle of radius R centered on center, 
+        #     Generates n random points inside a circle of radius R centered on center,
         #     filtering points with negative y-value.
         #     '''
         #     pts = np.array([], dtype=float).reshape(2,0)
@@ -1284,11 +1295,11 @@ class PolynomialCLFCBFPair():
         # init_pts = np.vstack([init_kappas, init_lambdas])
 
         return lambdas, kappas, equilibrium_points, init_lines
-   
+
 class LinearMatrixPencil2():
     '''
     Class for regular, symmetric linear matrix pencils of the form P(\lambda) = \lambda A - B, where A and B are p.s.d. matrices.
-    '''    
+    '''
     def __init__(self, A, B, **kwargs):
 
         dimA = A.shape
@@ -1338,8 +1349,8 @@ class LinearMatrixPencil2():
     def solve_nonlinear(self, const):
         '''
         Compute all the solutions for the nonlinear system: (mu1 A - mu2 B) z = 0               ,
-                                                                          mu2 = 0.5 k z.T @ B z , 
-                                                                          z \in Im(m(x))        
+                                                                          mu2 = 0.5 k z.T @ B z ,
+                                                                          z \in Im(m(x))
         '''
         mu1_list, mu2_list, z_list = [], [], []
         for k in range(self.dim):
@@ -1347,14 +1358,14 @@ class LinearMatrixPencil2():
             if z[-1] == 1.0 and np.abs(self.eigenvalues[k]) != np.inf:
                 mu2 = 0.5 * const * (z.T @ self._B @ z)
                 mu1 = self.eigenvalues[k] * mu2
-                
+
                 mu1_list.append( mu1 )
                 mu2_list.append( mu2 )
                 z_list.append( z.tolist() )
-        
+
         return np.array(mu1_list), np.array(mu2_list), np.array( z_list ).T
 
-    def __str__(self):         
+    def __str__(self):
         '''
         Print the given pencil.
         '''
@@ -1386,7 +1397,7 @@ class LinearMatrixPencil():
 
         self.compute_eig()
         # self.compute_eig2()
-    
+
     def value(self, lambda_param):
         '''
         Returns pencil value.
@@ -1434,7 +1445,7 @@ class LinearMatrixPencil():
         self.eigenvalues = pencil_eig[sorted_args]
         self.eigenvectors = pencil_eigenvectors[:,sorted_args]
 
-    def __str__(self):         
+    def __str__(self):
         '''
         Print the given pencil.
         '''
@@ -1462,7 +1473,7 @@ class CLFCBFPair():
                 self.clf = kwargs[key]
             if key == "cbf":
                 self.cbf = kwargs[key]
-        
+
         self.Hv = self.clf.get_hessian()
         self.x0 = self.clf.get_critical()
         self.Hh = self.cbf.get_hessian()
@@ -1482,11 +1493,11 @@ class CLFCBFPair():
         Compute the equilibrium points using new method.
         '''
         temp_P = -(self.Hv @ self.x0).reshape(self.dim,1)
-        P_matrix = np.block([ [ self.Hv  , temp_P                        ], 
+        P_matrix = np.block([ [ self.Hv  , temp_P                        ],
                               [ temp_P.T , self.x0 @ self.Hv @ self.x0 ] ])
 
         temp_Q = -(self.Hh @ self.p0).reshape(self.dim,1)
-        Q_matrix = np.block([ [ self.Hh  , temp_Q                        ], 
+        Q_matrix = np.block([ [ self.Hh  , temp_Q                        ],
                               [ temp_Q.T , self.p0 @ self.Hh @ self.p0 ] ])
 
         pencil = LinearMatrixPencil( Q_matrix, P_matrix )
@@ -1498,7 +1509,7 @@ class CLFCBFPair():
             # if np.abs(pencil.eigenvectors[-1,k]) > 0.0001:
             # print(pencil.eigenvectors)
             self.equilibrium_points2.append( (pencil.eigenvectors[0:-1,k]/pencil.eigenvectors[-1,k]).tolist() )
-        
+
         self.equilibrium_points2 = np.array(self.equilibrium_points2).T
 
         # print("Lambda 1 = " + str(pencil.lambda1))
@@ -1575,7 +1586,7 @@ class CLFCBFPair():
         Compute equilibrium solutions and equilibrium points.
         '''
         solution_poly = np.polynomial.polynomial.polysub( self.q_function["numerator"], self.q_function["denominator"] )
-        
+
         equilibrium_solutions = np.polynomial.polynomial.polyroots(solution_poly)
         equilibrium_solutions = np.real(np.extract( equilibrium_solutions.imag == 0.0, equilibrium_solutions ))
         equilibrium_solutions = np.concatenate((equilibrium_solutions, self.q_function["repeated_poles"]))
