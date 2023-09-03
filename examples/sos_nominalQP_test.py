@@ -25,20 +25,20 @@ def g(state):
 plant = ConservativeAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
 
 # ---------------------------------------------------- Define CLF ----------------------------------------------------------
-# Proot = 0.1*np.random.rand(p,p)
-# P = Proot.T @ Proot
+Proot = 0.1*np.random.rand(p,p)
+P = Proot.T @ Proot
 
-clf_eigs = np.array([5.0, 1.0])
-clf_rotation = rot2D( np.deg2rad(-45) )
-clf_center = np.array([4.0, -4.0])
-P = create_quadratic(clf_eigs, clf_rotation, clf_center, p)
+# clf_eigs = np.array([5.0, 1.0])
+# clf_rotation = rot2D( np.deg2rad(-45) )
+clf_center = np.array([-4.0, -4.0])
+# P = create_quadratic(clf_eigs, clf_rotation, clf_center, p)
 
 clf = KernelLyapunov(*initial_state, kernel=kernel, P=P)
 clf.define_center( clf_center )
 
 # ----------------------------------------------- Define CBF (sad smile) ---------------------------------------------------
-# Qroot = 0.1*np.random.rand(p,p)
-# Q = Qroot.T @ Qroot
+Qroot = 0.1*np.random.rand(p,p)
+Q = Qroot.T @ Qroot
 
 cbf_eigs = np.array([1.0, 4.0])
 cbf_rotation = rot2D( np.deg2rad(0) )

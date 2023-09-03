@@ -589,6 +589,8 @@ def compute_equilibria_algorithm6(plant, clf, cbf, initial_points, **kwargs):
     kernel = clf.kernel
     p = kernel.kernel_dim
     N_list = kernel.get_N_matrices()
+    r = len(N_list)
+
     # matrices = kernel.get_matrix_constraints()
     # num_matrices = len(matrices)
 
@@ -602,60 +604,87 @@ def compute_equilibria_algorithm6(plant, clf, cbf, initial_points, **kwargs):
 
     # def linear_pencil(vars):
     #     z = kernel.function(vars[0:n])
-    #     kappas = vars[n:p]
+    #     kappas = vars[n:n+p]
     #     sum = np.zeros([p,p])
-    #     for k in range(len(N_list)):
+    #     for k in range(p):
     #         sum += kappas[k] * commutator(Q,N_list[k],z)
     #     L = 0.5 * c * commutator( commutator(Q,P,z), P, z) - commutator(Q,F,z) - sum
     #     return L
 
-    def lambda2_fun(z, kappas):
+    def lambda2_matrix(z, kappas):
         sum = np.zeros([p,p])
-        for k in range(len(N_list)):
+        for k in range(p):
             sum += kappas[k] * N_list[k]
-        return z.T @ ( 0.5 * c * np.outer(P @ z, P @ z) - F - sum ) @ z
+        return 0.5 * c * np.outer(P @ z, P @ z) - F - sum
 
     def linear_pencil(vars):
         z = kernel.function(vars[0:n])
-        kappas = vars[n:p]
-        l1 = 0.5 * c * z.T @ P @ z
+        kappas = vars[n:n+p]
         l2 = vars[-1]
-        L = F + l1 * Q - l2 * P
-        for k in range(len(N_list)):
-            L += kappas[k] * N_list[k]
-        return L
+        return lambda2_matrix(z, kappas) - l2 * Q
 
-    # def detL_constraint(vars):
-    #     return np.linalg.det( linear_pencil_commutator(vars) )
+    # def lambda2_fun(z, kappas):
+    #     return z.T @ lambda2_matrix(z, kappas) @ z
 
-    # ------------------- Constraints on vars = [ x, kappas, l2 ] ----------------------
+    def projection(z):
+        return np.eye(len(z)) - np.outer(z, Q @ z)
 
-    def Lz_eq_constraint(vars):
+    # ------------------- Constraints on vars = [ x, kappas, l2 ], kappas is p-dimensional ----------------------
+
+    def detL_eq(vars):
+        return np.linalg.det( linear_pencil(vars) )
+
+    def Lz_eq(vars):
         z = kernel.function(vars[0:n])
         return linear_pencil(vars) @ z
 
-    def lambda2_eq_constraint(vars):
-        z = kernel.function(vars[0:n])
-        kappas = vars[n:p]
-        l2 = vars[-1]
-        return l2 - lambda2_fun(z, kappas)
+    # def lambda2_eq(vars):
+    #     z = kernel.function(vars[0:n])
+    #     kappas = vars[n:n+p]
+    #     l2 = vars[-1]
+    #     return l2 - lambda2_fun(z, kappas)
     
-    def lambda2_ineq_constraint(vars):
-        l2 = vars[-1]
-        return l2 # >> 0
+    # def lambda2_ineq_constraint(vars):
+    #     l2 = vars[-1]
+    #     return l2 # >> 0
 
-    def boundary_ineq_constraint(vars):
+    # def boundary_ineq(vars):
+    #     z = kernel.function(vars[0:n])
+    #     return z.T @ Q @ z - 1 # >> 0
+
+    def boundary_eq(vars):
         z = kernel.function(vars[0:n])
-        return z.T @ Q @ z - 1 # >> 0
+        return z.T @ Q @ z - 1 # >= 0
 
-    def complementary_slackness_constraint(vars):
-        return lambda2_ineq_constraint(vars) * boundary_ineq_constraint(vars)
+    # def lambda2_ineq(vars):
+    #     z = kernel.function(vars[0:n])
+    #     kappas = vars[n:n+p]
+    #     return z.T @ lambda2_matrix(z, kappas) @ z
 
-    eq_constr1 = {'type': 'eq', 'fun': Lz_eq_constraint}
-    eq_constr2 = {'type': 'eq', 'fun': lambda2_eq_constraint}
-    
-    ineq_constr1 = {'type': 'ineq', 'fun': boundary_ineq_constraint}
-    ineq_constr2 = {'type': 'ineq', 'fun': lambda2_ineq_constraint}
+    def lambda2_ineq(vars):
+        return vars[-1]
+
+    def kappa_eq(vars):
+        z = kernel.function(vars[0:n])
+        kappas = vars[n:n+p]
+        sum = 0.0
+        for k in range(p):
+            sum += kappas[k] * z.T @ ( N_list[k] -  N_list[k].T ) @ z
+        return sum
+
+    def complementary_slackness_eq(vars):
+        z = kernel.function(vars[0:n])
+        kappas = vars[n:n+p]
+        return z.T @ lambda2_matrix(z, kappas) @ projection(z) @ z
+        # return lambda2_ineq_constraint(vars) * boundary_ineq_constraint(vars)
+
+    eq_constr0 = {'type': 'eq', 'fun': detL_eq}
+    eq_constr1 = {'type': 'eq', 'fun': Lz_eq}
+    eq_constr2 = {'type': 'eq', 'fun': boundary_eq}
+    eq_constr3 = {'type': 'eq', 'fun': kappa_eq}
+
+    ineq_constr1 = {'type': 'ineq', 'fun': lambda2_ineq}
+    # ineq_constr2 = {'type': 'ineq', 'fun': boundary_ineq}
 
     # Initialize with boundary points
     # boundary_pts = get_boundary_points( cbf, initial_points )
@@ -671,19 +700,27 @@ def compute_equilibria_algorithm6(plant, clf, cbf, initial_points, **kwargs):
             x = vars[0:n]
             return np.linalg.norm(x - x_n)**2
 
-        z = kernel.function(x_n)
-        kappas = np.zeros(p-n)
-        l2 = lambda2_fun(z, kappas)
-        initial_vars = np.hstack([ x_n, kappas, l2 ])
+        init_z = kernel.function(x_n)
+        a = np.zeros([1,p])
+        for i in range(p):
+            a[:,i] = init_z.T @ ( N_list[i] -  N_list[i].T ) @ init_z
+
+        init_kappas = np.zeros(p)
+        for col in null_space(a).T:
+            init_kappas += np.random.randn() * col
+
+        init_l2 = init_z.T @ lambda2_matrix(init_z, init_kappas) @ init_z
+        initial_vars = np.hstack([ x_n, init_kappas, init_l2 ])
 
         # Solve optimization problem
-        min_sol = minimize(objective, initial_vars, constraints=[ eq_constr1, eq_constr2, ineq_constr1, ineq_constr2 ])
+        min_sol = minimize(objective, initial_vars, method='trust-constr', constraints=[ eq_constr1, eq_constr2, eq_constr3, ineq_constr1 ])
         if min_sol.success:
             solutions["points"].append( min_sol.x[0:n] )
             solutions["lambda2"].append( min_sol.x[-1] )
             solutions["indexes"].append( k )
         else:
             error_counter += 1
+            print(min_sol.message)
             
     return solutions
 

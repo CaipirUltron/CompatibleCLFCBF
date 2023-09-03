@@ -593,12 +593,12 @@ class Kernel(Function):
         n = self._dim
         p = self._num_monomials
         I_p = np.eye(p)
-        M = np.zeros([(n+1)*p**2, p**2])
+        M = np.zeros([n*p**2, p**2])
         for k in range(n):
             A = self.A[k]
-            M[k*(p**2):(k+1)*(p**2),:] = np.kron(I_p, A.T) + np.kron(A.T, I_p) @ self._K 
+            M[k*(p**2):(k+1)*(p**2),:] = np.kron(I_p, A.T) + np.kron(A.T, I_p) @ self._K
             # M[k*(p**2):(k+1)*(p**2),:] = np.kron(I_p, A.T) + np.kron(A.T, I_p)
-        M[n*(p**2):(n+1)*(p**2),:] = self._K - np.eye(p**2)
+        # M[n*(p**2):(n+1)*(p**2),:] = self._K - np.eye(p**2)
 
         from scipy.linalg import null_space
         solutions = null_space(M)
