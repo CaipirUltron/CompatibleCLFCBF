@@ -254,8 +254,9 @@ class PolynomialSystem(AffineSystem):
         for dim in range(self.n):
             self._symbols.append( sp.Symbol('x' + str(dim+1)) )
 
-        from common import generate_monomials_from_symbols
-        self._monomials = generate_monomials_from_symbols( self._symbols, self._degree )
+        from common import generate_monomial_list, generate_monomials_from_symbols
+        alpha, _ = generate_monomial_list(self.n, self._degree)
+        self._monomials = generate_monomials_from_symbols( self._symbols, alpha )
         self._num_monomials = len(self._monomials)
 
         # Symbolic f(x) and corresponding lambda function

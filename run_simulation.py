@@ -15,7 +15,7 @@ for step in range(0, num_steps):
 
     # Simulation time
     t = step*sim.sample_time
-    # os.system('clear')
+    os.system('clear')
     print("Simulating instant t = " + str(float(f'{t:.3f}')) + " s")
     time.append( t )
 
@@ -32,7 +32,9 @@ for step in range(0, num_steps):
 sim.logs["time"] = time
 sim.logs["state"] = sim.plant.state_log
 sim.logs["control"] = sim.plant.control_log
-sim.logs["equilibria"] = sim.controller.equilibrium_points_log
+# sim.logs["equilibria"] = sim.controller.equilibrium_points_log
+sim.logs["clf_log"] = sim.controller.clf.dynamics.state_log
+sim.logs["equilibria"] = sim.controller.equilibrium_points.tolist()
 
 if hasattr(sim, 'path'):
     sim.logs["gamma_log"] = sim.path.logs["gamma"]

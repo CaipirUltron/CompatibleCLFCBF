@@ -11,7 +11,7 @@ simulation_file = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples." + simulation_file, package=None)
 
 try:
-    with open(simulation_file + ".json") as file:
+    with open("logs/" + simulation_file + ".json") as file:
         print("Loading graphical simulation with " + simulation_file + ".json")
         logs = json.load(file)
 except IOError:
@@ -87,10 +87,10 @@ all_errors = np.hstack([error_x, error_y])
 plt.savefig(simulation_file + "_traj.eps", format='eps', transparent=True)
 
 max_time = 7.0
-fig = plt.figure(figsize = (6,6), constrained_layout=True)
+fig = plt.figure(figsize = (6,3), constrained_layout=True)
 
 # Subplot 325
-ax1 = fig.add_subplot(211)
+ax1 = fig.add_subplot(111)
 # ax1.set_aspect('equal', adjustable='box')
 ax1.set_title('Path following error', fontsize=font_size)
 ax1.plot(time, error_x, "--", label='$e_1$', linewidth=2, markersize=10)
@@ -98,20 +98,20 @@ ax1.plot(time, error_y, "--", label='$e_2$', linewidth=2, markersize=10)
 ax1.legend(fontsize=14, loc='upper right')
 ax1.set_xlim(0, max_time)
 ax1.set_ylim(np.min(all_errors)-1, np.max(all_errors)+1)
-# ax1.set_xlabel('Time [s]', fontsize=14)
+ax1.set_xlabel('Time [s]', fontsize=14)
 plt.grid()
 
 # Subplot 326
-ax2 = fig.add_subplot(212)
-# ax2.set_aspect('equal', adjustable='box')
-ax2.set_title('Control signal', fontsize=font_size)
-ax2.plot(time, control_x, "--", label='$u_1$', linewidth=2, markersize=10, alpha=1.0)
-ax2.plot(time, control_y, "--", label='$u_2$', linewidth=2, markersize=10, alpha=0.6) 
-ax2.legend(fontsize=14, loc='upper right')
-ax2.set_xlim(0, max_time)
-ax2.set_ylim(np.min(all_controls)-1, np.max(all_controls)+1)
-ax2.set_xlabel('Time [s]', fontsize=14)
-plt.grid()
+# ax2 = fig.add_subplot(212)
+# # ax2.set_aspect('equal', adjustable='box')
+# ax2.set_title('Control signal', fontsize=font_size)
+# ax2.plot(time, control_x, "--", label='$u_1$', linewidth=2, markersize=10, alpha=1.0)
+# ax2.plot(time, control_y, "--", label='$u_2$', linewidth=2, markersize=10, alpha=0.6) 
+# ax2.legend(fontsize=14, loc='upper right')
+# ax2.set_xlim(0, max_time)
+# ax2.set_ylim(np.min(all_controls)-1, np.max(all_controls)+1)
+# ax2.set_xlabel('Time [s]', fontsize=14)
+# plt.grid()
 
 plt.savefig(simulation_file + "_plots.eps", format='eps', transparent=True)
 # plt.savefig(simulation_file + ".svg", format="svg",transparent=True)

@@ -205,7 +205,7 @@ class Quadratic(Function):
     '''
     Class for quadratic function representing x'Ax + b'x + c = 0.5 (x - p)'H(x-p) + height = 0.5 x'Hx - 0.5 p'(H + H')x + 0.5 p'Hp + height
     '''
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args):
 
         # Set parameters
         super().__init__(*args)
@@ -223,7 +223,7 @@ class Quadratic(Function):
         self.c = 0.0
         self.height = 0.0
 
-        self.set_param(self, **kwargs)
+        # self.set_param(kwargs)
 
         # Set eigenbasis for hessian matrix
         _, _, Q = self.compute_eig()
@@ -309,7 +309,8 @@ class QuadraticLyapunov(Quadratic):
     Hv = Lv(pi_v)'Lv(pi_v) + epsilon I_n (Lv is upper triangular and epsilon is a small positive constant).
     '''
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args)
+        super().set_param(**kwargs)
         super().set_param(height=0.0)
 
         self.epsilon = 0.0
@@ -377,7 +378,8 @@ class QuadraticBarrier(Quadratic):
     The symmetric Hessian is parametrized by Hh(pi) = sum^n_i Li pi_i, where {Li} is the canonical basis of the space of (n,n) symmetric matrices.
     '''
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args)
+        super().set_param(**kwargs)
         super().set_param(height = -0.5)
 
         self.param = sym2vector(self._hessian)

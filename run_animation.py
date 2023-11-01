@@ -3,6 +3,7 @@ import json
 import importlib
 import matplotlib.pyplot as plt
 from graphics import Plot2DSimulation, PlotPFSimulation
+import time
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -16,6 +17,8 @@ except IOError:
     print("Couldn't locate " + simulation_file + ".json")
 
 print('Animating simulation...')
+
+time.sleep(5)
 
 if hasattr(sim, 'path'):
     plotSim = PlotPFSimulation( sim.path, logs, sim.plant, sim.clf, sim.cbfs, plot_config = sim.plot_config )

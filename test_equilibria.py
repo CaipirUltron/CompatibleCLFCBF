@@ -30,7 +30,7 @@ plotSim.plot_frame(9.0)
 #     print("Found equilibrium points at :\n" + str(equilibrium))
 #     plotSim.main_ax.plot( equilibrium[0], equilibrium[1], 'ro')
 
-N = 50
+N = 100
 initial_guesses = 8*2*(np.random.rand(N,2)-0.5)
 # initial_guesses = np.array([ sim.initial_state ])
 # boundary_pts = get_boundary_points(sim.cbf, initial_guesses)

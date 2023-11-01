@@ -52,7 +52,7 @@ class Plot2DSimulation():
             self.clf_param_dim = np.shape(np.array(self.clf_log))[0]
 
         # self.mode_log = self.logs["mode"]
-        self.equilibria = self.logs["equilibria"]
+        self.equilibria = np.array(self.logs["equilibria"])
         self.num_steps = len(self.state_log[0])
         self.anim_step = (self.num_steps/self.time[-1])/self.fps
         self.current_step = 0
@@ -67,8 +67,8 @@ class Plot2DSimulation():
         # self.origin, = self.main_ax.plot([],[],lw=4, marker='*', color=[0.,0.,0.])
         self.trajectory, = self.main_ax.plot([],[],lw=2)
         self.init_state, = self.main_ax.plot([],[],'bo',lw=2)
-        # self.equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
-        self.equilibria_plot, = self.main_ax.plot([],[], marker='o', color='r',lw=2)
+        self.equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
+        # self.equilibria_plot, = self.main_ax.plot([],[], marker='o', color='r',lw=2)
         self.clf_grad_arrow, = self.main_ax.plot([],[],'b',lw=0.8)
         self.cbf_grad_arrow, = self.main_ax.plot([],[],'g',lw=0.8)
 
@@ -148,12 +148,12 @@ class Plot2DSimulation():
         x_init, y_init = self.state_log[0][0], self.state_log[1][0]
         self.init_state.set_data(x_init, y_init)
 
-        # if self.plot_config["equilibria"]:
-        #     num_eq = self.equilibria.shape[0]
-        #     x_eq, y_eq = np.zeros(num_eq), np.zeros(num_eq)
-        #     for k in range(num_eq):
-        #         x_eq[k], y_eq[k] = self.equilibria[k,0], self.equilibria[k,1]
-        #     self.equilibria_plot.set_data(x_eq, y_eq)
+        if self.plot_config["equilibria"]:
+            num_eq = self.equilibria.shape[0]
+            x_eq, y_eq = np.zeros(num_eq), np.zeros(num_eq)
+            for k in range(num_eq):
+                x_eq[k], y_eq[k] = self.equilibria[k,0], self.equilibria[k,1]
+            self.equilibria_plot.set_data(x_eq, y_eq)
 
         for cbf in self.cbfs:
             self.cbf_contours.append( cbf.contour_plot(self.main_ax, levels=[0.0], colors=self.cbf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.1) )
@@ -180,17 +180,17 @@ class Plot2DSimulation():
             current_time = np.around(self.time[i], decimals = 2)
             current_state = [ self.state_log[0][i], self.state_log[1][i] ]
 
-            nablaV = self.clf.evaluate_gradient(*current_state)[0]
-            nablaV_norm = nablaV/np.linalg.norm(nablaV)
-            self.clf_grad_arrow.set_data( 
-                [ current_state[0], current_state[0] + nablaV_norm[0] ], 
-                [ current_state[1], current_state[1] + nablaV_norm[1] ] )
+            # nablaV = self.clf.evaluate_gradient(*current_state)[0]
+            # nablaV_norm = nablaV/np.linalg.norm(nablaV)
+            # self.clf_grad_arrow.set_data( 
+            #     [ current_state[0], current_state[0] + nablaV_norm[0] ], 
+            #     [ current_state[1], current_state[1] + nablaV_norm[1] ] )
 
-            nablah = self.cbfs[0].evaluate_gradient(*current_state)[0]
-            nablah_norm = nablaV/np.linalg.norm(nablah)
-            self.cbf_grad_arrow.set_data( 
-                [ current_state[0], current_state[0] + nablah_norm[0] ], 
-                [ current_state[1], current_state[1] + nablah_norm[1] ] )
+            # nablah = self.cbfs[0].evaluate_gradient(*current_state)[0]
+            # nablah_norm = nablaV/np.linalg.norm(nablah)
+            # self.cbf_grad_arrow.set_data( 
+            #     [ current_state[0], current_state[0] + nablah_norm[0] ], 
+            #     [ current_state[1], current_state[1] + nablah_norm[1] ] )
 
             if hasattr(self, 'clf_log'):
                 current_piv_state = [ self.clf_log[k][i] for k in range(self.clf_param_dim) ]
@@ -200,9 +200,9 @@ class Plot2DSimulation():
             # h = self.cbfs[0].evaluate_function(*current_state)[0]
             # self.time_text.set_text("h = " + str(h) + "s")
 
-            if len(self.equilibria) != 0 and self.equilibria[i] != None:
-                x_eq, y_eq = self.equilibria[i][0], self.equilibria[i][1]
-                self.equilibria_plot.set_data(x_eq, y_eq)
+            # if len(self.equilibria) != 0 and self.equilibria[i] != None:
+            #     x_eq, y_eq = self.equilibria[i][0], self.equilibria[i][1]
+            #     self.equilibria_plot.set_data(x_eq, y_eq)
 
             if self.draw_level:
                 V = self.clf.evaluate_function(*current_state)[0]

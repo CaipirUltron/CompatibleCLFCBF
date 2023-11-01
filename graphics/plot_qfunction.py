@@ -56,10 +56,10 @@ V_constant = lyapunov(eq_point)
 
 # Plot ellipsoids -------------------------------------------------------------------------------
 
-fig = plt.figure(figsize=plt.figaspect(2))  # Tall figure
+fig = plt.figure(figsize=(8,4)) 
 # fig.suptitle("3D Numerical Example", fontsize=12)
 
-ax = fig.add_subplot(211, projection='3d')
+ax = fig.add_subplot(121, projection='3d')
 
 # Set of all spherical angles:
 u = np.linspace(0, 2 * np.pi, 100)
@@ -103,7 +103,7 @@ for axis in 'xyz':
 # Plot q-function -------------------------------------------------------------------------------
 
 # fig, ax = plt.subplots(tight_layout=True)
-ax = fig.add_subplot(212)
+ax = fig.add_subplot(122)
 ax.plot(lambda_p, q, color='blue', linewidth=0.8)
 ax.plot([p_min, p_max], [1, 1], '--', color='green', linewidth=2.0)
 ax.plot(lambda_sol, 1.0, 'o', color = "red")
@@ -117,7 +117,10 @@ ax.set_ylim([q_min, q_max])
 ax.set_xlabel("$\lambda$")
 ax.legend(["$q_i(\lambda)$"], fontsize=12)
 
+ax.set_box_aspect(1)
 ax.set_title('(b) Corresponding $q_i$-function', fontsize=12)
+
+plt.subplots_adjust(wspace = 0.5)
 
 # plt.savefig(test_config + ".eps", format='eps', transparent=True)
 plt.savefig("q_function.eps", format='eps', transparent=True)

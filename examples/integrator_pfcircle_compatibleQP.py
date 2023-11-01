@@ -78,3 +78,5 @@ plot_config = {
     "fps":60,
     "pad":2.0
 }
+
+logs = { "sample_time": sample_time }

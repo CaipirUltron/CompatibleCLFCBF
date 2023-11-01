@@ -83,3 +83,5 @@ plot_config = {
     "pad":2.0,
     "equilibria": True
 }
+
+logs = { "sample_time": sample_time }
