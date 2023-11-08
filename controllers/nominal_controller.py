@@ -3,7 +3,7 @@ from controllers import CLFCBFPair, compute_equilibria_algorithm7
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 from common import sat
-import time
+import time, sys
 
 class NominalQP():
     '''
@@ -44,16 +44,20 @@ class NominalQP():
 
         self.ctrl_dt = dt
 
-        self.eq_dt = 0.3
+        self.eq_dt = 0.2
         self.equilibrium_points = np.zeros([0,self.state_dim])
         
-        self.t = time.time()
+        self.updated_timer = False
+        self.timer = 0.0
+        self.last_updated_by = None
+        self.last_eq_t = 0.0
+        # self.t = time.time()
 
     def get_equilibria(self):
         '''
         Computes the equilibrium points every 
         '''
-        elapsed_time = time.time() - self.t
+        elapsed_time = self.timer - self.last_eq_t
         if elapsed_time > self.eq_dt:
             initial_guess = self.plant.get_state()
             solutions = compute_equilibria_algorithm7( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
@@ -63,8 +67,7 @@ class NominalQP():
                     if np.any( new_pt == self.equilibrium_points ):
                         continue
                     self.equilibrium_points = np.vstack([ self.equilibrium_points, new_pt ])
-
-            self.t = time.time()
+            self.last_eq_t = self.timer
 
     def get_control(self):
         '''
@@ -88,8 +91,6 @@ class NominalQP():
         control = self.QP_sol[0:self.control_dim,]
 
         self.get_equilibria()
-
-        print(self.equilibrium_points)
 
         return control
 
@@ -148,12 +149,25 @@ class NominalQP():
         Integrates the dynamic system for the CLF Hessian matrix.
         '''
         self.clf.update(piv_ctrl, self.ctrl_dt)
+        self.update_timer(self.update_clf_dynamics, self.ctrl_dt)
 
     def update_cbf_dynamics(self, cbf, pih_ctrl):
         '''
         Integrates the dynamic system for the CBF Hessian matrix.
         '''
         cbf.update(pih_ctrl, self.ctrl_dt)
+        self.update_timer(self.update_cbf_dynamics, self.ctrl_dt)
+
+    def update_timer(self, method, dt):
+        '''
+        Updates built-in timer
+        '''
+        if self.last_updated_by == method.__name__:
+            self.updated_timer = False
+        if not self.updated_timer:
+            self.timer += dt
+            self.updated_timer = True
+            self.last_updated_by = method.__name__
 
 class NominalQuadraticQP():
     '''

@@ -76,7 +76,8 @@ plot_config = {
     "drawlevel": True,
     "resolution": 200,
     "fps":60,
-    "pad":2.0
+    "pad":2.0,
+    "equilibria": True
 }
 
 logs = { "sample_time": sample_time }
