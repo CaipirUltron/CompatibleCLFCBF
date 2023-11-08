@@ -134,6 +134,7 @@ numpy_tests.py
 
 #Figures
 *.eps
+*.png
 
 #JSON
 *.json
