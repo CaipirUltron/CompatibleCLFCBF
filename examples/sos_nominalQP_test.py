@@ -25,7 +25,7 @@ def g(state):
 plant = ConservativeAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
 
 # ---------------------------------------------------- Define CLF ----------------------------------------------------------
-Proot = 0.1*np.random.rand(p,p)
+Proot = 0.5*np.random.rand(p,p)
 P = Proot.T @ Proot
 
 # clf_eigs = np.array([5.0, 1.0])

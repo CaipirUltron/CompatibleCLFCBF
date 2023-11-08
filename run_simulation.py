@@ -32,7 +32,6 @@ for step in range(0, num_steps):
 sim.logs["time"] = time
 sim.logs["state"] = sim.plant.state_log
 sim.logs["control"] = sim.plant.control_log
-# sim.logs["equilibria"] = sim.controller.equilibrium_points_log
 sim.logs["clf_log"] = sim.controller.clf.dynamics.state_log
 sim.logs["equilibria"] = sim.controller.equilibrium_points.tolist()
 

@@ -18,7 +18,7 @@ except IOError:
 
 print('Animating simulation...')
 
-time.sleep(5)
+time.sleep(1)
 
 if hasattr(sim, 'path'):
     plotSim = PlotPFSimulation( sim.path, logs, sim.plant, sim.clf, sim.cbfs, plot_config = sim.plot_config )

@@ -699,7 +699,9 @@ class KernelQuadratic(Function):
         super().__init__(*args)
         self.set_param(**kwargs)
         self.evaluate()
-        self.dynamics = Integrator([0.0],[0.0])
+
+        self.param = sym2vector( self.matrix_coefs )
+        self.dynamics = Integrator( self.param, np.zeros(len(self.param)) )
 
     def set_param(self, **kwargs):
         '''
@@ -734,6 +736,14 @@ class KernelQuadratic(Function):
             
         if np.shape(self.matrix_coefs) != (self.kernel_dim, self.kernel_dim):
             raise Exception("P must be (p x p), where p is the kernel dimension!") 
+        
+    def update(self, param_ctrl, dt):
+        '''
+        Integrates the parameters.
+        '''
+        self.dynamics.set_control(param_ctrl)
+        self.dynamics.actuate(dt)
+        self.set_param( coefficients = vector2sym(self.dynamics.get_state()) )
 
     def define_center(self, point):
         '''
@@ -831,7 +841,12 @@ class KernelLyapunov(KernelQuadratic):
                 break
         return kwargs
 
-    def set_param(self, **kwargs):
+    def set_param(self, param=None, **kwargs):
+        '''
+        Pass a vector of parameters representing the vectorization of matrix P
+        '''
+        if param != None:
+            super().set_param(coefficients=vector2sym(param))
         new_kwargs = self.change_kwargs(**kwargs)
         super().set_param(**new_kwargs)
         self.P = self.matrix_coefs
@@ -879,7 +894,12 @@ class KernelBarrier(KernelQuadratic):
                 break
         return kwargs
 
-    def set_param(self, **kwargs):
+    def set_param(self, param=None, **kwargs):
+        '''
+        Pass a vector of parameters representing the vectorization of matrix P
+        '''
+        if param != None:
+            super().set_param(coefficients=vector2sym(param))
         new_kwargs = self.change_kwargs(**kwargs)
         super().set_param(**new_kwargs)
         self.Q = self.matrix_coefs

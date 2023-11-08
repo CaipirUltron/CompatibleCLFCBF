@@ -137,3 +137,5 @@ numpy_tests.py
 
 #JSON
 *.json
+!/graphics/splines/**
+**/__pycache__/

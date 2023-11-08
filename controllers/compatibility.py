@@ -823,7 +823,12 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_points, **kwargs):
 
     # Initialization
     # boundary_pts = get_boundary_points( cbf, initial_points )
-    num_pts = np.shape(initial_points)[0]
+
+    if np.shape(initial_points) == (n,):
+        num_pts = 1
+        initial_points = np.array([initial_points])
+    else:
+        num_pts = np.shape(initial_points)[0]
 
     solutions = {"costs": [], "points": [], "lambda2": [], "indexes": []}
     error_counter = 0

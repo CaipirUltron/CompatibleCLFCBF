@@ -39,45 +39,6 @@ class Plot2DSimulation():
         # self.fig.tight_layout(pad=plot_config["pad"])
         self.animation = None
 
-    def create_graphical_objs(self):
-        '''
-        Create graphical objects into the correct axes.
-        '''
-        # Get logs
-        self.sample_time = self.logs["sample_time"]
-        self.time = np.array(self.logs["time"])
-        self.state_log = self.logs["state"]
-        if "clf_log" in self.logs.keys():
-            self.clf_log = self.logs["clf_log"]
-            self.clf_param_dim = np.shape(np.array(self.clf_log))[0]
-
-        # self.mode_log = self.logs["mode"]
-        self.equilibria = np.array(self.logs["equilibria"])
-        self.num_steps = len(self.state_log[0])
-        self.anim_step = (self.num_steps/self.time[-1])/self.fps
-        self.current_step = 0
-        self.runs = False
-
-        self.num_cbfs = len(self.cbfs)
-
-        # Initalize some graphical objects
-        self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str("Time = "), fontsize=14)
-        # self.mode_text = self.main_ax.text(self.x_lim[0]+0.5, self.y_lim[0]-1, "", fontweight="bold",  fontsize=18)
-
-        # self.origin, = self.main_ax.plot([],[],lw=4, marker='*', color=[0.,0.,0.])
-        self.trajectory, = self.main_ax.plot([],[],lw=2)
-        self.init_state, = self.main_ax.plot([],[],'bo',lw=2)
-        self.equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
-        # self.equilibria_plot, = self.main_ax.plot([],[], marker='o', color='r',lw=2)
-        self.clf_grad_arrow, = self.main_ax.plot([],[],'b',lw=0.8)
-        self.cbf_grad_arrow, = self.main_ax.plot([],[],'g',lw=0.8)
-
-        self.clf_contour_color = mcolors.TABLEAU_COLORS['tab:blue']
-        self.cbf_contour_color = mcolors.TABLEAU_COLORS['tab:green']
-
-        self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[0.0], colors=self.clf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.5)
-        self.cbf_contours = []
-
     def configure(self):
         '''
         Configure axes.
@@ -134,6 +95,45 @@ class Plot2DSimulation():
         self.numpoints = self.plot_config["resolution"]
 
         self.create_graphical_objs()
+
+    def create_graphical_objs(self):
+        '''
+        Create graphical objects into the correct axes.
+        '''
+        # Get logs
+        self.sample_time = self.logs["sample_time"]
+        self.time = np.array(self.logs["time"])
+        self.state_log = self.logs["state"]
+        if "clf_log" in self.logs.keys():
+            self.clf_log = self.logs["clf_log"]
+            self.clf_param_dim = np.shape(np.array(self.clf_log))[0]
+
+        # self.mode_log = self.logs["mode"]
+        self.equilibria = np.array(self.logs["equilibria"])
+        self.num_steps = len(self.state_log[0])
+        self.anim_step = (self.num_steps/self.time[-1])/self.fps
+        self.current_step = 0
+        self.runs = False
+
+        self.num_cbfs = len(self.cbfs)
+
+        # Initalize some graphical objects
+        self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str("Time = "), fontsize=14)
+        # self.mode_text = self.main_ax.text(self.x_lim[0]+0.5, self.y_lim[0]-1, "", fontweight="bold",  fontsize=18)
+
+        # self.origin, = self.main_ax.plot([],[],lw=4, marker='*', color=[0.,0.,0.])
+        self.trajectory, = self.main_ax.plot([],[],lw=2)
+        self.init_state, = self.main_ax.plot([],[],'bo',lw=2)
+        self.equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
+        # self.equilibria_plot, = self.main_ax.plot([],[], marker='o', color='r',lw=2)
+        self.clf_grad_arrow, = self.main_ax.plot([],[],'b',lw=0.8)
+        self.cbf_grad_arrow, = self.main_ax.plot([],[],'g',lw=0.8)
+
+        self.clf_contour_color = mcolors.TABLEAU_COLORS['tab:blue']
+        self.cbf_contour_color = mcolors.TABLEAU_COLORS['tab:green']
+
+        self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[0.0], colors=self.clf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.5)
+        self.cbf_contours = []
 
     def init(self):
 

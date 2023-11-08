@@ -44,33 +44,26 @@ class NominalQP():
 
         self.ctrl_dt = dt
 
-        self.eq_dt = 0.1
-        self.equilibrium_points_log = []
-        self.equilibrium_point = None
-
-        # initial_guess = self.plant.get_state()
-        # self.equilibrium_point = compute_equilibria_algorithm7( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
-
-        # print(self.equilibrium_point)
-
-        # self.equilibrium_point = find_nearest_boundary(self.cbfs[0], initial_guess)
-        if np.any(self.equilibrium_point) != None:
-            self.equilibrium_point = self.equilibrium_point.tolist()
-        self.equilibrium_points_log.append( self.equilibrium_point )
+        self.eq_dt = 0.3
+        self.equilibrium_points = np.zeros([0,self.state_dim])
         
         self.t = time.time()
 
     def get_equilibria(self):
         '''
-        Computes the equilibrium points
+        Computes the equilibrium points every 
         '''
         elapsed_time = time.time() - self.t
         if elapsed_time > self.eq_dt:
             initial_guess = self.plant.get_state()
-            self.equilibrium_point = compute_equilibria_algorithm7( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
-            # self.equilibrium_point = find_nearest_boundary(self.cbfs[0], initial_guess)
-            if np.any(self.equilibrium_point) != None:
-                self.equilibrium_point = self.equilibrium_point.tolist()
+            solutions = compute_equilibria_algorithm7( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
+            if len(solutions["points"]) > 0:
+                for eq_point in solutions["points"]:
+                    new_pt = np.array(eq_point)
+                    if np.any( new_pt == self.equilibrium_points ):
+                        continue
+                    self.equilibrium_points = np.vstack([ self.equilibrium_points, new_pt ])
+
             self.t = time.time()
 
     def get_control(self):
@@ -94,16 +87,17 @@ class NominalQP():
         self.QP_sol = self.QP.get_solution()
         control = self.QP_sol[0:self.control_dim,]
 
-        # self.get_equilibria()
-        self.equilibrium_points_log.append( self.equilibrium_point )
+        self.get_equilibria()
+
+        print(self.equilibrium_points)
 
         return control
 
     def get_clf_control(self):
         '''
-        This controller will not modify the CLF.
+        For now, this controller will not modify the CLF.
         '''
-        return 0.0
+        return np.zeros(len(self.clf.param))
 
     def get_clf_constraint(self):
         '''
@@ -153,7 +147,7 @@ class NominalQP():
         '''
         Integrates the dynamic system for the CLF Hessian matrix.
         '''
-        pass
+        self.clf.update(piv_ctrl, self.ctrl_dt)
 
     def update_cbf_dynamics(self, cbf, pih_ctrl):
         '''
