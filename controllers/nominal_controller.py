@@ -44,14 +44,13 @@ class NominalQP():
 
         self.ctrl_dt = dt
 
-        self.eq_dt = 0.2
+        self.eq_dt = 0.5
         self.equilibrium_points = np.zeros([0,self.state_dim])
         
         self.updated_timer = False
         self.timer = 0.0
         self.last_updated_by = None
         self.last_eq_t = 0.0
-        # self.t = time.time()
 
     def get_equilibria(self):
         '''
@@ -90,7 +89,7 @@ class NominalQP():
         self.QP_sol = self.QP.get_solution()
         control = self.QP_sol[0:self.control_dim,]
 
-        self.get_equilibria()
+        # self.get_equilibria()
 
         return control
 
@@ -149,23 +148,23 @@ class NominalQP():
         Integrates the dynamic system for the CLF Hessian matrix.
         '''
         self.clf.update(piv_ctrl, self.ctrl_dt)
-        self.update_timer(self.update_clf_dynamics, self.ctrl_dt)
+        self.update_timer(self.update_clf_dynamics)
 
     def update_cbf_dynamics(self, cbf, pih_ctrl):
         '''
         Integrates the dynamic system for the CBF Hessian matrix.
         '''
         cbf.update(pih_ctrl, self.ctrl_dt)
-        self.update_timer(self.update_cbf_dynamics, self.ctrl_dt)
+        self.update_timer(self.update_cbf_dynamics)
 
-    def update_timer(self, method, dt):
+    def update_timer(self, method):
         '''
         Updates built-in timer
         '''
         if self.last_updated_by == method.__name__:
             self.updated_timer = False
         if not self.updated_timer:
-            self.timer += dt
+            self.timer += self.ctrl_dt
             self.updated_timer = True
             self.last_updated_by = method.__name__
 

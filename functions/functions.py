@@ -745,35 +745,51 @@ class KernelQuadratic(Function):
         self.dynamics.actuate(dt)
         self.set_param( coefficients = vector2sym(self.dynamics.get_state()) )
 
-    def define_center(self, point):
+    def interpolate(self, points, values):
         '''
-        This method tries to find the closest matrix coefficients such that F(x_c) = 0, for a given list of [x_c] points
+        This method interpolates the kernel-based function: 
+        it tries to find the closest matrix coefficients such that F(points[k]) = values[k] for every point in points and value in values
         '''
+        if len(points) != len(values):
+            raise Exception("List of points must have the same size as list of values!")
+        num_pts = len(points)
+
         import cvxpy as cp
-        n = self._dim
         p = self.kernel_dim
         P_variable = cp.Variable( (p,p), symmetric=True ) # Create p x p symmetric variable
-        Pn_param = cp.Parameter( (p,p), symmetric=True )
-        Pc_param = cp.Parameter( (p,p), symmetric=True )
-        m_param = cp.Parameter(p)
+        Pn_param = cp.Parameter( (p,p), symmetric=True )  # Create p x p symmetric parameter
 
-        objective = cp.Minimize( cp.norm(P_variable - Pn_param) )
-        constraints = [ P_variable >> Pc_param, 
-                        m_param.T @ P_variable @ m_param == 0 ]
-        define_zeros_problem = cp.Problem(objective, constraints)
+        objective = cp.Minimize( cp.norm(P_variable - Pn_param) )  # define objective function to be minimized
+        constraints = [ P_variable >> 0 ]                          # fundamental constraint: z.T P z must be p.s.d.
 
-        std_centered_quadratic = create_quadratic( np.ones(n), np.eye(n), point, p )
-
-        m_param.value = self.kernel.function(point)
+        # Define the interpolation constraints
+        for k in range(num_pts):
+            z = self.kernel.function(points[k])
+            constraints += [ z.T @ P_variable @ z == 2*values[k] ]
+    
+        # Define cvxpy problem, give values to the problem parameter and solve
+        interpolation_problem = cp.Problem(objective, constraints)
         Pn_param.value = self.matrix_coefs
-        Pc_param.value = std_centered_quadratic
-        define_zeros_problem.solve()
+        interpolation_problem.solve()
 
-        if define_zeros_problem.status == "infeasible" or define_zeros_problem.status == "unbounded":
-            raise Exception("Problem is unfeasible.")
+        if interpolation_problem.status == "infeasible" or interpolation_problem.status == "unbounded":
+            raise Exception("Problem is " + interpolation_problem.status + ".")
+        else:
+            print("Interpolation was successful.")
 
         self.set_param(coefficients = P_variable.value)
 
+    def define_level_set(self, points, level):
+        '''
+        Tries to interpolate all the points into a single level set.
+        '''
+        self.interpolate(points=points, values=[ level for _ in range(len(points)) ])
+
+    def define_center(self, point):
+        '''
+        This method tries to find the closest matrix coefficients such that F(point) = 0.
+        '''
+        self.interpolate( points=[point], values=[0.0] )
         return self.function( point )
 
     def function(self, point):
@@ -834,13 +850,6 @@ class KernelLyapunov(KernelQuadratic):
         if ~self.is_valid():
             raise Exception("Kernel Lyapunov function must be SoS")
 
-    def change_kwargs(self, **kwargs):
-        for key in kwargs:
-            if key == "P":
-                kwargs["coefficients"] = kwargs.pop(key)
-                break
-        return kwargs
-
     def set_param(self, param=None, **kwargs):
         '''
         Pass a vector of parameters representing the vectorization of matrix P
@@ -850,6 +859,13 @@ class KernelLyapunov(KernelQuadratic):
         new_kwargs = self.change_kwargs(**kwargs)
         super().set_param(**new_kwargs)
         self.P = self.matrix_coefs
+
+    def change_kwargs(self, **kwargs):
+        for key in kwargs:
+            if key == "P":
+                kwargs["coefficients"] = kwargs.pop(key)
+                break
+        return kwargs
 
     def is_valid(self):
         '''
@@ -871,21 +887,7 @@ class KernelBarrier(KernelQuadratic):
         '''
         Defines the CBF boundary, given a list of points 
         '''
-        import cvxpy as cp
-        p = self.kernel_dim
-        Q_variable = cp.Variable( (p,p), symmetric=True ) # Create p x p symmetric variable
-        Qn_param = cp.Parameter( (p,p), symmetric=True )
-
-        objective = cp.Minimize( cp.norm(Q_variable - Qn_param) )
-        constraints = [ Q_variable >> 0 ]
-        for point in points:
-            z = self.kernel.function(point)
-            constraints += [ z.T @ Q_variable @ z == 1 ]
-        define_boundary_problem = cp.Problem(objective, constraints)
-
-        Qn_param.value = self.Q
-        define_boundary_problem.solve()
-        self.set_param(coefficients = Q_variable.value)
+        self.interpolate( points=points, values=[0.5 for k in range(len(points))] )
 
     def change_kwargs(self, **kwargs):
         for key in kwargs:

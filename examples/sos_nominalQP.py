@@ -5,7 +5,7 @@ from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
 from common import create_quadratic, rot2D
 
-initial_state = [-4.2, 5.0]
+initial_state = [-6.2, 6.0]
 # initial_state = [-8.0, -2.15]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
@@ -14,47 +14,51 @@ m = len(initial_control)
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 max_degree = 2
 kernel = Kernel(*initial_state, degree = max_degree)
-p = kernel.kernel_dim
+kern_dim = kernel.kernel_dim
 print(kernel)
 print(kernel.alpha)
 
 # -------------------------------------------------- Define system ---------------------------------------------------------
-F = np.zeros([p,p])
+F = np.zeros([kern_dim,kern_dim])
 def g(state):
     return np.eye(m)
 plant = ConservativeAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
 
 # ---------------------------------------------------- Define CLF ----------------------------------------------------------
-Proot = 0.5*np.random.rand(p,p)
-P = Proot.T @ Proot
+# Proot = 0.5*np.random.rand(p,p)
+# P = Proot.T @ Proot
 
-# clf_eigs = np.array([5.0, 1.0])
-# clf_rotation = rot2D( np.deg2rad(-45) )
-clf_center = np.array([-4.0, -4.0])
-# P = create_quadratic(clf_eigs, clf_rotation, clf_center, p)
+clf_eigs = np.array([1.0, 3.8])
+clf_rotation = rot2D( np.deg2rad(0) )
+clf_center = np.array([0.0, -4.0])
+P = create_quadratic(clf_eigs, clf_rotation, clf_center, kern_dim)
 
 clf = KernelLyapunov(*initial_state, kernel=kernel, P=P)
-clf.define_center( clf_center )
 
-# ----------------------------------------------- Define CBF (sad smile) ---------------------------------------------------
-Qroot = 0.1*np.random.rand(p,p)
-Q = Qroot.T @ Qroot
+# level_set_points = np.array([ [0.0, 2.0], [2.0, 1.0], [2.0, -2.0], [0.0, -4.0], [-2.0, -2.0], [-2.0, 1.0] ])
+# clf.define_level_set( level_set_points, 1.0 )
+# clf.define_center( clf_center )
+
+# ----------------------------------------------------- Define CBF ---------------------------------------------------------
+# Qroot = 0.5*np.random.rand(p,p)
+# Q = Qroot.T @ Qroot
 
 cbf_eigs = np.array([1.0, 4.0])
 cbf_rotation = rot2D( np.deg2rad(0) )
 cbf_center = np.array([0.0, 0.0])
-Q = create_quadratic(cbf_eigs, cbf_rotation, cbf_center, p)
+Q = create_quadratic(cbf_eigs, cbf_rotation, cbf_center, kernel_dim = kern_dim)
 
 cbf = KernelBarrier(*initial_state, kernel=kernel, Q=Q)
 
-boundary_points = np.array([ [-4.0, 0.0], [-4.0, -1.0], [2.0, 0.5], [4.0, -1.0], [4.0, 0.0] ])
+boundary_points = np.array([ [-4.0, 0.0], [-4.0, -1.0], [-2.0, 0.5], [2.0, 0.5], [4.0, -1.0], [4.0, 0.0] ])   # (sad   smile)
+# boundary_points = np.array([ [-4.0, 0.0], [-4.0, 1.0], [-2.0, -0.5], [2.0, -0.5], [4.0, 1.0], [4.0, 0.0] ]) # (happy smile)
 cbf.define_boundary( boundary_points )
 
 cbfs = [cbf]
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
-sample_time = .001
-controller = NominalQP(plant, clf, cbfs, alpha = 10.0, beta = 10.0, p = 1.0)
+sample_time = .002
+controller = NominalQP(plant, clf, cbfs, alpha = 10.0, beta = 10.0, p = 1.0, dt=sample_time)
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 xlimits, ylimits = [-8, 8], [-8, 8]
