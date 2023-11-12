@@ -6,7 +6,6 @@ from controllers import NominalQP
 from common import create_quadratic, rot2D
 
 initial_state = [-6.2, 6.0]
-# initial_state = [-8.0, -2.15]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
@@ -16,7 +15,6 @@ max_degree = 2
 kernel = Kernel(*initial_state, degree = max_degree)
 kern_dim = kernel.kernel_dim
 print(kernel)
-print(kernel.alpha)
 
 # -------------------------------------------------- Define system ---------------------------------------------------------
 F = np.zeros([kern_dim,kern_dim])
@@ -25,35 +23,14 @@ def g(state):
 plant = ConservativeAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
 
 # ---------------------------------------------------- Define CLF ----------------------------------------------------------
-# Proot = 0.5*np.random.rand(p,p)
-# P = Proot.T @ Proot
-
-clf_eigs = np.array([1.0, 3.8])
-clf_rotation = rot2D( np.deg2rad(0) )
-clf_center = np.array([0.0, -4.0])
-P = create_quadratic(clf_eigs, clf_rotation, clf_center, kern_dim)
-
-clf = KernelLyapunov(*initial_state, kernel=kernel, P=P)
-
-# level_set_points = np.array([ [0.0, 2.0], [2.0, 1.0], [2.0, -2.0], [0.0, -4.0], [-2.0, -2.0], [-2.0, 1.0] ])
-# clf.define_level_set( level_set_points, 1.0 )
-# clf.define_center( clf_center )
+points_dict = { 2.0: [ [0.0, 2.0], [4.0, 1.0], [2.0, -2.0], [-2.0, -2.0], [-4.0, 1.0], [0.0, -4.0] ] }
+clf = KernelLyapunov(*initial_state, kernel=kernel, points = points_dict)
 
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
-# Qroot = 0.5*np.random.rand(p,p)
-# Q = Qroot.T @ Qroot
+boundary_points = [ [-4.0, 0.0], [-4.0, -1.0], [-2.0, 0.5], [2.0, 0.5], [4.0, -1.0], [4.0, 0.0], [0.0, 1.0], [0.0, -0.5] ]   # (sad   smile)
+# boundary_points = [ [-4.0, 0.0], [-4.0, 1.0], [-2.0, -0.5], [2.0, -0.5], [4.0, 1.0], [4.0, 0.0] ] # (happy smile)
 
-cbf_eigs = np.array([1.0, 4.0])
-cbf_rotation = rot2D( np.deg2rad(0) )
-cbf_center = np.array([0.0, 0.0])
-Q = create_quadratic(cbf_eigs, cbf_rotation, cbf_center, kernel_dim = kern_dim)
-
-cbf = KernelBarrier(*initial_state, kernel=kernel, Q=Q)
-
-boundary_points = np.array([ [-4.0, 0.0], [-4.0, -1.0], [-2.0, 0.5], [2.0, 0.5], [4.0, -1.0], [4.0, 0.0] ])   # (sad   smile)
-# boundary_points = np.array([ [-4.0, 0.0], [-4.0, 1.0], [-2.0, -0.5], [2.0, -0.5], [4.0, 1.0], [4.0, 0.0] ]) # (happy smile)
-cbf.define_boundary( boundary_points )
-
+cbf = KernelBarrier(*initial_state, kernel=kernel, boundary_points=boundary_points)
 cbfs = [cbf]
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
@@ -77,4 +54,4 @@ plot_config = {
     "equilibria": False
 }
 
-logs = { "sample_time": sample_time, "P": P.tolist(), "Q": Q.tolist(), "clf_center": clf_center.tolist() }
+logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": cbf.Q.tolist() }

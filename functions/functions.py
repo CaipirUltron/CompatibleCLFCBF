@@ -709,31 +709,39 @@ class KernelQuadratic(Function):
         '''
         for key in kwargs:
 
-            # If degree was passed, create Kernel 
+            # If degree was passed, create Kernel() of appropriate degree 
             if key == "degree":
                 self.kernel = Kernel(*self._args, degree = kwargs[key])
                 self.kernel_dim = self.kernel.kernel_dim
-                # self.matrix_coefs = np.zeros([self.kernel_dim, self.kernel_dim])
+                self.matrix_coefs = np.zeros([self.kernel_dim, self.kernel_dim])
 
-            # If kernel function was passed, initialize it
+            # If kernel function was passed, initialize it.
             if key == "kernel":
                 if type(kwargs[key]) != Kernel:
                     raise Exception("Argument must be a valid Kernel function.")
                 self.kernel = kwargs[key]
                 self.kernel_dim = self.kernel.kernel_dim
-                # self.matrix_coefs = np.zeros([self.kernel_dim, self.kernel_dim])
+                self.matrix_coefs = np.zeros([self.kernel_dim, self.kernel_dim])
 
-            # If shape matrix was passed, initialize it
+            # If matrix of coefficients was passed, initialize it.
             if key == "coefficients":
-                self.matrix_coefs = kwargs[key]
-                matrix_shape = np.shape(self.matrix_coefs)
+                matrix_coefs = np.array(kwargs[key])
+                matrix_shape = np.shape(matrix_coefs)
+                if matrix_coefs.ndim != 2:
+                    raise Exception("Matrix of coefficients must be a two-dimensional array.")
                 if matrix_shape[0] != matrix_shape[1]:
-                    raise Exception("P must be a square matrix.")
+                    raise Exception("Matrix of coefficients must be a square.")
+                if not np.all(np.linalg.eigvals(matrix_coefs) >= 0):
+                    raise Exception("Matrix of coefficients must be positive semi-definite.")
+                if not np.all( matrix_coefs == matrix_coefs.T ):
+                    raise Warning("Matrix of coefficients is not symmetric. The symmetric part will be used.")
+                self.matrix_coefs = 0.5 * ( matrix_coefs + matrix_coefs.T )
+        
+            # If a dictionary of points was passed, call interpolate to find an interpolating coefficient matrix 
+            if key == "points":
+                points_dict = kwargs[key]
+                self.interpolate(points_dict)
 
-            # If center was passed, initialize it
-            if key == "centers":
-                self.centers = kwargs[key]
-            
         if np.shape(self.matrix_coefs) != (self.kernel_dim, self.kernel_dim):
             raise Exception("P must be (p x p), where p is the kernel dimension!") 
         
@@ -745,52 +753,48 @@ class KernelQuadratic(Function):
         self.dynamics.actuate(dt)
         self.set_param( coefficients = vector2sym(self.dynamics.get_state()) )
 
-    def interpolate(self, points, values):
+    def interpolate(self, points_dict):
         '''
-        This method interpolates the kernel-based function: 
-        it tries to find the closest matrix coefficients such that F(points[k]) = values[k] for every point in points and value in values
+        This method interpolates the kernel-based function. The dictionary points_dict holds the keys as level sets [v_i] corresponding to a list of points [x_i] such that F(x_i) = v_i
+        The method tries to find matrix coefficients such that F(x_i) = v_i.
+        Returns: the final objective cost.
         '''
-        if len(points) != len(values):
-            raise Exception("List of points must have the same size as list of values!")
-        num_pts = len(points)
-
         import cvxpy as cp
-        p = self.kernel_dim
-        P_variable = cp.Variable( (p,p), symmetric=True ) # Create p x p symmetric variable
-        Pn_param = cp.Parameter( (p,p), symmetric=True )  # Create p x p symmetric parameter
+        P_variable = cp.Variable( (self.kernel_dim,self.kernel_dim), symmetric=True ) # Create p x p symmetric variable
 
-        objective = cp.Minimize( cp.norm(P_variable - Pn_param) )  # define objective function to be minimized
-        constraints = [ P_variable >> 0 ]                          # fundamental constraint: z.T P z must be p.s.d.
+        # objective function to be minimized is a sum of squares
+        obj_expr = 0.0
+        level_set_values = points_dict.keys()
+        for level_value in level_set_values:
+            for point in points_dict[level_value]:
+                z = self.kernel.function(point)
+                obj_expr += ( 0.5 * z.T @ P_variable @ z - level_value )**2
 
-        # Define the interpolation constraints
-        for k in range(num_pts):
-            z = self.kernel.function(points[k])
-            constraints += [ z.T @ P_variable @ z == 2*values[k] ]
+        objective = cp.Minimize( obj_expr )
+        constraints = [ P_variable >> 0 ]                          # fundamental constraint: P must be p.s.d.
     
         # Define cvxpy problem, give values to the problem parameter and solve
         interpolation_problem = cp.Problem(objective, constraints)
-        Pn_param.value = self.matrix_coefs
         interpolation_problem.solve()
 
-        if interpolation_problem.status == "infeasible" or interpolation_problem.status == "unbounded":
-            raise Exception("Problem is " + interpolation_problem.status + ".")
+        if interpolation_problem.status not in ["infeasible", "unbounded"]:
+            print("Interpolation was successful with final cost = " + str(interpolation_problem.value))
+            self.matrix_coefs = P_variable.value
+            return interpolation_problem.value
         else:
-            print("Interpolation was successful.")
-
-        self.set_param(coefficients = P_variable.value)
+            raise Exception("Problem is " + interpolation_problem.status + ".")
 
     def define_level_set(self, points, level):
         '''
         Tries to interpolate all the points into a single level set.
         '''
-        self.interpolate(points=points, values=[ level for _ in range(len(points)) ])
+        return self.interpolate({ level:points })
 
     def define_center(self, point):
         '''
         This method tries to find the closest matrix coefficients such that F(point) = 0.
         '''
-        self.interpolate( points=[point], values=[0.0] )
-        return self.function( point )
+        return self.define_level_set(points=[point], level=0.0)
 
     def function(self, point):
         '''
@@ -847,32 +851,18 @@ class KernelLyapunov(KernelQuadratic):
     '''
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if ~self.is_valid():
-            raise Exception("Kernel Lyapunov function must be SoS")
 
     def set_param(self, param=None, **kwargs):
         '''
-        Pass a vector of parameters representing the vectorization of matrix P
+        Set the parameters of the Kernel Lyapunov function.
+        Optional: pass a vector of parameters representing the vectorization of matrix P
         '''
         if param != None:
             super().set_param(coefficients=vector2sym(param))
-        new_kwargs = self.change_kwargs(**kwargs)
-        super().set_param(**new_kwargs)
+
+        if "P" in kwargs.keys(): kwargs["coefficients"] = kwargs.pop("P")
+        super().set_param(**kwargs)
         self.P = self.matrix_coefs
-
-    def change_kwargs(self, **kwargs):
-        for key in kwargs:
-            if key == "P":
-                kwargs["coefficients"] = kwargs.pop(key)
-                break
-        return kwargs
-
-    def is_valid(self):
-        '''
-        Check if matrix of coefficients makes the function bounded from below
-        '''
-        eig, eigenvec = np.linalg.eig( self.P )
-        return np.all(eig >= -0.00000000000001)
     
 class KernelBarrier(KernelQuadratic):
     '''
@@ -880,38 +870,29 @@ class KernelBarrier(KernelQuadratic):
     '''
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if ~self.is_valid():
-            raise Exception("Kernel Barrier function must be bounded from below")      
 
+    def set_param(self, param=None, **kwargs):
+        '''
+        Set the parameters of the Kernel Barrier function.
+        Optional: pass a vector of parameters representing the vectorization of matrix Q
+        '''
+        if param != None:
+            super().set_param(coefficients=vector2sym(param))
+
+        if "Q" in kwargs.keys(): kwargs["coefficients"] = kwargs.pop("Q")
+        super().set_param(**kwargs)
+        self.Q = self.matrix_coefs
+
+        if "boundary_points" in kwargs.keys():
+            self.define_boundary(kwargs["boundary_points"])
+        
     def define_boundary(self, points):
         '''
         Defines the CBF boundary, given a list of points 
         '''
-        self.interpolate( points=points, values=[0.5 for k in range(len(points))] )
-
-    def change_kwargs(self, **kwargs):
-        for key in kwargs:
-            if key == "Q":
-                kwargs["coefficients"] = kwargs.pop(key)
-                break
-        return kwargs
-
-    def set_param(self, param=None, **kwargs):
-        '''
-        Pass a vector of parameters representing the vectorization of matrix P
-        '''
-        if param != None:
-            super().set_param(coefficients=vector2sym(param))
-        new_kwargs = self.change_kwargs(**kwargs)
-        super().set_param(**new_kwargs)
+        cost = self.define_level_set(points=points, level=0.5)
         self.Q = self.matrix_coefs
-
-    def is_valid(self):
-        '''
-        Check if matrix of coefficients is positive semidefinite
-        '''
-        eig, eigenvec = np.linalg.eig( self.Q )
-        return np.all(eig >= 0)
+        return cost
 
     def function(self, point):
         '''
