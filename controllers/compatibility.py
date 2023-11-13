@@ -8,6 +8,38 @@ from scipy.linalg import null_space
 
 ZERO_ACCURACY = 0.0000000001
 
+def compute_stability(plant, clf, cbf, eq_point, **kwargs):
+    '''
+    Compute the equilibrium conditions for a given equilibrium point
+    '''
+    c = 1
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "c":
+            c = kwargs[key]
+            continue
+
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    n = clf._dim
+
+    F = plant.get_F()
+    P = clf.P
+    Q = cbf.Q
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    kernel = clf.kernel
+    p = kernel.kernel_dim
+    N_list = kernel.get_N_matrices()
+
+    # Optimization
+    ACCURACY = 0.000000000001
+
+    Jm = kernel.jacobian( eq_point )
+    z = kernel.function( eq_point )
+
+    pass
+
 def compute_equilibria_algorithm1(F, clf, cbf, **kwargs):
     '''
     Solve the general eigenproblem of the type:

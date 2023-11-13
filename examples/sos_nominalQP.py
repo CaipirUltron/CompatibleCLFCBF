@@ -51,7 +51,7 @@ plot_config = {
     "resolution": 50,
     "fps":120,
     "pad":2.0,
-    "equilibria": False
+    "equilibria": True
 }
 
 logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": cbf.Q.tolist() }

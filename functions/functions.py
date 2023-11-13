@@ -757,7 +757,7 @@ class KernelQuadratic(Function):
         '''
         This method interpolates the kernel-based function. The dictionary points_dict holds the keys as level sets [v_i] corresponding to a list of points [x_i] such that F(x_i) = v_i
         The method tries to find matrix coefficients such that F(x_i) = v_i.
-        Returns: the final objective cost.
+        Returns:            the final objective cost.
         '''
         import cvxpy as cp
         P_variable = cp.Variable( (self.kernel_dim,self.kernel_dim), symmetric=True ) # Create p x p symmetric variable

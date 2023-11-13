@@ -63,7 +63,7 @@ class NominalQP():
             if len(solutions["points"]) > 0:
                 for eq_point in solutions["points"]:
                     new_pt = np.array(eq_point)
-                    if np.any( new_pt == self.equilibrium_points ):
+                    if np.any( np.linalg.norm(new_pt - self.equilibrium_points) <= 0.0000001 ):
                         continue
                     self.equilibrium_points = np.vstack([ self.equilibrium_points, new_pt ])
             self.last_eq_t = self.timer
@@ -89,7 +89,7 @@ class NominalQP():
         self.QP_sol = self.QP.get_solution()
         control = self.QP_sol[0:self.control_dim,]
 
-        # self.get_equilibria()
+        self.get_equilibria()
 
         return control
 
