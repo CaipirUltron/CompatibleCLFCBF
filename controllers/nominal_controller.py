@@ -60,8 +60,9 @@ class NominalQP():
         if elapsed_time > self.eq_dt:
             initial_guess = self.plant.get_state()
             solutions = compute_equilibria_algorithm7( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
-            if len(solutions["points"]) > 0:
-                for eq_point in solutions["points"]:
+            if len(solutions) > 0:
+                for sol in solutions:
+                    eq_point = sol["point"]
                     new_pt = np.array(eq_point)
                     if np.any( np.linalg.norm(new_pt - self.equilibrium_points) <= 0.0000001 ):
                         continue

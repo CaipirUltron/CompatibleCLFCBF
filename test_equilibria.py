@@ -38,18 +38,22 @@ plotSim.main_ax.plot( initial_guesses[:,0], initial_guesses[:,1], 'g*' )
 
 solutions = compute_equilibria_algorithm7(sim.plant, sim.clf, sim.cbf, initial_guesses, c = 1)
 
-pts = np.array( solutions["points"] )
-initial_pts = initial_guesses[ solutions["indexes"], : ]
+equilibria = []
+initial_pts = []
+for sol in solutions:
+    equilibria.append( sol["point"] )
+    initial_pts.append( initial_guesses[ sol["index"], : ] )
 
-print(initial_pts)
+equilibria = np.array( equilibria )
+initial_pts = np.array( initial_pts )
 
-num_convergences = np.shape(pts)[0]
+num_convergences = np.shape(equilibria)[0]
 
 print("From " + str(N) + " points, algorithm converged " + str(num_convergences) + " times.")
 print("Algorithm efficiency = " + str(num_convergences/N*100) + "%" )
 
 plotSim.main_ax.plot( initial_pts[:,0], initial_pts[:,1], 'b*' )
-if len(pts) > 0:
-    plotSim.main_ax.plot( pts[:,0], pts[:,1], 'r*' )
+if len(equilibria) > 0:
+    plotSim.main_ax.plot( equilibria[:,0], equilibria[:,1], 'r*' )
 
 plt.show()

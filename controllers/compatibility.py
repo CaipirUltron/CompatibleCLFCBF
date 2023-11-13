@@ -8,7 +8,7 @@ from scipy.linalg import null_space
 
 ZERO_ACCURACY = 0.0000000001
 
-def compute_stability(plant, clf, cbf, eq_point, **kwargs):
+def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
     '''
     Compute the equilibrium conditions for a given equilibrium point
     '''
@@ -35,8 +35,17 @@ def compute_stability(plant, clf, cbf, eq_point, **kwargs):
     # Optimization
     ACCURACY = 0.000000000001
 
-    Jm = kernel.jacobian( eq_point )
-    z = kernel.function( eq_point )
+    Jm = kernel.jacobian( eq_sol["point"] )
+    z = kernel.function( eq_sol["point"] )
+
+    def S_matrix(vars):
+        kappas = eq_sol["kappas"]        
+        sum = np.zeros([p,p])
+        for k in range(p):
+            sum += kappas[k] * N_list[k]
+        lambda0 = c * clf.function( eq_sol["point"] )
+
+        return F + eq_sol["lambda"]* Q - lambda0 * P - sum - c * np.outer(P @ z, P @ z)
 
     pass
 
@@ -763,6 +772,7 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_points, **kwargs):
     ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0, l2 >= 0,
     l1 = c V(z) P z,
     z \in Im(m)
+    Returns:                array with equilibrium point solutions
     '''
     c = 1
     for key in kwargs.keys():
@@ -862,7 +872,7 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_points, **kwargs):
     else:
         num_pts = np.shape(initial_points)[0]
 
-    solutions = {"costs": [], "points": [], "lambda2": [], "indexes": []}
+    solutions = []
     error_counter = 0
     for k in range(num_pts):
 
@@ -885,10 +895,8 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_points, **kwargs):
             LS_sol = least_squares( objective, initial_vars, method='trf', bounds=(lower_bounds, np.inf), max_nfev=1000 )
             print(LS_sol.message)
             if LS_sol.cost < ACCURACY:
-                solutions["costs"].append( LS_sol.cost )
-                solutions["points"].append( LS_sol.x[0:n] )
-                solutions["lambda2"].append( LS_sol.x[-1] )
-                solutions["indexes"].append( k )
+                sol = {"cost": LS_sol.cost, "point": LS_sol.x[0:n], "lambda": LS_sol.x[-1], "index": k, "kappas": LS_sol.x[n:n+p] }
+                solutions.append( sol )
         except ValueError as verror:
             error_counter += 1
             print(verror)
