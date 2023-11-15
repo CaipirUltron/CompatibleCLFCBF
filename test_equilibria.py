@@ -4,7 +4,7 @@ import importlib
 import numpy as np
 import matplotlib.pyplot as plt
 from graphics import Plot2DSimulation
-from controllers import compute_equilibria_algorithm7, get_boundary_points
+from controllers import compute_equilibria_algorithm7, find_nearest_boundary, find_nearest_det, compute_stability
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -21,39 +21,20 @@ except IOError:
 plotSim = Plot2DSimulation( logs, sim.plant, sim.clf, sim.cbfs, plot_config = sim.plot_config )
 plotSim.plot_frame(9.0)
 
-# boundary_pt = find_nearest_boundary(sim.cbf, [-7.0, 0.0])
-# print("Boundary initializer = " + str(boundary_pt))
-# plotSim.main_ax.plot( boundary_pt[0], boundary_pt[1], 'go')
+print("The following equilibrium points were found:")
+for eq in logs["equilibria"]:
+    print(str(eq["point"]) + ", with stability value = " + str(eq["stability"]))
+    plotSim.main_ax.plot( eq["point"][0], eq["point"][1], 'ro' )
 
-# equilibrium = compute_equilibria_algorithm7(sim.plant, sim.clf, sim.cbf, boundary_pt, c = 1)
-# if np.any(equilibrium) != None:
-#     print("Found equilibrium points at :\n" + str(equilibrium))
-#     plotSim.main_ax.plot( equilibrium[0], equilibrium[1], 'ro')
+# initial_guess = sim.initial_state
+# plotSim.main_ax.plot( initial_guess[0], initial_guess[1], 'g*' )
 
-N = 100
-initial_guesses = 8*2*(np.random.rand(N,2)-0.5)
-# initial_guesses = np.array([ sim.initial_state ])
-# boundary_pts = get_boundary_points(sim.cbf, initial_guesses)
-plotSim.main_ax.plot( initial_guesses[:,0], initial_guesses[:,1], 'g*' )
+# solution = compute_equilibria_algorithm7(sim.plant, sim.clf, sim.cbf, initial_guess, c = 1)
+# plotSim.main_ax.plot( solution["boundary_start"][0], solution["boundary_start"][1], 'ko' )
 
-solutions = compute_equilibria_algorithm7(sim.plant, sim.clf, sim.cbf, initial_guesses, c = 1)
-
-equilibria = []
-initial_pts = []
-for sol in solutions:
-    equilibria.append( sol["point"] )
-    initial_pts.append( initial_guesses[ sol["index"], : ] )
-
-equilibria = np.array( equilibria )
-initial_pts = np.array( initial_pts )
-
-num_convergences = np.shape(equilibria)[0]
-
-print("From " + str(N) + " points, algorithm converged " + str(num_convergences) + " times.")
-print("Algorithm efficiency = " + str(num_convergences/N*100) + "%" )
-
-plotSim.main_ax.plot( initial_pts[:,0], initial_pts[:,1], 'b*' )
-if len(equilibria) > 0:
-    plotSim.main_ax.plot( equilibria[:,0], equilibria[:,1], 'r*' )
+# if solution != None:
+#     print(solution)
+#     print(str(solution["message"]))
+#     plotSim.main_ax.plot( solution["point"][0], solution["point"][1], 'ro' )
 
 plt.show()

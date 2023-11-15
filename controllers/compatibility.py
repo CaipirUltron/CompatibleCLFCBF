@@ -5,12 +5,15 @@ import numpy as np
 from scipy import signal
 from scipy.optimize import fsolve, root, least_squares, minimize
 from scipy.linalg import null_space
+from quadratic_program import QuadraticProgram
+from dynamic_systems import Integrator
+from common import adjugate
 
 ZERO_ACCURACY = 0.0000000001
 
 def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
     '''
-    Compute the equilibrium conditions for a given equilibrium point
+    Compute the equilibrium conditions for a given equilibrium point (only valid in R2)
     '''
     c = 1
     for key in kwargs.keys():
@@ -38,7 +41,9 @@ def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
     Jm = kernel.jacobian( eq_sol["point"] )
     z = kernel.function( eq_sol["point"] )
 
-    def S_matrix(vars):
+    nablah = Jm.T @ Q @ z
+
+    def S_matrix(eq_sol):
         kappas = eq_sol["kappas"]        
         sum = np.zeros([p,p])
         for k in range(p):
@@ -47,7 +52,9 @@ def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
 
         return F + eq_sol["lambda"]* Q - lambda0 * P - sum - c * np.outer(P @ z, P @ z)
 
-    pass
+    v = np.array([ nablah[1], -nablah[0] ])
+
+    return v.T @ Jm.T @ S_matrix( eq_sol ) @ Jm @ v
 
 def compute_equilibria_algorithm1(F, clf, cbf, **kwargs):
     '''
@@ -766,19 +773,23 @@ def compute_equilibria_algorithm6(plant, clf, cbf, initial_points, **kwargs):
 
     return solutions
 
-def compute_equilibria_algorithm7(plant, clf, cbf, initial_points, **kwargs):
+def compute_equilibria_algorithm7(plant, clf, cbf, initial_point, **kwargs):
     '''
     Solve the general eigenproblem of the type:
     ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0, l2 >= 0,
     l1 = c V(z) P z,
     z \in Im(m)
-    Returns:                array with equilibrium point solutions
+    Returns:                array with boundary equilibrium point solutions
     '''
     c = 1
+    max_iter = 10
     for key in kwargs.keys():
         aux_key = key.lower()
         if aux_key == "c":
             c = kwargs[key]
+            continue
+        if aux_key == "max_iter":
+            max_iter = kwargs[key]
             continue
 
     if clf._dim != cbf._dim:
@@ -816,7 +827,8 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_points, **kwargs):
         sum = np.zeros([p,p])
         for k in range(p):
             sum += kappas[k] * N_list[k]
-        return 0.5 * c * np.outer(P @ z, P @ z) - F - sum
+        L = 0.5 * c * np.outer(P @ z, P @ z) - F - sum
+        return L
 
     def linear_pencil(vars):
         z = kernel.function(vars[0:n])
@@ -824,17 +836,14 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_points, **kwargs):
         l2 = vars[-1]
         return lambda2_matrix(z, kappas) - l2 * Q
 
-    def detL_constraint(vars):
-        return np.linalg.det( linear_pencil(vars) )
-
     def Lz_constraint(vars):
         z = kernel.function(vars[0:n])
         return linear_pencil(vars) @ z
 
     def lambda2_fun(z, kappas):
-        sum = np.zeros([p,p])
-        for k in range(p):
-            sum += kappas[k] * N_list[k]
+        # sum = np.zeros([p,p])
+        # for k in range(p):
+        #     sum += kappas[k] * N_list[k]
         return z.T @ lambda2_matrix(z, kappas) @ z
 
     def lambda2_constraint(vars):
@@ -843,66 +852,288 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_points, **kwargs):
         lambda2 = vars[-1]
         return lambda2 - lambda2_fun(z, kappas)
 
-    def kappa_constraint(vars):
-        z = kernel.function(vars[0:n])
-        kappas = vars[n:n+p]
-        sum = 0.0
-        for k in range(p):
-            sum += kappas[k] * z.T @ ( N_list[k] -  N_list[k].T ) @ z
-        return sum
+    # def kappa_constraint(vars):
+    #     z = kernel.function(vars[0:n])
+    #     kappas = vars[n:n+p]
+    #     sum = 0.0
+    #     for k in range(p):
+    #         sum += kappas[k] * z.T @ ( N_list[k] -  N_list[k].T ) @ z
+    #     return sum
 
     def boundary_constraint(vars):
         z = kernel.function(vars[0:n])
         return z.T @ Q @ z - 1 # >= 0
 
+    def detL(vars):
+        detL = np.linalg.det( linear_pencil(vars) )
+        return detL
+
     def objective(vars):
         return np.hstack([
                            Lz_constraint(vars),
-                           kappa_constraint(vars),
+                           detL(vars),
                            boundary_constraint(vars),
                            lambda2_constraint(vars)
                          ])
 
-    # Initialization
-    # boundary_pts = get_boundary_points( cbf, initial_points )
+    def stability(x, l, kappa):
 
-    if np.shape(initial_points) == (n,):
-        num_pts = 1
-        initial_points = np.array([initial_points])
-    else:
-        num_pts = np.shape(initial_points)[0]
+        z = kernel.function(x)
+        Jm = kernel.jacobian(x)
+        nablah = Jm.T @ Q @ z
 
-    solutions = []
-    error_counter = 0
-    for k in range(num_pts):
+        sum = np.zeros([p,p])
+        for k in range(p):
+            sum += kappa[k] * N_list[k]
 
-        init_x = initial_points[k,:]
+        lambda0 = c * clf.function(x)
+
+        S = F + l * Q - lambda0 * P - sum - c * np.outer(P @ z, P @ z)
+        v = np.array([ nablah[1], -nablah[0] ])
+
+        return v.T @ Jm.T @ S @ Jm @ v
+
+    iterations = 0
+    while iterations < max_iter:
+
+        iterations += 1
+
+        initial_guess = find_nearest_boundary(cbf, initial_point)
+
+        init_x = initial_guess
         init_z = kernel.function(init_x)
-        a = np.zeros([1,p])
-        for i in range(p):
-            a[:,i] = init_z.T @ ( N_list[i] -  N_list[i].T ) @ init_z
-
-        init_kappas = np.zeros(p)
-        for col in null_space(a).T:
-            init_kappas += np.random.randn() * col
+        init_kappas = np.random.randn(p)
 
         init_l2 = init_z.T @ lambda2_matrix(init_z, init_kappas) @ init_z
         initial_vars = np.hstack([ init_x, init_kappas, init_l2 ])
 
         # Solve least squares problem with bounds on s and l2
+        lower_bounds = [ -np.inf for _ in range(n+p) ] + [ 0.0 ]
         try:
-            lower_bounds = [ -np.inf for _ in range(n+p) ] + [ 0.0 ]
-            LS_sol = least_squares( objective, initial_vars, method='trf', bounds=(lower_bounds, np.inf), max_nfev=1000 )
-            print(LS_sol.message)
-            if LS_sol.cost < ACCURACY:
-                sol = {"cost": LS_sol.cost, "point": LS_sol.x[0:n], "lambda": LS_sol.x[-1], "index": k, "kappas": LS_sol.x[n:n+p] }
-                solutions.append( sol )
-        except ValueError as verror:
-            error_counter += 1
-            print(verror)
-            print("Errors = "+str(error_counter))
+            LS_sol = least_squares( objective, initial_vars, method='trf', bounds=(lower_bounds, np.inf), max_nfev=500 )
+            if "unfeasible" not in LS_sol.message:
+                equilibrium_point = LS_sol.x[0:n].tolist()
+                lambda_sol = LS_sol.x[-1]
+                kappa_sol = LS_sol.x[n:n+p].tolist()
+                stability_value = stability( equilibrium_point, lambda_sol, kappa_sol )
+                return {"cost": LS_sol.cost, "point": equilibrium_point, "lambda": lambda_sol, "stability": stability_value, "kappa": kappa_sol, "boundary_start": initial_guess, "message": LS_sol.message, "iterations": iterations }
+        except:
+            continue
+    
+def compute_equilibria_algorithm8(plant, clf, cbf, initial_point, **kwargs):
+    '''
+    Compute the equilibrium points
+    '''
+    c = 1
+    max_iter = 1000
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "c":
+            c = kwargs[key]
+            continue
+        if aux_key == "max_iter":
+            max_iter = kwargs[key]
+            continue
 
-    return solutions
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    n = clf._dim
+
+    F = plant.get_F()
+    P = clf.P
+    Q = cbf.Q
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    kernel = clf.kernel
+    p = kernel.kernel_dim
+    N_list = kernel.get_N_matrices()
+
+    ACCURACY = 0.000000000001
+
+    # QP parameters
+    QP_dim = n + p + 1
+    Cost_matrix = np.eye(QP_dim)
+    Cost_matrix[n,n] = 1
+    q = np.zeros(QP_dim)
+    QP = QuadraticProgram(P=Cost_matrix, q=q)
+
+    sample_time = 1e+0
+    initial_kappa = [ 0.0 for _ in range(p) ]
+    state_dynamics = Integrator( initial_point, np.zeros(n) )
+    kappa_dynamics = Integrator( initial_kappa, np.zeros(p) )
+
+    it = 0
+    curr_kappa = initial_kappa
+    curr_state = initial_point
+    state_log = [[np.inf, np.inf]]
+
+    cost = np.linalg.norm(  curr_state - state_log[-1] )
+    while cost > 0.001 and it < max_iter:
+        it += 1
+
+        z = kernel.function(curr_state)
+        Jm = kernel.jacobian(curr_state)
+
+        a = np.zeros(p)
+        sumN = np.zeros([p,p])
+        sum_kappa = np.zeros([p,p])
+        for i in range(p):
+            a[i] = z.T @ N_list[i] @ z
+            sumN[:,i] = N_list[i] @ z
+            sum_kappa += curr_kappa[i] * N_list[i]
+
+        L = ( 0.5 * c * np.outer(P @ z, P @ z) - F + sum_kappa )
+
+        alpha = z.T @ L @ z
+        vec = alpha * Q @ z - L @ z
+        M = 2 * L + c * (z.T @ P @ z) * P
+
+        nabla_alpha_x = z.T @ M @ Jm
+        nabla_alpha_kappa = a
+
+        h = cbf.evaluate_function(*curr_state)[0]
+        nablah = cbf.evaluate_gradient(*curr_state)[0]
+
+        V1 = (1/2)*(h**2)
+        nabla_V1_x = h*nablah
+        nabla_V1_kappa = np.zeros(p)
+
+        # a_V1 = np.hstack([ nabla_V1_x, nabla_V1_kappa, -1.0 ])
+        # b_V1 = -V1
+
+        V2 = (1/2)*(np.linalg.norm(vec)**2)
+        nabla_V2_x = vec.T @ ( np.outer(Q @ z, z) @ M + alpha * Q - L - 0.5 * c * ( z.T @ P @ z * P + np.outer( P @ z, P @ z ) ) ) @ Jm
+        nabla_V2_kappa = vec.T @ ( np.outer( Q @ z, a ) - sumN )
+
+        Matrix = alpha * Q - L
+        detMatrix = np.linalg.det(Matrix)
+        A = adjugate( Matrix )
+        symmA = 0.5 * ( A + A.T )
+        trace_vec = np.zeros(p)
+        for i in range(p):
+            trace_vec[i] = np.trace( A @ N_list[i] )
+
+        V3 = (1/2)*(detMatrix**2)
+        nabla_V3_x = detMatrix * z.T @ ( np.trace(A @ Q) * M - c * P @ symmA @ P ) @ Jm
+        nabla_V3_kappa = detMatrix * ( np.trace(A @ Q) * a.T - trace_vec.T )
+
+        # a_V2 = np.hstack([ nabla_V2_x, nabla_V2_kappa, -1.0 ])
+        # b_V2 = -V2
+
+        mu1, mu2, mu3 = 1, 1, 0.01
+        V = mu1 * V1 + mu2 * V2 + mu3 * V3
+        nabla_V_x = mu1*nabla_V1_x + mu2*nabla_V2_x + mu3 * nabla_V3_x
+        nabla_V_kappa = mu1*nabla_V1_kappa + mu2*nabla_V2_kappa + mu3 * nabla_V3_kappa
+
+        a_V = np.hstack([ nabla_V_x, nabla_V_kappa, -1.0 ])
+        b_V = -V
+
+        a_lambda = -np.hstack([ nabla_alpha_x, nabla_alpha_kappa, 0.0 ])
+        b_lambda = alpha
+
+        A = np.vstack([ a_V, a_lambda ])
+        b = np.hstack([ b_V, b_lambda ])
+
+        QP.set_inequality_constraints(A, b)
+        QP_sol = QP.get_solution()
+
+        w_control = QP_sol[0:n]
+
+        # mu = 1.0
+        # w_control = - mu * (1/np.linalg.norm(nablah)**2) * nablah * np.sign( h )
+
+        kappa_control = QP_sol[n:n+p]
+        delta = QP_sol[-1]
+
+        state_dynamics.set_control(w_control)
+        state_dynamics.actuate(sample_time)
+
+        kappa_dynamics.set_control(kappa_control) 
+        kappa_dynamics.actuate(sample_time)
+
+        state_log.append( curr_state.tolist() )
+        curr_state = state_dynamics.get_state()
+        curr_kappa = kappa_dynamics.get_state()
+        cost = V
+
+    kappas = kappa_dynamics.get_state()
+    return {"cost": cost, "point": curr_state, "lambda": alpha, "kappas": kappas }, state_log
+
+def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
+    '''
+    Compute the equilibrium points
+    '''
+    c = 1
+    max_iter = 100
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "c":
+            c = kwargs[key]
+            continue
+        if aux_key == "max_iter":
+            max_iter = kwargs[key]
+            continue
+
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    n = clf._dim
+
+    F = plant.get_F()
+    P = clf.P
+    Q = cbf.Q
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    kernel = clf.kernel
+    p = kernel.kernel_dim
+    N_list = kernel.get_N_matrices()
+
+    ACCURACY = 0.000000000001
+
+    initial_kappa = [0.0 for _ in range(p)]
+
+    it = 0
+    curr_kappa = initial_kappa
+    curr_pt = initial_point
+    pt_log = []
+
+    cost = np.inf
+    while cost > 0.000001 and it < max_iter:
+        it += 1
+
+        z = kernel.function(curr_pt)
+        # Jm = kernel.jacobian(curr_pt)
+
+        sum_kappa = np.zeros([p,p])
+        for i in range(p):
+            sum_kappa += curr_kappa[i] * N_list[i]
+
+        L = ( 0.5 * c * np.outer(P @ z, P @ z) - F + sum_kappa )
+
+        pencil = LinearMatrixPencil( Q, L )
+        candidate_sols = []
+        candidate_lambdas = []
+        for k in range(len(pencil.eigenvalues)):
+
+            zk = pencil.eigenvectors[:,k]
+            lambda_k = pencil.eigenvalues[k]
+            if np.abs(zk.T @ Q @ zk - 1) > 0.0001:
+                continue
+
+            LS_sol = least_squares( lambda x : np.linalg.norm( zk - kernel.function(x) ), curr_pt)
+
+            candidate_sols.append( LS_sol.x )
+            candidate_lambdas.append( lambda_k )
+        
+        best_fit = np.argmin([ np.abs( kernel.function(sol).T @ Q @ kernel.function(sol) - 1 ) for sol in candidate_sols ])
+        curr_pt = candidate_sols[best_fit]
+        curr_lambda = candidate_lambdas[best_fit]
+
+        # LS_sol = least_squares( lambda x : np.linalg.norm( zk - kernel.function(x) ), curr_pt)
+        # curr_pt = LS_sol.x
+        pt_log.append( curr_pt )
+        cost = np.linalg.norm( (curr_lambda*Q - L) @ kernel.function(curr_pt) )
+
+    return {"cost": cost, "point": curr_pt, "lambda": curr_lambda, "kappas": [], "iterations": it }, pt_log
 
 def get_boundary_points(cbf, points, **kwargs):
     '''
@@ -957,7 +1188,61 @@ def get_boundary_points(cbf, points, **kwargs):
 
     return boundary_pts
 
-# def find_nearest_boundary(cbf, initial_point):
+def find_nearest_det(plant, clf, cbf, initial_point, **kwargs):
+    '''
+    This method finds the nearest point on the boundary of the CBF (initialization for finding equilibria)
+    '''
+    c = 1
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "c":
+            c = kwargs[key]
+            continue
+
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    n = clf._dim
+
+    F = plant.get_F()
+    P = clf.P
+    Q = cbf.Q
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    kernel = clf.kernel
+    p = kernel.kernel_dim
+    N_list = kernel.get_N_matrices()
+
+    if len(initial_point) != n:
+        raise Exception("Incorrect dimension for initial point.")
+    
+    # Optimization
+    def objective(vars):
+        x = vars[0:n]
+        return np.linalg.norm(x - initial_point)
+
+    def det_constraint(vars):
+        z = kernel.function(vars[0:n])
+        kappas = vars[n:n+p]
+
+        sum = np.zeros([p,p])
+        for k in range(p):
+            sum += kappas[k] * N_list[k]
+        L = 0.5 * c * np.outer(P @ z, P @ z) - F - sum
+
+        return np.linalg.det( z.T @ L @ z * Q - L )
+
+    constr1 = {'type': 'eq', 'fun': det_constraint}
+    sol = minimize(objective, initial_point.tolist() + [ np.random.rand() for _ in range(p) ], method='trust-constr', constraints=[ constr1 ])
+
+    if sol.success:
+        print("Initialization algorithm was a success.\n")
+        return sol.x[0:n]
+    else:
+        print("Initialization algorithm exit with the following error: \n")
+        print(sol.message)
+        return initial_point
+
+def find_nearest_boundary(cbf, initial_point):
     '''
     This method finds the nearest point on the boundary of the CBF (initialization for finding equilibria)
     '''
@@ -968,43 +1253,22 @@ def get_boundary_points(cbf, points, **kwargs):
     if len(initial_point) != n:
         raise Exception("Incorrect dimension for initial point.")
 
-    # p = kernel.kernel_dim
-    # matrices = kernel.get_matrix_constraints()
-    # num_matrices = len(matrices)
-
     # Optimization
-    # vars = [x, s]
-    def objective(vars):
-        x = vars[0:n]
-        return np.hstack([ x - initial_point, s_constraint(vars) ])
+    def objective(x):
+        return np.linalg.norm(x - initial_point)
 
-    def s_constraint(vars):
-        x = vars[0:n]
-        s = vars[-1]
-        z = kernel.function(x)
-        return s - (z.T @ Q @ z - 1)
-
-    def boundary_constraint(vars):
-        x = vars[0:n]
+    def boundary_constraint(x):
         z = kernel.function(x)
         return z.T @ Q @ z - 1
 
-    # def kernel_constraints(x):
-    #     z = kernel.function(x)
-    #     kernel_constr = [ np.eye(p)[0,:] @ z - 1 ]
-    #     kernel_constr += [ z.T @ matrices[k] @ z for k in range(num_matrices) ]
-    #     return kernel_constr
+    constr1 = {'type': 'eq', 'fun': boundary_constraint}
 
-    # constr1 = {'type': 'eq', 'fun': boundary_constraint}
-    # constr2 = {'type': 'eq', 'fun': kernel_constraints}
-
-    # sol = minimize(objective, initial_point, method='trust-constr', constraints=[ constr1 ])
-    lower_bounds = [ -np.inf for _ in range(n) ] + [ 0.0 ]
-    initial_vars = np.hstack([ initial_point, 0.0 ])
-    sol = least_squares( objective, initial_vars, bounds=(lower_bounds, np.inf) )
+    sol = minimize(objective, initial_point, method='trust-constr', constraints=[ constr1 ])
+    # sol = least_squares( lambda x : np.linalg.norm( kernel.function(x).T @ Q @ kernel.function(x) - 1 ), initial_point )
 
     if sol.success:
-        return sol.x[0:n]
+        # print("Initialization algorithm was a success.\n")
+        return sol.x[0:n].tolist()
     else:
         print("Initialization algorithm exit with the following error: \n")
         print(sol.message)

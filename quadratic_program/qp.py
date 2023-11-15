@@ -26,6 +26,7 @@ class QuadraticProgram():
         else:
             self.initialize()
         self.last_solution = None
+        self.message = None
 
     def initialize(self):
         '''
@@ -95,8 +96,9 @@ class QuadraticProgram():
         '''
         try:
             if "quadprog" in available_solvers:
-                self.last_solution = solve_qp(P=self.P, q=self.q, G=self.A, h=self.b, A=self.Aeq, b=self.beq, solver="quadprog")
+                self.last_solution = solve_qp(P=self.P, q=self.q, G=self.A, h=self.b, A=self.Aeq, b=self.beq, solver="quadprog",verbose=True)
             else:
-                self.last_solution = solve_qp(P=self.P, q=self.q, G=self.A, h=self.b, A=self.Aeq, b=self.beq, solver="daqp")
+                self.last_solution = solve_qp(P=self.P, q=self.q, G=self.A, h=self.b, A=self.Aeq, b=self.beq, solver="daqp",verbose=True)
         except Exception as error:
+            self.message = error
             print(error)

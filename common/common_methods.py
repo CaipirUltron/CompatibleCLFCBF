@@ -3,6 +3,38 @@ import numpy as np
 import itertools
 from scipy.optimize import fsolve
 
+def cofactor(A):
+    """
+    Calculate cofactor matrix of A
+    """
+    sel_rows = np.ones(A.shape[0],dtype=bool)
+    sel_columns = np.ones(A.shape[1],dtype=bool)
+    CO = np.zeros_like(A)
+    sgn_row = 1
+    for row in range(A.shape[0]):
+        # Unselect current row
+        sel_rows[row] = False
+        sgn_col = 1
+        for col in range(A.shape[1]):
+            # Unselect current column
+            sel_columns[col] = False
+            # Extract submatrix
+            MATij = A[sel_rows][:,sel_columns]
+            CO[row,col] = sgn_row*sgn_col*np.linalg.det(MATij)
+            # Reselect current column
+            sel_columns[col] = True
+            sgn_col = -sgn_col
+        sel_rows[row] = True
+        # Reselect current row
+        sgn_row = -sgn_row
+    return CO
+
+def adjugate(A):
+    """
+    Calculate adjugate matrix of A
+    """
+    return cofactor(A).T
+
 def sat(u, limits):
     '''
     Scalar saturation.

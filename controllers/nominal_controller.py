@@ -1,5 +1,5 @@
 import numpy as np
-from controllers import CLFCBFPair, compute_equilibria_algorithm7
+from controllers import CLFCBFPair, compute_equilibria_algorithm7, find_nearest_boundary
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 from common import sat
@@ -44,8 +44,8 @@ class NominalQP():
 
         self.ctrl_dt = dt
 
-        self.eq_dt = 0.5
-        self.equilibrium_points = np.zeros([0,self.state_dim])
+        self.eq_dt = 0.1
+        self.equilibria = []
         
         self.updated_timer = False
         self.timer = 0.0
@@ -59,14 +59,16 @@ class NominalQP():
         elapsed_time = self.timer - self.last_eq_t
         if elapsed_time > self.eq_dt:
             initial_guess = self.plant.get_state()
-            solutions = compute_equilibria_algorithm7( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
-            if len(solutions) > 0:
-                for sol in solutions:
-                    eq_point = sol["point"]
-                    new_pt = np.array(eq_point)
-                    if np.any( np.linalg.norm(new_pt - self.equilibrium_points) <= 0.0000001 ):
-                        continue
-                    self.equilibrium_points = np.vstack([ self.equilibrium_points, new_pt ])
+            eq_sol = compute_equilibria_algorithm7( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
+            if eq_sol != None:
+                eq_pt = np.array(eq_sol["point"])
+                eq_pts = np.array([ eq["point"] for eq in self.equilibria ])
+                if len(eq_pts) > 0:
+                    if np.all( np.linalg.norm(eq_pt - eq_pts, axis=1) > 0.0000001 ):
+                        self.equilibria.append(eq_sol)
+                else:
+                    self.equilibria.append(eq_sol)
+
             self.last_eq_t = self.timer
 
     def get_control(self):

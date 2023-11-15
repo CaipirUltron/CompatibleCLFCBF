@@ -5,7 +5,7 @@ from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
 from common import create_quadratic, rot2D
 
-initial_state = [-6.2, 6.0]
+initial_state = [+3.2, 3.0]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
@@ -23,7 +23,8 @@ def g(state):
 plant = ConservativeAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
 
 # ---------------------------------------------------- Define CLF ----------------------------------------------------------
-points_dict = { 2.0: [ [0.0, 2.0], [4.0, 1.0], [2.0, -2.0], [-2.0, -2.0], [-4.0, 1.0], [0.0, -4.0] ] }
+points_dict = { 2.0: [ [0.0, 2.0], [4.0, 1.0], [2.0, -2.0], [-2.0, -2.0], [-4.0, 1.0], [0.0, -4.0] ], 
+                0.0: [ [0.0, -2.0] ] }
 clf = KernelLyapunov(*initial_state, kernel=kernel, points = points_dict)
 
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
