@@ -1,6 +1,7 @@
 import time
 import scipy
 import numpy as np
+import cvxpy as cp
 
 from scipy import signal
 from scipy.optimize import fsolve, root, least_squares, minimize
@@ -804,6 +805,7 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_point, **kwargs):
     kernel = clf.kernel
     p = kernel.kernel_dim
     N_list = kernel.get_N_matrices()
+    q = len(N_list)
 
     # Optimization
     ACCURACY = 0.000000000001
@@ -825,14 +827,14 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_point, **kwargs):
 
     def lambda2_matrix(z, kappas):
         sum = np.zeros([p,p])
-        for k in range(p):
+        for k in range(q):
             sum += kappas[k] * N_list[k]
         L = 0.5 * c * np.outer(P @ z, P @ z) - F - sum
         return L
 
     def linear_pencil(vars):
         z = kernel.function(vars[0:n])
-        kappas = vars[n:n+p]
+        kappas = vars[n:n+q]
         l2 = vars[-1]
         return lambda2_matrix(z, kappas) - l2 * Q
 
@@ -848,7 +850,7 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_point, **kwargs):
 
     def lambda2_constraint(vars):
         z = kernel.function(vars[0:n])
-        kappas = vars[n:n+p]
+        kappas = vars[n:n+q]
         lambda2 = vars[-1]
         return lambda2 - lambda2_fun(z, kappas)
 
@@ -877,13 +879,12 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_point, **kwargs):
                          ])
 
     def stability(x, l, kappa):
-
         z = kernel.function(x)
         Jm = kernel.jacobian(x)
         nablah = Jm.T @ Q @ z
 
         sum = np.zeros([p,p])
-        for k in range(p):
+        for k in range(q):
             sum += kappa[k] * N_list[k]
 
         lambda0 = c * clf.function(x)
@@ -899,22 +900,23 @@ def compute_equilibria_algorithm7(plant, clf, cbf, initial_point, **kwargs):
         iterations += 1
 
         initial_guess = find_nearest_boundary(cbf, initial_point)
+        # initial_guess = initial_point.tolist()
 
         init_x = initial_guess
         init_z = kernel.function(init_x)
-        init_kappas = np.random.randn(p)
+        init_kappas = np.random.randn(q)
 
         init_l2 = init_z.T @ lambda2_matrix(init_z, init_kappas) @ init_z
         initial_vars = np.hstack([ init_x, init_kappas, init_l2 ])
 
         # Solve least squares problem with bounds on s and l2
-        lower_bounds = [ -np.inf for _ in range(n+p) ] + [ 0.0 ]
+        lower_bounds = [ -np.inf for _ in range(n+q) ] + [ 0.0 ]
         try:
             LS_sol = least_squares( objective, initial_vars, method='trf', bounds=(lower_bounds, np.inf), max_nfev=500 )
             if "unfeasible" not in LS_sol.message:
                 equilibrium_point = LS_sol.x[0:n].tolist()
                 lambda_sol = LS_sol.x[-1]
-                kappa_sol = LS_sol.x[n:n+p].tolist()
+                kappa_sol = LS_sol.x[n:n+q].tolist()
                 stability_value = stability( equilibrium_point, lambda_sol, kappa_sol )
                 return {"cost": LS_sol.cost, "point": equilibrium_point, "lambda": lambda_sol, "stability": stability_value, "kappa": kappa_sol, "boundary_start": initial_guess, "message": LS_sol.message, "iterations": iterations }
         except:
@@ -1065,6 +1067,7 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
     '''
     c = 1
     max_iter = 100
+    delta = 1e-6
     for key in kwargs.keys():
         aux_key = key.lower()
         if aux_key == "c":
@@ -1072,6 +1075,9 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
             continue
         if aux_key == "max_iter":
             max_iter = kwargs[key]
+            continue
+        if aux_key == "delta":
+            delta = kwargs[key]
             continue
 
     if clf._dim != cbf._dim:
@@ -1086,10 +1092,44 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
     kernel = clf.kernel
     p = kernel.kernel_dim
     N_list = kernel.get_N_matrices()
+    r = len(N_list)
 
-    ACCURACY = 0.000000000001
+    def L(x, kappa):
+        z = kernel.function(x)
+        sum_kappa = np.zeros([p,p])
+        for i in range(r):
+            sum_kappa += kappa[i] * N_list[i]
+        return 0.5 * c * np.outer(P @ z, P @ z) - F - sum_kappa
 
-    initial_kappa = [0.0 for _ in range(p)]
+    def cost_function(l, x, kappa):
+        z = kernel.function(x)
+        return 0.5 * np.linalg.norm( (l*Q - L(x, kappa)) @ z )**2
+
+    def cost_gradient_x(l, x, kappa):
+        z = kernel.function(x)
+        Jm = kernel.jacobian(x)
+
+        w = (l*Q - L(x, kappa)) @ z
+        Jw_x = - 0.5 * c * ( z.T @ P @ z * np.eye(p,p) + P @ np.outer(z,z) ) @ P @ Jm + (l*Q - L(x, kappa)) @ Jm
+
+        return Jw_x.T @ w
+
+    def cost_gradient_kappa(l, x, kappa):
+        z = kernel.function(x)
+
+        Jw_kappa = np.zeros([p,r])
+        for i in range(r):
+            Jw_kappa[:,i] = N_list[i] @ z
+        w = (l*Q - L(x, kappa)) @ z
+
+        return Jw_kappa.T @ w
+
+    kappa_var = cp.Variable(r)
+    kappa_param = cp.Parameter(r)
+    obj_kappa_probl = cp.Minimize( cp.norm( kappa_var - kappa_param ) )
+
+    ACCURACY = 1e-6
+    initial_kappa = [np.random.rand() for _ in range(r)]
 
     it = 0
     curr_kappa = initial_kappa
@@ -1097,43 +1137,53 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
     pt_log = []
 
     cost = np.inf
-    while cost > 0.000001 and it < max_iter:
+    next_pt = np.array([np.inf, np.inf])
+    while cost > ACCURACY and it < max_iter:
         it += 1
 
-        z = kernel.function(curr_pt)
-        # Jm = kernel.jacobian(curr_pt)
+        # Compute kappa
+        kappa_param.value = curr_kappa
+        constr_kappa = [ L(curr_pt, np.zeros(r)) - cp.sum([ kappa_var[k] * N_list[k] for k in range(r) ]) >> 0 ]
+        kappa_probl = cp.Problem(obj_kappa_probl, constr_kappa)
+        kappa_probl.solve()
+        if kappa_probl.status in ["infeasible", "unbounded"]:
+            raise Exception("Kappa problem is " + kappa_probl.status)
+        curr_kappa = kappa_var.value.tolist()
 
-        sum_kappa = np.zeros([p,p])
-        for i in range(p):
-            sum_kappa += curr_kappa[i] * N_list[i]
-
-        L = ( 0.5 * c * np.outer(P @ z, P @ z) - F + sum_kappa )
-
-        pencil = LinearMatrixPencil( Q, L )
-        candidate_sols = []
-        candidate_lambdas = []
+        # Compute pencil
+        pencil = LinearMatrixPencil( Q, L(curr_pt, curr_kappa) )
+        lambdas, candidate_next_pts, candidate_next_kappas, candidate_costs = [], [], [], []
         for k in range(len(pencil.eigenvalues)):
-
             zk = pencil.eigenvectors[:,k]
             lambda_k = pencil.eigenvalues[k]
-            if np.abs(zk.T @ Q @ zk - 1) > 0.0001:
+
+            if np.abs(zk.T @ Q @ zk - 1) > 1e-1 and lambda_k < 1e-2:
                 continue
+            lambdas.append( lambda_k )
+            
+            # Update curr_pt
+            nabla_x_cost = cost_gradient_x( lambda_k, curr_pt, curr_kappa )
+            nabla_kappa_cost = cost_gradient_kappa( lambda_k, curr_pt, curr_kappa )
+            delta = .99
+            
+            next_pt = curr_pt - delta * nabla_x_cost/np.linalg.norm(nabla_x_cost)
+            next_kappa = curr_kappa - delta * nabla_kappa_cost/np.linalg.norm(nabla_kappa_cost)
 
-            LS_sol = least_squares( lambda x : np.linalg.norm( zk - kernel.function(x) ), curr_pt)
+            candidate_next_pts.append( next_pt )
+            candidate_next_kappas.append( next_kappa )
+            candidate_costs.append( cost_function( lambda_k, next_pt, next_kappa ) )
 
-            candidate_sols.append( LS_sol.x )
-            candidate_lambdas.append( lambda_k )
-        
-        best_fit = np.argmin([ np.abs( kernel.function(sol).T @ Q @ kernel.function(sol) - 1 ) for sol in candidate_sols ])
-        curr_pt = candidate_sols[best_fit]
-        curr_lambda = candidate_lambdas[best_fit]
+        index = np.argmin( candidate_costs )
+        curr_lambda = lambdas[index]
+        curr_pt = candidate_next_pts[index].tolist()
+        curr_kappa = candidate_next_kappas[index].tolist()
+        cost = candidate_costs[index]
 
-        # LS_sol = least_squares( lambda x : np.linalg.norm( zk - kernel.function(x) ), curr_pt)
-        # curr_pt = LS_sol.x
+        print("Cost = " + str(cost_function( curr_lambda, curr_pt, curr_kappa )))
+
         pt_log.append( curr_pt )
-        cost = np.linalg.norm( (curr_lambda*Q - L) @ kernel.function(curr_pt) )
-
-    return {"cost": cost, "point": curr_pt, "lambda": curr_lambda, "kappas": [], "iterations": it }, pt_log
+        
+    return {"cost": cost, "point": curr_pt, "lambda": curr_lambda, "kappas": curr_kappa, "iterations": it }, pt_log
 
 def get_boundary_points(cbf, points, **kwargs):
     '''
@@ -1724,7 +1774,7 @@ class LinearMatrixPencil():
         Given the pencil matrices A and B, this method solves the pencil eigenvalue problem.
         '''
         # Compute the sorted pencil eigenvalues
-        schurHv, schurHh, _, _, Q, Z = scipy.linalg.ordqz(self._B, self._A)
+        schurHv, schurHh, _, _, Q, Z = scipy.linalg.ordqz( self._B, self._A )
         self.lambda1 = np.diag(schurHh)
         self.lambda2 = np.diag(schurHv)
         pencil_eig = self.lambda2/self.lambda1

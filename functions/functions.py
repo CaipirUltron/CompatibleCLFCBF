@@ -731,7 +731,7 @@ class KernelQuadratic(Function):
                     raise Exception("Matrix of coefficients must be a two-dimensional array.")
                 if matrix_shape[0] != matrix_shape[1]:
                     raise Exception("Matrix of coefficients must be a square.")
-                if not np.all(np.linalg.eigvals(matrix_coefs) >= 0):
+                if not np.all(np.linalg.eigvals(matrix_coefs) >= -1e-10):
                     raise Exception("Matrix of coefficients must be positive semi-definite.")
                 if not np.all( matrix_coefs == matrix_coefs.T ):
                     raise Warning("Matrix of coefficients is not symmetric. The symmetric part will be used.")
