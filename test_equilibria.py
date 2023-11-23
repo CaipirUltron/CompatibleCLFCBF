@@ -26,7 +26,7 @@ plotSim.plot_frame(9.0)
 #     print(str(eq["point"]) + " with and stability value = " + str(eq["stability"]))
 #     plotSim.main_ax.plot( eq["point"][0], eq["point"][1], 'ro' )
 
-initial_guess = sim.initial_state
+initial_guess = [-1, 1]
 plotSim.main_ax.plot( initial_guess[0], initial_guess[1], 'g*' )
 
 solution, pt_log = compute_equilibria_using_pencil(sim.plant, sim.clf, sim.cbf, initial_guess, c = 1)

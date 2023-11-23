@@ -92,7 +92,7 @@ class NominalQP():
         self.QP_sol = self.QP.get_solution()
         control = self.QP_sol[0:self.control_dim,]
 
-        self.get_equilibria()
+        # self.get_equilibria()
 
         return control
 

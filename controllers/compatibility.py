@@ -1066,7 +1066,7 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
     Compute the equilibrium points
     '''
     c = 1
-    max_iter = 100
+    max_iter = 1000
     delta = 1e-6
     for key in kwargs.keys():
         aux_key = key.lower()
@@ -1094,41 +1094,62 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
     N_list = kernel.get_N_matrices()
     r = len(N_list)
 
-    def L(x, kappa):
+    def L_fun(x, kappa):
+        '''
+        L matrix
+        '''
         z = kernel.function(x)
         sum_kappa = np.zeros([p,p])
         for i in range(r):
             sum_kappa += kappa[i] * N_list[i]
         return 0.5 * c * np.outer(P @ z, P @ z) - F - sum_kappa
 
-    def cost_function(l, x, kappa):
-        z = kernel.function(x)
-        return 0.5 * np.linalg.norm( (l*Q - L(x, kappa)) @ z )**2
+    def cost_function(x, z):
+        '''
+        Cost function to be minimized
+        '''
+        return np.linalg.norm( kernel.function(x) - z )
 
-    def cost_gradient_x(l, x, kappa):
-        z = kernel.function(x)
-        Jm = kernel.jacobian(x)
+    def cost_gradient_x(x, kappa, l, z):
+        '''
+        Gradient of the cost function
+        '''
+        m = kernel.function(x)
+        dm_dx = kernel.jacobian(x)
 
-        w = (l*Q - L(x, kappa)) @ z
-        Jw_x = - 0.5 * c * ( z.T @ P @ z * np.eye(p,p) + P @ np.outer(z,z) ) @ P @ Jm + (l*Q - L(x, kappa)) @ Jm
+        zzT = np.outer(z,z)
+        ProjQ = np.eye(p) - Q @ zzT
 
-        return Jw_x.T @ w
+        L = L_fun(x, kappa)
+        symL = L + L.T
+        dz_dx = 0.5 * c * np.linalg.inv( l*Q - L + Q @ zzT @ symL ) @ ProjQ @ ( m.T @ P @ z * np.eye(p) + P @ zzT ) @ P @ dm_dx
 
-    def cost_gradient_kappa(l, x, kappa):
-        z = kernel.function(x)
+        return (dm_dx - dz_dx).T @ (kernel.function(x) - z)
 
-        Jw_kappa = np.zeros([p,r])
-        for i in range(r):
-            Jw_kappa[:,i] = N_list[i] @ z
-        w = (l*Q - L(x, kappa)) @ z
+    # def cost_gradient_x(l, x, kappa):
+    #     z = kernel.function(x)
+    #     Jm = kernel.jacobian(x)
 
-        return Jw_kappa.T @ w
+    #     w = (l*Q - L(x, kappa)) @ z
+    #     Jw_x = - 0.5 * c * ( z.T @ P @ z * np.eye(p,p) + P @ np.outer(z,z) ) @ P @ Jm + (l*Q - L(x, kappa)) @ Jm
+
+    #     return Jw_x.T @ w
+
+    # def cost_gradient_kappa(l, x, kappa):
+    #     z = kernel.function(x)
+
+    #     Jw_kappa = np.zeros([p,r])
+    #     for i in range(r):
+    #         Jw_kappa[:,i] = N_list[i] @ z
+    #     w = (l*Q - L(x, kappa)) @ z
+
+    #     return Jw_kappa.T @ w
 
     kappa_var = cp.Variable(r)
     kappa_param = cp.Parameter(r)
     obj_kappa_probl = cp.Minimize( cp.norm( kappa_var - kappa_param ) )
 
-    ACCURACY = 1e-6
+    ACCURACY = 1e-3
     initial_kappa = [np.random.rand() for _ in range(r)]
 
     it = 0
@@ -1142,8 +1163,8 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
         it += 1
 
         # Compute kappa
-        kappa_param.value = curr_kappa
-        constr_kappa = [ L(curr_pt, np.zeros(r)) - cp.sum([ kappa_var[k] * N_list[k] for k in range(r) ]) >> 0 ]
+        kappa_param.value = np.zeros(r)
+        constr_kappa = [ L_fun(curr_pt, np.zeros(r)) - cp.sum([ kappa_var[k] * N_list[k] for k in range(r) ]) >> 0 ]
         kappa_probl = cp.Problem(obj_kappa_probl, constr_kappa)
         kappa_probl.solve()
         if kappa_probl.status in ["infeasible", "unbounded"]:
@@ -1151,39 +1172,51 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
         curr_kappa = kappa_var.value.tolist()
 
         # Compute pencil
-        pencil = LinearMatrixPencil( Q, L(curr_pt, curr_kappa) )
+        pencil = LinearMatrixPencil( Q, L_fun(curr_pt, curr_kappa) )
         lambdas, candidate_next_pts, candidate_next_kappas, candidate_costs = [], [], [], []
         for k in range(len(pencil.eigenvalues)):
-            zk = pencil.eigenvectors[:,k]
-            lambda_k = pencil.eigenvalues[k]
 
-            if np.abs(zk.T @ Q @ zk - 1) > 1e-1 and lambda_k < 1e-2:
+            lambda_k = pencil.eigenvalues[k]
+            zk = pencil.eigenvectors[:,k]
+
+            if np.abs(zk.T @ Q @ zk - 1) > 1e-3 and lambda_k < 1e-2:
                 continue
-            lambdas.append( lambda_k )
             
             # Update curr_pt
-            nabla_x_cost = cost_gradient_x( lambda_k, curr_pt, curr_kappa )
-            nabla_kappa_cost = cost_gradient_kappa( lambda_k, curr_pt, curr_kappa )
-            delta = .99
-            
-            next_pt = curr_pt - delta * nabla_x_cost/np.linalg.norm(nabla_x_cost)
-            next_kappa = curr_kappa - delta * nabla_kappa_cost/np.linalg.norm(nabla_kappa_cost)
+            nabla_x_cost = cost_gradient_x( curr_pt, curr_kappa, lambda_k, zk )
+            # nabla_kappa_cost = cost_gradient_kappa( lambda_k, curr_pt, curr_kappa )
+            delta = 1/(it+1)
 
+            next_pt = curr_pt - delta * nabla_x_cost
+            # next_kappa = curr_kappa - delta * nabla_kappa_cost
+            
+            lambdas.append( lambda_k )
             candidate_next_pts.append( next_pt )
-            candidate_next_kappas.append( next_kappa )
-            candidate_costs.append( cost_function( lambda_k, next_pt, next_kappa ) )
+            # candidate_next_kappas.append( next_kappa )
+            candidate_costs.append( cost_function( next_pt, zk ) )
 
         index = np.argmin( candidate_costs )
         curr_lambda = lambdas[index]
         curr_pt = candidate_next_pts[index].tolist()
-        curr_kappa = candidate_next_kappas[index].tolist()
+        # curr_kappa = candidate_next_kappas[index].tolist()
         cost = candidate_costs[index]
 
-        print("Cost = " + str(cost_function( curr_lambda, curr_pt, curr_kappa )))
-
+        print("Cost = " + str(cost))
         pt_log.append( curr_pt )
         
     return {"cost": cost, "point": curr_pt, "lambda": curr_lambda, "kappas": curr_kappa, "iterations": it }, pt_log
+
+'''
+Implement L + L.T >> 0 (the symmetric version of L must be p.s.d.)
+Compute grad_kappa_k through the following opt. problem:
+min || grad_kappa_k - grad_kappa_k_NOM ||^2
+s.t L(x,kappa_k+1) + L(x,kappa_k+1).T >> 0
+where:
+(i) grad_kappa_k_NOM is known
+(ii) kappa_k+1 = kappa_k - delta * grad_kappa_k is the next kappa value
+
+This way, kappa evolves towards the solutions that keep L p.s.d 
+'''
 
 def get_boundary_points(cbf, points, **kwargs):
     '''
