@@ -1065,21 +1065,6 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
     '''
     Compute the equilibrium points
     '''
-    c = 1
-    max_iter = 1000
-    delta = 1e-6
-    for key in kwargs.keys():
-        aux_key = key.lower()
-        if aux_key == "c":
-            c = kwargs[key]
-            continue
-        if aux_key == "max_iter":
-            max_iter = kwargs[key]
-            continue
-        if aux_key == "delta":
-            delta = kwargs[key]
-            continue
-
     if clf._dim != cbf._dim:
         raise Exception("CLF and CBF must have the same dimension.")
     n = clf._dim
@@ -1094,117 +1079,168 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
     N_list = kernel.get_N_matrices()
     r = len(N_list)
 
+    ACCURACY = 1e-3
+
+    c = 1
+    max_iter = 1000
+    delta = 1e-1
+    initial_kappa = [np.random.rand() for _ in range(r)]
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "c":
+            c = kwargs[key]
+            continue
+        if aux_key == "max_iter":
+            max_iter = kwargs[key]
+            continue
+        if aux_key == "delta":
+            delta = kwargs[key]
+            continue
+        if aux_key == "initial_kappa":
+            initial_kappa = kwargs[key]
+
     def L_fun(x, kappa):
         '''
-        L matrix
+        L = 0.5 c P m(x) m(x).T P - F - SUM κ_i N_i
         '''
-        z = kernel.function(x)
+        m = kernel.function(x)
         sum_kappa = np.zeros([p,p])
         for i in range(r):
             sum_kappa += kappa[i] * N_list[i]
-        return 0.5 * c * np.outer(P @ z, P @ z) - F - sum_kappa
+        return 0.5 * c * np.outer(P @ m, P @ m) - F - sum_kappa
 
     def cost_function(x, z):
         '''
-        Cost function to be minimized
+        Cost function
         '''
         return np.linalg.norm( kernel.function(x) - z )
 
     def cost_gradient_x(x, kappa, l, z):
         '''
-        Gradient of the cost function
+        Gradient of the cost function ||m(x) - z||^2 w.r.t. x, where z is an eigenvector of the pencil (λ Q - L)
         '''
         m = kernel.function(x)
-        dm_dx = kernel.jacobian(x)
+        dm_dx = kernel.jacobian(x)  
 
         zzT = np.outer(z,z)
         ProjQ = np.eye(p) - Q @ zzT
 
         L = L_fun(x, kappa)
         symL = L + L.T
-        dz_dx = 0.5 * c * np.linalg.inv( l*Q - L + Q @ zzT @ symL ) @ ProjQ @ ( m.T @ P @ z * np.eye(p) + P @ zzT ) @ P @ dm_dx
+        Omega = l*Q - L + Q @ zzT @ symL
+        dz_dx = 0.5 * c * np.linalg.inv(Omega) @ ProjQ @ ( m.T @ P @ z * np.eye(p) + P @ np.outer(m,z) ) @ P @ dm_dx
 
         return (dm_dx - dz_dx).T @ (kernel.function(x) - z)
 
-    # def cost_gradient_x(l, x, kappa):
-    #     z = kernel.function(x)
-    #     Jm = kernel.jacobian(x)
+    def cost_gradient_kappa(x, kappa, l, z):
+        '''
+        Gradient of the cost function ||m(x) - z||^2 w.r.t. κ, where z is an eigenvector of the pencil (λ Q - L)
+        '''
+        zzT = np.outer(z,z)
+        ProjQ = np.eye(p) - Q @ zzT
 
-    #     w = (l*Q - L(x, kappa)) @ z
-    #     Jw_x = - 0.5 * c * ( z.T @ P @ z * np.eye(p,p) + P @ np.outer(z,z) ) @ P @ Jm + (l*Q - L(x, kappa)) @ Jm
+        L = L_fun(x, kappa)
+        symL = L + L.T
+        Omega = l*Q - L + Q @ zzT @ symL
 
-    #     return Jw_x.T @ w
+        dz_dkappa = np.zeros([p, r])
+        for i in range(r):
+            dz_dkappa[:,i] = - np.linalg.inv(Omega) @ ProjQ @ N_list[i] @ z 
 
-    # def cost_gradient_kappa(l, x, kappa):
-    #     z = kernel.function(x)
+        return -dz_dkappa.T @ (kernel.function(x) - z)
 
-    #     Jw_kappa = np.zeros([p,r])
-    #     for i in range(r):
-    #         Jw_kappa[:,i] = N_list[i] @ z
-    #     w = (l*Q - L(x, kappa)) @ z
-
-    #     return Jw_kappa.T @ w
-
-    kappa_var = cp.Variable(r)
+    '''
+    Setup cvxpy problem
+    '''
+    decision_var = cp.Variable(r)
+    cost_center_param = cp.Parameter(r)
     kappa_param = cp.Parameter(r)
-    obj_kappa_probl = cp.Minimize( cp.norm( kappa_var - kappa_param ) )
+    delta_param = cp.Parameter()
+    mmT_param = cp.Parameter((p,p), symmetric=True)
 
-    ACCURACY = 1e-3
-    initial_kappa = [np.random.rand() for _ in range(r)]
+    objective = cp.Minimize( cp.norm( decision_var - cost_center_param ) )
+    constraint = [ c * P @ mmT_param @ P - 2 * F
+                    - cp.sum([ kappa_param[k] * (N_list[k] + N_list[k].T) for k in range(r) ]) 
+                    + delta_param * cp.sum([ decision_var[k] * (N_list[k] + N_list[k].T) for k in range(r) ]) >> 0 ]
+    problem = cp.Problem(objective, constraint)
+    '''
+    First, solve min ||κ - κ_initial|| s.t. L(x,κ) + L(x,κ).T >= 0, for κ
+    '''
+    cost_center_param.value = initial_kappa
+    m_initial = kernel.function(initial_point)
+    mmT_param.value = np.outer(m_initial,m_initial)
+    kappa_param.value = np.zeros(r)
+    delta_param.value = -1
+    problem.solve()
+
+    curr_kappa = decision_var.value
+    curr_pt = initial_point
 
     it = 0
-    curr_kappa = initial_kappa
-    curr_pt = initial_point
-    pt_log = []
-
+    pt_log, kappa_log = [], []
     cost = np.inf
-    next_pt = np.array([np.inf, np.inf])
+    delta = 1e-2
     while cost > ACCURACY and it < max_iter:
         it += 1
-
-        # Compute kappa
-        kappa_param.value = np.zeros(r)
-        constr_kappa = [ L_fun(curr_pt, np.zeros(r)) - cp.sum([ kappa_var[k] * N_list[k] for k in range(r) ]) >> 0 ]
-        kappa_probl = cp.Problem(obj_kappa_probl, constr_kappa)
-        kappa_probl.solve()
-        if kappa_probl.status in ["infeasible", "unbounded"]:
-            raise Exception("Kappa problem is " + kappa_probl.status)
-        curr_kappa = kappa_var.value.tolist()
-
-        # Compute pencil
+        delta = 0.2
+        m = kernel.function(curr_pt)
+        mmT = np.outer(m,m)
+        '''
+        The pencil (λ Q - L) must have non-negative spectra.
+        '''
         pencil = LinearMatrixPencil( Q, L_fun(curr_pt, curr_kappa) )
-        lambdas, candidate_next_pts, candidate_next_kappas, candidate_costs = [], [], [], []
+        eigenvalues, eigenvectors = [], []
         for k in range(len(pencil.eigenvalues)):
 
-            lambda_k = pencil.eigenvalues[k]
-            zk = pencil.eigenvectors[:,k]
+            eigenvalue = pencil.eigenvalues[k]
+            eigenvector = pencil.eigenvectors[:,k]
 
-            if np.abs(zk.T @ Q @ zk - 1) > 1e-3 and lambda_k < 1e-2:
+            # Filters the useless ones
+            if np.abs(eigenvector.T @ Q @ eigenvector - 1) > 1e-6 or eigenvalue < 1e-6:
                 continue
-            
-            # Update curr_pt
-            nabla_x_cost = cost_gradient_x( curr_pt, curr_kappa, lambda_k, zk )
-            # nabla_kappa_cost = cost_gradient_kappa( lambda_k, curr_pt, curr_kappa )
-            delta = 1/(it+1)
 
-            next_pt = curr_pt - delta * nabla_x_cost
-            # next_kappa = curr_kappa - delta * nabla_kappa_cost
-            
-            lambdas.append( lambda_k )
-            candidate_next_pts.append( next_pt )
-            # candidate_next_kappas.append( next_kappa )
-            candidate_costs.append( cost_function( next_pt, zk ) )
-
-        index = np.argmin( candidate_costs )
-        curr_lambda = lambdas[index]
-        curr_pt = candidate_next_pts[index].tolist()
-        # curr_kappa = candidate_next_kappas[index].tolist()
-        cost = candidate_costs[index]
-
-        print("Cost = " + str(cost))
-        pt_log.append( curr_pt )
+            eigenvalues.append( eigenvalue )
+            eigenvectors.append( eigenvector )
         
-    return {"cost": cost, "point": curr_pt, "lambda": curr_lambda, "kappas": curr_kappa, "iterations": it }, pt_log
+        '''
+        Then, solve min ||∇κ - ∇κ_nom|| s.t. L(x,κ) + L(x,κ).T + δ SUM ∇κ_i (N_i + N_i.T) >= 0, for ∇κ
+        for each of the valid eigenpairs
+        '''
+        candidate_gradients, candidate_costs = [], []
+        for k in range(len(eigenvalues)):
+
+            l = eigenvalues[k]
+            z = eigenvectors[k]
+
+            cost_center_param.value = cost_gradient_kappa( curr_pt, curr_kappa, l, z )
+            mmT_param.value = mmT
+            kappa_param.value = curr_kappa
+            delta_param.value = delta
+            problem.solve()
+            if problem.status in ["infeasible", "unbounded"]:
+                raise Exception("Kappa problem is " + problem.status)
+            
+            candidate_gradients.append(decision_var.value)
+            candidate_costs.append( cost_function(curr_pt, z) )
+        
+        '''
+        Select best cost
+        '''
+        opt_index = np.argmin(candidate_costs)
+        grad_kappa = candidate_gradients[opt_index]
+        l = eigenvalues[opt_index]
+        z = eigenvectors[opt_index]
+
+        curr_kappa -= delta * grad_kappa
+        curr_pt -= delta * cost_gradient_x( curr_pt, curr_kappa, l, z )
+
+        cost = cost_function(curr_pt, z)
+
+        print("Cost = " + str(cost), ", λ = " + str(l), ", zQz = " + str( z.T @ Q @ z ))
+        pt_log.append( curr_pt )
+        kappa_log.append( curr_kappa )
+        
+    return {"cost": cost, "point": curr_pt, "kappas": curr_kappa, "lambda": l, "iterations": it }, pt_log, kappa_log
 
 '''
 Implement L + L.T >> 0 (the symmetric version of L must be p.s.d.)

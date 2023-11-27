@@ -29,7 +29,7 @@ plotSim.plot_frame(9.0)
 initial_guess = [-1, 1]
 plotSim.main_ax.plot( initial_guess[0], initial_guess[1], 'g*' )
 
-solution, pt_log = compute_equilibria_using_pencil(sim.plant, sim.clf, sim.cbf, initial_guess, c = 1)
+solution, pt_log, kappa_log = compute_equilibria_using_pencil(sim.plant, sim.clf, sim.cbf, initial_guess, c = 1)
 # plotSim.main_ax.plot( solution["boundary_start"][0], solution["boundary_start"][1], 'ko' )
 
 if solution != None:
