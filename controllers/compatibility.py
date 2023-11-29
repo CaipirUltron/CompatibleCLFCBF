@@ -6,6 +6,7 @@ import cvxpy as cp
 from scipy import signal
 from scipy.optimize import fsolve, root, least_squares, minimize
 from scipy.linalg import null_space
+from numpy.polynomial import polynomial as poly
 from quadratic_program import QuadraticProgram
 from dynamic_systems import Integrator
 from common import adjugate
@@ -1830,7 +1831,7 @@ class LinearMatrixPencil2():
 
 class LinearMatrixPencil():
     '''
-    Class for regular, symmetric linear matrix pencils of the form H(\lambda) = mu1 A - mu2 B, where A and B are p.s.d. matrices
+    Class for regular linear matrix pencils of the form P(λ) = λ A - B or P(l1,l2) = l1 A - l2 B : λ = l1/l2
     '''
     def __init__(self, A, B, **kwargs):
         self._shapeA = None
@@ -1873,33 +1874,61 @@ class LinearMatrixPencil():
         '''
         Returns pencil value.
         '''
-        return lambda2_param * self._A - lambda1_param * self._B
+        return lambda1_param * self._A - lambda2_param * self._B
 
     def compute_eig(self):
         '''
-        Given the pencil matrices A and B, this method solves the pencil eigenvalue problem.
+        This method solves the generalized eigenvalue problem for matrices A,B
         '''
-        # Compute the sorted pencil eigenvalues
-        schurHv, schurHh, _, _, Q, Z = scipy.linalg.ordqz( self._B, self._A )
-        self.lambda1 = np.diag(schurHh)
-        self.lambda2 = np.diag(schurHv)
-        pencil_eig = self.lambda2/self.lambda1
-        sorted_args = np.argsort(pencil_eig)
+        # Schur decomposition of A and B
+        schurA, schurB, _, _, Q, Z = scipy.linalg.ordqz( self._A, self._B )
 
-        # Compute the pencil eigenvectors
-        pencil_eigenvectors = np.zeros([self.dim,self.dim])
-        for k in range(len(pencil_eig)):
-            P = self.value_double(self.lambda1[k], self.lambda2[k])
+        # Compute the corresponding pencil eigenvalues from the Schur decomposition
+        lambda1, lambda2, pencil_eigs = [], [], []
+        k = 0
+        while k <= self.dim-1:
+            
+            if k == self.dim-1:
+                lambda1.append(schurB[k,k])
+                lambda2.append(schurA[k,k])
+                pencil_eigs.append(schurB[k,k]/schurA[k,k])
+                k+=1
+                continue
 
+            if schurA[k+1,k] != 0:
+                blockA = schurA[k:k+2,k:k+2]
+                blockB = schurB[k:k+2,k:k+2]
 
+                polynomial = poly.polysub( poly.polymul([-blockB[0,0], blockA[0,0] ], [-blockB[1,1], blockA[1,1] ]), [0.0, 0.0, blockA[1,0]*blockA[0,1] ] )
+                pencil_eigs += poly.polyroots(polynomial).tolist()
+                lambda1 += [ None, None ]
+                lambda2 += [ None, None ]
+                k+=2
+            else:
+                lambda1.append(schurB[k,k])
+                lambda2.append(schurA[k,k])
+                pencil_eigs.append(schurB[k,k]/schurA[k,k])
+                k+=1
+
+        # Finds sorting order
+        # sorted_args = np.argsort(pencil_eigs)
+
+        # Compute the corresponding pencil eigenvectors
+        pencil_eigenvectors = np.zeros([self.dim,self.dim], dtype="complex_")
+        for k in range(len(pencil_eigs)):
+
+            if lambda1[k] != None:
+                P = self.value_double(lambda1[k], lambda2[k])   # more accurate
+            else:
+                P = self.value(pencil_eigs[k])
 
             N = null_space(P)
-            print("lambda1 = " + str(self.lambda1[k]))
-            print("lambda2 = " + str(self.lambda2[k]))
-            print("Eigs of P = " + str(np.linalg.eigvals(P)) )
-            print("null space = " + str(N))
+
             n = N[:,0]
-            normalization_const = 1.0 / np.sqrt(n.T @ self._A @ n)
+            if np.isreal(n.T @ self._A @ n) and n.T @ self._A @ n > 1e-4:
+                normalization_const = 1.0 / np.sqrt(n.T @ self._A @ n)
+            else:
+                normalization_const = 1.0
             pencil_eigenvectors[:,k] = normalization_const * n
 
         # Assumption: B is invertible => detB != 0
@@ -1908,12 +1937,12 @@ class LinearMatrixPencil():
         #     raise Exception("B is rank deficient.")
 
         # Computes the pencil characteristic polynomial and denominator of f(\lambda)
-        pencil_det = np.real(np.prod(pencil_eig))
-        self.characteristic_poly = ( detB/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(pencil_eig))
+        pencil_det = np.real(np.prod(pencil_eigs))
+        self.characteristic_poly = ( detB/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(pencil_eigs))
 
         # Sorts eigenpairs
-        self.eigenvalues = pencil_eig[sorted_args]
-        self.eigenvectors = pencil_eigenvectors[:,sorted_args]
+        self.eigenvalues = pencil_eigs
+        self.eigenvectors = pencil_eigenvectors
 
     def __str__(self):
         '''

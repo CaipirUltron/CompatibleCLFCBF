@@ -15,12 +15,13 @@ constraint = [ var + var.T >> 0 ]
 problem = cp.Problem(objective, constraint)
 
 param.value = L
-problem.solve(verbose=True)
+problem.solve()
 L = var.value
 
-eigsL = np.linalg.eigvals(L)
-
-print("Eigenvalues of L = " + str(eigsL))
-
 # Constructs pencil with a non-symmetric but p.s.d. matrix
-pencil = LinearMatrixPencil(Q @ Q.T, L+L.T)
+pencil = LinearMatrixPencil(Q @ Q.T, L)
+
+print("Pencil spectra = ")
+for k in range(dim):
+    print(str(k+1) + "-th eigenvalue = " + str(pencil.eigenvalues[k]))
+    # print(str(k+1) + "-th eigenvector = " + str(pencil.eigenvectors[:,k]))
