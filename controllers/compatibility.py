@@ -1157,14 +1157,14 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
         valid_eigenvalues, valid_eigenvectors = [], []
         for k in range(len(pencil.eigenvalues)):
             eigenvalue = pencil.eigenvalues[k]
-            eigenvector = pencil.eigenvectors[:,k]
+            eigenvector = pencil.eigenvectors[k]
             # Filters invalid eigenpairs
-            if np.abs(eigenvector.T @ Q @ eigenvector - 1) > 1e-6:
+            if (not np.isreal(eigenvalue)) or eigenvalue < 1e-6:
                 continue
             valid_eigenvalues.append( eigenvalue )
             valid_eigenvectors.append( eigenvector )
 
-        return valid_eigenvalues, valid_eigenvectors
+        return valid_eigenvalues, np.array(valid_eigenvectors)
 
     '''
     Setup general cvxpy problem
@@ -1197,11 +1197,13 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
     The pencil (λ Q - L) must have non-negative spectra.
     '''
     pencil = LinearMatrixPencil( Q, L_fun(curr_pt, curr_kappa) )
-    for k in range(len(pencil.eigenvalues)):
-        print("lambda = " + str(pencil.eigenvalues[k]))
-        print("zQz = " + str(pencil.eigenvectors[:,k].T @ Q @ pencil.eigenvectors[:,k]))
-
     eigenvalues, eigenvectors = filter(pencil)
+
+    for k in range(len(eigenvalues)):
+        eig = eigenvalues[k]
+        z = eigenvectors[k]
+        print("lambda = " + str(eig))
+        print("zQz = " + str(z.T @ Q @ z))
 
     # Create copies of initial points with valid eigenpairs
     curr_sols = []
@@ -1221,7 +1223,7 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
     total_cost = np.inf
     while total_cost > ACCURACY and it < max_iter:
         it += 1
-        delta = 0.1
+        delta = 0.01
 
         # For each existing solution...
         for curr_sol in curr_sols:
@@ -1262,7 +1264,7 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
 
         print(str(it) + " iterations...")
         for curr_sol in curr_sols:
-            print("lambda = " + str( curr_sol["lambda"]))
+            print("cost = " + str( curr_sol["cost"]))
 
         sol_log.append( curr_sols )
 
@@ -1914,7 +1916,7 @@ class LinearMatrixPencil():
         # sorted_args = np.argsort(pencil_eigs)
 
         # Compute the corresponding pencil eigenvectors
-        pencil_eigenvectors = np.zeros([self.dim,self.dim], dtype="complex_")
+        pencil_eigenvectors = []
         for k in range(len(pencil_eigs)):
 
             if lambda1[k] != None:
@@ -1927,18 +1929,19 @@ class LinearMatrixPencil():
             n = N[:,0]
             if np.isreal(n.T @ self._A @ n) and n.T @ self._A @ n > 1e-4:
                 normalization_const = 1.0 / np.sqrt(n.T @ self._A @ n)
+                pencil_eigenvectors.append( normalization_const * n.real )
             else:
                 normalization_const = 1.0
-            pencil_eigenvectors[:,k] = normalization_const * n
-
+                pencil_eigenvectors.append( normalization_const * n )
+        
         # Assumption: B is invertible => detB != 0
-        detB = np.linalg.det(self._B)
+        # detB = np.linalg.det(self._B)
         # if detB == 0:
         #     raise Exception("B is rank deficient.")
 
         # Computes the pencil characteristic polynomial and denominator of f(\lambda)
-        pencil_det = np.real(np.prod(pencil_eigs))
-        self.characteristic_poly = ( detB/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(pencil_eigs))
+        # pencil_det = np.real(np.prod(pencil_eigs))
+        # self.characteristic_poly = ( detB/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(pencil_eigs))
 
         # Sorts eigenpairs
         self.eigenvalues = pencil_eigs

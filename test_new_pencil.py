@@ -24,4 +24,4 @@ pencil = LinearMatrixPencil(Q @ Q.T, L)
 print("Pencil spectra = ")
 for k in range(dim):
     print(str(k+1) + "-th eigenvalue = " + str(pencil.eigenvalues[k]))
-    # print(str(k+1) + "-th eigenvector = " + str(pencil.eigenvectors[:,k]))
+    print(str(k+1) + "-th eigenvector = " + str(pencil.eigenvectors[k]))
