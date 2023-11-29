@@ -1149,8 +1149,24 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
 
         return -dz_dkappa.T @ (kernel.function(x) - z)
 
+    def filter(pencil):
+        '''
+        Filters invalid eigenpairs
+        '''
+        valid_eigenvalues, valid_eigenvectors = [], []
+        for k in range(len(pencil.eigenvalues)):
+            eigenvalue = pencil.eigenvalues[k]
+            eigenvector = pencil.eigenvectors[:,k]
+            # Filters invalid eigenpairs
+            if np.abs(eigenvector.T @ Q @ eigenvector - 1) > 1e-6:
+                continue
+            valid_eigenvalues.append( eigenvalue )
+            valid_eigenvectors.append( eigenvector )
+
+        return valid_eigenvalues, valid_eigenvectors
+
     '''
-    Setup cvxpy problem
+    Setup general cvxpy problem
     '''
     decision_var = cp.Variable(r)
     cost_center_param = cp.Parameter(r)
@@ -1163,6 +1179,7 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
                     - cp.sum([ kappa_param[k] * (N_list[k] + N_list[k].T) for k in range(r) ]) 
                     + delta_param * cp.sum([ decision_var[k] * (N_list[k] + N_list[k].T) for k in range(r) ]) >> 0 ]
     problem = cp.Problem(objective, constraint)
+
     '''
     First, solve min ||κ - κ_initial|| s.t. L(x,κ) + L(x,κ).T >= 0, for κ
     '''
@@ -1175,72 +1192,80 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
 
     curr_kappa = decision_var.value
     curr_pt = initial_point
+    '''
+    The pencil (λ Q - L) must have non-negative spectra.
+    '''
+    pencil = LinearMatrixPencil( Q, L_fun(curr_pt, curr_kappa) )
+    for k in range(len(pencil.eigenvalues)):
+        print("lambda = " + str(pencil.eigenvalues[k]))
+        print("zQz = " + str(pencil.eigenvectors[:,k].T @ Q @ pencil.eigenvectors[:,k]))
+
+    eigenvalues, eigenvectors = filter(pencil)
+
+    # Create copies of initial points with valid eigenpairs
+    curr_sols = []
+    for k in range(len(eigenvalues)):
+        curr_sols.append( {"x": curr_pt, "kappa": curr_kappa,
+                           "lambda": eigenvalues[k], "z": eigenvectors[k],
+                           "cost": cost_function(curr_pt, eigenvectors[k]) } )
+
+    print("Initial conditions = ")
+    for curr_sol in curr_sols:
+        print(str( curr_sol["lambda"]))
+
+    sol_log = []
+    sol_log.append( curr_sols )
 
     it = 0
-    pt_log, kappa_log = [], []
-    cost = np.inf
-    delta = 1e-2
-    while cost > ACCURACY and it < max_iter:
+    total_cost = np.inf
+    while total_cost > ACCURACY and it < max_iter:
         it += 1
-        delta = 0.2
-        m = kernel.function(curr_pt)
-        mmT = np.outer(m,m)
-        '''
-        The pencil (λ Q - L) must have non-negative spectra.
-        '''
-        pencil = LinearMatrixPencil( Q, L_fun(curr_pt, curr_kappa) )
-        eigenvalues, eigenvectors = [], []
-        for k in range(len(pencil.eigenvalues)):
+        delta = 0.1
 
-            eigenvalue = pencil.eigenvalues[k]
-            eigenvector = pencil.eigenvectors[:,k]
+        # For each existing solution...
+        for curr_sol in curr_sols:
 
-            # Filters the useless ones
-            if np.abs(eigenvector.T @ Q @ eigenvector - 1) > 1e-6 or eigenvalue < 1e-6:
-                continue
-
-            eigenvalues.append( eigenvalue )
-            eigenvectors.append( eigenvector )
+            m = kernel.function(curr_sol["x"])
+            mmT = np.outer(m,m)
         
-        '''
-        Then, solve min ||∇κ - ∇κ_nom|| s.t. L(x,κ) + L(x,κ).T + δ SUM ∇κ_i (N_i + N_i.T) >= 0, for ∇κ
-        for each of the valid eigenpairs
-        '''
-        candidate_gradients, candidate_costs = [], []
-        for k in range(len(eigenvalues)):
-
-            l = eigenvalues[k]
-            z = eigenvectors[k]
-
-            cost_center_param.value = cost_gradient_kappa( curr_pt, curr_kappa, l, z )
+            # For each valid eigenpair, solve min ||∇κ - ∇κ_nom|| s.t. L(x,κ) + L(x,κ).T + δ SUM ∇κ_i (N_i + N_i.T) >= 0, for ∇κ
+            cost_center_param.value = cost_gradient_kappa( curr_sol["x"], curr_sol["kappa"], curr_sol["lambda"], curr_sol["z"] )
             mmT_param.value = mmT
-            kappa_param.value = curr_kappa
+            kappa_param.value = curr_sol["kappa"]
             delta_param.value = delta
             problem.solve()
-            if problem.status in ["infeasible", "unbounded"]:
-                raise Exception("Kappa problem is " + problem.status)
             
-            candidate_gradients.append(decision_var.value)
-            candidate_costs.append( cost_function(curr_pt, z) )
-        
-        '''
-        Select best cost
-        '''
-        opt_index = np.argmin(candidate_costs)
-        grad_kappa = candidate_gradients[opt_index]
-        l = eigenvalues[opt_index]
-        z = eigenvectors[opt_index]
+            # If no solution exists.... (WHAT TO DO?)
+            if problem.status in ["infeasible", "unbounded"]:
+                raise Exception("FUCK")
 
-        curr_kappa -= delta * grad_kappa
-        curr_pt -= delta * cost_gradient_x( curr_pt, curr_kappa, l, z )
+            # If the SDP can be solved, store that solution
+            gradC_x = cost_gradient_x( curr_sol["x"], curr_sol["kappa"], curr_sol["lambda"], curr_sol["z"] )
+            gradC_kappa = decision_var.value
 
-        cost = cost_function(curr_pt, z)
+            # Update current solution
+            curr_sol["x"] -= delta * gradC_x
+            curr_sol["kappa"] -= delta * gradC_kappa
 
-        print("Cost = " + str(cost), ", λ = " + str(l), ", zQz = " + str( z.T @ Q @ z ))
-        pt_log.append( curr_pt )
-        kappa_log.append( curr_kappa )
-        
-    return {"cost": cost, "point": curr_pt, "kappas": curr_kappa, "lambda": l, "iterations": it }, pt_log, kappa_log
+            # Updates pencil and eliminates invalid eigenpairs
+            pencil.set_pencil(B = L_fun(curr_sol["x"], curr_sol["kappa"]))
+            eigenvalues, eigenvectors = filter(pencil)
+
+            # Updates lambda and z with new values
+            min_index = np.argmin([ np.abs( curr_sol["lambda"] - eigenvalue ) for eigenvalue in eigenvalues ])
+            curr_sol["lambda"] = eigenvalues[min_index]
+            curr_sol["z"] = eigenvectors[min_index]
+
+            # Updates cost - if everything is working, this should -->> 0
+            curr_sol["cost"] = np.linalg.norm( kernel.function(curr_sol["x"]) - curr_sol["z"] )
+
+        print(str(it) + " iterations...")
+        for curr_sol in curr_sols:
+            print("lambda = " + str( curr_sol["lambda"]))
+
+        sol_log.append( curr_sols )
+
+    return curr_sols, sol_log
 
 '''
 Implement L + L.T >> 0 (the symmetric version of L must be p.s.d.)
@@ -1808,31 +1833,43 @@ class LinearMatrixPencil():
     Class for regular, symmetric linear matrix pencils of the form H(\lambda) = mu1 A - mu2 B, where A and B are p.s.d. matrices
     '''
     def __init__(self, A, B, **kwargs):
-
-        dimA = A.shape
-        dimB = B.shape
-        if dimA != dimB:
-            raise Exception("Matrix dimensions are not equal.")
-        if (dimA[0] != dimA[1]) or (dimB[0] != dimB[1]):
-            raise Exception("Matrices are not square.")
-        self._A, self._B = A, B
-        self.dim = dimA[0]
-
+        self._shapeA = None
+        self._shapeB = None
+        self.set_pencil(A=A, B=B)
         self._lambda = 0.0
-        for key in kwargs:
-            if key == "parameter":
-                self._lambda = kwargs[key]
+        if "parameter" in kwargs.keys():
+            self._lambda = kwargs["parameter"]
+
+    def set_pencil(self, **kwargs):
+        '''
+        Sets pencil attributes and computes pencil spectra
+        '''
+        for key in kwargs.keys():
+            aux_key = key.lower()
+            if aux_key == "a":
+                self._A = kwargs[key]
+                self._shapeA = self._A.shape
+                continue
+            if aux_key == "b":
+                self._B = kwargs[key]
+                self._shapeB = self._B.shape
+                continue
+        
+        if self._shapeA != self._shapeB:
+            raise Exception("Matrix dimensions are not equal.")
+        if (self._shapeA[0] != self._shapeA[1]) or (self._shapeB[0] != self._shapeB[1]):
+            raise Exception("Matrices are not square.")
+        self.dim = self._shapeA[0]
 
         self.compute_eig()
-        # self.compute_eig2()
 
     def value(self, lambda_param):
         '''
         Returns pencil value.
         '''
-        return lambda_param * self._A - self._B
+        return self.value_double( lambda_param, 1.0 )
 
-    def value2(self, lambda1_param, lambda2_param):
+    def value_double(self, lambda1_param, lambda2_param):
         '''
         Returns pencil value.
         '''
@@ -1852,13 +1889,18 @@ class LinearMatrixPencil():
         # Compute the pencil eigenvectors
         pencil_eigenvectors = np.zeros([self.dim,self.dim])
         for k in range(len(pencil_eig)):
-            # eig, Q = np.linalg.eig( self.value(pencil_eig[k]) )
-            eig, Q = np.linalg.eig( self.value2(self.lambda1[k], self.lambda2[k]) )
-            for i in range(len(eig)):
-                if np.abs(eig[i]) <= 0.000001:
-                    normalization_const = 1/np.sqrt(Q[:,i].T @ self._A @ Q[:,i])
-                    pencil_eigenvectors[:,k] = normalization_const * Q[:,i]
-                    break
+            P = self.value_double(self.lambda1[k], self.lambda2[k])
+
+
+
+            N = null_space(P)
+            print("lambda1 = " + str(self.lambda1[k]))
+            print("lambda2 = " + str(self.lambda2[k]))
+            print("Eigs of P = " + str(np.linalg.eigvals(P)) )
+            print("null space = " + str(N))
+            n = N[:,0]
+            normalization_const = 1.0 / np.sqrt(n.T @ self._A @ n)
+            pencil_eigenvectors[:,k] = normalization_const * n
 
         # Assumption: B is invertible => detB != 0
         detB = np.linalg.det(self._B)
