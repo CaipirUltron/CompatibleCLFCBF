@@ -1133,6 +1133,13 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
         Omega = l*Q - L + Q @ zzT @ symL
         dz_dx = c * np.linalg.inv(Omega) @ ProjQ @ P @ np.outer(z, m) @ P @ dm_dx
 
+        # print("m = " + str(m))
+        # print("z = " + str(z))
+        # print("Omega^-1 = " + str(np.linalg.inv(Omega)))
+        # print("ProjQ = " + str(ProjQ))
+        # print("zmT = " + str(np.outer(z, m)))
+        # print("Jm = " + str(dm_dx))
+
         # E = np.eye(p)
         # Pz = P @ z
         # dz_dm = c * np.linalg.inv(Omega) @ ProjQ @ np.array([ (m.T @ P @ E[:,i] * Pz).tolist() for i in range(p) ]).T
@@ -1163,7 +1170,7 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
             eigenvalue = pencil.eigenvalues[k]
             eigenvector = pencil.eigenvectors[k]
             # Filters invalid eigenpairs
-            if (not np.isreal(eigenvalue)) or eigenvalue < 1e-4 or np.abs(eigenvector[0] - 1.0) > 1e-10:
+            if (not np.isreal(eigenvalue)) or eigenvalue < 1e-4 or np.abs(eigenvector.T @ Q @ eigenvector - 1.0) > 1e-8:
                 continue
             valid_eigenvalues.append( eigenvalue )
             valid_eigenvectors.append( eigenvector )
@@ -1213,7 +1220,8 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
     for k in range(len(eigenvalues)):
         curr_sols.append( {"x": curr_pt, "kappa": curr_kappa,
                            "lambda": eigenvalues[k], "z": eigenvectors[k],
-                           "cost": cost_function(curr_pt, eigenvectors[k]) } )
+                           "cost": cost_function(curr_pt, eigenvectors[k]), 
+                           "delta_cost": 0.0 } )
 
     print("Initial conditions = ")
     for curr_sol in curr_sols:
@@ -1227,7 +1235,7 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
     limit_grad_norm = 1e+6
     while total_cost > ACCURACY and it < max_iter:
         it += 1
-        delta = 0.1
+        delta = 0.05
 
         # For each existing solution...
         for curr_sol in curr_sols:
@@ -1238,10 +1246,10 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
                 gradC_x = gradC_x/limit_grad_norm
             new_x = curr_sol["x"] - delta * gradC_x
 
+            # print("gradC_x = " + str(gradC_x))
+
             # For each valid eigenpair, solve min ||∇κ - ∇κ_nom|| s.t. L(x,κ) + L(x,κ).T + δ SUM ∇κ_i (N_i + N_i.T) >= 0, for ∇κ
             gradC_kappa = cost_gradient_kappa( curr_sol["x"], curr_sol["kappa"], curr_sol["lambda"], curr_sol["z"] )
-            if np.linalg.norm(gradC_kappa) > limit_grad_norm:
-                gradC_kappa = gradC_kappa/limit_grad_norm
 
             cost_center_param.value = gradC_kappa
             kappa_param.value = curr_sol["kappa"]
@@ -1251,8 +1259,13 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
                 raise Exception("Problem is " + problem.status)
             gradC_kappa = decision_var.value
 
+            if np.linalg.norm(gradC_kappa) > limit_grad_norm:
+                gradC_kappa = gradC_kappa/limit_grad_norm
+
             # Compute new kappa and compute pencil, eliminating invalid eigenpairs
             new_kappa = curr_sol["kappa"] - delta * gradC_kappa
+
+            # print("gradC_kappa = " + str(gradC_kappa))
 
             # print("inner = " + str( gradC_kappa.T @ cost_center_param.value ))
             # print("λ = " + str(pencil.eigenvalues))
@@ -1267,7 +1280,7 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
             eigenvalues, eigenvectors = filter(pencil)
 
             # Finds best cost after update for all valid eigenvectors
-
+            old_cost = curr_sol["cost"]
             costs = [ cost_function( curr_sol["x"], eigenvector ) for eigenvector in eigenvectors ]
             min_index = np.argmin(costs)
 
@@ -1275,19 +1288,131 @@ def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
             curr_sol["lambda"] = eigenvalues[min_index]
             curr_sol["z"] = eigenvectors[min_index]
             curr_sol["cost"] = costs[min_index]
+            curr_sol["delta_cost"] = curr_sol["cost"] - old_cost
 
         print(str(it) + " iterations...")
         for curr_sol in curr_sols:
+            pass
             # print("x = " + str( curr_sol["x"]))
             # print("κ = " + str( curr_sol["kappa"]))
             # print("λ = " + str( curr_sol["lambda"]))
-            print("m = " + str(kernel.function(curr_sol["x"])))
-            print("z = " + str(curr_sol["z"]))
+            # print("m = " + str(kernel.function(curr_sol["x"])))
+            # print("z = " + str(curr_sol["z"]))
             print("cost = " + str( curr_sol["cost"]))
+            print("Δ cost = " + str( curr_sol["delta_cost"]))
 
         sol_log.append( curr_sols )
 
     return curr_sols, sol_log
+
+def compute_equilibria_using_pencil2(plant, clf, cbf, initial_point, **kwargs):
+    '''
+    Compute the equilibrium points
+    '''
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    n = clf._dim
+
+    F = plant.get_F()
+    P = clf.P
+    Q = cbf.Q
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    kernel = clf.kernel
+    p = kernel.kernel_dim
+    N_list = kernel.get_N_matrices()
+    r = len(N_list)
+
+    ACCURACY = 1e-3
+
+    c = 1
+    max_iter = 1000
+    limit_grad_norm = 1e+4
+    initial_kappa = [np.random.rand() for _ in range(r)]
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "c":
+            c = kwargs[key]
+            continue
+        if aux_key == "max_iter":
+            max_iter = kwargs[key]
+            continue
+        if aux_key == "delta":
+            delta = kwargs[key]
+            continue
+        if aux_key == "initial_kappa":
+            initial_kappa = kwargs[key]
+
+    def L_fun(x, kappa):
+        '''
+        L = 0.5 c m.T P m P - F + SUM κ_i N_i
+        '''
+        m = kernel.function(x)
+        sum_kappa = np.zeros([p,p])
+        for i in range(r):
+            sum_kappa += kappa[i] * N_list[i]
+        return 0.5 * c * (m.T @ P @ m) * P - F + sum_kappa
+
+    def filter(pencil):
+        '''
+        Filters invalid eigenpairs
+        '''
+        valid_eigenvalues, valid_eigenvectors = [], []
+        for k in range(len(pencil.eigenvalues)):
+            eigenvalue = pencil.eigenvalues[k]
+            eigenvector = pencil.eigenvectors[k]
+            # Filters invalid eigenpairs
+            if (not np.isreal(eigenvalue)) or eigenvalue < 1e-4 or np.abs(eigenvector.T @ Q @ eigenvector - 1.0) > 1e-8:
+                continue
+            valid_eigenvalues.append( eigenvalue )
+            valid_eigenvectors.append( eigenvector )
+
+        return valid_eigenvalues, np.array(valid_eigenvectors)
+
+    '''
+    Setup SDP problem for kappa computation
+    '''
+    kappa_var = cp.Variable(r)
+    kappa_param = cp.Parameter(r)
+    objective = cp.Minimize( cp.norm( kappa_var - kappa_param ) )
+    constraint = [ cp.sum([ kappa_var[k] * (N_list[k] + N_list[k].T) for k in range(r) ]) - 2 * F >> 0 ]
+    problem = cp.Problem(objective, constraint)
+
+    '''
+    Setup linear matrix pencil
+    '''
+    pencil = LinearMatrixPencil( Q, L_fun(initial_point, initial_kappa) )
+
+    def cost_function(var):
+        '''
+        Cost function, depending on x and kappa
+        '''
+        x = var[0:n]
+        kappa = var[n:]
+
+        # Solve SDP optimization
+        kappa_param.value = kappa
+        problem.solve()
+        kappa = kappa_var.value
+
+        # Update pencil and filters invalid eigenpairs
+        pencil.set_pencil(B = L_fun(x, kappa))
+        eigenvalues, eigenvectors = filter(pencil)
+
+        m = kernel.function(x)
+        costs = [ np.linalg.norm( m - eigenvector ) for eigenvector in eigenvectors ]
+                
+        return np.array( np.min(costs) )
+
+    sol = least_squares( cost_function, initial_point + initial_kappa )
+
+    if sol.success:
+        print("Solution was found.\n")
+        return { "x": sol.x[0:n].tolist(), "kappa": sol.x[n:].tolist() }
+    else:
+        print("Algorithm exited with the following error: \n")
+        print(sol.message)
+        return initial_point
 
 '''
 Implement L + L.T >> 0 (the symmetric version of L must be p.s.d.)
@@ -1947,11 +2072,12 @@ class LinearMatrixPencil():
             N = null_space(P)
 
             n = N[:,0]
-            if np.isreal(lambda2[k]):
-            # if np.isreal(n.T @ self._A @ n) and n.T @ self._A @ n > 1e-10:
-                # normalization_const = 1.0 / np.sqrt(n.T @ self._A @ n)
-                normalization_const = 1.0 / n[0]
-                pencil_eigenvectors.append( normalization_const * n.real )
+            if np.isreal(n.T @ self._A @ n) and n.T @ self._A @ n > 1e-10:
+                n = n.real
+                normalization_const = 1.0 / np.sqrt(n.T @ self._A @ n)
+                if n[0] < 0:
+                    n = -n
+                pencil_eigenvectors.append( normalization_const * n )
             else:
                 pencil_eigenvectors.append(n)
             zQzs.append(pencil_eigenvectors[-1].T @ self._A @ pencil_eigenvectors[-1] )
