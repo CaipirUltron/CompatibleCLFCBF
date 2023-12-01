@@ -1404,15 +1404,203 @@ def compute_equilibria_using_pencil2(plant, clf, cbf, initial_point, **kwargs):
                 
         return np.array( np.min(costs) )
 
-    sol = least_squares( cost_function, initial_point + initial_kappa )
+    sol = least_squares( cost_function, initial_point + initial_kappa, max_nfev=1000 )
 
     if sol.success:
         print("Solution was found.\n")
-        return { "x": sol.x[0:n].tolist(), "kappa": sol.x[n:].tolist() }
+        return { "x": sol.x[0:n].tolist(), "kappa": sol.x[n:].tolist(), "cost": sol.cost }
     else:
         print("Algorithm exited with the following error: \n")
         print(sol.message)
         return initial_point
+
+def compute_equilibria(plant, clf, cbf, initial_point, **kwargs):
+    '''
+    Compute the equilibrium points.
+    '''
+    c = 1
+    max_iter = 1000
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "c":
+            c = kwargs[key]
+            continue
+        if aux_key == "max_iter":
+            max_iter = kwargs[key]
+            continue
+
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    n = clf._dim
+
+    F = plant.get_F()
+    P = clf.P
+    Q = cbf.Q
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    kernel = clf.kernel
+    p = kernel.kernel_dim
+    N_list = kernel.get_N_matrices()
+    r = len(N_list)
+
+    '''
+    Setup x and kappa dynamics
+    '''
+    sample_time = 1e-3
+    initial_kappa = [ np.random.rand() for _ in range(r) ]
+    x_dynamics = Integrator( initial_point, np.zeros(n) )
+    kappa_dynamics = Integrator( initial_kappa, np.zeros(r) )
+
+    '''
+    Setup optimization problem
+    '''
+    u_x = cp.Variable(n)
+    u_kappa = cp.Variable(r)
+    delta = cp.Variable()
+
+    gradCx = cp.Parameter(n)
+    gradCkappa = cp.Parameter(r)
+    kappa = cp.Parameter(r)
+    cost = cp.Parameter()
+
+    q, alpha, beta = 1, 1, 1
+    objective = cp.Minimize( cp.norm(u_x)**2 + cp.norm(u_kappa)**2 + q*delta**2 )
+    CLF_constr = [ gradCx.T @ u_x + gradCkappa.T @ u_kappa + alpha * cost <= 0.0 ]
+    B = cp.sum([ kappa[k] * (N_list[k] + N_list[k].T) for k in range(r) ]) - 2 * F
+    MCBF_constr = [ cp.sum([ u_kappa[k] * (N_list[k] + N_list[k].T) for k in range(r) ]) + beta * B >> 0 ]
+    problem = cp.Problem(objective, CLF_constr + MCBF_constr)
+
+    '''
+    Define filtering function for the pencil
+    '''
+    def filter(pencil):
+        '''
+        Filters invalid eigenpairs
+        '''
+        valid_eigenvalues, valid_eigenvectors = [], []
+        for k in range(len(pencil.eigenvalues)):
+            eigenvalue = pencil.eigenvalues[k]
+            eigenvector = pencil.eigenvectors[k]
+            # Filters invalid eigenpairs
+            if (not np.isreal(eigenvalue)) or eigenvalue < 1e-4 or np.abs(eigenvector.T @ Q @ eigenvector - 1.0) > 1e-8:
+                continue
+            valid_eigenvalues.append( eigenvalue )
+            valid_eigenvectors.append( eigenvector )
+
+        return valid_eigenvalues, np.array(valid_eigenvectors)
+
+    '''
+    Some collection of useful methods
+    '''
+    def L_fun(x, kappa):
+        '''
+        L = 0.5 c m.T P m P - F + SUM κ_i N_i
+        '''
+        m = kernel.function(x)
+        sum_kappa = np.zeros([p,p])
+        for i in range(r):
+            sum_kappa += kappa[i] * N_list[i]
+        return 0.5 * c * (m.T @ P @ m) * P - F + sum_kappa
+
+    '''
+    Define linear matrix pencil
+    '''
+    pencil = LinearMatrixPencil( Q, L_fun(initial_point, initial_kappa) )
+
+    def cost_function(x, kappa):
+        '''
+        Convex, continuous non-differentiable cost for minimization (aka, "Lyapunov" function of the problem)
+        '''
+        # Update pencil and filters invalid eigenpairs
+        pencil.set_pencil(B = L_fun(x, kappa))
+        eigenvalues, eigenvectors = filter(pencil)
+
+        m = kernel.function(x)
+        costs = [ 0.5 * np.linalg.norm( m - eigenvector )**2 for eigenvector in eigenvectors ]
+        min_index = np.argmin(costs)
+                
+        return costs[min_index], eigenvalues[min_index], eigenvectors[min_index]
+
+    def cost_gradient_x(x, kappa, l, z):
+        '''
+        Gradient of the cost function 0.5||m(x) - z||**2 w.r.t. x, where z is an eigenvector of the pencil (λ Q - L)
+        '''
+        m = kernel.function(x)
+        dm_dx = kernel.jacobian(x)
+
+        zzT = np.outer(z,z)
+        ProjQ = np.eye(p) - Q @ zzT
+
+        L = L_fun(x, kappa)
+        symL = L + L.T
+        Omega = l*Q - L + Q @ zzT @ symL
+        dz_dx = c * np.linalg.inv(Omega) @ ProjQ @ P @ np.outer(z, m) @ P @ dm_dx
+
+        return (dm_dx - dz_dx).T @ (m - z)
+
+    def cost_gradient_kappa(x, kappa, l, z):
+        '''
+        Gradient of the cost function 0.5||m(x) - z||**2 w.r.t. κ, where z is an eigenvector of the pencil (λ Q - L)
+        '''
+        zzT = np.outer(z,z)
+        ProjQ = np.eye(p) - Q @ zzT
+        m = kernel.function(x)
+
+        L = L_fun(x, kappa)
+        symL = L + L.T
+        Omega = l*Q - L + Q @ zzT @ symL
+        dz_dkappa = np.linalg.inv(Omega) @ ProjQ @ np.array([ (N_list[i] @ z).tolist() for i in range(r) ]).T
+
+        return -dz_dkappa.T @ (m - z)
+
+    '''
+    Initialize solution
+    '''
+    initial_cost, initial_lambda, initial_z = cost_function(initial_point, initial_kappa)
+    curr_sol = {"x": initial_point, "kappa": initial_kappa,
+                "lambda": initial_lambda, "z": initial_z,
+                "cost": initial_cost, "delta_cost": 0.0 }
+    
+    '''
+    Main optimization loop
+    '''
+    it = 0
+    ACCURACY = 1e-10
+    sample_time = 1e-2
+    while curr_sol["cost"] > ACCURACY and it < max_iter:
+        it += 1
+
+        # Solve the CLF-MCBF optimization problem to find the optimal directions
+        gradCx.value = cost_gradient_x(curr_sol["x"], curr_sol["kappa"], curr_sol["lambda"], curr_sol["z"])
+        gradCkappa.value = cost_gradient_kappa(curr_sol["x"], curr_sol["kappa"], curr_sol["lambda"], curr_sol["z"])
+        kappa.value = curr_sol["kappa"]
+        cost.value = curr_sol["cost"]
+        problem.solve()
+
+        # Actuate (x,κ) dynamics
+        x_dynamics.set_control(u_x.value)
+        x_dynamics.actuate(sample_time)
+
+        kappa_dynamics.set_control(u_kappa.value) 
+        kappa_dynamics.actuate(sample_time)
+
+        # Update solution
+        curr_sol["x"] = x_dynamics.get_state()
+        curr_sol["kappa"] = kappa_dynamics.get_state()
+        old_cost = curr_sol["cost"]
+        curr_sol["cost"], curr_sol["lambda"], curr_sol["z"] = cost_function(curr_sol["x"], curr_sol["kappa"])
+        curr_sol["delta_cost"] = curr_sol["cost"] - old_cost
+
+        # print(str(it) + " iterations...")
+        # print("x = " + str( curr_sol["x"]))
+        # print("κ = " + str( curr_sol["kappa"]))
+        # print("λ = " + str( curr_sol["lambda"]))
+        print("m = " + str(kernel.function(curr_sol["x"])[0]))
+        print("z = " + str(curr_sol["z"][0]))
+        # print("cost = " + str( curr_sol["cost"]))
+        # print("Δ cost = " + str( curr_sol["delta_cost"]))
+
+    return curr_sol
 
 '''
 Implement L + L.T >> 0 (the symmetric version of L must be p.s.d.)

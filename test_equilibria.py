@@ -4,7 +4,7 @@ import importlib
 import numpy as np
 import matplotlib.pyplot as plt
 from graphics import Plot2DSimulation
-from controllers import compute_equilibria_algorithm7, find_nearest_boundary, find_nearest_det, compute_stability, compute_equilibria_using_pencil2
+from controllers import compute_equilibria_algorithm7, find_nearest_boundary, find_nearest_det, compute_stability, compute_equilibria
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -29,7 +29,7 @@ plotSim.plot_frame(9.0)
 initial_guess = sim.initial_state
 plotSim.main_ax.plot( initial_guess[0], initial_guess[1], 'g*' )
 
-sol = compute_equilibria_using_pencil2(sim.plant, sim.clf, sim.cbf, initial_guess, c = 1)
+sol = compute_equilibria(sim.plant, sim.clf, sim.cbf, initial_guess, c = 1)
 # plotSim.main_ax.plot( solution["boundary_start"][0], solution["boundary_start"][1], 'ko' )
 
 # for sol in solutions:
