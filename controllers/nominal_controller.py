@@ -1,9 +1,10 @@
 import numpy as np
-from controllers import CLFCBFPair, compute_equilibria_algorithm7, find_nearest_boundary
+
+from common import sat
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
-from common import sat
-import time, sys
+from controllers.compatibility import CLFCBFPair
+from controllers.equilibrium_algorithms import check_equilibrium, compute_equilibria_algorithm7
 
 class NominalQP():
     '''
@@ -93,6 +94,8 @@ class NominalQP():
         control = self.QP_sol[0:self.control_dim,]
 
         # self.get_equilibria()
+        if check_equilibrium(self.plant, self.clf, self.cbfs[0], self.plant.get_state(), c = self.p * self.alpha):
+            print("Equilibrium point was found!")
 
         return control
 
