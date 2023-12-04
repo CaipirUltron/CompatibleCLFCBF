@@ -3,8 +3,9 @@ import json
 import importlib
 import numpy as np
 import matplotlib.pyplot as plt
+
 from graphics import Plot2DSimulation
-from controllers.equilibrium_algorithms import compute_equilibria_using_pencil3
+from controllers.equilibrium_algorithms import compute_equilibria_algorithm9
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -19,23 +20,43 @@ except IOError:
 
 # -----------------------------------Plots starting of simulation ------------------------------------------
 plotSim = Plot2DSimulation( logs, sim.plant, sim.clf, sim.cbfs, plot_config = sim.plot_config )
-plotSim.plot_frame(9.0)
-pt = plt.ginput(1)
+plotSim.plot_frame(3.0)
 
-# print("The following equilibrium points were found:")
-# for eq in logs["equilibria"]:
-#     print(str(eq["point"]) + " with and stability value = " + str(eq["stability"]))
-#     plotSim.main_ax.plot( eq["point"][0], eq["point"][1], 'ro' )
+# manual_mode = True
+manual_mode = False
 
-initial_guess = [pt[0][0], pt[0][1]]
-plotSim.main_ax.plot( initial_guess[0], initial_guess[1], 'g*' )
+'''
+Manually selects initial guesses
+'''
+if manual_mode:
+    pt = plt.ginput(1)
+    initial_guesses = [[ pt[0][0], pt[0][1] ]]
 
-solutions = compute_equilibria_using_pencil3(sim.plant, sim.clf, sim.cbf, initial_guess, c = 1)
-# plotSim.main_ax.plot( solution["boundary_start"][0], solution["boundary_start"][1], 'ko' )
+'''
+Plots initial guesses
+'''
+if not manual_mode:
+    res_x, res_y = 10, 10       # Density of points per axis
+    min_x, min_y = -8, -8     # lower limits for point generation 
+    max_x, max_y = 8, 8       # upper limits for point generation
+    initial_guesses = []
+    xv, yv = np.meshgrid(np.linspace(min_x, max_x, res_x), np.linspace(min_y, max_y, res_y), indexing='xy')
+    for i in range(res_x):
+        for j in range(res_y):
+            pt = [ xv[i,j], yv[i,j] ]
+            initial_guesses.append(pt)
+            plotSim.main_ax.plot( pt[0], pt[1], 'g.', alpha=0.3 )
 
-for k in range(len(solutions)):
+'''
+Finds and plots the equilibrium points
+'''
+solutions, log = compute_equilibria_algorithm9(sim.plant, sim.clf, sim.cbf, initial_guesses, c = 1)
+num_sols = len(solutions)
+print("From " + str(log["num_trials"]) + " trials, algorithm converged " + str(log["num_success"]) + " times, and " + str(num_sols) + " solutions were found.")
+print("Algorithm efficiency = " + str( log["num_success"]/log["num_trials"] ))
+for k in range(num_sols):
     sol = solutions[k]
-    print(sol)
+    print("Solution " + str(k+1) + " = " + str(sol))
     plotSim.main_ax.plot( sol["x"][0], sol["x"][1], 'ro' )
 
 plt.show()

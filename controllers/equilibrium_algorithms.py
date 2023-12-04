@@ -14,8 +14,7 @@ ZERO_ACCURACY = 0.0000000001
 
 '''
 The following algorithms implement some version of constrained least_squares or constrained minimization algorithms for finding the equilibrium points.
-Currently, algorithm 7 is the most promising, returning some nice results but being highly dependent on a good initialization.
-All algorithms suffer from poor numerical behaviour, suspectly because of the vanishing gradient problem near the solutions. 
+BREAKING NEWS!! compute_equilibria_algorithm9() finally works!!
 '''
 
 def compute_equilibria_algorithm1(F, clf, cbf, **kwargs):
@@ -347,7 +346,6 @@ def compute_equilibria_algorithm4(plant, clf, cbf, initial_point, **kwargs):
     print("Initial lambda2 = " + str(initial_l2))
 
     # Optimization
-    import cvxpy as cp
     from scipy.optimize import least_squares
 
     ACCURACY = 0.000000001
@@ -1022,16 +1020,139 @@ def compute_equilibria_algorithm8(plant, clf, cbf, initial_point, **kwargs):
     kappas = kappa_dynamics.get_state()
     return {"cost": cost, "point": curr_state, "lambda": alpha, "kappas": kappas }, state_log
 
-'''
-Implement L + L.T >> 0 (the symmetric version of L must be p.s.d.)
-Compute grad_kappa_k through the following opt. problem:
-min || grad_kappa_k - grad_kappa_k_NOM ||^2
-s.t L(x,kappa_k+1) + L(x,kappa_k+1).T >> 0
-where:
-(i) grad_kappa_k_NOM is known
-(ii) kappa_k+1 = kappa_k - delta * grad_kappa_k is the next kappa value
+def compute_equilibria_algorithm9(plant, clf, cbf, initial_points, **kwargs):
+    '''
+    Solve the general eigenproblem of the type:
+    ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0, l2 >= 0,
+    l1 = c V(z) P z,
+    z \in Im(m)
+    '''
+    c = 1
+    max_iter = 1000
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "c":
+            c = kwargs[key]
+            continue
+        if aux_key == "max_iter":
+            max_iter = kwargs[key]
+            continue
 
-This way, kappa evolves towards the solutions that keep L p.s.d 
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    n = clf._dim
+
+    F = plant.get_F()
+    P = clf.P
+    Q = cbf.Q
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    kernel = clf.kernel
+    p = kernel.kernel_dim
+
+    num_pts = len(initial_points)
+
+    '''
+    var = [ x, κ, lambda ] is a (n+p+1) dimensional array
+    x is n-dimensional
+    κ is p-dimensional, HOWEVER: it has actually the dimension of the transpose Jacobian null space
+    λ is a scalar
+    '''
+    def gradient_collinearity_constraint(var):
+        '''
+        Returns the vector residues of gradient collinearity -> is zero iff the collinearity condition is satisfied 
+        '''
+        x = var[0:n]
+        kappa = var[n:n+p]
+        l = var[-1]
+
+        m = kernel.function(x)
+        Jm = kernel.jacobian(x)
+
+        N = null_space(Jm.T)
+        dim_nullspace = N.shape[1]
+
+        nullspace_vec = np.zeros(p)
+        for k in range(dim_nullspace):
+            nullspace_vec += kappa[k] * N[:,k]
+
+        return ( l * Q - 0.5 * c * (m.T @ P @ m) * P + F ) @ m - nullspace_vec
+
+    def boundary_constraint(var):
+        '''
+        Returns the diff between mQm and 1
+        '''
+        x = var[0:n]
+        m = kernel.function(x)
+        return np.abs( m.T @ Q @ m - 1 )
+
+    def constraint(var):
+        '''
+        Combination of all constraints
+        '''
+        return np.hstack([gradient_collinearity_constraint(var), boundary_constraint(var) ])
+
+    '''
+    Solve constrained least squares
+    '''
+    from scipy.optimize import least_squares
+
+    log = {"num_trials": num_pts, "num_success": 0, "num_failure": 0}
+    sols = []
+    for k in range(num_pts):
+        initial_point = initial_points[k]
+
+        initial_m = kernel.function(initial_point)
+        initial_var = initial_point + np.random.rand(p).tolist() + [0.0]
+        v_lambda0 = gradient_collinearity_constraint(initial_var)
+        initial_lambda = -(initial_m.T @ v_lambda0)/(initial_m.T @ Q @ initial_m)
+        initial_var[-1] = initial_lambda
+        
+        lower_bounds = [ -np.inf for _ in range(p+n) ] + [ 0.0 ]
+        try:
+            error_flag = False
+            sol = least_squares( constraint, initial_var, bounds=(lower_bounds, np.inf), max_nfev=max_iter )
+        except Exception as error_msg:
+            log["num_failure"] += 1 
+            error_flag = True
+            print(error_msg)
+
+        if not error_flag:
+            print(sol.message)
+            if sol.success and sol.cost < 1e-5:
+                log["num_success"] += 1
+
+                # Equilibrium pt found
+                x = sol.x[0:n]
+
+                # Ignore the last p - rank(Jm) entries of kappa
+                Jm = kernel.jacobian(x)
+                dim_nullspace = null_space(Jm.T).shape[1]
+                kappa = sol.x[n:n+dim_nullspace]
+
+                # Lambda
+                l = sol.x[-1]
+
+                # Verifies if solution was already found
+                is_new_sol = True
+                for previous_sol in sols:
+                    error_x = np.linalg.norm( np.array(previous_sol["x"]) - x )
+                    # error_kappa = np.linalg.norm( np.array(previous_sol["kappa"]) - kappa )
+                    error_lambda = np.linalg.norm( np.array(previous_sol["lambda"]) - l )
+                    if error_x < 1e-3 and error_lambda < 1e-3:
+                        is_new_sol = False
+                        break
+                
+                if is_new_sol:
+                    sols.append( {"x": x.tolist(), "kappa": kappa.tolist(), "lambda": l, "residue": sol.cost} )
+            else:
+                log["num_failure"] += 1
+
+    return sols, log
+
+'''
+The following algorithms try to compute the equilibrium points by using the LinearMatrixPencil() class.
+None of them work.
 '''
 
 def compute_equilibria_using_pencil(plant, clf, cbf, initial_point, **kwargs):
@@ -1656,6 +1777,12 @@ def compute_equilibria_using_pencil3(plant, clf, cbf, initial_point, **kwargs):
 '''
 The following algorithms are useful for initialization of the previous algorithms, among other utilities.
 '''
+
+def project_into_kernel_image(kernel, pt):
+    '''
+    This method projects a point pt from R**p (where p is the kernel dimension) onto the kernel image manifold
+    '''
+    pass
 
 def generate_point_grid(Q, resolution):
     '''
