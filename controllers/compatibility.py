@@ -335,9 +335,12 @@ class LinearMatrixPencil():
                 blockB = schurB[k:k+2,k:k+2]
 
                 polynomial = poly.polysub( poly.polymul([-blockB[0,0], blockA[0,0] ], [-blockB[1,1], blockA[1,1] ]), [0.0, 0.0, blockA[1,0]*blockA[0,1] ] )
-                pencil_eigs += poly.polyroots(polynomial).tolist()
-                lambda1 += [ None, None ]
-                lambda2 += [ None, None ]
+                block_eigs = poly.polyroots(polynomial).tolist()
+                pencil_eigs += block_eigs
+                # lambda1 += [ None, None ]
+                # lambda2 += [ None, None ]
+                lambda1 += [ block_eigs[0], block_eigs[1] ]
+                lambda2 += [ 1.0, 1.0 ]
                 k+=2
             else:
                 lambda1.append(schurB[k,k])
@@ -352,14 +355,13 @@ class LinearMatrixPencil():
         pencil_eigenvectors, zQzs = [], []
         for k in range(len(pencil_eigs)):
 
-            if lambda1[k] != None:
-                P = self.value_double(lambda1[k], lambda2[k])   # more accurate
-            else:
-                P = self.value(pencil_eigs[k])
+            P = self.value_double(lambda1[k], lambda2[k])   # more accurate
+            # if np.linalg.det(P) > 1e-8:
+            #     P = self.value(pencil_eigs[k])
 
             N = null_space(P)
-
             n = N[:,0]
+
             if np.isreal(n.T @ self._A @ n) and n.T @ self._A @ n > 1e-10:
                 n = n.real
                 normalization_const = 1.0 / np.sqrt(n.T @ self._A @ n)
@@ -380,6 +382,8 @@ class LinearMatrixPencil():
         # self.characteristic_poly = ( detB/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(pencil_eigs))
 
         # Sorts eigenpairs
+        self.lambda1 = lambda1
+        self.lambda2 = lambda2
         self.eigenvalues = pencil_eigs
         self.eigenvectors = pencil_eigenvectors
         self.zQzs = zQzs

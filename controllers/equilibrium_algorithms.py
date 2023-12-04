@@ -1677,30 +1677,43 @@ def check_equilibrium(plant, clf, cbf, x, **kwargs):
     if clf.kernel != cbf.kernel:
         raise Exception("CLF and CBF must be based on the same kernel.")
     kernel = clf.kernel
+    p = kernel.kernel_dim
 
     m = kernel.function(x)
     Jm = kernel.jacobian(x)
 
-    def L_fun(x):
-        '''
-        L = 0.5 c m.T P m P - F + SUM κ_i N_i
-        '''
-        V = clf.evaluate_function(*x)[0]
-        m = kernel.function(x)
-        return c * V * P - F
-    
-    L = L_fun(x)
-    l = m.T @ L @ m
-    v = Jm.T @ ( l * Q - L ) @ m
+    '''
+    Find a basis for the transpose Jacobian null space of dimension l = p - rank(Jm) >= p - n
+    '''
+    nulls = null_space(Jm.T)
+    dimJm_nullspace = nulls.shape[1]
 
-    error = np.linalg.norm(v) + np.abs(m.T @ Q @ m - 1)
-    print(error)
+    '''
+    Checks if the linear system ( λ Q - L ) m(x) = SUM a_i n_i can be solved for (λ, a_1, ..., a_l),
+    where n_i are elements of the basis for the transpose Jacobian null space.
+    '''
+    Equilibrium_matrix = np.zeros([p,dimJm_nullspace+1])
+    Equilibrium_matrix[:,0] = Q @ m
+    for k in range(dimJm_nullspace):
+        Equilibrium_matrix[:,k+1] = - nulls[:,k]
+    b_vec = ( 0.5 * c * (m.T @ P @ m) * P - F ) @ m
 
+    sol = np.linalg.lstsq(Equilibrium_matrix, b_vec, rcond=None)
+    l = sol[0][0]
+    null_space_coords = sol[0][1:]
+    residue = sol[1]
+
+    '''
+    If the resulting under-determined linear system of equations has an exact solution, 
+    and if the first sol. coord. is non-negative, then x is an equilibrium point.
+    '''
     is_equilibrium = False
-    if error < 1e-5:
+    equilibrium_pt = { "x": None, "lambda": None }
+    if l >= 0 and np.linalg.norm(residue) < 1e-12:
         is_equilibrium = True
+        equilibrium_pt = { "x": x.tolist(), "lambda": l, "residue": residue.tolist() }
 
-    return is_equilibrium
+    return is_equilibrium, equilibrium_pt
 
 def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
     '''
