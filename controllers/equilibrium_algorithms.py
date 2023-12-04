@@ -1657,9 +1657,13 @@ def compute_equilibria_using_pencil3(plant, clf, cbf, initial_point, **kwargs):
 The following algorithms are useful for initialization of the previous algorithms, among other utilities.
 '''
 
-def generate_point_grid(Q, res):
+def generate_point_grid(Q, resolution):
     '''
-    Generate grid of points at the CBF boundary. Assumption
+    Generate grid of points at the CBF boundary.
+    Assumption: Q must be a positive semi definite matrix.
+    The ellipsoid dimension is given by rank(Q)-1.
+    'resolution' is the angular resolution for each dimension of the angular parameters.
+    The total number of generated points is equal to resolution**(rank(Q)-1)
     '''
     eigsQ, eigvecsQ = np.linalg.eig(Q)
 
@@ -1670,13 +1674,14 @@ def generate_point_grid(Q, res):
         raise Exception("Q must be a positive semi-definite matrix.")
 
     rankQ = np.linalg.matrix_rank(Q)
-    print("eigenvalues of Q = " + str(eigsQ))
+    dim_elliptical_manifold = rankQ - 1
 
     def ellipsoid_parametrization(param):
         '''
-        Must pass a rankQ-dimensional vector of parameters 
+        This method implements an angular parametrization of the (rank(Q)-1) dimensional ellipsoid.
+        Receives an (rank(Q)-1) dimensional vector of angular parameters for the ellipsoid,
+        Returns a corresponding point m in the p-dimensional space at the ellipsoid, that is, m.T @ Q @ m = 1.
         '''
-        dim_elliptical_manifold = rankQ - 1
         if len(param) != dim_elliptical_manifold:
             raise Exception("Parameter has wrong dimensions")
 
@@ -1694,18 +1699,48 @@ def generate_point_grid(Q, res):
         m = eigvecsQ @ np.array(reduced_m.tolist() + [ 0.0 for _ in range(p-rankQ)])
         return m
 
-    # def test_parametrization(num_samples):
-    #     '''
-    #     Tests if parametrization is working. WORKS
-    #     '''
-    #     mQm_error = 0.0
-    #     for k in range(num_samples):
-    #         sample = np.random.rand(rankQ-1)
-    #         m = ellipsoid_parametrization(sample)
-    #         mQm_error += (m.T @ Q @ m - 1)
-    #     print("After testing with " + str(num_samples) + " samples, exit with error = " + str(mQm_error))
-    # test_parametrization(100)
+    '''
+    Generate meshgrid with equally spaced angular parameters.
+    '''
+    params = []
+    for k in range(dim_elliptical_manifold):
+        if k == 0:
+            params.append( np.arange(0, np.pi, resolution).tolist() )
+        else:
+            params.append( np.arange(0, 2*np.pi, resolution).tolist() )
+    mesh_coords = np.meshgrid(*params)
 
+    '''
+    Basic recursion for nested loops. 
+    Loops through all the dimensions of the angle parametrization of the (rank(Q)-1) dimensional ellipsoid,
+    generating the boundary points.
+    '''
+    def get_points(dim=0, indexes=[], points=[]):
+        if dim < dim_elliptical_manifold:
+            for i in range( mesh_coords[0].shape[dim] ):
+                indexes.append(i)
+                get_points(dim+1, indexes, points)
+                indexes.pop(-1)
+        else:            
+            theta_pt = [ mesh_coords[i][tuple( j for j in indexes )] for i in range(dim_elliptical_manifold) ]
+            points.append( ellipsoid_parametrization( theta_pt ) )
+
+        if dim == 0:
+            return points
+
+    return get_points()
+
+    '''
+    Basic idea behind the above recursion (for 3 nested loops):
+    for i in range(resolution):
+        for j in range(resolution):
+            for k in range(resolution):
+                theta1v = mesh_coords[0]
+                theta2v = mesh_coords[1]
+                theta3v = mesh_coords[2]
+                theta_pt = [ mesh_coords[dim][i,j,k] for dim in range(dim_elliptical_manifold) ]
+                points.append( ellipsoid_parametrization( theta_pt ) )
+    '''
 
 def check_equilibrium(plant, clf, cbf, x, **kwargs):
     '''
