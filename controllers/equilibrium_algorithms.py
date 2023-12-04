@@ -1657,6 +1657,56 @@ def compute_equilibria_using_pencil3(plant, clf, cbf, initial_point, **kwargs):
 The following algorithms are useful for initialization of the previous algorithms, among other utilities.
 '''
 
+def generate_point_grid(Q, res):
+    '''
+    Generate grid of points at the CBF boundary. Assumption
+    '''
+    eigsQ, eigvecsQ = np.linalg.eig(Q)
+
+    if Q.shape[0] != Q.shape[1]:
+        raise Exception("Q must be a square matrix.")
+    p = Q.shape[0]
+    if np.any(eigsQ < -1e-12):
+        raise Exception("Q must be a positive semi-definite matrix.")
+
+    rankQ = np.linalg.matrix_rank(Q)
+    print("eigenvalues of Q = " + str(eigsQ))
+
+    def ellipsoid_parametrization(param):
+        '''
+        Must pass a rankQ-dimensional vector of parameters 
+        '''
+        dim_elliptical_manifold = rankQ - 1
+        if len(param) != dim_elliptical_manifold:
+            raise Exception("Parameter has wrong dimensions")
+
+        reduced_m = np.zeros(rankQ)
+        for k in range(rankQ):
+            if k != dim_elliptical_manifold:
+                prod = 1/np.sqrt(eigsQ[k])
+                for i in range(k): prod *= np.sin(param[i])
+                reduced_m[k] = prod * np.cos(param[k])
+            else:
+                prod = 1/np.sqrt(eigsQ[k])
+                for i in range(k): prod *= np.sin(param[i])
+                reduced_m[k] = prod
+    
+        m = eigvecsQ @ np.array(reduced_m.tolist() + [ 0.0 for _ in range(p-rankQ)])
+        return m
+
+    # def test_parametrization(num_samples):
+    #     '''
+    #     Tests if parametrization is working. WORKS
+    #     '''
+    #     mQm_error = 0.0
+    #     for k in range(num_samples):
+    #         sample = np.random.rand(rankQ-1)
+    #         m = ellipsoid_parametrization(sample)
+    #         mQm_error += (m.T @ Q @ m - 1)
+    #     print("After testing with " + str(num_samples) + " samples, exit with error = " + str(mQm_error))
+    # test_parametrization(100)
+
+
 def check_equilibrium(plant, clf, cbf, x, **kwargs):
     '''
     Given a state-space point, returns True if it's an equilibrium point or False otherwise.
