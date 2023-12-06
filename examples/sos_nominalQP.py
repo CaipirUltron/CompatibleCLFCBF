@@ -34,7 +34,7 @@ P = create_quadratic(eig, rot2D( 0.0 ), center, kern_dim)
 clf = KernelLyapunov(*initial_state, kernel=kernel, P=P)
 
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
-boundary_points = [ [-4.0, 0.0], [-4.0, -1.0], [-2.0, 0.5], [2.0, 0.5], [4.0, -1.0], [4.0, 0.0], [0.0, 1.0], [0.0, -0.5] ]   # (sad   smile)
+boundary_points = [ [-4.0, 0.0], [-4.0, -1.0], [-2.0, 0.5], [2.0, 0.5], [4.0, -1.0], [4.0, 0.0], [0.0, 1.0], [0.0, -0.5] ]   # (sad smile)
 # boundary_points = [ [-4.0, 0.0], [-4.0, 1.0], [-2.0, -0.5], [2.0, -0.5], [4.0, 1.0], [4.0, 0.0] ] # (happy smile)
 
 cbf = KernelBarrier(*initial_state, kernel=kernel, boundary_points=boundary_points)

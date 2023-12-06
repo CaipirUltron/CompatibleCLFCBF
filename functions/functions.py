@@ -691,7 +691,8 @@ class Kernel(Function):
 
 class KernelQuadratic(Function):
     '''
-    Class for kernel quadratic functions of the type m(x)' P m(x) for a given kernel m(x).
+    Class for kernel quadratic functions of the type f(x) = m(x)' F m(x) - C for a given kernel m(x), where:
+    F is a p.s.d. matrix and C is an arbitrary constant. If no constant C is specified, C = 0
     '''
     def __init__(self, *args, **kwargs):
 
@@ -707,6 +708,7 @@ class KernelQuadratic(Function):
         '''
         Sets the function parameters.
         '''
+        self.constant = 0.0
         for key in kwargs:
 
             # If degree was passed, create Kernel() of appropriate degree 
@@ -737,6 +739,9 @@ class KernelQuadratic(Function):
                     raise Warning("Matrix of coefficients is not symmetric. The symmetric part will be used.")
                 self.matrix_coefs = 0.5 * ( matrix_coefs + matrix_coefs.T )
         
+            if key == "constant":
+                self.constant = kwargs[key]
+
             # If a dictionary of points was passed, call interpolate to find an interpolating coefficient matrix 
             if key == "points":
                 points_dict = kwargs[key]
@@ -753,6 +758,84 @@ class KernelQuadratic(Function):
         self.dynamics.actuate(dt)
         self.set_param( coefficients = vector2sym(self.dynamics.get_state()) )
 
+    def fit_to_points(self, point_list):
+        '''
+        point_list = [ { "point": , "level": , "gradient": , "curvature": } ]
+        Parameters: point_list is a list with the desired points, corresponding level sets, 
+        gradients and curvature (in two dimension only)
+        '''
+        n = self._dim
+        p = self.kernel_dim
+        A_list = self.kernel.get_A_matrices()
+
+        import cvxpy as cp
+
+        R = np.array([[0, -1],[1, 0]])
+        previous_gradient = cp.Parameter(n)
+        Hessian = cp.Variable( (n,n), symmetric=True )
+        F_var = cp.Variable( (p,p), symmetric=True ) # Create p x p symmetric variable
+
+        objective = cp.Minimize( 0.0 )                        # feasibility problem
+        psd_constraint = [F_var >> 0]                         # basic constraint: F_var must be p.s.d.
+
+        '''
+        First, create the required constraints based on the input data
+        '''
+        constraints = []
+        for pt_dict in point_list:
+            keys = pt_dict.keys()
+            pt_constraints = {"point":[], "gradient":[], "curvature":[], "fixed_gradient":[]}
+
+            # Define point-like constraints
+            if "point" in keys:
+                pt = pt_dict["point"]
+                m = self.kernel.function(pt)
+                Jm = self.kernel.jacobian(pt)
+                if "level" in keys:
+                    level_value = pt_dict["level"]
+                else:
+                    if self.constant <= 0.0:            # its either CLF (function is p.s.d.) or a crazy strictly positive function with C < 0
+                        raise Exception("For a CLF, you have to specify a level set for the point.")
+                    else:                               # its a CBF (function is not p.s.d.) ----->>> it will have a boundary!
+                        level_value = 0.0
+                pt_constraints["point"] = [ m.T @ F_var @ m - self.constant == level_value ]
+            else:
+                raise Exception("Point was not specified.")
+
+            # Define gradient-like constraints
+            if "gradient" in keys:
+                pt_constraints["gradient"] = [ Jm.T @ F_var @ m == pt_dict["gradient"] ]
+
+            # Define curvature-like constraints (2D only)
+            if "curvature" in keys:
+                if n == 2:
+                    
+                    for i in range(p): 
+                        for j in range(p):
+                            Hessian[i,j] =  m.T @ ( A_list[i].T @ F_var + F_var @ A_list[i] ) @ A_list[j] @ m
+
+                    pt_constraints["curvature"] = [ previous_gradient.T @ R.T @ Hessian @ R @ previous_gradient == pt_dict["curvature"] ]
+                    pt_constraints["fixed_gradient"] = [ previous_gradient.T @ Jm.T @ F_var @ m ]
+                else:
+                    raise Exception("Error: curvature fitting was not implemented for dimensions > 2")
+                
+            constraints.append( pt_constraints )
+
+        '''
+        Define first optimization, fitting only the points to their corresponding level sets and gradients
+        '''
+        constraints = psd_constraint + pt_constraints["point"] + pt_constraints["gradient"]
+        fit_problem = cp.Problem(objective, constraints)
+        fit_problem.solve()
+
+        '''
+        After first fitting problem was solved, try to fit the specified curvatures (without changing the gradients)
+        '''
+        constraints = psd_constraint["psd"] + pt_constraints["point"] + pt_constraints["curvature"] + pt_constraints["fixed_gradient"]
+        fit_problem = cp.Problem(objective, constraints)
+        fit_problem.solve()
+
+
     def interpolate(self, points_dict):
         '''
         This method interpolates the kernel-based function. The dictionary points_dict holds the keys as level sets [v_i] corresponding to a list of points [x_i] such that F(x_i) = v_i
@@ -768,7 +851,7 @@ class KernelQuadratic(Function):
         for level_value in level_set_values:
             for point in points_dict[level_value]:
                 z = self.kernel.function(point)
-                obj_expr += ( 0.5 * z.T @ P_variable @ z - level_value )**2
+                obj_expr += ( 0.5 * z.T @ P_variable @ z - self.constant - level_value )**2
 
         objective = cp.Minimize( obj_expr )
         constraints = [ P_variable >> 0 ]                          # fundamental constraint: P must be p.s.d.
@@ -801,7 +884,7 @@ class KernelQuadratic(Function):
         Compute polynomial function numerically.
         '''
         m = self.kernel.function(point)
-        return 0.5 * m.T @ self.matrix_coefs @ m
+        return 0.5 * m.T @ self.matrix_coefs @ m - self.constant
 
     def gradient(self, point):
         '''
@@ -877,9 +960,11 @@ class KernelBarrier(KernelQuadratic):
         Optional: pass a vector of parameters representing the vectorization of matrix Q
         '''
         if param != None:
-            super().set_param(coefficients=vector2sym(param))
+            super().set_param(coefficients=vector2sym(param), constant=0.5)
 
-        if "Q" in kwargs.keys(): kwargs["coefficients"] = kwargs.pop("Q")
+        kwargs["constant"] = 0.5
+        if "Q" in kwargs.keys():
+            kwargs["coefficients"] = kwargs.pop("Q")
         super().set_param(**kwargs)
         self.Q = self.matrix_coefs
 
@@ -890,16 +975,16 @@ class KernelBarrier(KernelQuadratic):
         '''
         Defines the CBF boundary, given a list of points 
         '''
-        cost = self.define_level_set(points=points, level=0.5)
+        cost = self.define_level_set(points=points, level=0.0)
         self.Q = self.matrix_coefs
         return cost
 
-    def function(self, point):
-        '''
-        Compute polynomial function numerically.
-        '''
-        half_mQm = super().function(point)
-        return half_mQm - 0.5
+    # def function(self, point):
+    #     '''
+    #     Compute polynomial function numerically.
+    #     '''
+    #     half_mQm = super().function(point)
+    #     return half_mQm - 0.5
 
 class ApproxFunction(Function):
     '''
