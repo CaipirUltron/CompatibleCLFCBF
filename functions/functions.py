@@ -1,5 +1,7 @@
 import math
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 
 from common import *
 from dynamic_systems import Integrator
@@ -177,15 +179,15 @@ class Function():
 
         return function
 
-    def contour_plot(self, ax, levels, colors, min=-10.0, max=10.0, resolution=0.1):
+    def contour_plot(self, ax, levels, colors, min_lims=(-10 -10), max_lims=(-10 -10), resolution=0.1):
         '''
         Return 2D contour plot object.
         '''
         # if self._dim != 2:
         #     raise Exception("Contour plot can only be used for 2D functions.")
 
-        x = np.arange(min, max, resolution)
-        y = np.arange(min, max, resolution)
+        x = np.arange(min_lims[0], max_lims[0], resolution)
+        y = np.arange(min_lims[1], max_lims[1], resolution)
         xv, yv = np.meshgrid(x,y)
 
         mesh_fvalues = np.zeros([np.size(xv,0),np.size(xv,1)])
@@ -704,6 +706,9 @@ class KernelQuadratic(Function):
         self.param = sym2vector( self.matrix_coefs )
         self.dynamics = Integrator( self.param, np.zeros(len(self.param)) )
 
+        default_plot_config = {"figsize": (5,5), "axeslim": (-6,6,-6,6), "color": mcolors.TABLEAU_COLORS['tab:green']}
+        self.plot_config = default_plot_config
+
     def set_param(self, **kwargs):
         '''
         Sets the function parameters.
@@ -758,7 +763,7 @@ class KernelQuadratic(Function):
         self.dynamics.actuate(dt)
         self.set_param( coefficients = vector2sym(self.dynamics.get_state()) )
 
-    def fit_to_points(self, point_list):
+    def fit(self, point_list):
         '''
         point_list = [ { "point": , "level": , "gradient": , "curvature": } ]
         Parameters: point_list is a list with the desired points, corresponding level sets, 
@@ -775,13 +780,13 @@ class KernelQuadratic(Function):
         Hessian = cp.Variable( (n,n), symmetric=True )
         F_var = cp.Variable( (p,p), symmetric=True ) # Create p x p symmetric variable
 
-        objective = cp.Minimize( 0.0 )                        # feasibility problem
+        objective = cp.Minimize( cp.norm(F_var, 'fro') )                        # feasibility problem
         psd_constraint = [F_var >> 0]                         # basic constraint: F_var must be p.s.d.
 
         '''
         First, create the required constraints based on the input data
         '''
-        constraints = []
+        constraints = psd_constraint
         for pt_dict in point_list:
             keys = pt_dict.keys()
             pt_constraints = {"point":[], "gradient":[], "curvature":[], "fixed_gradient":[]}
@@ -804,7 +809,9 @@ class KernelQuadratic(Function):
 
             # Define gradient-like constraints
             if "gradient" in keys:
-                pt_constraints["gradient"] = [ Jm.T @ F_var @ m == pt_dict["gradient"] ]
+                gradient = pt_dict["gradient"]
+                normalized = gradient/np.linalg.norm(gradient)
+                pt_constraints["gradient"] = [ Jm.T @ F_var @ m == normalized ]
 
             # Define curvature-like constraints (2D only)
             if "curvature" in keys:
@@ -819,22 +826,27 @@ class KernelQuadratic(Function):
                 else:
                     raise Exception("Error: curvature fitting was not implemented for dimensions > 2")
                 
-            constraints.append( pt_constraints )
+            constraints += pt_constraints["point"] + pt_constraints["gradient"]  + pt_constraints["curvature"]
 
         '''
         Define first optimization, fitting only the points to their corresponding level sets and gradients
         '''
-        constraints = psd_constraint + pt_constraints["point"] + pt_constraints["gradient"]
         fit_problem = cp.Problem(objective, constraints)
         fit_problem.solve()
 
         '''
         After first fitting problem was solved, try to fit the specified curvatures (without changing the gradients)
         '''
-        constraints = psd_constraint["psd"] + pt_constraints["point"] + pt_constraints["curvature"] + pt_constraints["fixed_gradient"]
-        fit_problem = cp.Problem(objective, constraints)
-        fit_problem.solve()
+        # constraints = psd_constraint["psd"] + pt_constraints["point"] + pt_constraints["curvature"] + pt_constraints["fixed_gradient"]
+        # fit_problem = cp.Problem(objective, constraints)
+        # fit_problem.solve()
 
+        if fit_problem.status not in ["infeasible", "unbounded"]:
+            print("Interpolation was successful with final cost = " + str(fit_problem.value))
+            self.set_param( coefficients =  F_var.value )
+            return fit_problem.value
+        else:
+            raise Exception("Problem is " + fit_problem.status + ".")
 
     def interpolate(self, points_dict):
         '''
@@ -908,6 +920,30 @@ class KernelQuadratic(Function):
                 hessian_m_ij = self.kernel._lambda_hessian_monomials(*point)[i][j].reshape(self.kernel_dim)
                 Hessian[i,j] = Jac_m_i @ self.matrix_coefs @ Jac_m_j + m @ self.matrix_coefs @ hessian_m_ij
         return Hessian
+
+    def plot(self, **kwargs):
+        '''
+        Plots the kernel-based function using matplotlib
+        '''
+        for key in kwargs:
+            if key == "figsize":
+                self.plot_config["figsize"] = kwargs[key]
+            if key == "axeslim":
+                self.plot_config["axeslim"] = kwargs[key]
+            if key == "color":
+                self.plot_config["color"] = kwargs[key]
+
+        fig = plt.figure(figsize = self.plot_config["figsize"], constrained_layout=True)
+        ax = fig.add_subplot(111)
+
+        x_lim = self.plot_config["axeslim"][0:2]
+        y_lim = self.plot_config["axeslim"][2:4]
+
+        ax.set_xlim(*x_lim)
+        ax.set_ylim(*y_lim)
+
+        self.contour_plot(ax, levels=[0.0], colors=self.plot_config["color"], min_lims=[ x_lim[0], y_lim[0] ], max_lims=[ x_lim[1], y_lim[1] ], resolution=0.1)
+        return ax
 
     def get_shape(self):
         '''

@@ -132,7 +132,7 @@ class Plot2DSimulation():
         self.clf_contour_color = mcolors.TABLEAU_COLORS['tab:blue']
         self.cbf_contour_color = mcolors.TABLEAU_COLORS['tab:green']
 
-        self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[0.0], colors=self.clf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.5)
+        self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[0.0], colors=self.clf_contour_color, min_lims=[ self.x_lim[0], self.y_lim[0] ], max_lims=[ self.x_lim[1], self.y_lim[1] ], resolution=0.5)
         self.cbf_contours = []
 
     def init(self):
@@ -156,7 +156,7 @@ class Plot2DSimulation():
             self.equilibria_plot.set_data(x_eq, y_eq)
 
         for cbf in self.cbfs:
-            self.cbf_contours.append( cbf.contour_plot(self.main_ax, levels=[0.0], colors=self.cbf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.1) )
+            self.cbf_contours.append( cbf.contour_plot(self.main_ax, levels=[0.0], colors=self.cbf_contour_color, min_lims=[ self.x_lim[0], self.y_lim[0] ], max_lims=[ self.x_lim[1], self.y_lim[1] ], resolution=0.1) )
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
@@ -210,7 +210,7 @@ class Plot2DSimulation():
                     coll.remove()
 
                 perimeter = 4*abs(current_state[0]) + 4*abs(current_state[1])
-                self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[V], colors=self.clf_contour_color, min=self.x_lim[0], max=self.x_lim[1], resolution=0.005*perimeter+0.1)
+                self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[V], colors=self.clf_contour_color, min_lims=[ self.x_lim[0], self.y_lim[0] ], max_lims=[ self.x_lim[1], self.y_lim[1] ], resolution=0.005*perimeter+0.1)
 
         else:
             self.runs = False
