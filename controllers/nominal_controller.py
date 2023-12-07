@@ -10,7 +10,7 @@ class NominalQP():
     '''
     Class for the nominal QP controller.
     '''
-    def __init__(self, plant, clf, cbfs, alpha = 1.0, beta = 1.0, p = 10.0, dt = 0.001):
+    def __init__(self, plant, clf, cbfs, alpha = 1.0, beta = 1.0, p = 1.0, dt = 0.001):
 
         # Dimensions and system model initialization
         self.plant = plant
@@ -53,24 +53,24 @@ class NominalQP():
         self.last_updated_by = None
         self.last_eq_t = 0.0
 
-    def get_equilibria(self):
-        '''
-        Computes the equilibrium points every 
-        '''
-        elapsed_time = self.timer - self.last_eq_t
-        if elapsed_time > self.eq_dt:
-            initial_guess = self.plant.get_state()
-            eq_sol = compute_equilibria_algorithm7( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
-            if eq_sol != None and eq_sol["cost"] < 1e-10:
-                eq_pt = np.array(eq_sol["point"])
-                eq_pts = np.array([ eq["point"] for eq in self.equilibria ])
-                if len(eq_pts) > 0:
-                    if np.all( np.linalg.norm(eq_pt - eq_pts, axis=1) > 1e-5 ):
-                        self.equilibria.append(eq_sol)
-                else:
-                    self.equilibria.append(eq_sol)
+    # def get_equilibria(self):
+    #     '''
+    #     Computes the equilibrium points every 
+    #     '''
+    #     elapsed_time = self.timer - self.last_eq_t
+    #     if elapsed_time > self.eq_dt:
+    #         initial_guess = self.plant.get_state()
+    #         eq_sol = compute_equilibria_algorithm7( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
+    #         if eq_sol != None and eq_sol["cost"] < 1e-10:
+    #             eq_pt = np.array(eq_sol["point"])
+    #             eq_pts = np.array([ eq["point"] for eq in self.equilibria ])
+    #             if len(eq_pts) > 0:
+    #                 if np.all( np.linalg.norm(eq_pt - eq_pts, axis=1) > 1e-5 ):
+    #                     self.equilibria.append(eq_sol)
+    #             else:
+    #                 self.equilibria.append(eq_sol)
 
-            self.last_eq_t = self.timer
+    #         self.last_eq_t = self.timer
 
     def get_control(self):
         '''
@@ -94,7 +94,7 @@ class NominalQP():
         control = self.QP_sol[0:self.control_dim,]
 
         # self.get_equilibria()
-        is_equilibrium, eq_pt = check_equilibrium(self.plant, self.clf, self.cbfs[0], self.plant.get_state(), c = self.p * self.alpha)
+        is_equilibrium, eq_pt = check_equilibrium(self.plant, self.clf, self.cbfs[0], self.plant.get_state(), slack_gain=self.p, clf_gain=self.alpha)
         if is_equilibrium:
             print("Equilibrium point was found: " + str(eq_pt))
 

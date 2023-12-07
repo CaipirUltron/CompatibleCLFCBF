@@ -2,6 +2,7 @@ import math
 import numpy as np
 import itertools
 from scipy.optimize import fsolve
+import cvxpy as cp
 
 def cofactor(A):
     """
@@ -355,6 +356,43 @@ def sontag_formula(a, b):
     if b != 0:
         kappa = - (a + np.sqrt(a**2 + b**4))/b
     return kappa
+
+def compute_curvatures(H, normal):
+    '''
+    This function computes the maximum/minimum curvatures of a function at a given direction,
+    using a clever algorithm based on the QR decomposition.
+    Parameters: H is the Hessian matrix of a given function, 
+                normal is the normal vector to the subspace where the optimization is taking place ( normally the direction the function gradient at a given level set )
+    Returns: the minimum and maximum curvatures found on the orthogonal subspace
+    '''
+    n = len(normal)
+    if (H.shape[0] != H.shape[1]) or H.shape != (n,n): 
+        raise Exception("Dimensions are not consistent.")
+
+    '''
+    Generate a random L.I. matrix with the given normal vector at the first column
+    '''
+    M = np.random.rand(n,n)
+    M[:,0] = normal
+    while np.abs( np.linalg.det(M) ) <= 1e-10:
+        M = np.random.rand(n,n)
+        M[:,0] = normal
+
+    '''
+    Compute the QR factorization of the previously generated matrix:
+    the columns of Q correspond to L.I vectors from Gram-Schmidt orthogonalization
+    '''
+    Q, R = np.linalg.qr(M)
+
+    barH = Q.T @ H @ Q
+    shape_operator = barH[1:,1:]
+    eigs = np.linalg.eigvals( shape_operator )
+
+    min_curvature = np.min(eigs)
+    max_curvature = np.max(eigs)
+    curvatures = [ min_curvature, max_curvature ]
+
+    return curvatures, shape_operator
 
 class Rect():
     '''

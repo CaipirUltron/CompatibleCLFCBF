@@ -1,4 +1,7 @@
+import numpy as np
 import matplotlib.pyplot as plt
+
+from common import compute_curvatures
 from functions import Kernel, KernelLyapunov, KernelBarrier
 
 initial_state = [3.2, 3.0]
@@ -19,17 +22,15 @@ boundary_points = [ [-4.0, 0.0], [-4.0, -1.0], [-2.0, 0.5], [2.0, 0.5], [4.0, -1
 
 cbf = KernelBarrier(*initial_state, kernel=kernel, boundary_points=boundary_points)
 
-# points = []
-# points.append({ "point": [2.0, 2.0], "gradient": [1.0, 1.0] })
-# points.append({ "point": [2.0, -2.0], "gradient": [1.0, -1.0] })
-# points.append({ "point": [-2.0, -2.0], "gradient": [-1.0, -1.0] })
-# points.append({ "point": [-2.0, 2.0], "gradient": [-1.0, 1.0] })
-# points.append({ "point": [0.0, 2.0], "gradient": [0.0, 1.0] })
-# points.append({ "point": [0.0, -2.0], "gradient": [0.0, -1.0] })
-# cbf.fit(points)
+# ax = cbf.plot(axeslim = [-10, 10, -10, 10])
+# plt.show()
 
-ax = cbf.plot(axeslim = [-10, 10, -10, 10])
-# for pt in points:
-#     ax.plot(pt["point"][0], pt["point"][1], "go")
+H = np.random.rand(3,3)
+# H = H.T + H
+normal = np.random.rand(3)
 
-plt.show()
+curvatures, shape_operator = compute_curvatures( H, normal )
+
+print("Max. curvature = " + str(curvatures[1]))
+print("Min. curvature = " + str(curvatures[0]))
+print("Shape operator = " + str(shape_operator))

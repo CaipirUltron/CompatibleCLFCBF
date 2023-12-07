@@ -50,7 +50,7 @@ if not manual_mode:
 '''
 Finds and plots the equilibrium points
 '''
-solutions, log = compute_equilibria_algorithm9(sim.plant, sim.clf, sim.cbf, initial_guesses, c = 1)
+solutions, log = compute_equilibria_algorithm9(sim.plant, sim.clf, sim.cbf, initial_guesses, slack_gain=sim.p, clf_gain=sim.alpha)
 num_sols = len(solutions)
 print("From " + str(log["num_trials"]) + " trials, algorithm converged " + str(log["num_success"]) + " times, and " + str(num_sols) + " solutions were found.")
 print("Algorithm efficiency = " + str( log["num_success"]/log["num_trials"] ))

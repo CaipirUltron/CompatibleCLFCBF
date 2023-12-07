@@ -42,7 +42,8 @@ cbfs = [cbf]
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .002
-controller = NominalQP(plant, clf, cbfs, alpha = 10.0, beta = 10.0, p = 1.0, dt=sample_time)
+p, alpha, beta = 1.0, 10.0, 10.0
+controller = NominalQP(plant, clf, cbfs, alpha, beta, p, dt=sample_time)
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 xlimits, ylimits = [-8, 8], [-8, 8]

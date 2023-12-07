@@ -5,7 +5,7 @@ import cvxpy as cp
 from scipy.optimize import root, least_squares, minimize
 from scipy.linalg import null_space
 
-from common import adjugate, rot2D
+from common import adjugate, rot2D, compute_curvatures
 from dynamic_systems import Integrator
 from quadratic_program import QuadraticProgram
 from controllers.compatibility import LinearMatrixPencil, LinearMatrixPencil2
@@ -1027,12 +1027,15 @@ def compute_equilibria_algorithm9(plant, clf, cbf, initial_points, **kwargs):
     l1 = c V(z) P z,
     z \in Im(m)
     '''
-    c = 1
+    slack_gain, clf_gain = 1.0, 1.0
     max_iter = 1000
     for key in kwargs.keys():
         aux_key = key.lower()
-        if aux_key == "c":
-            c = kwargs[key]
+        if aux_key == "slack_gain":
+            slack_gain = kwargs[key]
+            continue
+        if aux_key == "clf_gain":
+            clf_gain = kwargs[key]
             continue
         if aux_key == "max_iter":
             max_iter = kwargs[key]
@@ -1077,7 +1080,7 @@ def compute_equilibria_algorithm9(plant, clf, cbf, initial_points, **kwargs):
         for k in range(dim_nullspace):
             nullspace_vec += alpha[k] * N[:,k]
 
-        return ( l * Q - 0.5 * c * (m.T @ P @ m) * P + F ) @ m - nullspace_vec
+        return ( l * Q - 0.5 * slack_gain * clf_gain * (m.T @ P @ m) * P + F ) @ m - nullspace_vec      # = 0
 
     def boundary_constraint(var):
         '''
@@ -1127,6 +1130,7 @@ def compute_equilibria_algorithm9(plant, clf, cbf, initial_points, **kwargs):
                 x = sol.x[0:n]
 
                 # Ignore the last p - rank(Jm) entries of kappa
+                m = kernel.function(x)
                 Jm = kernel.jacobian(x)
                 dim_nullspace = null_space(Jm.T).shape[1]
                 alpha = sol.x[n:n+dim_nullspace]
@@ -1145,8 +1149,19 @@ def compute_equilibria_algorithm9(plant, clf, cbf, initial_points, **kwargs):
                         break
                 
                 if is_new_sol:
-                    eq_sol = {"x": x.tolist(), "alpha": alpha.tolist(), "lambda": l, "residue": sol.cost}
-                    eq_sol["stability"] = compute_stability(plant, clf, cbf, eq_sol, c = c)
+
+                    # Compute eta - might be relevant latter
+                    g = plant.g_method(x)
+                    G = g @ g.T
+                
+                    nablaV = Jm.T @ P @ m
+                    nablah = Jm.T @ Q @ m
+                    z1 = nablah / np.linalg.norm(nablah)
+                    z2 = nablaV - nablaV.T @ G @ z1 * z1
+                    eta = 1/(1 + slack_gain * z2.T @ G @ z2 )
+
+                    eq_sol = {"x": x.tolist(), "alpha": alpha.tolist(), "lambda": l, "eta": eta, "residue": sol.cost}
+                    eq_sol["stability"] = compute_stability(plant, clf, cbf, eq_sol, slack_gain=slack_gain, clf_gain=clf_gain)
                     sols.append( eq_sol )
             else:
                 log["num_failure"] += 1
@@ -1876,11 +1891,14 @@ def check_equilibrium(plant, clf, cbf, x, **kwargs):
     '''
     Given a state-space point, returns True if it's an equilibrium point or False otherwise.
     '''
-    c = 1
+    slack_gain, clf_gain = 1.0, 1.0
     for key in kwargs.keys():
         aux_key = key.lower()
-        if aux_key == "c":
-            c = kwargs[key]
+        if aux_key == "slack_gain":
+            slack_gain = kwargs[key]
+            continue
+        if aux_key == "clf_gain":
+            clf_gain = kwargs[key]
             continue
 
     if clf._dim != cbf._dim:
@@ -1904,30 +1922,40 @@ def check_equilibrium(plant, clf, cbf, x, **kwargs):
     dimJm_nullspace = N.shape[1]
 
     '''
-    Checks if the linear system ( λ Q - L ) m(x) = SUM a_i n_i can be solved for (λ, a_1, ..., a_l),
+    Checks if the linear system ( λ Q - 0.5 c m P m P + F ) m(x) = SUM a_i n_i can be solved for (λ, a_1, ..., a_l),
     where n_i are elements of the basis for the transpose Jacobian null space.
     '''
-    Equilibrium_matrix = np.zeros([p,dimJm_nullspace+1])
-    Equilibrium_matrix[:,0] = Q @ m
+    A = np.zeros([p,dimJm_nullspace+1])
+    A[:,0] = Q @ m
     for k in range(dimJm_nullspace):
-        Equilibrium_matrix[:,k+1] = - N[:,k]
-    b_vec = ( 0.5 * c * (m.T @ P @ m) * P - F ) @ m
+        A[:,k+1] = - N[:,k]
+    b = ( 0.5 * slack_gain * clf_gain * (m.T @ P @ m) * P - F ) @ m
 
-    sol = np.linalg.lstsq(Equilibrium_matrix, b_vec, rcond=None)
+    sol = np.linalg.lstsq(A, b, rcond=None)
     l = sol[0][0]
     alpha = sol[0][1:]          # nullspace coordinates
-    residue = sol[1]
+    residue = np.sum(sol[1])
 
     '''
     If the resulting under-determined linear system of equations has an exact solution, 
     and if the first sol. coord. is non-negative, then x is an equilibrium point.
     '''
     is_equilibrium = False
-    equilibrium_pt = { "x": None, "alpha": None, "lambda": None }
+    equilibrium_pt = { "x": None, "alpha": None, "lambda": None, "residue": residue }
     if l >= 0 and np.linalg.norm(residue) < 1e-12:
+
+        g = plant.g_method(x)
+        G = g @ g.T
+
+        nablaV = Jm.T @ P @ m
+        nablah = Jm.T @ Q @ m
+        z1 = nablah / np.linalg.norm(nablah)
+        z2 = nablaV - nablaV.T @ G @ z1 * z1
+        eta = 1/(1 + slack_gain * z2.T @ G @ z2 )
+
         is_equilibrium = True
-        equilibrium_pt = { "x": x.tolist(), "alpha": alpha, "lambda": l, "residue": residue.tolist() }
-        equilibrium_pt["stability"] = compute_stability(plant, clf, cbf, equilibrium_pt, c = c)
+        equilibrium_pt = { "x": x.tolist(), "alpha": alpha.tolist(), "lambda": l, "eta": eta, "residue": residue }
+        equilibrium_pt["stability"] = compute_stability(plant, clf, cbf, equilibrium_pt, slack_gain=slack_gain, clf_gain=clf_gain )
 
     return is_equilibrium, equilibrium_pt
 
@@ -1935,11 +1963,14 @@ def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
     '''
     Compute the stability number for a given equilibrium point
     '''
-    c = 1
+    slack_gain, clf_gain = 1.0, 1.0
     for key in kwargs.keys():
         aux_key = key.lower()
-        if aux_key == "c":
-            c = kwargs[key]
+        if aux_key == "slack_gain":
+            slack_gain = kwargs[key]
+            continue
+        if aux_key == "clf_gain":
+            clf_gain = kwargs[key]
             continue
 
     if clf._dim != cbf._dim:
@@ -1982,49 +2013,21 @@ def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
     system_solution = np.linalg.lstsq(System_matrix, nullspace_vec, rcond=None)
     kappa, residuals = system_solution[0], system_solution[1]
 
-    # print("Kappa = " + str(kappa))
-    # print("Residual of kappa conversion = " + str(residuals))
-    # print("Error on the system solution = " + str(np.linalg.norm(System_matrix @ kappa - nullspace_vec)) )
-    # print("Collinearity between CLF-CBF gradients = " + str( nablah.T @ nablaV - np.linalg.norm(nablah)*np.linalg.norm(nablaV) ) )
-
     '''
     Compute S matrix to determine stability of the equilibrium point
     '''
     sum = np.zeros([p,p])
     for k in range(p):
         sum += kappa[k] * N_list[k]
-    S_matrix = Jm.T @ ( F + l * Q - 0.5 * c * (m.T @ P @ m) * P - sum - c * np.outer(P @ m, P @ m) ) @ Jm
+    S_matrix = Jm.T @ ( F + l * Q - 0.5 * slack_gain * clf_gain * (m.T @ P @ m) * P - sum - slack_gain * clf_gain * np.outer(P @ m, P @ m) ) @ Jm
 
     '''
-    Compute stability number (valid only in n = 2)
+    Compute stability number
     '''
     normalized = nablah/np.linalg.norm(nablah)
-    vec_at_tangent_space = rot2D(np.pi/2) @ normalized
-    stability_number = vec_at_tangent_space.T @ S_matrix @ vec_at_tangent_space
+    curvatures, shape_operator = compute_curvatures( S_matrix, normalized )
 
-    return stability_number
-
-    '''
-    Setup general cvxpy problem (valid for every dimension)
-    '''
-    # v = cp.Variable(n)
-    # objective = cp.Minimize( v.T @ Jm.T @ S_matrix @ Jm @ v )
-    # constraint = [ nablah.T @ v == 0, 
-    #                v.T @ v == 1      ]
-    # stability_problem = cp.Problem(objective, constraint)
-    # stability_problem.solve()
-
-    # if "optimal" in stability_problem.status:
-    #     print("Stability computed successfully, with status: " + stability_problem.status)
-    #     if stability_problem.value > 0:
-    #         print("Equilibrium point " + str(x) + " is unstable, with value = " + str(stability_problem.value))
-    #     else:
-    #         print("Equilibrium point " + str(x) + " is stable, with value = " + str(stability_problem.value))
-    #     return stability_problem.value
-    # else:
-    #     raise Exception("Problem is " + stability_problem.status + ".")
-
-    # return problem.value
+    return np.max(curvatures)
 
 def get_boundary_points(cbf, points, **kwargs):
     '''
