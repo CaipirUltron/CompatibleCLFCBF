@@ -59,4 +59,9 @@ for k in range(num_sols):
     print("Solution " + str(k+1) + " = " + str(sol))
     plotSim.main_ax.plot( sol["x"][0], sol["x"][1], 'ro' )
 
+    if sol["stability"] > 0:
+        print("Equilibrium point " + str(sol["x"]) + " is unstable, with value = " + str(sol["stability"]))
+    else:
+        print("Equilibrium point " + str(sol["x"]) + " is stable, with value = " + str(sol["stability"]))
+
 plt.show()
