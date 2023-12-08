@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from common import compute_curvatures
+from common import rgb
 from functions import Kernel, KernelLyapunov, KernelBarrier
 
 initial_state = [3.2, 3.0]
@@ -10,7 +10,7 @@ n = len(initial_state)
 m = len(initial_control)
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
-max_degree = 2
+max_degree = 3
 kernel = Kernel(*initial_state, degree = max_degree)
 kern_dim = kernel.kernel_dim
 print(kernel)
@@ -22,15 +22,28 @@ boundary_points = [ [-4.0, 0.0], [-4.0, -1.0], [-2.0, 0.5], [2.0, 0.5], [4.0, -1
 
 cbf = KernelBarrier(*initial_state, kernel=kernel, boundary_points=boundary_points)
 
-# ax = cbf.plot(axeslim = [-10, 10, -10, 10])
-# plt.show()
+points = []
+points += [ { "point": [2.0, 2.0], "level": 0.0 , "gradient": [1.0, 1.0] } ]
+points += [ { "point": [2.0, -2.0], "level": 0.0 , "gradient": [1.0, -1.0] } ]
+points += [ { "point": [-2.0, -2.0], "level": 0.0 , "gradient": [-1.0, -1.0] } ]
+points += [ { "point": [-2.0, 2.0], "level": 0.0 , "gradient": [-1.0, 1.0] } ]
+points += [ { "point": [0.0, 2.0], "level": 0.0 , "gradient": [0.0, 1.0], "curvature": -0.2 } ]
+points += [ { "point": [0.0, -2.0], "level": 0.0 , "gradient": [0.0, -1.0], "curvature": 0.2 } ]
+# points += [ { "point": [4.0, 0.0], "level": 0.0, "gradient": [1.0, 0.0] } ]
+# points += [ { "point": [-4.0, 0.0], "level": 0.0, "gradient": [-1.0, 0.0] } ]
 
-H = np.random.rand(3,3)
-# H = H.T + H
-normal = np.random.rand(3)
+cbf.fit(points)
 
-curvatures, shape_operator = compute_curvatures( H, normal )
+ax = cbf.plot(axeslim = [-10, 10, -10, 10])
+for pt in points:
 
-print("Max. curvature = " + str(curvatures[1]))
-print("Min. curvature = " + str(curvatures[0]))
-print("Shape operator = " + str(shape_operator))
+    plt.plot(pt["point"][0], pt["point"][1], 'go')
+
+    if "gradient" in pt.keys():
+        if "curvature" in pt.keys():
+            color = rgb(-10.0, 10.0, pt["curvature"])
+            plt.quiver(pt["point"][0], pt["point"][1], pt["gradient"][0], pt["gradient"][1], color=color)
+        else:
+            plt.quiver(pt["point"][0], pt["point"][1], pt["gradient"][0], pt["gradient"][1])
+
+plt.show()

@@ -1,4 +1,5 @@
 import math
+import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -738,7 +739,7 @@ class KernelQuadratic(Function):
                     raise Exception("Matrix of coefficients must be a two-dimensional array.")
                 if matrix_shape[0] != matrix_shape[1]:
                     raise Exception("Matrix of coefficients must be a square.")
-                if not np.all(np.linalg.eigvals(matrix_coefs) >= -1e-10):
+                if not np.all(np.linalg.eigvals(matrix_coefs) >= -1e-12):
                     raise Exception("Matrix of coefficients must be positive semi-definite.")
                 if not np.all( matrix_coefs == matrix_coefs.T ):
                     raise Warning("Matrix of coefficients is not symmetric. The symmetric part will be used.")
@@ -772,77 +773,80 @@ class KernelQuadratic(Function):
         n = self._dim
         p = self.kernel_dim
         A_list = self.kernel.get_A_matrices()
+        R = rot2D(np.pi/2)
 
         import cvxpy as cp
 
-        R = np.array([[0, -1],[1, 0]])
-        previous_gradient = cp.Parameter(n)
-        Hessian = cp.Variable( (n,n), symmetric=True )
-        F_var = cp.Variable( (p,p), symmetric=True ) # Create p x p symmetric variable
-
-        objective = cp.Minimize( cp.norm(F_var, 'fro') )                        # feasibility problem
-        psd_constraint = [F_var >> 0]                         # basic constraint: F_var must be p.s.d.
+        obj_expr = 0.0
+        F_var = cp.Variable( (p,p), symmetric=True )               # Create p x p symmetric variable
+        constraints = [ F_var >> 0 ]                               # Basic constraint: F_var must be p.s.d.
 
         '''
-        First, create the required constraints based on the input data
+        Iterate over the input list to get problem requirements
         '''
-        constraints = psd_constraint
+        gradient_norms = []
         for pt_dict in point_list:
             keys = pt_dict.keys()
-            pt_constraints = {"point":[], "gradient":[], "curvature":[], "fixed_gradient":[]}
 
-            # Define point-like constraints
+            # Define point-level constraints
             if "point" in keys:
                 pt = pt_dict["point"]
                 m = self.kernel.function(pt)
                 Jm = self.kernel.jacobian(pt)
                 if "level" in keys:
                     level_value = pt_dict["level"]
-                else:
-                    if self.constant <= 0.0:            # its either CLF (function is p.s.d.) or a crazy strictly positive function with C < 0
-                        raise Exception("For a CLF, you have to specify a level set for the point.")
-                    else:                               # its a CBF (function is not p.s.d.) ----->>> it will have a boundary!
-                        level_value = 0.0
-                pt_constraints["point"] = [ m.T @ F_var @ m - self.constant == level_value ]
+                elif self.constant > 0.0:                     # its a CBF (function is not p.s.d.) ----->>> it will have a boundary! (consider the specified level to be 0)
+                    level_value = 0.0
+                else:                                         # its either CLF (function is p.s.d.) or a crazy strictly positive function with C < 0
+                    raise Exception("For a CLF, you have to specify a level set different than 0 for the point.")
+                
+                # Sums errors to objective function
+                obj_expr += ( 0.5 * m.T @ F_var @ m - self.constant - level_value )**2
             else:
-                raise Exception("Point was not specified.")
+                raise Exception("A point must be specified.")
 
-            # Define gradient-like constraints
+            # Define point-gradient constraints
             if "gradient" in keys:
+                gradient_norms.append( cp.Variable() )
+
                 gradient = pt_dict["gradient"]
                 normalized = gradient/np.linalg.norm(gradient)
-                pt_constraints["gradient"] = [ Jm.T @ F_var @ m == normalized ]
+                constraints += [ Jm.T @ F_var @ m == gradient_norms[-1] * normalized ]
+                constraints += [ gradient_norms[-1] >= 0 ]
 
-            # Define curvature-like constraints (2D only)
+            # Define point-curvature constraints (2D only)
             if "curvature" in keys:
-                if n == 2:
-                    
-                    for i in range(p): 
-                        for j in range(p):
-                            Hessian[i,j] =  m.T @ ( A_list[i].T @ F_var + F_var @ A_list[i] ) @ A_list[j] @ m
 
-                    pt_constraints["curvature"] = [ previous_gradient.T @ R.T @ Hessian @ R @ previous_gradient == pt_dict["curvature"] ]
-                    pt_constraints["fixed_gradient"] = [ previous_gradient.T @ Jm.T @ F_var @ m ]
-                else:
-                    raise Exception("Error: curvature fitting was not implemented for dimensions > 2")
-                
-            constraints += pt_constraints["point"] + pt_constraints["gradient"]  + pt_constraints["curvature"]
+                if n != 2:
+                    raise Exception("Error: curvature fitting was not implemented for dimensions > 2. ")
+
+                if "gradient" not in keys:
+                    raise Exception("Cannot specify a curvature without specifying the gradient.")
+
+                curvature = pt_dict["curvature"]
+                v = rot2D(np.pi/2) @ normalized
+
+                curvature_var = 0.0
+                for i,j in itertools.product(range(n),range(n)):
+                    Hij = m.T @ ( A_list[i].T @ F_var + F_var @ A_list[i] ) @ A_list[j] @ m
+                    curvature_var += Hij * v[i] * v[j]
+
+                obj_expr += ( curvature_var - curvature )**2
+                # constraints += [ curvature_var == curvature ]
+
+        # Trying to keep the gradient norms close to 1
+        for gradient_norm in gradient_norms:    
+            obj_expr += ( gradient_norm - 1.0 )**2
 
         '''
         Define first optimization, fitting only the points to their corresponding level sets and gradients
         '''
+        objective = cp.Minimize( obj_expr )
         fit_problem = cp.Problem(objective, constraints)
         fit_problem.solve()
 
-        '''
-        After first fitting problem was solved, try to fit the specified curvatures (without changing the gradients)
-        '''
-        # constraints = psd_constraint["psd"] + pt_constraints["point"] + pt_constraints["curvature"] + pt_constraints["fixed_gradient"]
-        # fit_problem = cp.Problem(objective, constraints)
-        # fit_problem.solve()
-
-        if fit_problem.status not in ["infeasible", "unbounded"]:
-            print("Interpolation was successful with final cost = " + str(fit_problem.value))
+        if "optimal" in fit_problem.status:
+            print("Fitting was successful with final cost = " + str(fit_problem.value) + " and message " + str(fit_problem.status))
             self.set_param( coefficients =  F_var.value )
             return fit_problem.value
         else:

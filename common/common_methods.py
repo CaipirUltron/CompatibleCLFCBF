@@ -2,7 +2,6 @@ import math
 import numpy as np
 import itertools
 from scipy.optimize import fsolve
-import cvxpy as cp
 
 def cofactor(A):
     """
@@ -386,13 +385,25 @@ def compute_curvatures(H, normal):
 
     barH = Q.T @ H @ Q
     shape_operator = barH[1:,1:]
-    eigs = np.linalg.eigvals( shape_operator )
+    eigs = np.linalg.eigvals(shape_operator)
 
     min_curvature = np.min(eigs)
     max_curvature = np.max(eigs)
     curvatures = [ min_curvature, max_curvature ]
 
     return curvatures, shape_operator
+
+def rgb(minimum, maximum, value):
+    '''
+    Create RGB map
+    '''
+    minimum, maximum = float(minimum), float(maximum)
+    ratio = 2 * (value-minimum) / (maximum - minimum)
+    b = int(max(0, 255*(1 - ratio)))
+    r = int(max(0, 255*(ratio - 1)))
+    g = 255 - b - r
+
+    return [ r/255, g/255, b/255 ]
 
 class Rect():
     '''
