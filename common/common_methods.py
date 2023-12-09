@@ -330,12 +330,23 @@ def kernel_constraints( z, terms_by_degree ):
 
 def create_quadratic(eigen, R, center, kernel_dim):
     '''
-    This function creates a matrix P for a generic quadratic function 
-    with eigenvalues eigen and rotation matrix R, centered in center
+    This function generates the coefficient matrix for a kernel quadratic function
+    corresponding to a general quadratic function f(x) = x.T H x.
+    Parameters: eigen      -> the list of eigenvalues of H
+                R          -> orthonormal matrix with the eigenvectors of H
+                center     -> the center point for the quadratic
+                kernel_dim -> the dimension of the polynominal kernel function used (standard form - with growing order of monomials)
+    Returns: a 
     '''
     n = len(eigen)
     if np.shape(R) != (n,n) or len(center) != n:
         raise Exception("Entered dimensions are not correct.")
+
+    eigen = np.array(eigen)    
+    center = np.array(center)
+
+    if np.any(eigen < 0.0):
+        raise Exception("Quadratic should be positive semi-definite.")
 
     H = R.T @ np.diag(eigen) @ R
     std_centered_quadratic = np.zeros([kernel_dim, kernel_dim])
@@ -395,7 +406,8 @@ def compute_curvatures(H, normal):
 
 def rgb(minimum, maximum, value):
     '''
-    Create RGB map
+    Create RGB map from value in interval [ minimum, maximum ].
+    Returns: [ r, g, b ] array, with values btw 0-1
     '''
     minimum, maximum = float(minimum), float(maximum)
     ratio = 2 * (value-minimum) / (maximum - minimum)

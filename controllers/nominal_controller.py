@@ -4,32 +4,22 @@ from common import sat
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 from controllers.compatibility import CLFCBFPair
-from controllers.equilibrium_algorithms import check_equilibrium, compute_equilibria_algorithm7
+from controllers.equilibrium_algorithms import check_equilibrium
 
 class NominalQP():
     '''
     Class for the nominal QP controller.
     '''
-    def __init__(self, plant, clf, cbfs, alpha = 1.0, beta = 1.0, p = 1.0, dt = 0.001):
+    def __init__(self, plant, clf, cbf, alpha = 1.0, beta = 1.0, p = 1.0, dt = 0.001):
 
         # Dimensions and system model initialization
         self.plant = plant
         self.clf = clf
-        
-        if type(cbfs) == list:
-            self.cbfs = cbfs
-        else:
-            self.cbfs = []
-            self.cbfs.append(cbfs)
-        
+        self.cbf = cbf
+
         clf_dim = self.clf._dim
-        cbf_dims = []
-
-        for cbf in self.cbfs:
-            cbf_dims.append( cbf._dim )
-
-        if not all(dim == cbf_dims[0] for dim in cbf_dims): raise Exception("CBF dimensions are not equal.")
-        # if cbf_dims[0] != clf_dim: raise Exception("CLF and CBF dimensions are not equal.")
+        cbf_dim = self.cbf._dim
+        if clf_dim != cbf_dim: raise Exception("CLF and CBF dimensions are not equal.")
 
         self.state_dim = clf_dim
         self.control_dim = self.plant.m
@@ -76,25 +66,19 @@ class NominalQP():
         '''
         Computes the QP control.
         '''
+        # Gets CLF and CBF constraints
         a_clf, b_clf = self.get_clf_constraint()
+        a_cbf, b_cbf = self.get_cbf_constraint()
 
-        # Stacking the CLF and CBF constraints
-        a_cbfs, b_cbfs = np.array([]).reshape(0,self.QP_dim), []
-        for cbf in self.cbfs:
-            a_cbf, b_cbf = self.get_cbf_constraint(cbf)
-            a_cbfs = np.vstack( [ a_cbfs, a_cbf ])
-            b_cbfs = np.hstack( [ b_cbfs, b_cbf ])
-
-        A = np.vstack([ a_clf, a_cbfs ])
-        b = np.hstack([ b_clf, b_cbfs ])
+        A = np.vstack([ a_clf, a_cbf ])
+        b = np.hstack([ b_clf, b_cbf ])
 
         # Solve QP
         self.QP.set_inequality_constraints(A, b)
         self.QP_sol = self.QP.get_solution()
         control = self.QP_sol[0:self.control_dim,]
 
-        # self.get_equilibria()
-        is_equilibrium, eq_pt = check_equilibrium(self.plant, self.clf, self.cbfs[0], self.plant.get_state(), slack_gain=self.p, clf_gain=self.alpha)
+        is_equilibrium, eq_pt = check_equilibrium(self.plant, self.clf, self.cbf, self.plant.get_state(), slack_gain=self.p, clf_gain=self.alpha)
         if is_equilibrium:
             print("Equilibrium point was found: " + str(eq_pt))
 
@@ -102,7 +86,7 @@ class NominalQP():
 
     def get_clf_control(self):
         '''
-        For now, this controller will not modify the CLF.
+        For now, the controller will not modify the CLF.
         '''
         return np.zeros(len(self.clf.param))
 
@@ -116,20 +100,20 @@ class NominalQP():
         state = self.plant.get_state()
 
         # Lyapunov function and gradient
-        self.V = self.clf.evaluate_function(*state)[0]
-        self.nablaV = self.clf.evaluate_gradient(*state)[0]
-        
+        V = self.clf.evaluate_function(*state)[0]
+        nablaV = self.clf.evaluate_gradient(*state)[0]
+
         # Lie derivatives
-        self.LfV = self.nablaV.dot(f)
-        self.LgV = g.T.dot(self.nablaV)
+        LfV = nablaV.dot(f)
+        LgV = g.T.dot(nablaV)
 
         # CLF contraint for the QP
-        a_clf = np.hstack( [ self.LgV, -1.0 ])
-        b_clf = -self.alpha * self.V - self.LfV
+        a_clf = np.hstack( [ LgV, -1.0 ])
+        b_clf = -self.alpha * V - LfV
 
         return a_clf, b_clf
 
-    def get_cbf_constraint(self, cbf):
+    def get_cbf_constraint(self):
         '''
         Sets the i-th barrier constraint.
         '''
@@ -138,15 +122,15 @@ class NominalQP():
         state = self.plant.get_state()
 
         # Barrier function and gradient
-        h = cbf.evaluate_function(*state)[0]
-        self.nablah = cbf.evaluate_gradient(*state)[0]
+        h = self.cbf.evaluate_function(*state)[0]
+        nablah = self.cbf.evaluate_gradient(*state)[0]
 
-        self.Lfh = self.nablah.dot(f)
-        self.Lgh = g.T @ self.nablah
+        Lfh = nablah.dot(f)
+        Lgh = g.T @ nablah
 
         # CBF contraint for the QP
-        a_cbf = -np.hstack( [ self.Lgh, 0.0 ])
-        b_cbf = self.beta * h + self.Lfh
+        a_cbf = -np.hstack( [ Lgh, 0.0 ])
+        b_cbf = self.beta * h + Lfh
 
         return a_cbf, b_cbf
 
@@ -156,13 +140,6 @@ class NominalQP():
         '''
         self.clf.update(piv_ctrl, self.ctrl_dt)
         self.update_timer(self.update_clf_dynamics)
-
-    def update_cbf_dynamics(self, cbf, pih_ctrl):
-        '''
-        Integrates the dynamic system for the CBF Hessian matrix.
-        '''
-        cbf.update(pih_ctrl, self.ctrl_dt)
-        self.update_timer(self.update_cbf_dynamics)
 
     def update_timer(self, method):
         '''

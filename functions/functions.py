@@ -1,6 +1,7 @@
 import math
 import itertools
 import numpy as np
+import cvxpy as cp
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
@@ -701,11 +702,12 @@ class KernelQuadratic(Function):
 
         # Initialization
         super().__init__(*args)
+                
+        self.point_list = []
+        self.constant = 0.0
+        
         self.set_param(**kwargs)
         self.evaluate()
-
-        self.param = sym2vector( self.matrix_coefs )
-        self.dynamics = Integrator( self.param, np.zeros(len(self.param)) )
 
         default_plot_config = {"figsize": (5,5), "axeslim": (-6,6,-6,6), "color": mcolors.TABLEAU_COLORS['tab:green']}
         self.plot_config = default_plot_config
@@ -714,22 +716,34 @@ class KernelQuadratic(Function):
         '''
         Sets the function parameters.
         '''
-        self.constant = 0.0
+        # If constant was passed, initialize it imediately (other methods need it). Otherwise it's just zero
+        if "constant" in kwargs.keys():
+                self.constant = kwargs["constant"]
+
         for key in kwargs:
 
-            # If degree was passed, create Kernel() of appropriate degree 
+            if key == "constant":
+                continue            # already dealt with
+
+            # If degree was passed, create Kernel() of appropriate degree and initialize parameter dynamics
             if key == "degree":
                 self.kernel = Kernel(*self._args, degree = kwargs[key])
                 self.kernel_dim = self.kernel.kernel_dim
                 self.matrix_coefs = np.zeros([self.kernel_dim, self.kernel_dim])
 
-            # If kernel function was passed, initialize it.
+                self.param_dim = int(self.kernel_dim*(self.kernel_dim + 1)/2)
+                self.dynamics = Integrator( np.zeros(self.param_dim), np.zeros(self.param_dim) )
+
+            # If kernel function was passed, initialize it and parameter dynamics
             if key == "kernel":
                 if type(kwargs[key]) != Kernel:
                     raise Exception("Argument must be a valid Kernel function.")
                 self.kernel = kwargs[key]
                 self.kernel_dim = self.kernel.kernel_dim
                 self.matrix_coefs = np.zeros([self.kernel_dim, self.kernel_dim])
+
+                self.param_dim = int(self.kernel_dim*(self.kernel_dim + 1)/2)
+                self.dynamics = Integrator( np.zeros(self.param_dim), np.zeros(self.param_dim) )
 
             # If matrix of coefficients was passed, initialize it.
             if key == "coefficients":
@@ -739,19 +753,18 @@ class KernelQuadratic(Function):
                     raise Exception("Matrix of coefficients must be a two-dimensional array.")
                 if matrix_shape[0] != matrix_shape[1]:
                     raise Exception("Matrix of coefficients must be a square.")
-                if not np.all(np.linalg.eigvals(matrix_coefs) >= -1e-12):
+                if not np.all(np.linalg.eigvals(matrix_coefs) >= -1e-3):
                     raise Exception("Matrix of coefficients must be positive semi-definite.")
                 if not np.all( matrix_coefs == matrix_coefs.T ):
                     raise Warning("Matrix of coefficients is not symmetric. The symmetric part will be used.")
                 self.matrix_coefs = 0.5 * ( matrix_coefs + matrix_coefs.T )
-        
-            if key == "constant":
-                self.constant = kwargs[key]
+                self.param = sym2vector( self.matrix_coefs )
+                self.dynamics.set_state(self.param)
 
             # If a dictionary of points was passed, call interpolate to find an interpolating coefficient matrix 
             if key == "points":
-                points_dict = kwargs[key]
-                self.interpolate(points_dict)
+                point_list = kwargs[key]
+                self.fit(point_list)
 
         if np.shape(self.matrix_coefs) != (self.kernel_dim, self.kernel_dim):
             raise Exception("P must be (p x p), where p is the kernel dimension!") 
@@ -762,20 +775,21 @@ class KernelQuadratic(Function):
         '''
         self.dynamics.set_control(param_ctrl)
         self.dynamics.actuate(dt)
-        self.set_param( coefficients = vector2sym(self.dynamics.get_state()) )
+        new_param = self.dynamics.get_state()
+        self.set_param( coefficients = vector2sym(new_param) )
 
     def fit(self, point_list):
         '''
-        point_list = [ { "point": , "level": , "gradient": , "curvature": } ]
-        Parameters: point_list is a list with the desired points, corresponding level sets, 
-        gradients and curvature (in two dimension only)
+        Fits the p.s.d. coefficient matrix to a list of desired points.
+        Parameters: point_list = [ { "point": , "level": , "gradient": , "curvature": } ], 
+                    a list with dicts containing each desired point, corresponding level set, gradient and curvature (2D only)
+        Returns: the optimization error.
         '''
+        self.point_list = point_list
+        
         n = self._dim
         p = self.kernel_dim
         A_list = self.kernel.get_A_matrices()
-        R = rot2D(np.pi/2)
-
-        import cvxpy as cp
 
         obj_expr = 0.0
         F_var = cp.Variable( (p,p), symmetric=True )               # Create p x p symmetric variable
@@ -789,21 +803,27 @@ class KernelQuadratic(Function):
             keys = pt_dict.keys()
 
             # Define point-level constraints
-            if "point" in keys:
-                pt = pt_dict["point"]
-                m = self.kernel.function(pt)
-                Jm = self.kernel.jacobian(pt)
-                if "level" in keys:
-                    level_value = pt_dict["level"]
-                elif self.constant > 0.0:                     # its a CBF (function is not p.s.d.) ----->>> it will have a boundary! (consider the specified level to be 0)
-                    level_value = 0.0
-                else:                                         # its either CLF (function is p.s.d.) or a crazy strictly positive function with C < 0
-                    raise Exception("For a CLF, you have to specify a level set different than 0 for the point.")
+            if "point" not in keys:
+                    raise Exception("A point must be specified.")
+
+            pt = pt_dict["point"]
+            m = self.kernel.function(pt)
+            Jm = self.kernel.jacobian(pt)
+
+                # if "level" in keys:
+                #     level_value = pt_dict["level"]
+                # elif self.constant > 0.0:                     # its a CBF (function is not p.s.d.) ----->>> it will have a boundary! (consider the specified level to be 0)
+                #     level_value = 0.0
+                # else:                                         # its either CLF (function is p.s.d.) or a crazy strictly positive function with C < 0
+                #     raise Exception("For a CLF, you have to specify a level set different than 0 for the point.")
                 
                 # Sums errors to objective function
+                # obj_expr += ( 0.5 * m.T @ F_var @ m - self.constant - level_value )**2
+                
+            # Define point-level constraints
+            if "level" in keys:
+                level_value = pt_dict["level"]
                 obj_expr += ( 0.5 * m.T @ F_var @ m - self.constant - level_value )**2
-            else:
-                raise Exception("A point must be specified.")
 
             # Define point-gradient constraints
             if "gradient" in keys:
@@ -819,7 +839,6 @@ class KernelQuadratic(Function):
 
                 if n != 2:
                     raise Exception("Error: curvature fitting was not implemented for dimensions > 2. ")
-
                 if "gradient" not in keys:
                     raise Exception("Cannot specify a curvature without specifying the gradient.")
 
@@ -832,7 +851,6 @@ class KernelQuadratic(Function):
                     curvature_var += Hij * v[i] * v[j]
 
                 obj_expr += ( curvature_var - curvature )**2
-                # constraints += [ curvature_var == curvature ]
 
         # Trying to keep the gradient norms close to 1
         for gradient_norm in gradient_norms:    
@@ -846,54 +864,32 @@ class KernelQuadratic(Function):
         fit_problem.solve()
 
         if "optimal" in fit_problem.status:
-            print("Fitting was successful with final cost = " + str(fit_problem.value) + " and message " + str(fit_problem.status))
+            print("Fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
             self.set_param( coefficients =  F_var.value )
             return fit_problem.value
         else:
             raise Exception("Problem is " + fit_problem.status + ".")
 
-    def interpolate(self, points_dict):
+    def fit_level_set(self, points, level):
         '''
-        This method interpolates the kernel-based function. The dictionary points_dict holds the keys as level sets [v_i] corresponding to a list of points [x_i] such that F(x_i) = v_i
-        The method tries to find matrix coefficients such that F(x_i) = v_i.
-        Returns:            the final objective cost.
+        Fits the function coefficients to points on a single level set.
+        Parameters: points -> list of points
+                    level  -> value of level set
+        Returns: the optmization error.
         '''
-        import cvxpy as cp
-        P_variable = cp.Variable( (self.kernel_dim,self.kernel_dim), symmetric=True ) # Create p x p symmetric variable
+        point_list = []
+        for pt in points:
+           point_list.append({ "point": pt, "level": level }) 
+        return self.fit(point_list)
 
-        # objective function to be minimized is a sum of squares
-        obj_expr = 0.0
-        level_set_values = points_dict.keys()
-        for level_value in level_set_values:
-            for point in points_dict[level_value]:
-                z = self.kernel.function(point)
-                obj_expr += ( 0.5 * z.T @ P_variable @ z - self.constant - level_value )**2
-
-        objective = cp.Minimize( obj_expr )
-        constraints = [ P_variable >> 0 ]                          # fundamental constraint: P must be p.s.d.
-    
-        # Define cvxpy problem, give values to the problem parameter and solve
-        interpolation_problem = cp.Problem(objective, constraints)
-        interpolation_problem.solve()
-
-        if interpolation_problem.status not in ["infeasible", "unbounded"]:
-            print("Interpolation was successful with final cost = " + str(interpolation_problem.value))
-            self.matrix_coefs = P_variable.value
-            return interpolation_problem.value
-        else:
-            raise Exception("Problem is " + interpolation_problem.status + ".")
-
-    def define_level_set(self, points, level):
+    def fit_center(self, point):
         '''
-        Tries to interpolate all the points into a single level set.
+        Fits the function coefficients to match f(point) = 0.0
+        Parameters: point -> single point to be fit
+        Returns: the optmization error.
         '''
-        return self.interpolate({ level:points })
-
-    def define_center(self, point):
-        '''
-        This method tries to find the closest matrix coefficients such that F(point) = 0.
-        '''
-        return self.define_level_set(points=[point], level=0.0)
+        self.point_list.append({ "point": point, "level": 0.0 })
+        return self.fit(self.point_list)
 
     def function(self, point):
         '''
@@ -1015,16 +1011,9 @@ class KernelBarrier(KernelQuadratic):
         '''
         Defines the CBF boundary, given a list of points 
         '''
-        cost = self.define_level_set(points=points, level=0.0)
+        cost = self.fit_level_set(points=points, level=0.0)
         self.Q = self.matrix_coefs
         return cost
-
-    # def function(self, point):
-    #     '''
-    #     Compute polynomial function numerically.
-    #     '''
-    #     half_mQm = super().function(point)
-    #     return half_mQm - 0.5
 
 class ApproxFunction(Function):
     '''
@@ -1099,65 +1088,10 @@ class CassiniOval(ApproxFunction):
 
         return hessian_v @ self.R
 
-# class CLBF(Function):
-#     '''
-#     Class for Gaussian-based Control Lyapunov Barrier Functions.
-#     '''
-#     def __init__(self, *args, goal = Gaussian(), obstacles = []):
-#         super().__init__(*args)
-#         self.set_goal(goal)
-#         self.dim = self.goal_gaussian._dim
-#         self.obstacle_gaussians = []
-#         for obs in obstacles:
-#             if obs._dim != self.dim:
-#                 raise Exception("Dimension of goal Gaussian and obstacle Gaussian must be the same.")
-#             self.add_obstacle(obs)
-
-#     def set_goal(self, goal):
-#         self.goal_gaussian = goal
-
-#     def add_obstacle(self, obstacle):
-#         self.obstacle_gaussians.append(obstacle)
-
-#     def function(self, point):
-#         '''
-#         Gaussian CLBF function.
-#         '''
-#         self.goal_gaussian.set_value(*point)
-#         self.goal_gaussian.function()
-
-#         sum_obs_gaussians = 0.0
-#         self.goal_gaussian.compute()
-#         for obs in self.obstacle_gaussians:
-#             obs.set_value(np.array(point))
-#             obs.function()
-#             sum_obs_gaussians += obs.get_function()
-#         self._function = - self.goal_gaussian.get_function() + sum_obs_gaussians
-
-#     def gradient(self, point):
-#         '''
-#         Gradient of Gaussian CLBF function.
-#         '''
-#         self.goal_gaussian.set_value(np.array(point))
-#         self.goal_gaussian.gradient()
-
-#         sum_obs_gradients =  np.zeros(self.dim)
-#         for obs in self.obstacle_gaussians:
-#             obs.set_value(np.array(point))
-#             obs.gradient()
-#             sum_obs_gradients += obs.get_gradient()
-#         self._gradient = - self.goal_gaussian.get_gradient() + sum_obs_gradients
-
-#     def hessian(self):
-#         '''
-#         Hessian of Gaussian CLBF function.
-#         '''
-#         self.goal_gaussian.set_value(self._var)
-#         self.goal_gaussian.hessian()
-
-#         sum_obs_hessians =  np.zeros([self.dim,self.dim])
-#         for obs in self.obstacle_gaussians:
-#             obs.set_value(self._var)
-#             obs.hessian()
-#             sum_obs_hessians += obs.get_hessian()
-#         self._hessian = - self.goal_gaussian.get_hessian() + sum_obs_hessians
+class CLBF(KernelQuadratic):
+    '''
+    Class for kernel-based Control Lyapunov Barrier Functions.
+    '''
+    def __init__(self, *args):
+        super().__init__(*args)
+        pass

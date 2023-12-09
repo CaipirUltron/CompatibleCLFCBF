@@ -19,8 +19,8 @@ except IOError:
     print("Couldn't locate " + simulation_file + ".json")
 
 # -----------------------------------Plots starting of simulation ------------------------------------------
-plotSim = Plot2DSimulation( logs, sim.plant, sim.clf, sim.cbfs, plot_config = sim.plot_config )
-plotSim.plot_frame(3.0)
+plotSim = Plot2DSimulation( logs, sim.plant, sim.clf, [sim.cbf], plot_config = sim.plot_config )
+plotSim.plot_frame(5.0)
 
 # manual_mode = True
 manual_mode = False
@@ -36,7 +36,7 @@ if manual_mode:
 Plots initial guesses
 '''
 if not manual_mode:
-    res_x, res_y = 10, 10       # Density of points per axis
+    res_x, res_y = 15, 15       # Density of points per axis
     min_x, min_y = -8, -8     # lower limits for point generation 
     max_x, max_y = 8, 8       # upper limits for point generation
     initial_guesses = []

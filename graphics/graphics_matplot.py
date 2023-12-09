@@ -3,10 +3,8 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as anim
 import matplotlib.colors as mcolors
 
-from common import rot2D
 from matplotlib import gridspec
 from matplotlib.patches import Rectangle
-
 
 class Plot2DSimulation():
     '''
@@ -260,7 +258,6 @@ class Plot2DSimulation():
         '''
         self.get_frame(t)
 
-
 class PlotPFSimulation(Plot2DSimulation):
     '''
     Class for matplotlib-based simulation of the vehicle performing path following.
@@ -317,7 +314,6 @@ class PlotPFSimulation(Plot2DSimulation):
 
         return graphical_elements
     
-
 class PlotUnicycleSimulation(Plot2DSimulation):
     '''
     Class for matplotlib-based simulation of the unicycle robot.

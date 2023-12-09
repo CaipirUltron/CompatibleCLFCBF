@@ -5,7 +5,7 @@ from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
 from common import create_quadratic, rot2D
 
-initial_state = [3.2, 3.0]
+initial_state = [0.0, 6.0]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
@@ -24,42 +24,51 @@ def g(state):
 plant = ConservativeAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
 
 # ---------------------------------------------------- Define CLF ----------------------------------------------------------
-points_dict = { 2.0: [ [0.0, 2.0], [4.0, 1.0], [2.0, -2.0], [-2.0, -2.0], [-4.0, 1.0], [0.0, -4.0] ], 
-                0.0: [ [0.0, -2.0] ] }
-# clf = KernelLyapunov(*initial_state, kernel=kernel, points = points_dict)
+base_level = 16.0
+points = []
+points += [{ "point": [ 0.0,  0.0], "level": 0.0 }]
+points += [{ "point": [ 3.0,  3.0], "level": base_level, "gradient": [ 1.0,  1.0] }]
+points += [{ "point": [-3.0,  3.0], "level": base_level, "gradient": [-1.0,  1.0] }]
+points += [{ "point": [ 0.0,  6.0],                      "gradient": [ 0.0,  1.0], "curvature": -1.5 }]
 
-eig = np.array([1.0, 4.0])
-center = np.array([0.0, -1.0])
-P = create_quadratic(eig, rot2D( 0.0 ), center, kern_dim)
-clf = KernelLyapunov(*initial_state, kernel=kernel, P=P)
+clf = KernelLyapunov(*initial_state, kernel=kernel, points=points)
+
+# eig = [1.0, 1.0]
+# center = [0.0, 0.0]
+# P = create_quadratic(eig, rot2D(0.0), center, kern_dim)
+# clf = KernelLyapunov(*initial_state, kernel=kernel, P=P)
 
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
-boundary_points = [ [-4.0, 0.0], [-4.0, -1.0], [-2.0, 0.5], [2.0, 0.5], [4.0, -1.0], [4.0, 0.0], [0.0, 1.0], [0.0, -0.5] ]   # (sad smile)
-# boundary_points = [ [-4.0, 0.0], [-4.0, 1.0], [-2.0, -0.5], [2.0, -0.5], [4.0, 1.0], [4.0, 0.0] ]                              # (bell shaped)
+# boundary_points = [ [-4.0, 0.0], [-4.0, -1.0], [-2.0, 0.5], [2.0, 0.5], [4.0, -1.0], [4.0, 0.0], [0.0, 1.0], [0.0, -0.5] ]   # (sad smile)
+# boundary_points = [ [-4.0, 0.0], [-4.0, 1.0], [-2.0, -0.5], [2.0, -0.5], [4.0, 1.0], [4.0, 0.0] ]                            # (bell shaped)
 
-cbf = KernelBarrier(*initial_state, kernel=kernel, boundary_points=boundary_points)
-cbfs = [cbf]
+points = []
+points += [{ "point": [ 2.0,  2.0], "level": 0.0, "gradient": [ 1.0,  1.0] }]
+points += [{ "point": [ 2.0, -2.0], "level": 0.0, "gradient": [ 1.0, -1.0] }]
+points += [{ "point": [-2.0, -2.0], "level": 0.0, "gradient": [-1.0, -1.0] }]
+points += [{ "point": [-2.0,  2.0], "level": 0.0, "gradient": [-1.0,  1.0] }]
+points += [{ "point": [ 0.0,  2.0], "level": 0.0, "gradient": [ 0.0,  1.0] }]
+points += [{ "point": [ 0.0, -2.0], "level": 0.0, "gradient": [ 0.0, -1.0] }]
+# points += [{ "point": [ 2.0,  0.0], "level": 0.0, "gradient": [ 1.0,  0.0] }]
+# points += [{ "point": [-2.0,  0.0], "level": 0.0, "gradient": [-1.0,  0.0] }]
+displacement = 2*np.array([0,2])
+for pt in points:
+    pt["point"] = ( np.array(pt["point"]) + displacement ).tolist()
+
+cbf = KernelBarrier(*initial_state, kernel=kernel, points=points)
+# cbf = KernelBarrier(*initial_state, kernel=kernel, boundary_points=boundary_points)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
+T = 15
 sample_time = .002
-p, alpha, beta = 1.0, 10.0, 10.0
-controller = NominalQP(plant, clf, cbfs, alpha, beta, p, dt=sample_time)
+p, alpha, beta = 1.0, 1.0, 1.0
+controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 xlimits, ylimits = [-8, 8], [-8, 8]
 plot_config = {
-    "figsize": (5,5),
-    "gridspec": (1,1,1),
-    "widthratios": [1],
-    "heightratios": [1],
-    "axeslim": tuple(xlimits+ylimits),
-    "path_length": 10,
-    "numpoints": 1000,
-    "drawlevel": True,
-    "resolution": 50,
-    "fps":120,
-    "pad":2.0,
-    "equilibria": True
+    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "axeslim": tuple(xlimits+ylimits),
+    "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "equilibria": True
 }
 
 logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": cbf.Q.tolist() }
