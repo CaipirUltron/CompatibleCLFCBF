@@ -11,7 +11,6 @@ simulation_file = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples."+simulation_file, package=None)
 
 # ----------------------------------------------------- Plotting ---------------------------------------------------------
-
 fig = plt.figure(constrained_layout=True)
 ax = fig.add_subplot(111)
 ax.set_title("Kernel-based CLF-CBF fitting")

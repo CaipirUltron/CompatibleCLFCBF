@@ -72,8 +72,8 @@ def check_invariant(plant, clf, cbf, x, **kwargs):
         g = plant.g_method(x)
         G = g @ g.T
 
-        nablaV = Jm.T @ P @ m
-        nablah = Jm.T @ Q @ m
+        nablaV = clf.gradient(x)
+        nablah = cbf.gradient(x)
         z1 = nablah / np.linalg.norm(nablah)
         z2 = nablaV - nablaV.T @ G @ z1 * z1
         eta = 1/(1 + slack_gain * z2.T @ G @ z2 )

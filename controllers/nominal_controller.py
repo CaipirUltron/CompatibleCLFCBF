@@ -59,7 +59,7 @@ class NominalQP():
         self.QP_sol = self.QP.get_solution()
         control = self.QP_sol[0:self.control_dim,]
 
-        is_equilibrium, eq_pt = check_equilibrium(self.plant, self.clf, self.cbf, self.plant.get_state(), slack_gain=self.p, clf_gain=self.alpha)
+        is_equilibrium, eq_pt = check_invariant(self.plant, self.clf, self.cbf, self.plant.get_state(), slack_gain=self.p, clf_gain=self.alpha)
         if is_equilibrium:
             print("Equilibrium point was found: " + str(eq_pt))
 
