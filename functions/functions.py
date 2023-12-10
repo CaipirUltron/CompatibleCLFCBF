@@ -709,7 +709,13 @@ class KernelQuadratic(Function):
         self.set_param(**kwargs)
         self.evaluate()
 
-        default_plot_config = {"figsize": (5,5), "axeslim": (-6,6,-6,6), "color": mcolors.TABLEAU_COLORS['tab:green']}
+        default_color = "black"
+        if isinstance(self, KernelLyapunov):
+            default_color = mcolors.TABLEAU_COLORS['tab:blue']
+        elif isinstance(self, KernelBarrier):
+            default_color = mcolors.TABLEAU_COLORS['tab:green']
+
+        default_plot_config = {"figsize": (5,5), "axeslim": (-6,6,-6,6), "color": default_color}
         self.plot_config = default_plot_config
 
     def set_param(self, **kwargs):
@@ -767,7 +773,7 @@ class KernelQuadratic(Function):
                 self.fit(point_list)
 
         if np.shape(self.matrix_coefs) != (self.kernel_dim, self.kernel_dim):
-            raise Exception("P must be (p x p), where p is the kernel dimension!") 
+            raise Exception("P must be (p x p), where p is the kernel dimension!")
         
     def update(self, param_ctrl, dt):
         '''
@@ -809,16 +815,6 @@ class KernelQuadratic(Function):
             pt = pt_dict["point"]
             m = self.kernel.function(pt)
             Jm = self.kernel.jacobian(pt)
-
-                # if "level" in keys:
-                #     level_value = pt_dict["level"]
-                # elif self.constant > 0.0:                     # its a CBF (function is not p.s.d.) ----->>> it will have a boundary! (consider the specified level to be 0)
-                #     level_value = 0.0
-                # else:                                         # its either CLF (function is p.s.d.) or a crazy strictly positive function with C < 0
-                #     raise Exception("For a CLF, you have to specify a level set different than 0 for the point.")
-                
-                # Sums errors to objective function
-                # obj_expr += ( 0.5 * m.T @ F_var @ m - self.constant - level_value )**2
                 
             # Define point-level constraints
             if "level" in keys:
@@ -864,7 +860,12 @@ class KernelQuadratic(Function):
         fit_problem.solve()
 
         if "optimal" in fit_problem.status:
-            print("Fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
+            if isinstance(self, KernelLyapunov):
+                print("Lyapunov fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
+            elif isinstance(self, KernelBarrier):
+                print("Barrier fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
+            else:
+                print("Function fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
             self.set_param( coefficients =  F_var.value )
             return fit_problem.value
         else:
@@ -890,6 +891,21 @@ class KernelQuadratic(Function):
         '''
         self.point_list.append({ "point": point, "level": 0.0 })
         return self.fit(self.point_list)
+
+    def get_curvature(self, point):
+        '''
+        For testing only. Only works in 2D
+        '''
+        if self._dim != 2:
+            raise Exception("Not intended to work with dimensions higher than 2")
+        
+        grad = self.gradient(point)
+        grad_norm = np.linalg.norm(grad)
+        normalized_grad = grad/grad_norm
+        z = rot2D(np.pi/2) @ normalized_grad
+        Hessian = self.hessian(point)
+
+        return z.T @ Hessian @ z / grad_norm
 
     def function(self, point):
         '''
@@ -921,11 +937,17 @@ class KernelQuadratic(Function):
                 Hessian[i,j] = Jac_m_i @ self.matrix_coefs @ Jac_m_j + m @ self.matrix_coefs @ hessian_m_ij
         return Hessian
 
-    def plot(self, **kwargs):
+    def plot_level(self, **kwargs):
         '''
         Plots the kernel-based function using matplotlib
         '''
+        ax = None
+        level = 0.0
         for key in kwargs:
+            if key == "level":
+                level = kwargs["level"]
+            if key == "axes":
+                ax = kwargs["axes"]
             if key == "figsize":
                 self.plot_config["figsize"] = kwargs[key]
             if key == "axeslim":
@@ -933,8 +955,9 @@ class KernelQuadratic(Function):
             if key == "color":
                 self.plot_config["color"] = kwargs[key]
 
-        fig = plt.figure(figsize = self.plot_config["figsize"], constrained_layout=True)
-        ax = fig.add_subplot(111)
+        if ax == None:
+            fig = plt.figure(figsize = self.plot_config["figsize"], constrained_layout=True)
+            ax = fig.add_subplot(111)
 
         x_lim = self.plot_config["axeslim"][0:2]
         y_lim = self.plot_config["axeslim"][2:4]
@@ -942,7 +965,7 @@ class KernelQuadratic(Function):
         ax.set_xlim(*x_lim)
         ax.set_ylim(*y_lim)
 
-        self.contour_plot(ax, levels=[0.0], colors=self.plot_config["color"], min_lims=[ x_lim[0], y_lim[0] ], max_lims=[ x_lim[1], y_lim[1] ], resolution=0.1)
+        self.contour_plot(ax, levels=[level], colors=self.plot_config["color"], min_lims=[ x_lim[0], y_lim[0] ], max_lims=[ x_lim[1], y_lim[1] ], resolution=0.1)
         return ax
 
     def get_shape(self):

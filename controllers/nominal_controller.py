@@ -4,7 +4,7 @@ from common import sat
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 from controllers.compatibility import CLFCBFPair
-from controllers.equilibrium_algorithms import check_equilibrium
+from controllers.equilibrium_algorithms import check_invariant, check_equilibrium, compute_equilibria
 
 class NominalQP():
     '''
@@ -35,32 +35,13 @@ class NominalQP():
 
         self.ctrl_dt = dt
 
-        self.eq_dt = 0.1
+        self.eq_dt = 0.2
         self.equilibria = []
         
         self.updated_timer = False
         self.timer = 0.0
         self.last_updated_by = None
         self.last_eq_t = 0.0
-
-    # def get_equilibria(self):
-    #     '''
-    #     Computes the equilibrium points every 
-    #     '''
-    #     elapsed_time = self.timer - self.last_eq_t
-    #     if elapsed_time > self.eq_dt:
-    #         initial_guess = self.plant.get_state()
-    #         eq_sol = compute_equilibria_algorithm7( self.plant, self.clf, self.cbfs[0], initial_guess, c = self.p * self.alpha)
-    #         if eq_sol != None and eq_sol["cost"] < 1e-10:
-    #             eq_pt = np.array(eq_sol["point"])
-    #             eq_pts = np.array([ eq["point"] for eq in self.equilibria ])
-    #             if len(eq_pts) > 0:
-    #                 if np.all( np.linalg.norm(eq_pt - eq_pts, axis=1) > 1e-5 ):
-    #                     self.equilibria.append(eq_sol)
-    #             else:
-    #                 self.equilibria.append(eq_sol)
-
-    #         self.last_eq_t = self.timer
 
     def get_control(self):
         '''
@@ -81,6 +62,15 @@ class NominalQP():
         is_equilibrium, eq_pt = check_equilibrium(self.plant, self.clf, self.cbf, self.plant.get_state(), slack_gain=self.p, clf_gain=self.alpha)
         if is_equilibrium:
             print("Equilibrium point was found: " + str(eq_pt))
+
+        # elapsed_time = self.timer - self.last_eq_t
+        # is_invariant, inv_pt = check_invariant(self.plant, self.clf, self.cbf, self.plant.get_state(), slack_gain=self.p, clf_gain=self.alpha)
+        # if is_invariant and elapsed_time > self.eq_dt:
+        #     solutions, log = compute_equilibria(self.plant, self.clf, self.cbf, [inv_pt["x"]], slack_gain=self.p, clf_gain=self.alpha)
+        #     if len(solutions) > 0:
+        #         eq_pt = solutions[0]
+        #         print("Equilibrium point was found: " + str(eq_pt))
+        #     self.last_eq_t = self.timer
 
         return control
 

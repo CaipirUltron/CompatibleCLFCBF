@@ -1,37 +1,48 @@
 import sys
-import json
 import importlib
 import numpy as np
 import matplotlib.pyplot as plt
 
-from graphics import Plot2DSimulation
-from controllers.equilibrium_algorithms import compute_equilibria_algorithm9
+from common import rgb
+from controllers.equilibrium_algorithms import check_equilibrium, compute_equilibria
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples."+simulation_file, package=None)
 
-try:
-    with open("logs/"+simulation_file + ".json") as file:
-        print("Loading graphical simulation with "+simulation_file + ".json")
-        logs = json.load(file)
-except IOError:
-    print("Couldn't locate " + simulation_file + ".json")
+# ----------------------------------------------------- Plotting ---------------------------------------------------------
 
-# -----------------------------------Plots starting of simulation ------------------------------------------
-plotSim = Plot2DSimulation( logs, sim.plant, sim.clf, [sim.cbf], plot_config = sim.plot_config )
-plotSim.plot_frame(5.0)
+fig = plt.figure(constrained_layout=True)
+ax = fig.add_subplot(111)
+ax.set_title("Kernel-based CLF-CBF fitting")
+
+sim.clf.plot_level(axes = ax, level = 23.0, axeslim = [-10, 10, -10, 10])
+sim.cbf.plot_level(axes = ax, axeslim = [-10, 10, -10, 10])
+
+arrow_width = 0.005
+for pt in sim.clf.point_list:
+    ax.plot(pt["point"][0], pt["point"][1], 'o', color="blue")
+    if "gradient" in pt.keys():
+        if "curvature" in pt.keys():
+            color = rgb(-10.0, 10.0, pt["curvature"])
+            ax.quiver(pt["point"][0], pt["point"][1], pt["gradient"][0], pt["gradient"][1], color=color, width=arrow_width)
+        else:
+            ax.quiver(pt["point"][0], pt["point"][1], pt["gradient"][0], pt["gradient"][1], width=arrow_width)
+
+for pt in sim.cbf.point_list:
+    ax.plot(pt["point"][0], pt["point"][1], 'o', color="green")
+    if "gradient" in pt.keys():
+        if "curvature" in pt.keys():
+            color = rgb(-10.0, 10.0, pt["curvature"])
+            ax.quiver(pt["point"][0], pt["point"][1], pt["gradient"][0], pt["gradient"][1], color=color, width=arrow_width)
+        else:
+            ax.quiver(pt["point"][0], pt["point"][1], pt["gradient"][0], pt["gradient"][1], width=arrow_width)
+
+# ----------------------------------------------------- Plotting ---------------------------------------------------------
 
 # manual_mode = True
-manual_mode = False
-
-'''
-Manually selects initial guesses
-'''
-if manual_mode:
-    pt = plt.ginput(1)
-    initial_guesses = [[ pt[0][0], pt[0][1] ]]
-
+manual_mode = True
+    
 '''
 Plots initial guesses
 '''
@@ -45,19 +56,40 @@ if not manual_mode:
         for j in range(res_y):
             pt = [ xv[i,j], yv[i,j] ]
             initial_guesses.append(pt)
-            plotSim.main_ax.plot( pt[0], pt[1], 'g.', alpha=0.3 )
+            ax.plot( pt[0], pt[1], 'g.', alpha=0.3 )
 
 '''
 Finds and plots the equilibrium points
 '''
-solutions, log = compute_equilibria_algorithm9(sim.plant, sim.clf, sim.cbf, initial_guesses, slack_gain=sim.p, clf_gain=sim.alpha)
+if manual_mode:
+    is_equilibrium = False
+    while not is_equilibrium:
+        print("Didn't hit the equilibrium...")
+        pt = plt.ginput(1)
+        clicked_pt = np.array([ pt[0][0], pt[0][1] ])
+        is_equilibrium, eq_pt = check_equilibrium(sim.plant, sim.clf, sim.cbf, clicked_pt, slack_gain=sim.p, clf_gain=sim.alpha)
+    solutions = [eq_pt]
+
+else:
+    solutions, log = compute_equilibria(sim.plant, sim.clf, sim.cbf, initial_guesses, slack_gain=sim.p, clf_gain=sim.alpha)
+    print("From " + str(log["num_trials"]) + " trials, algorithm converged " + str(log["num_success"]) + " times, and " + str(len(solutions)) + " solutions were found.")
+    print("Algorithm efficiency = " + str( log["num_success"]/log["num_trials"] ))
+
 num_sols = len(solutions)
-print("From " + str(log["num_trials"]) + " trials, algorithm converged " + str(log["num_success"]) + " times, and " + str(num_sols) + " solutions were found.")
-print("Algorithm efficiency = " + str( log["num_success"]/log["num_trials"] ))
 for k in range(num_sols):
     sol = solutions[k]
     print("Solution " + str(k+1) + " = " + str(sol))
-    plotSim.main_ax.plot( sol["x"][0], sol["x"][1], 'ro' )
+    ax.plot( sol["x"][0], sol["x"][1], 'ro' )
+
+    '''
+    Checks curvatures
+    '''
+    clf_curv = sim.clf.get_curvature(sol["x"])
+    cbf_curv = sim.cbf.get_curvature(sol["x"])
+
+    print("CLF curvature = " + str(clf_curv))
+    print("CBF curvature = " + str(cbf_curv))
+    print("Delta curvature = " + str(cbf_curv - clf_curv))
 
     if sol["stability"] > 0:
         print("Equilibrium point " + str(sol["x"]) + " is unstable, with value = " + str(sol["stability"]))

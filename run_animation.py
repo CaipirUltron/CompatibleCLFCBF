@@ -31,4 +31,5 @@ if len(sys.argv) > 2:
     initial_time = float(sys.argv[2])
 plotSim.animate(initial_time)
 # plotSim.animation.save(simulation_file + ".mp4", writer=anim.FFMpegWriter(fps=30, codec='h264'), dpi=100)
+
 plt.show()

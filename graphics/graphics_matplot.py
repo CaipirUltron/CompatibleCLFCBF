@@ -49,6 +49,9 @@ class Plot2DSimulation():
         # Specify main ax
         main_ax = self.plot_config["gridspec"][-1]
 
+        '''
+        I honestly don't know wtf is this
+        '''
         def order2indexes(k, m):
             i = int((k-1)/m)
             j = int(np.mod(k-1, m))
@@ -79,6 +82,9 @@ class Plot2DSimulation():
             else:
                 self.main_ax = self.fig.add_subplot(gs[i[0]:(i[-1]+1),j[0]:(j[-1]+1)])
 
+        '''
+        Configures plot
+        '''
         axes_lim = self.plot_config["axeslim"]
         self.x_lim = axes_lim[0:2]
         self.y_lim = axes_lim[2:4]
@@ -213,7 +219,7 @@ class Plot2DSimulation():
         else:
             self.runs = False
             self.animation.event_source.stop()
-
+            
         graphical_elements = []
         graphical_elements.append(self.time_text)
         graphical_elements.append(self.trajectory)

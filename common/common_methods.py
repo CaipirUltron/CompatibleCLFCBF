@@ -396,13 +396,20 @@ def compute_curvatures(H, normal):
 
     barH = Q.T @ H @ Q
     shape_operator = barH[1:,1:]
-    eigs = np.linalg.eigvals(shape_operator)
+    curvatures, directions_in_TpS = np.linalg.eig(shape_operator)
 
-    min_curvature = np.min(eigs)
-    max_curvature = np.max(eigs)
-    curvatures = [ min_curvature, max_curvature ]
+    basis_for_TpS = np.zeros([n,n-1])
+    for k in range(directions_in_TpS.shape[1]):
+        direction = directions_in_TpS[:,k]
 
-    return curvatures, shape_operator
+        barv = np.zeros(n)
+        barv[1:] = direction
+        basis_for_TpS[:,k] = Q @ barv
+
+        if basis_for_TpS[:,k].T @ normal > 1e-10:
+            raise Exception("Principal curvatures are not computed correctly.")
+
+    return curvatures, basis_for_TpS
 
 def rgb(minimum, maximum, value):
     '''

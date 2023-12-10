@@ -5,7 +5,7 @@ from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
 from common import create_quadratic, rot2D
 
-initial_state = [0.0, 6.0]
+initial_state = [0.2, 7.0]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
@@ -29,7 +29,7 @@ points = []
 points += [{ "point": [ 0.0,  0.0], "level": 0.0 }]
 points += [{ "point": [ 3.0,  3.0], "level": base_level, "gradient": [ 1.0,  1.0] }]
 points += [{ "point": [-3.0,  3.0], "level": base_level, "gradient": [-1.0,  1.0] }]
-points += [{ "point": [ 0.0,  6.0],                      "gradient": [ 0.0,  1.0], "curvature": -1.5 }]
+points += [{ "point": [ 0.0,  5.0],                      "gradient": [ 0.0,  1.0], "curvature": -1.2 }]
 
 clf = KernelLyapunov(*initial_state, kernel=kernel, points=points)
 
@@ -49,9 +49,10 @@ points += [{ "point": [-2.0, -2.0], "level": 0.0, "gradient": [-1.0, -1.0] }]
 points += [{ "point": [-2.0,  2.0], "level": 0.0, "gradient": [-1.0,  1.0] }]
 points += [{ "point": [ 0.0,  2.0], "level": 0.0, "gradient": [ 0.0,  1.0] }]
 points += [{ "point": [ 0.0, -2.0], "level": 0.0, "gradient": [ 0.0, -1.0] }]
-# points += [{ "point": [ 2.0,  0.0], "level": 0.0, "gradient": [ 1.0,  0.0] }]
-# points += [{ "point": [-2.0,  0.0], "level": 0.0, "gradient": [-1.0,  0.0] }]
-displacement = 2*np.array([0,2])
+points += [{ "point": [ 2.0,  0.0], "level": 0.0 }]
+points += [{ "point": [-2.0,  0.0], "level": 0.0 }]
+
+displacement = 3*np.array([0,1])
 for pt in points:
     pt["point"] = ( np.array(pt["point"]) + displacement ).tolist()
 
@@ -59,7 +60,7 @@ cbf = KernelBarrier(*initial_state, kernel=kernel, points=points)
 # cbf = KernelBarrier(*initial_state, kernel=kernel, boundary_points=boundary_points)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
-T = 15
+T = 12
 sample_time = .002
 p, alpha, beta = 1.0, 1.0, 1.0
 controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
