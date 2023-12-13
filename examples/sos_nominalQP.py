@@ -5,7 +5,7 @@ from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
 from common import create_quadratic, rot2D
 
-initial_state = [3.2, 7.0]
+initial_state = [5.2, 3.0]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
@@ -18,7 +18,10 @@ print(kernel)
 print("Dimension of kappa space = " + str(len(kernel.get_N_matrices())))
 
 # -------------------------------------------------- Define system ---------------------------------------------------------
+fx, fy = 10.0, -10.0                       # constant force with fx, fy components
 F = np.zeros([kern_dim,kern_dim])
+F[1,0], F[2,0] = fx, fy
+
 def g(state):
     return np.eye(m)
 plant = ConservativeAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
@@ -60,7 +63,7 @@ cbf = KernelBarrier(*initial_state, kernel=kernel, points=points)
 # cbf = KernelBarrier(*initial_state, kernel=kernel, boundary_points=boundary_points)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
-T = 12
+T = 30
 sample_time = .002
 p, alpha, beta = 1.0, 1.0, 1.0
 controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)

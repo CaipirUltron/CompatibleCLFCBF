@@ -168,6 +168,8 @@ class Plot2DSimulation():
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
         graphical_elements.append(self.equilibria_plot)
+        graphical_elements.append(self.clf_grad_arrow)
+        graphical_elements.append(self.cbf_grad_arrow)
         graphical_elements += self.clf_contours.collections
         for cbf_countour in self.cbf_contours:
             graphical_elements += cbf_countour.collections
@@ -184,17 +186,17 @@ class Plot2DSimulation():
             current_time = np.around(self.time[i], decimals = 2)
             current_state = [ self.state_log[0][i], self.state_log[1][i] ]
 
-            # nablaV = self.clf.evaluate_gradient(*current_state)[0]
-            # nablaV_norm = nablaV/np.linalg.norm(nablaV)
-            # self.clf_grad_arrow.set_data( 
-            #     [ current_state[0], current_state[0] + nablaV_norm[0] ], 
-            #     [ current_state[1], current_state[1] + nablaV_norm[1] ] )
+            nablaV = self.clf.gradient(current_state)
+            nablaV_norm = nablaV/np.linalg.norm(nablaV)
+            self.clf_grad_arrow.set_data( 
+                [ current_state[0], current_state[0] + nablaV_norm[0] ], 
+                [ current_state[1], current_state[1] + nablaV_norm[1] ] )
 
-            # nablah = self.cbfs[0].evaluate_gradient(*current_state)[0]
-            # nablah_norm = nablaV/np.linalg.norm(nablah)
-            # self.cbf_grad_arrow.set_data( 
-            #     [ current_state[0], current_state[0] + nablah_norm[0] ], 
-            #     [ current_state[1], current_state[1] + nablah_norm[1] ] )
+            nablah = self.cbfs[0].gradient(current_state)
+            nablah_norm = nablah/np.linalg.norm(nablah)
+            self.cbf_grad_arrow.set_data( 
+                [ current_state[0], current_state[0] + nablah_norm[0] ], 
+                [ current_state[1], current_state[1] + nablah_norm[1] ] )
 
             if hasattr(self, 'clf_log'):
                 current_piv_state = [ self.clf_log[k][i] for k in range(self.clf_param_dim) ]
@@ -226,6 +228,7 @@ class Plot2DSimulation():
         graphical_elements.append(self.init_state)
         graphical_elements.append(self.equilibria_plot)
         graphical_elements.append(self.clf_grad_arrow)
+        graphical_elements.append(self.cbf_grad_arrow)
         graphical_elements += self.clf_contours.collections
         for cbf_countour in self.cbf_contours:
             graphical_elements += cbf_countour.collections
