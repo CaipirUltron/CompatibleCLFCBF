@@ -5,12 +5,87 @@ from scipy.linalg import null_space
 
 from common import compute_curvatures
 from controllers.compatibility import LinearMatrixPencil2
+from functions import Kernel
 
 ZERO_ACCURACY = 1e-9
 
 '''
 Verification / computation of equilibrium points and their stability 
 '''
+def alpha2kappas(eq_sol, kernel):
+    '''
+    Finds a representation for the Jacobian transpose null space at a point x. 
+    '''
+    if type(kernel) != Kernel:
+        raise Exception("A valid kernel must be specified.")
+    
+    p = kernel.kernel_dim
+    N_list = kernel.get_N_matrices()
+    r = len(N_list)
+
+    # Get the solution
+    x = eq_sol["x"]
+    alpha = eq_sol["alpha"]
+    l = eq_sol["lambda"]
+
+    m = kernel.function(x)
+    Jm = kernel.jacobian(x)
+
+    '''
+    Compute Jacobian nullspace vector from the alpha coordinates of the equilibrium solutions
+    '''
+    N = null_space(Jm.T)
+    dim_nullspace = N.shape[1]
+    nullspace_vec = np.zeros(p)
+    for k in range(dim_nullspace):
+        nullspace_vec += alpha[k] * N[:,k]
+
+    '''
+    Finds kappa constants of the Jacobian nullspace vector written as L.C. of N_i m(x)
+    '''
+    System_matrix = np.array([ (N_list[l] @ m).tolist() for l in range(r) ]).T
+    system_solution = np.linalg.lstsq(System_matrix, nullspace_vec, rcond=None)
+    kappa, residuals = system_solution[0], system_solution[1]
+
+def S_matrix(plant, clf, cbf, eq_sol, **kwargs):
+    '''
+    Computes the S matrix determining stability.
+    '''
+    slack_gain, clf_gain = 1.0, 1.0
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "slack_gain":
+            slack_gain = kwargs[key]
+            continue
+        if aux_key == "clf_gain":
+            clf_gain = kwargs[key]
+            continue
+
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    n = clf._dim
+
+    F = plant.get_F()
+    P = clf.P
+    Q = cbf.Q
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    kernel = clf.kernel
+    p = kernel.kernel_dim
+    N_list = kernel.get_N_matrices()
+    r = len(N_list)
+    
+    x = eq_sol["x"]
+    alpha = eq_sol["alpha"]
+    l = eq_sol["lambda"]
+    kappas = eq_sol["kappa"]
+
+    sum = np.zeros([p,p])
+    for k in range(r):
+        sum += kappa[k] * N_list[k]
+    S_matrix = Jm.T @ ( F + l * Q - slack_gain * clf_gain * V * P - sum - slack_gain * clf_gain * np.outer(P @ m, P @ m) ) @ Jm
+
+
 def check_invariant(plant, clf, cbf, x, **kwargs):
     '''
     Given a state-space point, returns True if it's inside an invariant manifold
@@ -343,6 +418,43 @@ def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
         diff_curvatures = curv_h - curv_V
 
     return stability_number
+
+def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
+    '''
+    Compute the closest P matrix that compatibilizes the CLF-CBF pair, given M known points in the invariaant set.
+    '''
+    slack_gain, clf_gain = 1.0, 1.0
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "slack_gain":
+            slack_gain = kwargs[key]
+            continue
+        if aux_key == "clf_gain":
+            clf_gain = kwargs[key]
+            continue
+
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    n = clf._dim
+
+    F = plant.get_F()
+    Pnom = clf.P
+    Q = cbf.Q
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    kernel = clf.kernel
+    p = kernel.kernel_dim
+    N_list = kernel.get_N_matrices()
+    r = len(N_list)
+    M = len(eq_sols)
+
+    for sol in eq_sols:
+
+        x = sol["x"]
+        alpha = sol["alpha"]
+        l = sol["lambda"]
+
+    pass
 
 '''
 The following algorithms are useful for initialization of the previous algorithms, among other utilities.

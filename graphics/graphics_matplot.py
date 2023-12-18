@@ -132,6 +132,7 @@ class Plot2DSimulation():
         # self.equilibria_plot, = self.main_ax.plot([],[], marker='o', color='r',lw=2)
         self.clf_grad_arrow, = self.main_ax.plot([],[],'b',lw=0.8)
         self.cbf_grad_arrow, = self.main_ax.plot([],[],'g',lw=0.8)
+        self.fc_arrow, = self.main_ax.plot([],[],'r',lw=0.8)
 
         self.clf_contour_color = mcolors.TABLEAU_COLORS['tab:blue']
         self.cbf_contour_color = mcolors.TABLEAU_COLORS['tab:green']
@@ -170,6 +171,7 @@ class Plot2DSimulation():
         graphical_elements.append(self.equilibria_plot)
         graphical_elements.append(self.clf_grad_arrow)
         graphical_elements.append(self.cbf_grad_arrow)
+        graphical_elements.append(self.fc_arrow)
         graphical_elements += self.clf_contours.collections
         for cbf_countour in self.cbf_contours:
             graphical_elements += cbf_countour.collections
@@ -197,6 +199,15 @@ class Plot2DSimulation():
             self.cbf_grad_arrow.set_data( 
                 [ current_state[0], current_state[0] + nablah_norm[0] ], 
                 [ current_state[1], current_state[1] + nablah_norm[1] ] )
+
+            F = self.robot.get_F()
+            fc = np.array([F[1,0], F[2,0]])
+            fc_norm = fc/np.linalg.norm(fc)
+            self.fc_arrow.set_data( 
+                [ current_state[0], current_state[0] + fc_norm[0] ], 
+                [ current_state[1], current_state[1] + fc_norm[1] ] )
+            
+            # print("Proportionality = " + str( fc.T @ nablaV/ (nablaV.T @ nablaV) ) + " , V = " + str( self.clf.function(current_state) ))
 
             if hasattr(self, 'clf_log'):
                 current_piv_state = [ self.clf_log[k][i] for k in range(self.clf_param_dim) ]
@@ -229,6 +240,7 @@ class Plot2DSimulation():
         graphical_elements.append(self.equilibria_plot)
         graphical_elements.append(self.clf_grad_arrow)
         graphical_elements.append(self.cbf_grad_arrow)
+        graphical_elements.append(self.fc_arrow)
         graphical_elements += self.clf_contours.collections
         for cbf_countour in self.cbf_contours:
             graphical_elements += cbf_countour.collections

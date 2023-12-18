@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(name='compatible_clf_cbf',
-      version='0.1',
+      version='1.0.0',
       description='Safety-critical control based on CLF and CBFs',
       url='https://github.com/CaipirUltron/CompatibleCLFCBF',
       author='Matheus Reis',
