@@ -22,7 +22,8 @@ class Plot2DSimulation():
             "resolution": 50,
             "fps":50,
             "pad":2.0,
-            "equilibria": True
+            "equilibria": True,
+            "arrows": False
         }
         if "plot_config" in kwargs.keys():
             self.plot_config = kwargs["plot_config"]
@@ -188,24 +189,25 @@ class Plot2DSimulation():
             current_time = np.around(self.time[i], decimals = 2)
             current_state = [ self.state_log[0][i], self.state_log[1][i] ]
 
-            nablaV = self.clf.gradient(current_state)
-            nablaV_norm = nablaV/np.linalg.norm(nablaV)
-            self.clf_grad_arrow.set_data( 
-                [ current_state[0], current_state[0] + nablaV_norm[0] ], 
-                [ current_state[1], current_state[1] + nablaV_norm[1] ] )
+            if self.plot_config["arrows"]:
+                nablaV = self.clf.gradient(current_state)
+                nablaV_norm = nablaV/np.linalg.norm(nablaV)
+                self.clf_grad_arrow.set_data( 
+                    [ current_state[0], current_state[0] + nablaV_norm[0] ], 
+                    [ current_state[1], current_state[1] + nablaV_norm[1] ] )
 
-            nablah = self.cbfs[0].gradient(current_state)
-            nablah_norm = nablah/np.linalg.norm(nablah)
-            self.cbf_grad_arrow.set_data( 
-                [ current_state[0], current_state[0] + nablah_norm[0] ], 
-                [ current_state[1], current_state[1] + nablah_norm[1] ] )
+                nablah = self.cbfs[0].gradient(current_state)
+                nablah_norm = nablah/np.linalg.norm(nablah)
+                self.cbf_grad_arrow.set_data( 
+                    [ current_state[0], current_state[0] + nablah_norm[0] ], 
+                    [ current_state[1], current_state[1] + nablah_norm[1] ] )
 
-            F = self.robot.get_F()
-            fc = np.array([F[1,0], F[2,0]])
-            fc_norm = fc/np.linalg.norm(fc)
-            self.fc_arrow.set_data( 
-                [ current_state[0], current_state[0] + fc_norm[0] ], 
-                [ current_state[1], current_state[1] + fc_norm[1] ] )
+                F = self.robot.get_F()
+                fc = np.array([F[1,0], F[2,0]])
+                fc_norm = fc/np.linalg.norm(fc)
+                self.fc_arrow.set_data( 
+                    [ current_state[0], current_state[0] + fc_norm[0] ], 
+                    [ current_state[1], current_state[1] + fc_norm[1] ] )
             
             # print("Proportionality = " + str( fc.T @ nablaV/ (nablaV.T @ nablaV) ) + " , V = " + str( self.clf.function(current_state) ))
 

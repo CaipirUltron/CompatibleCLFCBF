@@ -12,9 +12,9 @@ ZERO_ACCURACY = 1e-9
 '''
 Verification / computation of equilibrium points and their stability 
 '''
-def alpha2kappas(eq_sol, kernel):
+def alpha2kappa(eq_sol, kernel):
     '''
-    Finds a representation for the Jacobian transpose null space at a point x. 
+    Finds a representation for the Jacobian transpose null space at a point x.
     '''
     if type(kernel) != Kernel:
         raise Exception("A valid kernel must be specified.")
@@ -26,7 +26,6 @@ def alpha2kappas(eq_sol, kernel):
     # Get the solution
     x = eq_sol["x"]
     alpha = eq_sol["alpha"]
-    l = eq_sol["lambda"]
 
     m = kernel.function(x)
     Jm = kernel.jacobian(x)
@@ -47,44 +46,7 @@ def alpha2kappas(eq_sol, kernel):
     system_solution = np.linalg.lstsq(System_matrix, nullspace_vec, rcond=None)
     kappa, residuals = system_solution[0], system_solution[1]
 
-def S_matrix(plant, clf, cbf, eq_sol, **kwargs):
-    '''
-    Computes the S matrix determining stability.
-    '''
-    slack_gain, clf_gain = 1.0, 1.0
-    for key in kwargs.keys():
-        aux_key = key.lower()
-        if aux_key == "slack_gain":
-            slack_gain = kwargs[key]
-            continue
-        if aux_key == "clf_gain":
-            clf_gain = kwargs[key]
-            continue
-
-    if clf._dim != cbf._dim:
-        raise Exception("CLF and CBF must have the same dimension.")
-    n = clf._dim
-
-    F = plant.get_F()
-    P = clf.P
-    Q = cbf.Q
-    if clf.kernel != cbf.kernel:
-        raise Exception("CLF and CBF must be based on the same kernel.")
-    kernel = clf.kernel
-    p = kernel.kernel_dim
-    N_list = kernel.get_N_matrices()
-    r = len(N_list)
-    
-    x = eq_sol["x"]
-    alpha = eq_sol["alpha"]
-    l = eq_sol["lambda"]
-    kappas = eq_sol["kappa"]
-
-    sum = np.zeros([p,p])
-    for k in range(r):
-        sum += kappa[k] * N_list[k]
-    S_matrix = Jm.T @ ( F + l * Q - slack_gain * clf_gain * V * P - sum - slack_gain * clf_gain * np.outer(P @ m, P @ m) ) @ Jm
-
+    return kappa
 
 def check_invariant(plant, clf, cbf, x, **kwargs):
     '''
@@ -155,7 +117,7 @@ def check_invariant(plant, clf, cbf, x, **kwargs):
 
         is_invariant = True
         equilibrium_pt = { "x": x.tolist(), "alpha": alpha.tolist(), "lambda": l, "eta": eta, "residue": residue }
-        equilibrium_pt["stability"] = compute_stability(plant, clf, cbf, equilibrium_pt, slack_gain=slack_gain, clf_gain=clf_gain )
+        equilibrium_pt["stability"], equilibrium_pt["kappa"] = compute_stability(plant, clf, cbf, equilibrium_pt, slack_gain=slack_gain, clf_gain=clf_gain )
 
     return is_invariant, equilibrium_pt
 
@@ -223,7 +185,7 @@ def compute_equilibria(plant, clf, cbf, initial_points, **kwargs):
     x is n-dimensional
     alpha is p-dimensional, representing the coordinates of a vector of the nullspace of the transpose Jacobian, in a basis given by the (0, vi) eigenpairs. 
                             HOWEVER: alpha has actually the dimension of the transpose Jacobian null space (p is the maximum dimension of this null space).
-    λ is a scalar (must be positive for a valid equilibriu solution)
+    λ is a scalar (must be positive for a valid equilibrium solution)
     '''
     def gradient_collinearity_constraint(var):
         '''
@@ -325,7 +287,7 @@ def compute_equilibria(plant, clf, cbf, initial_points, **kwargs):
                     eta = 1/(1 + slack_gain * z2.T @ G @ z2 )
 
                     eq_sol = {"x": x.tolist(), "alpha": alpha.tolist(), "lambda": l,"eta": eta, "residue": sol.cost}
-                    eq_sol["stability"] = compute_stability(plant, clf, cbf, eq_sol, slack_gain=slack_gain, clf_gain=clf_gain)
+                    eq_sol["stability"], eq_sol["kappa"] = compute_stability(plant, clf, cbf, eq_sol, slack_gain=slack_gain, clf_gain=clf_gain)
                     sols.append( eq_sol )
             else:
                 log["num_failure"] += 1
@@ -361,7 +323,6 @@ def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
     r = len(N_list)
 
     x = eq_sol["x"]
-    alpha = eq_sol["alpha"]
     l = eq_sol["lambda"]
 
     m = kernel.function(x)
@@ -375,21 +336,7 @@ def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
     norm_nablaV = np.linalg.norm(nablaV)
     norm_nablah = np.linalg.norm(nablah)
 
-    '''
-    Compute Jacobian nullspace vector from the alpha coordinates of the equilibrium solutions
-    '''
-    N = null_space(Jm.T)
-    dim_nullspace = N.shape[1]
-    nullspace_vec = np.zeros(p)
-    for k in range(dim_nullspace):
-        nullspace_vec += alpha[k] * N[:,k]
-
-    '''
-    Finds kappa constants of the Jacobian nullspace vector written as L.C. of N_i m(x)
-    '''
-    System_matrix = np.array([ (N_list[l] @ m).tolist() for l in range(r) ]).T
-    system_solution = np.linalg.lstsq(System_matrix, nullspace_vec, rcond=None)
-    kappa, residuals = system_solution[0], system_solution[1]
+    kappa = alpha2kappa(eq_sol, kernel)
 
     '''
     Compute S matrix to determine stability of the equilibrium point
@@ -397,6 +344,7 @@ def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
     sum = np.zeros([p,p])
     for k in range(r):
         sum += kappa[k] * N_list[k]
+
     S_matrix = Jm.T @ ( F + l * Q - slack_gain * clf_gain * V * P - sum - slack_gain * clf_gain * np.outer(P @ m, P @ m) ) @ Jm
 
     '''
@@ -417,11 +365,11 @@ def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
         curv_h = cbf.get_curvature(x)
         diff_curvatures = curv_h - curv_V
 
-    return stability_number
+    return stability_number, kappa.tolist()
 
 def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
     '''
-    Compute the closest P matrix that compatibilizes the CLF-CBF pair, given M known points in the invariaant set.
+    Compute the closest P matrix that compatibilizes the CLF-CBF pair, given M known points in the invariant set.
     '''
     slack_gain, clf_gain = 1.0, 1.0
     for key in kwargs.keys():
@@ -447,6 +395,9 @@ def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
     N_list = kernel.get_N_matrices()
     r = len(N_list)
     M = len(eq_sols)
+
+    m = kernel.function(x)
+    Jm = kernel.jacobian(x)
 
     for sol in eq_sols:
 

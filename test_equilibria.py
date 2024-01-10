@@ -40,7 +40,7 @@ for pt in sim.cbf.point_list:
 # ----------------------------------------------------- Plotting ---------------------------------------------------------
 
 # manual_mode = True
-manual_mode = True
+manual_mode = False
     
 '''
 Plots initial guesses

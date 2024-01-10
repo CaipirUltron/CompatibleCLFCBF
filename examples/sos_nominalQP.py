@@ -63,7 +63,7 @@ cbf = KernelBarrier(*initial_state, kernel=kernel, points=points)
 # cbf = KernelBarrier(*initial_state, kernel=kernel, boundary_points=boundary_points)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
-T = 30
+T = 20
 sample_time = .002
 p, alpha, beta = 1.0, 1.0, 1.0
 controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
@@ -72,7 +72,7 @@ controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
 xlimits, ylimits = [-8, 8], [-8, 8]
 plot_config = {
     "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "axeslim": tuple(xlimits+ylimits),
-    "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "equilibria": True
+    "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "equilibria": True, "arrows": False
 }
 
 logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": cbf.Q.tolist() }
