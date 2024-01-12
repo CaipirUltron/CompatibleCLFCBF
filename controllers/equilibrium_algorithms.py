@@ -372,7 +372,7 @@ def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
     '''
     Compute the closest P matrix that compatibilizes the CLF-CBF pair, given M known points in the invariant set.
     '''
-    slack_gain, clf_gain = 1.0, 1.0
+    slack_gain, clf_gain, c_lim = 1.0, 1.0, 1.0
     for key in kwargs.keys():
         aux_key = key.lower()
         if aux_key == "slack_gain":
@@ -381,6 +381,8 @@ def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
         if aux_key == "clf_gain":
             clf_gain = kwargs[key]
             continue
+        if aux_key == "c_lim":
+            c_lim = kwargs[key]
 
     if clf._dim != cbf._dim:
         raise Exception("CLF and CBF must have the same dimension.")
@@ -405,18 +407,60 @@ def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
     lambdas_var = cp.Variable(num_sols)
 
     objective = cp.Minimize( cp.norm( P_var - Pnom ) )
-    constraints = []
-    problem = cp.Problem(objective, constraints)
+    constraints = [ P_var >> 0 ]
 
-    for sol in eq_sols:
+    def S(lambda_var, P_var, sol):
 
         x = sol["x"]
-        l = sol["lambda"]
+        kappa = sol["kappa"]
 
+        V = clf.function(x)
         m = kernel.function(x)
         Jm = kernel.jacobian(x)
 
-    pass
+        sum = np.zeros([p,p])
+        for k in range(r):
+            sum += kappa[k] * N_list[k]
+
+        return Jm.T @ ( F + lambda_var * Q - slack_gain * clf_gain * V * P_var - sum - 1/(slack_gain * clf_gain * (V**2)) * np.outer(F @ m, F @ m) ) @ Jm
+
+    for k in range(len(eq_sols)):
+
+        eq_sol = eq_sols[k]
+        l_var = lambdas_var[k]
+
+        x = eq_sol["x"]
+        V = clf.function(x)
+        m = kernel.function(x)
+        Jm = kernel.jacobian(x)
+
+        M = np.random.rand(n,n)
+        normal = cbf.gradient(x) / np.linalg.norm(cbf.gradient(x))
+        M[:,0] = normal
+        while np.abs( np.linalg.det(M) ) <= 1e-10:
+            M = np.random.rand(n,n)
+            M[:,0] = normal
+        Q, R = np.linalg.qr(M)
+
+        aux_M = np.vstack([ np.zeros(n-1), np.eye(n-1) ])
+        curv_constr = cp.lambda_max(aux_M.T @ Q.T @ S(l_var, P_var, eq_sol) @ Q @ aux_M) - c_lim >> 0
+        eq_constr = Jm.T @ ( F + l_var * Q - slack_gain * clf_gain * V * P_var ) @ m == 0
+        clf_level_constr = V - 0.5 * m.T @ P_var @ m == 0
+        pos_lambda_constr = l_var >= 0
+
+        constraints += curv_constr
+        constraints += eq_constr
+        constraints += clf_level_constr
+        constraints += pos_lambda_constr
+
+    problem = cp.Problem(objective, constraints)
+    problem.solve()
+    if problem.status not in ["infeasible", "unbounded"]:
+        print("Optimal value: %s" % problem.value)
+        for variable in problem.variables():
+            print("Variable %s: value %s" % (variable.name(), variable.value))
+
+    return P_var.value
 
 '''
 The following algorithms are useful for initialization of the previous algorithms, among other utilities.
