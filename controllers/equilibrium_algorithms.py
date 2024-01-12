@@ -1,4 +1,5 @@
 import numpy as np
+import cvxpy as cp
 
 from scipy.optimize import root, minimize, least_squares
 from scipy.linalg import null_space
@@ -394,16 +395,26 @@ def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
     p = kernel.kernel_dim
     N_list = kernel.get_N_matrices()
     r = len(N_list)
-    M = len(eq_sols)
 
-    m = kernel.function(x)
-    Jm = kernel.jacobian(x)
+    '''
+    Setup cvxpy problem
+    '''
+    num_sols = len(eq_sols)
+
+    P_var = cp.Variable((p,p), symmetric=True)
+    lambdas_var = cp.Variable(num_sols)
+
+    objective = cp.Minimize( cp.norm( P_var - Pnom ) )
+    constraints = []
+    problem = cp.Problem(objective, constraints)
 
     for sol in eq_sols:
 
         x = sol["x"]
-        alpha = sol["alpha"]
         l = sol["lambda"]
+
+        m = kernel.function(x)
+        Jm = kernel.jacobian(x)
 
     pass
 
@@ -802,86 +813,86 @@ The following algorithms implement some version of constrained least_squares or 
 None of them work.
 '''
 # def compute_equilibria_algorithm1(F, clf, cbf, **kwargs):
-#     '''
-#     Solve the general eigenproblem of the type:
-#     ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0,
-#     l1 = c V(z) P z,
-#     z \in Im(m)
-#     '''
-#     max_iter = 1000
-#     for key in kwargs.keys():
-#         aux_key = key.lower()
-#         if aux_key == "max_iter":
-#             max_iter = kwargs[key]
-#             continue
-#         if aux_key == "c":
-#             c = kwargs[key]
-#             continue
-#         if aux_key == "initial":
-#             initial_guess = kwargs[key]
+    # '''
+    # Solve the general eigenproblem of the type:
+    # ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0,
+    # l1 = c V(z) P z,
+    # z \in Im(m)
+    # '''
+    # max_iter = 1000
+    # for key in kwargs.keys():
+    #     aux_key = key.lower()
+    #     if aux_key == "max_iter":
+    #         max_iter = kwargs[key]
+    #         continue
+    #     if aux_key == "c":
+    #         c = kwargs[key]
+    #         continue
+    #     if aux_key == "initial":
+    #         initial_guess = kwargs[key]
 
-#     if clf._dim != cbf._dim:
-#         raise Exception("CLF and CBF must have the same dimension.")
-#     n = clf._dim
+    # if clf._dim != cbf._dim:
+    #     raise Exception("CLF and CBF must have the same dimension.")
+    # n = clf._dim
 
-#     P = clf.P
-#     Q = cbf.Q
-#     if clf.kernel != cbf.kernel:
-#         raise Exception("CLF and CBF must be based on the same kernel.")
-#     kernel = clf.kernel
-#     p = kernel.kernel_dim
+    # P = clf.P
+    # Q = cbf.Q
+    # if clf.kernel != cbf.kernel:
+    #     raise Exception("CLF and CBF must be based on the same kernel.")
+    # kernel = clf.kernel
+    # p = kernel.kernel_dim
 
-#     # A_list = clf.kernel.get_A_matrices()
-#     N_list = kernel.get_N_matrices()
+    # # A_list = clf.kernel.get_A_matrices()
+    # N_list = kernel.get_N_matrices()
 
-#     def linear_pencil(linear_combs):
-#         '''
-#         linear_combs = [ lambda1, lambda2, kappa1, kappa2, ... ]
-#         Computes the linear matrix pencil.
-#         '''
-#         L = F + linear_combs[1] * Q - linear_combs[0] * P
-#         for k in range(2, p - n):
-#             L += linear_combs[k] * N_list[k]
-#         return L
+    # def linear_pencil(linear_combs):
+    #     '''
+    #     linear_combs = [ lambda1, lambda2, kappa1, kappa2, ... ]
+    #     Computes the linear matrix pencil.
+    #     '''
+    #     L = F + linear_combs[1] * Q - linear_combs[0] * P
+    #     for k in range(2, p - n):
+    #         L += linear_combs[k] * N_list[k]
+    #     return L
 
-#     def linear_pencil_det(linear_combs):
-#         '''
-#         linear_combs = [ lambda1, lambda2, kappa1, kappa2, ... ]
-#         Computes determinant of linear matrix pencil.
-#         '''
-#         return np.linalg.det( linear_pencil(linear_combs) )
+    # def linear_pencil_det(linear_combs):
+    #     '''
+    #     linear_combs = [ lambda1, lambda2, kappa1, kappa2, ... ]
+    #     Computes determinant of linear matrix pencil.
+    #     '''
+    #     return np.linalg.det( linear_pencil(linear_combs) )
 
-#     def compute_F(solution):
-#         '''
-#         This inner method computes the vector field F(lambda, kappa, z) and returns its value.
-#         '''
-#         linear_combs, z = solution[0:p-n+2], solution[p-n+2:]
-#         kernel_constraints = kernel.get_constraints(z)
-#         num_kernel_constraints = len(kernel_constraints)
+    # def compute_F(solution):
+    #     '''
+    #     This inner method computes the vector field F(lambda, kappa, z) and returns its value.
+    #     '''
+    #     linear_combs, z = solution[0:p-n+2], solution[p-n+2:]
+    #     kernel_constraints = kernel.get_constraints(z)
+    #     num_kernel_constraints = len(kernel_constraints)
 
-#         F = np.zeros(p+num_kernel_constraints+2)
-#         L = linear_pencil(linear_combs)
-#         F[0:p] = L @ z
-#         V = 0.5 * z.T @ P @ z
-#         F[p] = linear_combs[0] - c*V
-#         F[p+1] = linear_pencil_det(linear_combs)
-#         F[p+2:] = kernel_constraints
+    #     F = np.zeros(p+num_kernel_constraints+2)
+    #     L = linear_pencil(linear_combs)
+    #     F[0:p] = L @ z
+    #     V = 0.5 * z.T @ P @ z
+    #     F[p] = linear_combs[0] - c*V
+    #     F[p+1] = linear_pencil_det(linear_combs)
+    #     F[p+2:] = kernel_constraints
 
-#         return F
+    #     return F
 
-#     # t = time.time()
-#     solution = root(compute_F, initial_guess, method='lm', tol = 0.00001)
-#     # solution = fsolve(compute_F, initial_guess, maxfev = max_iter)
-#     # elapsed = time.time() - t
+    # # t = time.time()
+    # solution = root(compute_F, initial_guess, method='lm', tol = 0.00001)
+    # # solution = fsolve(compute_F, initial_guess, maxfev = max_iter)
+    # # elapsed = time.time() - t
 
-#     l1 = solution.x[0]
-#     l2 = solution.x[1]
-#     kappas = solution.x[2:p-n+2]
-#     z = solution.x[p-n+2:]
+    # l1 = solution.x[0]
+    # l2 = solution.x[1]
+    # kappas = solution.x[2:p-n+2]
+    # z = solution.x[p-n+2:]
 
-#     equilibrium_point = np.flip(z[1:n+1]).tolist()
+    # equilibrium_point = np.flip(z[1:n+1]).tolist()
 
-#     return equilibrium_point
+    # return equilibrium_point
 
 # def compute_equilibria_algorithm2(F, clf, cbf, **kwargs):
 #     '''
