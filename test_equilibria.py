@@ -73,8 +73,8 @@ else:
     solutions, log = compute_equilibria(sim.plant, sim.clf, sim.cbf, initial_guesses, slack_gain=sim.p, clf_gain=sim.alpha)
     print("From " + str(log["num_trials"]) + " trials, algorithm converged " + str(log["num_success"]) + " times, and " + str(len(solutions)) + " solutions were found.")
     print("Algorithm efficiency = " + str( log["num_success"]/log["num_trials"] ))
-    P = closest_compatible(sim.plant, sim.clf, sim.cbf, initial_guesses, slack_gain=sim.p, clf_gain=sim.alpha)
-    print(P)
+    # P = closest_compatible(sim.plant, sim.clf, sim.cbf, solutions, slack_gain=sim.p, clf_gain=sim.alpha)
+    # print(P)
 
 num_sols = len(solutions)
 for k in range(num_sols):

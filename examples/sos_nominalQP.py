@@ -5,7 +5,7 @@ from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
 from common import create_quadratic, rot2D
 
-initial_state = [5.2, 3.0]
+initial_state = [0.2, 6.0]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
@@ -18,7 +18,7 @@ print(kernel)
 print("Dimension of kappa space = " + str(len(kernel.get_N_matrices())))
 
 # -------------------------------------------------- Define system ---------------------------------------------------------
-fx, fy = 10.0, -10.0                       # constant force with fx, fy components
+fx, fy = 0.0, 0.0                       # constant force with fx, fy components
 F = np.zeros([kern_dim,kern_dim])
 F[1,0], F[2,0] = fx, fy
 
@@ -63,7 +63,7 @@ cbf = KernelBarrier(*initial_state, kernel=kernel, points=points)
 # cbf = KernelBarrier(*initial_state, kernel=kernel, boundary_points=boundary_points)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
-T = 20
+T = 35
 sample_time = .002
 p, alpha, beta = 1.0, 1.0, 1.0
 controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
@@ -72,7 +72,7 @@ controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
 xlimits, ylimits = [-8, 8], [-8, 8]
 plot_config = {
     "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "axeslim": tuple(xlimits+ylimits),
-    "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "equilibria": True, "arrows": False
+    "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": False
 }
 
 logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": cbf.Q.tolist() }

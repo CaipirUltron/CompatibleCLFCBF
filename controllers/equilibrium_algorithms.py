@@ -117,7 +117,7 @@ def check_invariant(plant, clf, cbf, x, **kwargs):
         eta = 1/(1 + slack_gain * z2.T @ G @ z2 )
 
         is_invariant = True
-        equilibrium_pt = { "x": x.tolist(), "alpha": alpha.tolist(), "lambda": l, "eta": eta, "residue": residue }
+        equilibrium_pt = { "x": x.tolist(), "alpha": alpha.tolist(), "lambda": l, "eta": eta, "residue": residue, "V": clf.function(x) }
         equilibrium_pt["stability"], equilibrium_pt["kappa"] = compute_stability(plant, clf, cbf, equilibrium_pt, slack_gain=slack_gain, clf_gain=clf_gain )
 
     return is_invariant, equilibrium_pt
@@ -133,18 +133,35 @@ def check_equilibrium(plant, clf, cbf, x, **kwargs):
     kernel = clf.kernel
     Q = cbf.Q
 
+    type_dict = {"invariant": False, "equilibrium": False}
     is_invariant, eq_sol = check_invariant(plant, clf, cbf, x, **kwargs)
     if not is_invariant:
-        return False, eq_sol
+        return type_dict, eq_sol
     else:
         m = kernel.function(eq_sol["x"])
         mQm = m.T @ Q @ m
         boundary_residue = np.abs(mQm-1)
         if boundary_residue < tol:
             eq_sol["residue"] = eq_sol["residue"] + boundary_residue
-            return True, eq_sol
+            type_dict["invariant"], type_dict["equilibrium"] = True, True
+            return type_dict, eq_sol
         else:
-            return False, { "x": None, "alpha": None, "lambda": None, "eta": None, "residue": eq_sol["residue"] + boundary_residue }
+            type_dict["invariant"] = True
+            return type_dict, eq_sol
+
+def is_new(cur_sol, sols):
+    '''
+    Verify if equilibrium solution is new
+    '''
+    is_new_sol = True
+    for sol in sols:
+        error_x = np.linalg.norm( np.array(sol["x"]) - cur_sol["x"] )
+        error_lambda = np.linalg.norm( np.array(sol["lambda"]) - cur_sol["lambda"] )
+        error_kappa = np.linalg.norm( np.array(sol["kappa"]) - cur_sol["kappa"] )
+        if error_x < 1e-2 and error_lambda < 1e-1 and error_kappa < 1e-1:
+            is_new_sol = False
+            break
+    return is_new_sol
 
 def compute_equilibria(plant, clf, cbf, initial_points, **kwargs):
     '''
@@ -260,36 +277,24 @@ def compute_equilibria(plant, clf, cbf, initial_points, **kwargs):
                 Jm = kernel.jacobian(x)
                 dim_nullspace = null_space(Jm.T).shape[1]
                 alpha = sol.x[n:n+dim_nullspace]
-
-                # Lambda
                 l = sol.x[-1]
 
-                # Verifies if solution was already found
-                is_new_sol = True
-                for previous_sol in sols:
-                    error_x = np.linalg.norm( np.array(previous_sol["x"]) - x )
-                    # error_alpha = np.linalg.norm( np.array(previous_sol["alpha"]) - alpha )
-                    error_lambda = np.linalg.norm( np.array(previous_sol["lambda"]) - l )
-                    if error_x < 1e-3 and error_lambda < 1e-3:
-                        is_new_sol = False
-                        break
-                
-                if is_new_sol:
+                # Compute eta - might be relevant latter
+                g = plant.g_method(x)
+                G = g @ g.T
+            
+                nablaV = clf.gradient(x)
+                nablah = cbf.gradient(x)
 
-                    # Compute eta - might be relevant latter
-                    g = plant.g_method(x)
-                    G = g @ g.T
-                
-                    nablaV = clf.gradient(x)
-                    nablah = cbf.gradient(x)
+                z1 = nablah / np.linalg.norm(nablah)
+                z2 = nablaV - nablaV.T @ G @ z1 * z1
+                eta = 1/(1 + slack_gain * z2.T @ G @ z2 )
 
-                    z1 = nablah / np.linalg.norm(nablah)
-                    z2 = nablaV - nablaV.T @ G @ z1 * z1
-                    eta = 1/(1 + slack_gain * z2.T @ G @ z2 )
+                eq_sol = {"x": x.tolist(), "alpha": alpha.tolist(), "lambda": l,"eta": eta, "residue": sol.cost}
+                eq_sol["stability"], eq_sol["kappa"] = compute_stability(plant, clf, cbf, eq_sol, slack_gain=slack_gain, clf_gain=clf_gain)
 
-                    eq_sol = {"x": x.tolist(), "alpha": alpha.tolist(), "lambda": l,"eta": eta, "residue": sol.cost}
-                    eq_sol["stability"], eq_sol["kappa"] = compute_stability(plant, clf, cbf, eq_sol, slack_gain=slack_gain, clf_gain=clf_gain)
-                    sols.append( eq_sol )
+                # If solution is new, append it      
+                if is_new(eq_sol, sols): sols.append( eq_sol )
             else:
                 log["num_failure"] += 1
 
@@ -372,7 +377,7 @@ def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
     '''
     Compute the closest P matrix that compatibilizes the CLF-CBF pair, given M known points in the invariant set.
     '''
-    slack_gain, clf_gain, c_lim = 1.0, 1.0, 1.0
+    slack_gain, clf_gain, c_lim = 1.0, 1.0, 2.0
     for key in kwargs.keys():
         aux_key = key.lower()
         if aux_key == "slack_gain":
@@ -414,7 +419,7 @@ def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
         x = sol["x"]
         kappa = sol["kappa"]
 
-        V = clf.function(x)
+        V = sol["V"]
         m = kernel.function(x)
         Jm = kernel.jacobian(x)
 
@@ -430,7 +435,7 @@ def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
         l_var = lambdas_var[k]
 
         x = eq_sol["x"]
-        V = clf.function(x)
+        V = eq_sol["V"]
         m = kernel.function(x)
         Jm = kernel.jacobian(x)
 
@@ -440,25 +445,23 @@ def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
         while np.abs( np.linalg.det(M) ) <= 1e-10:
             M = np.random.rand(n,n)
             M[:,0] = normal
-        Q, R = np.linalg.qr(M)
+        Rot, _ = np.linalg.qr(M)
 
         aux_M = np.vstack([ np.zeros(n-1), np.eye(n-1) ])
-        curv_constr = cp.lambda_max(aux_M.T @ Q.T @ S(l_var, P_var, eq_sol) @ Q @ aux_M) - c_lim >> 0
+        curv_constr = cp.lambda_min(aux_M.T @ Rot.T @ S(l_var, P_var, eq_sol) @ Rot @ aux_M) >= c_lim
         eq_constr = Jm.T @ ( F + l_var * Q - slack_gain * clf_gain * V * P_var ) @ m == 0
         clf_level_constr = V - 0.5 * m.T @ P_var @ m == 0
         pos_lambda_constr = l_var >= 0
 
-        constraints += curv_constr
-        constraints += eq_constr
-        constraints += clf_level_constr
-        constraints += pos_lambda_constr
+        constraints.append( curv_constr )
+        constraints.append( eq_constr )
+        constraints.append( clf_level_constr )
+        constraints.append( pos_lambda_constr )
 
     problem = cp.Problem(objective, constraints)
     problem.solve()
     if problem.status not in ["infeasible", "unbounded"]:
         print("Optimal value: %s" % problem.value)
-        for variable in problem.variables():
-            print("Variable %s: value %s" % (variable.name(), variable.value))
 
     return P_var.value
 

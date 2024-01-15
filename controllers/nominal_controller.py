@@ -4,7 +4,7 @@ from common import sat
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 from controllers.compatibility import CLFCBFPair
-from controllers.equilibrium_algorithms import check_invariant, check_equilibrium, compute_equilibria
+from controllers.equilibrium_algorithms import check_invariant, check_equilibrium, closest_compatible, is_new
 
 class NominalQP():
     '''
@@ -35,7 +35,9 @@ class NominalQP():
 
         self.ctrl_dt = dt
 
+        self.min_curvature = 10.0
         self.eq_dt = 0.2
+        self.invariants = []
         self.equilibria = []
         
         self.updated_timer = False
@@ -59,9 +61,17 @@ class NominalQP():
         self.QP_sol = self.QP.get_solution()
         control = self.QP_sol[0:self.control_dim,]
 
-        is_equilibrium, eq_pt = check_invariant(self.plant, self.clf, self.cbf, self.plant.get_state(), slack_gain=self.p, clf_gain=self.alpha)
-        if is_equilibrium:
-            print("Equilibrium point was found: " + str(eq_pt))
+        # Verifies if a point is an equilibrium/invariant
+        type, sol = check_equilibrium(self.plant, self.clf, self.cbf, self.plant.get_state(), slack_gain=self.p, clf_gain=self.alpha)
+        if type["equilibrium"] and is_new(sol, self.equilibria) and sol["stability"] <= 0:
+            self.equilibria.append(sol)
+            Pnew = closest_compatible(self.plant, self.clf, self.cbf, self.equilibria, slack_gain=self.p, clf_gain=self.alpha, c_lim=self.min_curvature)
+            self.clf.set_param(P=Pnew)
+            control += 0.5*np.random.rand(self.control_dim)
+
+        # print("Equilibrium pts: ")
+        # for eq in self.invariants:
+        #     print(eq)
 
         # elapsed_time = self.timer - self.last_eq_t
         # is_invariant, inv_pt = check_invariant(self.plant, self.clf, self.cbf, self.plant.get_state(), slack_gain=self.p, clf_gain=self.alpha)
