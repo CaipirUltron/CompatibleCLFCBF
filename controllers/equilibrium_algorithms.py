@@ -351,7 +351,8 @@ def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
     for k in range(r):
         sum += kappa[k] * N_list[k]
 
-    S_matrix = Jm.T @ ( F + l * Q - slack_gain * clf_gain * V * P - sum - slack_gain * clf_gain * np.outer(P @ m, P @ m) ) @ Jm
+    # S_matrix = Jm.T @ ( F + l * Q - slack_gain * clf_gain * V * P - sum - slack_gain * clf_gain * np.outer(P @ m, P @ m) ) @ Jm
+    S_matrix = Jm.T @ ( F + l * Q - slack_gain * clf_gain * V * P - sum - 1/(slack_gain * clf_gain * (V**2)) * np.outer(F @ m, F @ m) ) @ Jm
 
     '''
     Compute stability number
@@ -468,11 +469,106 @@ def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
 '''
 The following algorithms are useful for initialization of the previous algorithms, among other utilities.
 '''
-def project_into_kernel_image(kernel, pt):
+def generate_boundary(cbf, num_pts, **kwargs):
     '''
-    This method projects a point pt from R**p (where p is the kernel dimension) onto the kernel image manifold
+    This method returns points in the CBF boundary 
     '''
-    pass
+    kernel = cbf.kernel
+    Q = cbf.Q
+    n = cbf._dim
+
+    minusones = -np.ones([n,1])
+    plusones = +np.ones([n,1])
+    interval_limits = np.hstack([ minusones, plusones ]).tolist()
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "limits":
+            interval_limits = kwargs[key]
+            for i in range(n):
+                if interval_limits[i][0] >=  interval_limits[i][1]:
+                    raise Exception("Lines should be sorted in ascending order.")
+            continue
+
+    rankQ = np.linalg.matrix_rank(Q)
+    dim_elliptical_manifold = rankQ - 1
+
+    '''
+    var = [ x, theta ] is a (n+rankQ-1) dimensional array, where:
+    x is n-dimensional
+    theta is (rankQ-1)-dimensional, representing the angular parameters of the ellipsoid.
+    '''
+    def cost(var):
+        '''
+        Returns the cost
+        '''
+        x = var[0:n]
+        theta = var[n:]
+        return ( ellipsoid_parametrization(Q, theta) - kernel.function(x) )**2
+
+    log = {"num_trials": num_pts, "num_success": 0, "num_failure": 0}
+    sols = []
+    for _ in range(num_pts):
+        init_theta = np.zeros(dim_elliptical_manifold)
+        for k in range(dim_elliptical_manifold):
+            if k > 0:
+                init_theta[k] = np.random.uniform(0, 2*np.pi)
+                continue
+            init_theta[k] = np.random.uniform(0, np.pi)
+        initial_var = [ np.random.uniform( interval_limits[k][0], interval_limits[k][1] ) for k in range(n) ] + init_theta.tolist()
+
+        lower_bounds = [ -np.inf for _ in range(n) ] + [ 0.0 for _ in range(dim_elliptical_manifold) ]
+        upper_bounds = [ +np.inf for _ in range(n) ] + [ np.pi ] + [ 2*np.pi for _ in range(1, dim_elliptical_manifold) ]
+
+        # Try solving least squares
+        try:
+            error_flag = False
+            sol = least_squares( cost, initial_var, bounds=(lower_bounds, upper_bounds) )
+        except Exception as error_msg:
+            log["num_failure"] += 1 
+            error_flag = True
+            print(error_msg)
+
+        if not error_flag:
+            print(sol.message)
+            if sol.success and sol.cost < 1e-6:
+                log["num_success"] += 1
+                sols.append({"x": sol.x[0:n], "cost": sol.cost})
+
+    return sols, log
+
+def ellipsoid_parametrization(Q, param):
+    '''
+    This method implements an angular parametrization of the (rank(Q)-1) dimensional ellipsoid.
+    Receives an (rank(Q)-1) dimensional vector of angular parameters for the ellipsoid,
+    Returns a corresponding point m in the p-dimensional space at the ellipsoid, that is, m.T @ Q @ m = 1.
+    '''
+    eigsQ, eigvecsQ = np.linalg.eig(Q)
+
+    if Q.shape[0] != Q.shape[1]:
+        raise Exception("Q must be a square matrix.")
+    p = Q.shape[0]
+    if np.any(eigsQ < -1e-12):
+        raise Exception("Q must be a positive semi-definite matrix.")
+
+    rankQ = np.linalg.matrix_rank(Q)
+    dim_elliptical_manifold = rankQ - 1
+
+    if len(param) != dim_elliptical_manifold:
+        raise Exception("Parameter has wrong dimensions")
+
+    reduced_m = np.zeros(rankQ)
+    for k in range(rankQ):
+        if k != dim_elliptical_manifold:
+            prod = 1/np.sqrt(eigsQ[k])
+            for i in range(k): prod *= np.sin(param[i])
+            reduced_m[k] = prod * np.cos(param[k])
+        else:
+            prod = 1/np.sqrt(eigsQ[k])
+            for i in range(k): prod *= np.sin(param[i])
+            reduced_m[k] = prod
+
+    m = eigvecsQ @ np.array(reduced_m.tolist() + [ 0.0 for _ in range(p-rankQ)])
+    return m
 
 def generate_point_grid(Q, resolution):
     '''
@@ -492,29 +588,6 @@ def generate_point_grid(Q, resolution):
 
     rankQ = np.linalg.matrix_rank(Q)
     dim_elliptical_manifold = rankQ - 1
-
-    def ellipsoid_parametrization(param):
-        '''
-        This method implements an angular parametrization of the (rank(Q)-1) dimensional ellipsoid.
-        Receives an (rank(Q)-1) dimensional vector of angular parameters for the ellipsoid,
-        Returns a corresponding point m in the p-dimensional space at the ellipsoid, that is, m.T @ Q @ m = 1.
-        '''
-        if len(param) != dim_elliptical_manifold:
-            raise Exception("Parameter has wrong dimensions")
-
-        reduced_m = np.zeros(rankQ)
-        for k in range(rankQ):
-            if k != dim_elliptical_manifold:
-                prod = 1/np.sqrt(eigsQ[k])
-                for i in range(k): prod *= np.sin(param[i])
-                reduced_m[k] = prod * np.cos(param[k])
-            else:
-                prod = 1/np.sqrt(eigsQ[k])
-                for i in range(k): prod *= np.sin(param[i])
-                reduced_m[k] = prod
-    
-        m = eigvecsQ @ np.array(reduced_m.tolist() + [ 0.0 for _ in range(p-rankQ)])
-        return m
 
     '''
     Generate meshgrid with equally spaced angular parameters.
@@ -540,7 +613,7 @@ def generate_point_grid(Q, resolution):
                 indexes.pop(-1)
         else:            
             theta_pt = [ mesh_coords[i][tuple( j for j in indexes )] for i in range(dim_elliptical_manifold) ]
-            points.append( ellipsoid_parametrization( theta_pt ) )
+            points.append( ellipsoid_parametrization( Q, theta_pt ) )
 
         if dim == 0:
             return points

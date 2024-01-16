@@ -35,7 +35,7 @@ class NominalQP():
 
         self.ctrl_dt = dt
 
-        self.min_curvature = 10.0
+        self.min_curvature = 1.0
         self.eq_dt = 0.2
         self.invariants = []
         self.equilibria = []
@@ -70,7 +70,7 @@ class NominalQP():
             control += 0.5*np.random.rand(self.control_dim)
 
         # print("Equilibrium pts: ")
-        # for eq in self.invariants:
+        # for eq in self.equilibria:
         #     print(eq)
 
         # elapsed_time = self.timer - self.last_eq_t

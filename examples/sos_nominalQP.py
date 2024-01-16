@@ -63,7 +63,7 @@ cbf = KernelBarrier(*initial_state, kernel=kernel, points=points)
 # cbf = KernelBarrier(*initial_state, kernel=kernel, boundary_points=boundary_points)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
-T = 35
+T = 25
 sample_time = .002
 p, alpha, beta = 1.0, 1.0, 1.0
 controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
