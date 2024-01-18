@@ -4,13 +4,13 @@ import cvxpy as cp
 from scipy.optimize import root, minimize, least_squares
 from scipy.linalg import null_space
 
-from common import compute_curvatures, KKTmultipliers
+from common import compute_curvatures, KKTmultipliers, asymmetric_sat
 from controllers.compatibility import LinearMatrixPencil2
 from functions import Kernel
 
 ZERO_ACCURACY = 1e-9
 
-'''
+''' 
 Verification / computation of equilibrium points and their stability 
 '''
 def compute_null(plant, clf, cbf, x, KKT):
@@ -328,145 +328,6 @@ def compute_equilibria(plant, clf, cbf, initial_points, **kwargs):
 
     return sols, log
 
-def compute_equilibria2(plant, clf, cbf, initial_points, **kwargs):
-    '''
-    Solve the general eigenproblem of the type:
-    ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0, l2 >= 0,
-    l1 = c V(z) P z,
-    z \in Im(m)
-    '''
-    slack_gain, clf_gain = 1.0, 1.0
-    max_iter = 1000
-    for key in kwargs.keys():
-        aux_key = key.lower()
-        if aux_key == "slack_gain":
-            slack_gain = kwargs[key]
-            continue
-        if aux_key == "clf_gain":
-            clf_gain = kwargs[key]
-            continue
-        if aux_key == "max_iter":
-            max_iter = kwargs[key]
-            continue
-
-    if clf._dim != cbf._dim:
-        raise Exception("CLF and CBF must have the same dimension.")
-    n = clf._dim
-
-    F = plant.get_F()
-    P = clf.P
-    Q = cbf.Q
-    if clf.kernel != cbf.kernel:
-        raise Exception("CLF and CBF must be based on the same kernel.")
-    kernel = clf.kernel
-    p = kernel.kernel_dim
-
-    num_pts = len(initial_points)
-
-    '''
-    var = [ x, alpha, lambda ] is a (n+p+1) dimensional array
-    theta is the angle parametrization for the ellipse
-    x is n-dimensional
-    alpha is p-dimensional, representing the coordinates of a vector of the nullspace of the transpose Jacobian, in a basis given by the (0, vi) eigenpairs. 
-                            HOWEVER: alpha has actually the dimension of the transpose Jacobian null space (p is the maximum dimension of this null space).
-    λ is a scalar (must be positive for a valid equilibrium solution)
-    '''
-    def gradient_collinearity_constraint(var):
-        '''
-        Returns the vector residues of gradient collinearity -> is zero iff the collinearity condition is satisfied 
-        '''
-        x = var[0:n]
-        alpha = var[n:n+p]
-        l = var[-1]
-
-        m = kernel.function(x)
-        Jm = kernel.jacobian(x)
-
-        N = null_space(Jm.T)
-        dim_nullspace = N.shape[1]
-
-        '''
-        IMPORTANT: notice that alpha is filtered (the last coords are just ignored - we really only need as much coords as the dimension of the Jacobian left-nullspace)
-        '''
-        nullspace_vec = np.zeros(p)
-        for k in range(dim_nullspace):
-            nullspace_vec += alpha[k] * N[:,k]
-
-        return ( F + l * Q - 0.5 * slack_gain * clf_gain * (m.T @ P @ m) * P ) @ m - nullspace_vec      # = 0
-
-    def parametrization_const(var):
-        '''
-        Returns the diff between mQm and 1
-        '''
-        x = var[0:n]
-        m = kernel.function(x)
-        return np.abs( m.T @ Q @ m - 1 )
-
-    def constraint(var):
-        '''
-        Combination of all constraints
-        '''
-        return np.hstack([ gradient_collinearity_constraint(var), boundary_constraint(var) ])
-
-    '''
-    Solve constrained least squares
-    '''
-    log = {"num_trials": num_pts, "num_success": 0, "num_failure": 0}
-    sols = []
-    for k in range(num_pts):
-        initial_point = initial_points[k]
-
-        initial_m = kernel.function(initial_point)
-        initial_var = initial_point + np.random.rand(p).tolist() + [0.0]
-        v_lambda0 = gradient_collinearity_constraint(initial_var)
-        initial_lambda = -(initial_m.T @ v_lambda0)/(initial_m.T @ Q @ initial_m)
-        initial_var[-1] = initial_lambda
-        
-        lower_bounds = [ -np.inf for _ in range(p+n) ] + [ 0.0 ]
-        try:
-            error_flag = False
-            sol = least_squares( constraint, initial_var, bounds=(lower_bounds, np.inf), max_nfev=max_iter )
-        except Exception as error_msg:
-            log["num_failure"] += 1 
-            error_flag = True
-            print(error_msg)
-
-        if not error_flag:
-            print(sol.message)
-            if sol.success and sol.cost < 1e-5:
-                log["num_success"] += 1
-
-                # Equilibrium pt found
-                x = sol.x[0:n]
-
-                # Ignore the last p - rank(Jm) entries of kappa
-                Jm = kernel.jacobian(x)
-                dim_nullspace = null_space(Jm.T).shape[1]
-                alpha = sol.x[n:n+dim_nullspace]
-                l = sol.x[-1]
-
-                # Compute eta - might be relevant latter
-                g = plant.g_method(x)
-                G = g @ g.T
-            
-                V = clf.function(x)
-                nablaV = clf.gradient(x)
-                nablah = cbf.gradient(x)
-
-                z1 = nablah / np.linalg.norm(nablah)
-                z2 = nablaV - nablaV.T @ G @ z1 * z1
-                eta = 1/(1 + slack_gain * z2.T @ G @ z2 )
-
-                eq_sol = {"x": x.tolist(), "alpha": alpha.tolist(), "lambda": l,"eta": eta, "residue": sol.cost, "V": V }
-                eq_sol["stability"], eq_sol["kappa"] = compute_stability(plant, clf, cbf, eq_sol, slack_gain=slack_gain, clf_gain=clf_gain)
-
-                # If solution is new, append it      
-                if is_new(eq_sol, sols): sols.append( eq_sol )
-            else:
-                log["num_failure"] += 1
-
-    return sols, log
-
 def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
     '''
     Compute the stability number for a given equilibrium point
@@ -638,13 +499,49 @@ def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
 '''
 The following algorithms are useful for initialization of the previous algorithms, among other utilities.
 '''
-def angle2boundary(cbf, init_theta, **kwargs):
+def compute_equilibria2(plant, clf, cbf, **kwargs):
     '''
     This function converts from angle parametrization of the boundary ellipsoid to the actual boundary
     '''
-    n = cbf._dim
+    slack_gain, clf_gain = 1.0, 1.0
+    max_iter = 1000
+    init_x_def, init_theta_def, init_alpha_def = False, False, False
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "slack_gain":
+            slack_gain = kwargs[key]
+            continue
+        if aux_key == "clf_gain":
+            clf_gain = kwargs[key]
+            continue
+        if aux_key == "max_iter":
+            max_iter = kwargs[key]
+            continue
+        if aux_key == "init_x":
+            init_x = kwargs[key]
+            init_x_def = True
+            continue
+        if aux_key == "init_theta":
+            init_theta = kwargs[key]
+            init_theta_def = True
+            continue
+        if aux_key == "init_alpha":
+            init_alpha = kwargs[key]
+            init_alpha_def = True
+            continue
+
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    
+    n = clf._dim
+    F = plant.get_F()
+    P = clf.P
     Q = cbf.Q
-    kernel = cbf.kernel
+    kernel = clf.kernel
+    p = kernel.kernel_dim
+    A_list = kernel.get_A_matrices()
 
     minusones, plusones = -np.ones([n,1]), +np.ones([n,1])
     interval_limits = np.hstack([ minusones, plusones ]).tolist()
@@ -657,40 +554,100 @@ def angle2boundary(cbf, init_theta, **kwargs):
     rankQ = np.linalg.matrix_rank(Q)
     dim_elliptical_manifold = rankQ - 1
 
+    if not init_x_def:
+        init_x = [ np.random.uniform( interval_limits[k][0], interval_limits[k][1] ) for k in range(n) ]
+    if not init_theta_def:
+        init_theta = np.random.uniform(0, 2*np.pi, dim_elliptical_manifold).tolist()
+    if not init_alpha_def:
+        init_alpha = np.random.rand(p).tolist()
+
     if len(init_theta) < dim_elliptical_manifold:
         raise Exception("Not enough angular dimensions to parametrize ellipsoid.")
 
     '''
-    var = [ x, theta ] is a (n+rankQ-1) dimensional array, where:
+    var = [ x, theta, alpha, λ ] is a (n+rankQ-1+p+1) dimensional array, where:
     x is n-dimensional
-    theta is (rankQ-1)-dimensional, representing the angular parameters of the ellipsoid.
+    theta is (rankQ-1)-dimensional, representing the angular parameters of the ellipsoid
+    alpha is p-dimensional
+    λ is a scalar (must be positive for a valid equilibrium solution)
     '''
-    def cost_constr(var):
+    def invariant_set_constraint(var):
+        '''
+        Returns the vector residues of invariant set -> is zero for x in the invariant set
+        '''
+        x = var[0:n]
+        # theta = var[n:(n+dim_elliptical_manifold)]
+        alpha = var[n+dim_elliptical_manifold:n+dim_elliptical_manifold+p]
+        l = var[-1]
+
+        V = clf.function(x)
+        m = kernel.function(x)
+        Jm = kernel.jacobian(x)
+
+        N = null_space(Jm.T)
+        dim_nullspace = N.shape[1]
+
+        '''
+        IMPORTANT: notice that alpha is filtered (the last coords are just ignored - we really only need as much coords as the dimension of the Jacobian left-nullspace)
+        '''
+        nullspace_vec = np.zeros(p)
+        for k in range(dim_nullspace):
+            nullspace_vec += alpha[k] * N[:,k]
+
+        return ( F + l * Q - slack_gain * clf_gain * V * P ) @ m - nullspace_vec      # = 0
+
+    def boundary_constr(var):
+        '''
+        Returns the vector residues of the kernel function at the boundary ellipsoid -> is zero if the x is on the boundary
+        '''
         x = var[0:n]
         theta = var[n:(n+dim_elliptical_manifold)]
         return ellipsoid_parametrization(Q, theta) - kernel.function(x)
 
-    lower_bounds = [ -np.inf for _ in range(n) ] + [ 0.0 for _ in range(dim_elliptical_manifold) ]
-    upper_bounds = [ +np.inf for _ in range(n) ] + [ 2*np.pi for _ in range(dim_elliptical_manifold) ]
+    def constraint(var):
+        '''
+        Combination of all constraints
+        '''
+        return np.hstack([ invariant_set_constraint(var), boundary_constr(var) ])
 
+    def retry():
+        # for k in range(len(init_x)):
+        #     min = np.abs(init_x[k] - interval_limits[k][0])
+        #     max = np.abs(interval_limits[k][1] - init_x[k])
+        #     delta = asymmetric_sat( eq_sol["cost"]*np.random.uniform(0,1), [ -min, max ], 1)
+        #     init_x[k] += delta
+        return [ np.random.uniform( interval_limits[k][0], interval_limits[k][1] ) for k in range(n) ]
+
+    # lower_bounds = [ -np.inf for _ in range(n) ] + [ 0.0 for _ in range(dim_elliptical_manifold) ] + [ -np.inf for _ in range(p) ] + [0.0]
+    # upper_bounds = [ +np.inf for _ in range(n) ] + [ 2*np.pi for _ in range(dim_elliptical_manifold) ] + [ np.inf for _ in range(p) ] + [np.inf]
+
+    lower_bounds = [ -np.inf for _ in range(n) ] + [ -np.inf for _ in range(dim_elliptical_manifold) ] + [ -np.inf for _ in range(p) ] + [-np.inf]
+    upper_bounds = [ +np.inf for _ in range(n) ] + [ np.inf for _ in range(dim_elliptical_manifold) ] + [ np.inf for _ in range(p) ] + [np.inf]
+
+    eq_sol = {"x": None, "lambda": None, "init_x": init_x, "init_theta": init_theta, "init_alpha": init_alpha, "cost": np.inf }
     try:
-        error_flag = False
-        mQm = np.inf
-        while np.abs(mQm - 1) > 1e-04:
-            init_x = [ np.random.uniform( interval_limits[k][0], interval_limits[k][1] ) for k in range(n) ]
-            init_var = init_x + init_theta.tolist()
-            sol = least_squares( cost_constr, init_var, bounds=(lower_bounds, upper_bounds) )
-            x = sol.x[0:n].tolist()
-            m = kernel.function(x)
-            mQm = m.T @ Q @ m
-    except Exception as error_msg:
-        error_flag = True
-        print(error_msg)
+        
+        # while eq_sol["cost"] > 1e-05:
+        #     if eq_sol["cost"] < np.inf:
+        #         init_x = retry()
+        init_m = kernel.function(init_x)
+        init_var = init_x + init_theta + init_alpha + [0.0]
+        v_lambda0 = invariant_set_constraint(init_var)
+        init_var[-1] = -(init_m.T @ v_lambda0)/(init_m.T @ Q @ init_m)
 
-    if not error_flag:
-        print(sol.message)
-        return sol.x[0:n].tolist()
-    return None
+        sol = least_squares( constraint, init_var, bounds=(lower_bounds,upper_bounds) )
+
+        eq_sol["x"] = sol.x[0:n].tolist()
+        eq_sol["lambda"] = sol.x[-1]
+        eq_sol["init_x"] = init_x
+        eq_sol["cost"] = sol.cost
+
+        print(eq_sol["cost"])
+
+    except Exception as error_msg:
+        print(error_msg)
+        
+    return eq_sol
 
 def generate_boundary(num_pts, **kwargs):
     '''

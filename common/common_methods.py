@@ -35,6 +35,21 @@ def adjugate(A):
     """
     return cofactor(A).T
 
+def asymmetric_sat(u, limits, slope):
+    '''
+    Continuous scalar saturation
+    '''
+    min = limits[0]
+    max = limits[1]
+    if min > 0:
+        raise Exception("Minimum limit should be negative.")
+    if max < 0:
+        raise Exception("Maximum limit should be positive.")
+
+    t0 = (1/slope)*np.log(-max/min)
+
+    return (max - min)/(1+np.exp( -slope*(u - t0) )) + min
+
 def sat(u, limits):
     '''
     Scalar saturation.
