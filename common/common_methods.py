@@ -424,6 +424,48 @@ def rgb(minimum, maximum, value):
 
     return [ r/255, g/255, b/255 ]
 
+def innerM(M, v, w):
+    '''
+    Generalized inner product between vectors v and w. Matrix M must be p.s.d.
+    '''
+    if not np.all( np.linalg.eigvals(M) >= -1e-10 ):
+        raise Exception("Matrix must be positive semi-definite.")
+    return v.T @ M @ w
+
+def KKTmultipliers(plant, clf, cbf, x, slack_gain, clf_gain):
+    '''
+    Returns the KKT multipliers
+    '''
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    kernel = clf.kernel
+
+    g = plant.g_method(x)
+    G = g @ g.T
+
+    V = clf.function(x)
+    m = kernel.function(x)
+    Jm = kernel.jacobian(x)
+
+    F = plant.get_F()
+    P = clf.P
+    Q = cbf.Q
+
+    def inner(v,w): return innerM(Jm @ G @ Jm.T, v, w)
+
+    Pm, Qm, Fm = P @ m, Q @ m, F @ m
+    zGz = inner(Pm, Pm) - (inner(Pm, Qm)**2)/(inner(Qm, Qm))
+    eta = 1/(1+slack_gain*zGz)
+
+    Const = eta*slack_gain/inner(Qm, Qm)
+
+    l0 = Const * ( inner(Qm, Qm) * ( inner(Pm, Fm) + clf_gain*V ) - inner(Fm, Qm) * inner(Pm, Qm) )
+    l1 = Const * ( inner(Pm, Qm) * ( inner(Pm, Fm) + clf_gain*V ) - inner(Fm, Qm) * ( (1/slack_gain) + inner(Pm, Pm) ) )
+
+    return l0, l1
+
 class Rect():
     '''
     Simple rectangle.

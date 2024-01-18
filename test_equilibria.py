@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from common import rgb
-from controllers.equilibrium_algorithms import check_equilibrium, compute_equilibria, closest_compatible
+from controllers.equilibrium_algorithms import check_equilibrium, compute_equilibria, generate_boundary, closest_compatible
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -18,25 +18,6 @@ ax.set_title("Kernel-based CLF-CBF fitting")
 sim.clf.plot_level(axes = ax, level = 23.0, axeslim = [-10, 10, -10, 10])
 sim.cbf.plot_level(axes = ax, axeslim = [-10, 10, -10, 10])
 
-arrow_width = 0.005
-for pt in sim.clf.point_list:
-    ax.plot(pt["point"][0], pt["point"][1], 'o', color="blue")
-    if "gradient" in pt.keys():
-        if "curvature" in pt.keys():
-            color = rgb(-10.0, 10.0, pt["curvature"])
-            ax.quiver(pt["point"][0], pt["point"][1], pt["gradient"][0], pt["gradient"][1], color=color, width=arrow_width)
-        else:
-            ax.quiver(pt["point"][0], pt["point"][1], pt["gradient"][0], pt["gradient"][1], width=arrow_width)
-
-for pt in sim.cbf.point_list:
-    ax.plot(pt["point"][0], pt["point"][1], 'o', color="green")
-    if "gradient" in pt.keys():
-        if "curvature" in pt.keys():
-            color = rgb(-10.0, 10.0, pt["curvature"])
-            ax.quiver(pt["point"][0], pt["point"][1], pt["gradient"][0], pt["gradient"][1], color=color, width=arrow_width)
-        else:
-            ax.quiver(pt["point"][0], pt["point"][1], pt["gradient"][0], pt["gradient"][1], width=arrow_width)
-
 # ----------------------------------------------------- Plotting ---------------------------------------------------------
 
 # manual_mode = True
@@ -46,16 +27,14 @@ manual_mode = False
 Plots initial guesses
 '''
 if not manual_mode:
-    res_x, res_y = 15, 15       # Density of points per axis
-    min_x, min_y = -8, -8     # lower limits for point generation 
-    max_x, max_y = 8, 8       # upper limits for point generation
+    num_pts = 10
+    limits = [ [-10, 10], [-10, 10] ]
+    # sols, log = generate_boundary(num_pts, cbf=sim.cbf, limits=limits)
+    sols, log = generate_boundary(num_pts, plant=sim.plant, clf=sim.clf, cbf=sim.cbf, limits=limits, slack_gain=sim.p, clf_gain=sim.alpha)
     initial_guesses = []
-    xv, yv = np.meshgrid(np.linspace(min_x, max_x, res_x), np.linspace(min_y, max_y, res_y), indexing='xy')
-    for i in range(res_x):
-        for j in range(res_y):
-            pt = [ xv[i,j], yv[i,j] ]
-            initial_guesses.append(pt)
-            ax.plot( pt[0], pt[1], 'g.', alpha=0.3 )
+    for sol in sols:
+        initial_guesses.append(sol["x"])
+        ax.plot( sol["x"][0], sol["x"][1], 'go', alpha=0.4 )
 
 '''
 Finds and plots the equilibrium points
@@ -68,7 +47,6 @@ if manual_mode:
         clicked_pt = np.array([ pt[0][0], pt[0][1] ])
         is_equilibrium, eq_pt = check_equilibrium(sim.plant, sim.clf, sim.cbf, clicked_pt, slack_gain=sim.p, clf_gain=sim.alpha)
     solutions = [eq_pt]
-
 else:
     solutions, log = compute_equilibria(sim.plant, sim.clf, sim.cbf, initial_guesses, slack_gain=sim.p, clf_gain=sim.alpha)
     print("From " + str(log["num_trials"]) + " trials, algorithm converged " + str(log["num_success"]) + " times, and " + str(len(solutions)) + " solutions were found.")

@@ -4,6 +4,7 @@ from dynamic_systems import ConservativeAffineSystem
 from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
 from common import create_quadratic, rot2D
+from controllers.equilibrium_algorithms import generate_boundary, compute_equilibria, closest_compatible
 
 initial_state = [1.2, 6.0]
 initial_control = [0.0, 0.0]
@@ -68,11 +69,26 @@ sample_time = .002
 p, alpha, beta = 1.0, 1.0, 1.0
 controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
 
+# --------------------------------------------- Find closest compatible CLF -----------------------------------------------
+# compatibility = False
+compatibility = True
+
+if compatibility:
+    limits = [ [-10, 10], [0, 10] ]
+    num_pts = 15
+    sols, log = generate_boundary(num_pts, cbf=cbf, limits=limits)
+    initial_guesses = [ sol["x"] for sol in sols ]
+    eq_sols, log = compute_equilibria(plant, clf, cbf, initial_guesses, slack_gain=p, clf_gain=alpha)
+    if len(eq_sols) > 0:
+        Pnew = closest_compatible(plant, clf, cbf, eq_sols, slack_gain=p, clf_gain=alpha, c_lim=10.0)
+        clf.set_param(P=Pnew)
+        print("CLF is now compatible.")
+
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 xlimits, ylimits = [-8, 8], [-8, 8]
 plot_config = {
     "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "axeslim": tuple(xlimits+ylimits),
-    "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": True
+    "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": False
 }
 
 logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": cbf.Q.tolist() }

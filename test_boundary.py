@@ -15,16 +15,30 @@ fig = plt.figure(constrained_layout=True)
 ax = fig.add_subplot(111)
 ax.set_title("Kernel-based CLF-CBF fitting")
 
-sim.clf.plot_level(axes = ax, level = 23.0, axeslim = [-10, 10, -10, 10])
+sim.clf.plot_level(axes = ax, level = 23.154, axeslim = [-10, 10, -10, 10])
 sim.cbf.plot_level(axes = ax, axeslim = [-10, 10, -10, 10])
 
-limits = [ [-10, 10], [-10, 10] ]
-num_pts = 100
-sols, log = generate_boundary(sim.cbf, num_pts, limits=limits)
+limits = [ [-10, 10], [5, 10] ]
+num_pts = 15
+# sols, log = generate_boundary(num_pts, plant=sim.plant, clf=sim.clf, cbf=sim.cbf, limits=limits, slack_gain=sim.p, clf_gain=sim.alpha)
+sols, log = generate_boundary(num_pts, cbf=sim.cbf, limits=limits)
 
-print("From "+str(log["num_trials"])+" , algorithm converged "+str(log["num_success"])+" times.")
+initial_guesses = []
 for sol in sols:
     x = sol["x"]
-    ax.plot( x[0], x[1], 'og' )
+    initial_guesses.append(x)
+    ax.plot( x[0], x[1], 'og', alpha=0.3 )
+
+eq_sols, log = compute_equilibria(sim.plant, sim.clf, sim.cbf, initial_guesses, slack_gain=sim.p, clf_gain=sim.alpha)
+
+if len(eq_sols) > 0:
+    Pnew = closest_compatible(sim.plant, sim.clf, sim.cbf, eq_sols, slack_gain=sim.p, clf_gain=sim.alpha, c_lim=5.0)
+    sim.clf.set_param(P=Pnew)
+    sim.clf.plot_level(axes = ax, level = 23.154, axeslim = [-10, 10, -10, 10])
+    print("CLF is compatible now.")
+
+eq_sols, log = compute_equilibria(sim.plant, sim.clf, sim.cbf, initial_guesses, slack_gain=sim.p, clf_gain=sim.alpha)
+for sol in eq_sols:
+    ax.plot( sol["x"][0], sol["x"][1], 'ro' )
 
 plt.show()
