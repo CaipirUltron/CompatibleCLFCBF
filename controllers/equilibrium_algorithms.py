@@ -783,7 +783,7 @@ def ellipsoid_parametrization(Q, param):
     '''
     This method implements an angular parametrization of the (rank(Q)-1) dimensional ellipsoid.
     Receives an (rank(Q)-1) dimensional vector of angular parameters for the ellipsoid,
-    Returns a corresponding point m in the p-dimensional space at the ellipsoid, that is, m.T @ Q @ m = 1.
+    Returns a corresponding point z in the p-dimensional space at the ellipsoid, that is, z.T @ Q @ z = 1.
     '''
     eigsQ, eigvecsQ = np.linalg.eig(Q)
 
@@ -810,8 +810,8 @@ def ellipsoid_parametrization(Q, param):
             for i in range(k): prod *= np.sin(param[i])
             reduced_m[k] = prod
 
-    m = eigvecsQ @ np.array(reduced_m.tolist() + [ 0.0 for _ in range(p-rankQ)])
-    return m
+    z = eigvecsQ @ np.array(reduced_m.tolist() + [ 0.0 for _ in range(p-rankQ)])
+    return z
 
 def generate_point_grid(Q, resolution):
     '''

@@ -18,7 +18,7 @@ print(kernel)
 print("Dimension of kappa space = " + str(len(kernel.get_N_matrices())))
 
 # -------------------------------------------------- Define system ---------------------------------------------------------
-fx, fy = 0.0, 0.0                       # constant force with fx, fy components
+fx, fy = 10.0, 10.0                       # constant force with fx, fy components
 F = np.zeros([kern_dim,kern_dim])
 F[1,0], F[2,0] = fx, fy
 

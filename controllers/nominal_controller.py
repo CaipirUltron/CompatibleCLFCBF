@@ -63,16 +63,15 @@ class NominalQP():
 
         # Verifies if a point is an equilibrium/invariant
         x = self.plant.get_state()
-        l0, l1 = KKTmultipliers(self.plant, self.clf, self.cbf, x, self.p, self.alpha)
+        # l0, l1 = KKTmultipliers(self.plant, self.clf, self.cbf, x, self.p, self.alpha)
         # if l0 >= 0 and l1 >= 0:
         type, sol = check_equilibrium(self.plant, self.clf, self.cbf, x, slack_gain=self.p, clf_gain=self.alpha)
-        if type["equilibrium"] and is_new(sol, self.equilibria):
-            print("Equilibrium found")
-            if sol["stability"] <= 0:
-                self.equilibria.append(sol)
-                Pnew = closest_compatible(self.plant, self.clf, self.cbf, self.equilibria, slack_gain=self.p, clf_gain=self.alpha, c_lim=self.min_curvature)
-                self.clf.set_param(P=Pnew)
-                # control += 0.5*np.random.rand(self.control_dim)
+        # if type["equilibrium"] and is_new(sol, self.equilibria):
+        #     print("Equilibrium found")
+        #     if sol["stability"] <= 0:
+        #         self.equilibria.append(sol)
+        #         Pnew = closest_compatible(self.plant, self.clf, self.cbf, self.equilibria, slack_gain=self.p, clf_gain=self.alpha, c_lim=self.min_curvature)
+        #         self.clf.set_param(P=Pnew)
 
         # print("Equilibrium pts: ")
         # for eq in self.equilibria:
