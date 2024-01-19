@@ -505,7 +505,7 @@ def compute_equilibria2(plant, clf, cbf, **kwargs):
     '''
     slack_gain, clf_gain = 1.0, 1.0
     max_iter = 1000
-    init_x_def, init_theta_def, init_alpha_def = False, False, False
+    init_x_def = False
     for key in kwargs.keys():
         aux_key = key.lower()
         if aux_key == "slack_gain":
@@ -521,14 +521,6 @@ def compute_equilibria2(plant, clf, cbf, **kwargs):
             init_x = kwargs[key]
             init_x_def = True
             continue
-        if aux_key == "init_theta":
-            init_theta = kwargs[key]
-            init_theta_def = True
-            continue
-        if aux_key == "init_alpha":
-            init_alpha = kwargs[key]
-            init_alpha_def = True
-            continue
 
     if clf._dim != cbf._dim:
         raise Exception("CLF and CBF must have the same dimension.")
@@ -540,7 +532,6 @@ def compute_equilibria2(plant, clf, cbf, **kwargs):
     P = clf.P
     Q = cbf.Q
     kernel = clf.kernel
-    p = kernel.kernel_dim
     A_list = kernel.get_A_matrices()
 
     minusones, plusones = -np.ones([n,1]), +np.ones([n,1])
@@ -551,24 +542,13 @@ def compute_equilibria2(plant, clf, cbf, **kwargs):
             if interval_limits[i][0] >=  interval_limits[i][1]:
                 raise Exception("Lines should be sorted in ascending order.")
 
-    rankQ = np.linalg.matrix_rank(Q)
-    dim_elliptical_manifold = rankQ - 1
-
     if not init_x_def:
         init_x = [ np.random.uniform( interval_limits[k][0], interval_limits[k][1] ) for k in range(n) ]
-    if not init_theta_def:
-        init_theta = np.random.uniform(0, 2*np.pi, dim_elliptical_manifold).tolist()
-    if not init_alpha_def:
-        init_alpha = np.random.rand(p).tolist()
-
-    if len(init_theta) < dim_elliptical_manifold:
-        raise Exception("Not enough angular dimensions to parametrize ellipsoid.")
 
     '''
-    var = [ x, theta, alpha, λ ] is a (n+rankQ-1+p+1) dimensional array, where:
+    var = [ x, λ ] is a (n+rankQ-1+1) dimensional array, where:
     x is n-dimensional
     theta is (rankQ-1)-dimensional, representing the angular parameters of the ellipsoid
-    alpha is p-dimensional
     λ is a scalar (must be positive for a valid equilibrium solution)
     '''
     def invariant_set_constraint(var):
@@ -576,71 +556,48 @@ def compute_equilibria2(plant, clf, cbf, **kwargs):
         Returns the vector residues of invariant set -> is zero for x in the invariant set
         '''
         x = var[0:n]
-        # theta = var[n:(n+dim_elliptical_manifold)]
-        alpha = var[n+dim_elliptical_manifold:n+dim_elliptical_manifold+p]
         l = var[-1]
 
         V = clf.function(x)
         m = kernel.function(x)
-        Jm = kernel.jacobian(x)
 
-        N = null_space(Jm.T)
-        dim_nullspace = N.shape[1]
+        vecQ = np.zeros(n)
+        vecP = np.zeros(n)
+        for k in range(n):
+            vecQ[k] = m.T @ A_list[k].T @ Q @ m
+            vecP[k] = m.T @ A_list[k].T @ ( slack_gain*clf_gain*V*P - F ) @ m
 
-        '''
-        IMPORTANT: notice that alpha is filtered (the last coords are just ignored - we really only need as much coords as the dimension of the Jacobian left-nullspace)
-        '''
-        nullspace_vec = np.zeros(p)
-        for k in range(dim_nullspace):
-            nullspace_vec += alpha[k] * N[:,k]
-
-        return ( F + l * Q - slack_gain * clf_gain * V * P ) @ m - nullspace_vec      # = 0
+        return l * vecQ - vecP      # = 0
 
     def boundary_constr(var):
         '''
-        Returns the vector residues of the kernel function at the boundary ellipsoid -> is zero if the x is on the boundary
+        Returns the diff between mQm and 1
         '''
         x = var[0:n]
-        theta = var[n:(n+dim_elliptical_manifold)]
-        return ellipsoid_parametrization(Q, theta) - kernel.function(x)
+        m = kernel.function(x)
+        return np.abs( m.T @ Q @ m - 1 )
 
-    def constraint(var):
+    def objective(var):
         '''
-        Combination of all constraints
+        Objective function
         '''
-        return np.hstack([ invariant_set_constraint(var), boundary_constr(var) ])
+        return np.linalg.norm(invariant_set_constraint(var))**2 + boundary_constr(var)**2
 
-    def retry():
-        # for k in range(len(init_x)):
-        #     min = np.abs(init_x[k] - interval_limits[k][0])
-        #     max = np.abs(interval_limits[k][1] - init_x[k])
-        #     delta = asymmetric_sat( eq_sol["cost"]*np.random.uniform(0,1), [ -min, max ], 1)
-        #     init_x[k] += delta
-        return [ np.random.uniform( interval_limits[k][0], interval_limits[k][1] ) for k in range(n) ]
+    x_bounds = [ (-np.inf, np.inf) for _ in range(n) ]
+    l_bounds = [ (0, np.inf) ]
 
-    # lower_bounds = [ -np.inf for _ in range(n) ] + [ 0.0 for _ in range(dim_elliptical_manifold) ] + [ -np.inf for _ in range(p) ] + [0.0]
-    # upper_bounds = [ +np.inf for _ in range(n) ] + [ 2*np.pi for _ in range(dim_elliptical_manifold) ] + [ np.inf for _ in range(p) ] + [np.inf]
-
-    lower_bounds = [ -np.inf for _ in range(n) ] + [ -np.inf for _ in range(dim_elliptical_manifold) ] + [ -np.inf for _ in range(p) ] + [-np.inf]
-    upper_bounds = [ +np.inf for _ in range(n) ] + [ np.inf for _ in range(dim_elliptical_manifold) ] + [ np.inf for _ in range(p) ] + [np.inf]
-
-    eq_sol = {"x": None, "lambda": None, "init_x": init_x, "init_theta": init_theta, "init_alpha": init_alpha, "cost": np.inf }
+    eq_sol = {"x": None, "lambda": None, "init_x": init_x, "cost": np.inf }
     try:
         
-        # while eq_sol["cost"] > 1e-05:
-        #     if eq_sol["cost"] < np.inf:
-        #         init_x = retry()
-        init_m = kernel.function(init_x)
-        init_var = init_x + init_theta + init_alpha + [0.0]
-        v_lambda0 = invariant_set_constraint(init_var)
-        init_var[-1] = -(init_m.T @ v_lambda0)/(init_m.T @ Q @ init_m)
+        init_l = np.random.rand()
+        init_var = init_x + [init_l]
 
-        sol = least_squares( constraint, init_var, bounds=(lower_bounds,upper_bounds) )
+        sol = minimize(objective, init_var, bounds=x_bounds+l_bounds)
 
         eq_sol["x"] = sol.x[0:n].tolist()
         eq_sol["lambda"] = sol.x[-1]
         eq_sol["init_x"] = init_x
-        eq_sol["cost"] = sol.cost
+        eq_sol["cost"] = sol.fun
 
         print(eq_sol["cost"])
 
