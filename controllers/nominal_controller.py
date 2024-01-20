@@ -4,7 +4,7 @@ from common import sat, KKTmultipliers
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 from controllers.compatibility import CLFCBFPair
-from controllers.equilibrium_algorithms import check_invariant, check_equilibrium, closest_compatible, compute_equilibria2
+from controllers.equilibrium_algorithms import check_invariant, check_equilibrium, closest_compatible, compute_equilibria
 
 class NominalQP():
     '''
@@ -73,7 +73,7 @@ class NominalQP():
         #         Pnew = closest_compatible(self.plant, self.clf, self.cbf, self.equilibria, slack_gain=self.p, clf_gain=self.alpha, c_lim=self.min_curvature)
         #         self.clf.set_param(P=Pnew)
 
-        # print("Equilibrium pts: ")
+        # print(str(len(self.equilibria)) + " equilibrium points: ")
         # for eq in self.equilibria:
         #     print(eq)
 
@@ -81,7 +81,7 @@ class NominalQP():
         # is_invariant, inv_pt = check_invariant(self.plant, self.clf, self.cbf, self.plant.get_state(), slack_gain=self.p, clf_gain=self.alpha)
         if elapsed_time > self.eq_dt:
             x = self.plant.get_state().tolist()
-            sol = compute_equilibria2(self.plant, self.clf, self.cbf, init_x=x, slack_gain=self.p, clf_gain=self.alpha)
+            sol = compute_equilibria(self.plant, self.clf, self.cbf, init_x=x, slack_gain=self.p, clf_gain=self.alpha)
             self.add_equilibrium(sol)
             self.last_eq_t = self.timer
 
@@ -91,11 +91,9 @@ class NominalQP():
         '''
         Adds a new equilibrium point to the list.
         '''
-        if new_eq["cost"] > 1e-03:
-            return
         # If point is already in the list, pass
         for eq in self.equilibria:
-            if np.linalg.norm(np.array(new_eq["x"]) - np.array(eq["x"])) < 1e-05:
+            if np.linalg.norm(np.array(new_eq["x"]) - np.array(eq["x"])) < 1e-03:
                 return
         self.equilibria.append(new_eq)
 

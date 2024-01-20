@@ -176,21 +176,120 @@ def check_equilibrium(plant, clf, cbf, x, **kwargs):
             type_dict["invariant"] = True
             return type_dict, eq_sol
 
-def is_new(cur_sol, sols):
+def compute_equilibria(plant, clf, cbf, **kwargs):
     '''
-    Verify if equilibrium solution is new
+    This function converts from angle parametrization of the boundary ellipsoid to the actual boundary
     '''
-    is_new_sol = True
-    for sol in sols:
-        error_x = np.linalg.norm( np.array(sol["x"]) - cur_sol["x"] )
-        error_lambda = np.linalg.norm( np.array(sol["lambda"]) - cur_sol["lambda"] )
-        error_kappa = np.linalg.norm( np.array(sol["kappa"]) - cur_sol["kappa"] )
-        if error_x < 1e-2 and error_lambda < 1e-1 and error_kappa < 1e-1:
-            is_new_sol = False
-            break
-    return is_new_sol
+    slack_gain, clf_gain = 1.0, 1.0
+    tol = 1e-05
+    init_x_def = False
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "slack_gain":
+            slack_gain = kwargs[key]
+            continue
+        if aux_key == "clf_gain":
+            clf_gain = kwargs[key]
+            continue
+        if aux_key == "init_x":
+            init_x = kwargs[key]
+            init_x_def = True
+            continue
+        if aux_key == "tol":
+            tol = kwargs[key]
+            continue
 
-def compute_equilibria(plant, clf, cbf, initial_points, **kwargs):
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    
+    n = clf._dim
+    F = plant.get_F()
+    P = clf.P
+    Q = cbf.Q
+    kernel = clf.kernel
+    A_list = kernel.get_A_matrices()
+
+    minusones, plusones = -np.ones([n,1]), +np.ones([n,1])
+    interval_limits = np.hstack([ minusones, plusones ]).tolist()
+    if "limits" in kwargs.keys():
+        interval_limits = kwargs["limits"]
+        for i in range(n):
+            if interval_limits[i][0] >=  interval_limits[i][1]:
+                raise Exception("Lines should be sorted in ascending order.")
+
+    if not init_x_def:
+        init_x = [ np.random.uniform( interval_limits[k][0], interval_limits[k][1] ) for k in range(n) ]
+
+    '''
+    var = [ x, λ ] is a (n+rankQ-1+1) dimensional array, where:
+    x is n-dimensional
+    theta is (rankQ-1)-dimensional, representing the angular parameters of the ellipsoid
+    λ is a scalar (must be positive for a valid equilibrium solution)
+    '''
+    def invariant_set_constraint(var):
+        '''
+        Returns the vector residues of invariant set -> is zero for x in the invariant set
+        '''
+        x = var[0:n]
+        l = var[-1]
+
+        V = clf.function(x)
+        m = kernel.function(x)
+
+        vecQ = np.zeros(n)
+        vecP = np.zeros(n)
+        for k in range(n):
+            vecQ[k] = m.T @ A_list[k].T @ Q @ m
+            vecP[k] = m.T @ A_list[k].T @ ( slack_gain*clf_gain*V*P - F ) @ m
+
+        return l * vecQ - vecP      # = 0
+
+    def boundary_constr(var):
+        '''
+        Returns the diff between mQm and 1
+        '''
+        x = var[0:n]
+        m = kernel.function(x)
+        return np.abs( m.T @ Q @ m - 1 )
+
+    def objective(var):
+        '''
+        Objective function
+        '''
+        return np.linalg.norm(invariant_set_constraint(var))**2 + boundary_constr(var)**2
+
+    x_bounds = [ (-np.inf, np.inf) for _ in range(n) ]
+    l_bounds = [ (0, np.inf) ]
+
+    eq_found = False
+    eq_sol = {"x": None, "lambda": None, "init_x": init_x, "cost": np.inf, "stability": None, "type": None }
+    try:
+        init_l = np.random.rand()
+        init_var = init_x + [init_l]
+        sol = minimize(objective, init_var, bounds=x_bounds+l_bounds)
+        eq_sol["cost"] = sol.fun
+        if eq_sol["cost"] < tol:
+            eq_found = True
+    except Exception as error_msg:
+        print("Unable to find equilibrium. Error: " + str(error_msg))
+    
+    if eq_found:
+        eq_sol["x"] = sol.x[0:n].tolist()
+        eq_sol["lambda"] = sol.x[-1]
+        eq_sol["init_x"] = init_x
+        eq_sol["cost"] = sol.fun
+        stability, eta = compute_stability(plant, clf, cbf, eq_sol, slack_gain=slack_gain, clf_gain=clf_gain)
+        eq_sol["eta"] = eta
+        eq_sol["stability"] = stability
+        eq_sol["type"] = "stable"
+        if stability > 0:
+            eq_sol["type"] = "unstable"
+
+    return eq_sol
+
+def compute_equilibria_old(plant, clf, cbf, initial_points, **kwargs):
     '''
     Solve the general eigenproblem of the type:
     ( F + l2 Q - l1 P - \sum k_i N_i ) z = 0, l2 >= 0,
@@ -342,8 +441,6 @@ def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
             clf_gain = kwargs[key]
             continue
 
-    if clf._dim != cbf._dim:
-        raise Exception("CLF and CBF must have the same dimension.")
     n = clf._dim
 
     F = plant.get_F()
@@ -352,9 +449,7 @@ def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
     if clf.kernel != cbf.kernel:
         raise Exception("CLF and CBF must be based on the same kernel.")
     kernel = clf.kernel
-    p = kernel.kernel_dim
-    N_list = kernel.get_N_matrices()
-    r = len(N_list)
+    A_list = kernel.get_A_matrices()
 
     x = eq_sol["x"]
     l = eq_sol["lambda"]
@@ -362,31 +457,34 @@ def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
     m = kernel.function(x)
     Jm = kernel.jacobian(x)
 
-    V = 0.5 * m.T @ P @ m
+    V = clf.function(x)
+    fc = plant.get_fc()
+    g = plant.g_method(x)
+    G = g @ g.T
 
-    nablaV = Jm.T @ P @ m
-    nablah = Jm.T @ Q @ m
+    L = F + l * Q - slack_gain*clf_gain*V * P
+    H = np.zeros([n,n])
+    for i in range(n):
+        for j in range(n):
+            H[i,j] = m.T @ A_list[i].T @ ( L @ A_list[j] + A_list[j].T @ L ) @ m
 
-    norm_nablaV = np.linalg.norm(nablaV)
-    norm_nablah = np.linalg.norm(nablah)
-
-    kappa = alpha2kappa(eq_sol, kernel)
-
-    '''
-    Compute S matrix to determine stability of the equilibrium point
-    '''
-    sum = np.zeros([p,p])
-    for k in range(r):
-        sum += kappa[k] * N_list[k]
-
-    S_matrix = Jm.T @ ( F + l * Q - slack_gain * clf_gain * V * P - sum - slack_gain * clf_gain * np.outer(P @ m, P @ m) ) @ Jm
+    S_matrix = H - np.outer(fc, fc)/(slack_gain * clf_gain * (V**2))
     # S_matrix = Jm.T @ ( F + l * Q - slack_gain * clf_gain * V * P - sum - 1/(slack_gain * clf_gain * (V**2)) * np.outer(F @ m, F @ m) ) @ Jm
 
     '''
     Compute stability number
     '''
+    nablaV = clf.gradient(x)
+    nablah = cbf.gradient(x)
+    norm_nablaV = np.linalg.norm(nablaV)
+    norm_nablah = np.linalg.norm(nablah)
     unit_nablah = nablah/norm_nablah
     curvatures, basis_for_TpS = compute_curvatures( S_matrix, unit_nablah )
+
+    # Compute eta - might be relevant latter
+    z1 = nablah / np.linalg.norm(nablah)
+    z2 = nablaV - nablaV.T @ G @ z1 * z1
+    eta = 1/(1 + slack_gain * z2.T @ G @ z2 )
 
     max_index = np.argmax(curvatures)
     stability_number = curvatures[max_index] / ( slack_gain * clf_gain * V * norm_nablaV )
@@ -395,12 +493,12 @@ def compute_stability(plant, clf, cbf, eq_sol, **kwargs):
     '''
     If the CLF-CBF gradients are collinear, then the stability_number is equivalent to the diff. btw CBF and CLF curvatures at the equilibrium point
     '''
-    if (eq_sol["eta"] - 1) < 1e-10:
+    if (eta - 1) < 1e-10:
         curv_V = clf.get_curvature(x)
         curv_h = cbf.get_curvature(x)
         diff_curvatures = curv_h - curv_V
 
-    return stability_number, kappa.tolist()
+    return stability_number, eta
 
 def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
     '''
@@ -499,110 +597,19 @@ def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
 '''
 The following algorithms are useful for initialization of the previous algorithms, among other utilities.
 '''
-def compute_equilibria2(plant, clf, cbf, **kwargs):
+def is_new(cur_sol, sols):
     '''
-    This function converts from angle parametrization of the boundary ellipsoid to the actual boundary
+    Verify if equilibrium solution is new
     '''
-    slack_gain, clf_gain = 1.0, 1.0
-    max_iter = 1000
-    init_x_def = False
-    for key in kwargs.keys():
-        aux_key = key.lower()
-        if aux_key == "slack_gain":
-            slack_gain = kwargs[key]
-            continue
-        if aux_key == "clf_gain":
-            clf_gain = kwargs[key]
-            continue
-        if aux_key == "max_iter":
-            max_iter = kwargs[key]
-            continue
-        if aux_key == "init_x":
-            init_x = kwargs[key]
-            init_x_def = True
-            continue
-
-    if clf._dim != cbf._dim:
-        raise Exception("CLF and CBF must have the same dimension.")
-    if clf.kernel != cbf.kernel:
-        raise Exception("CLF and CBF must be based on the same kernel.")
-    
-    n = clf._dim
-    F = plant.get_F()
-    P = clf.P
-    Q = cbf.Q
-    kernel = clf.kernel
-    A_list = kernel.get_A_matrices()
-
-    minusones, plusones = -np.ones([n,1]), +np.ones([n,1])
-    interval_limits = np.hstack([ minusones, plusones ]).tolist()
-    if "limits" in kwargs.keys():
-        interval_limits = kwargs["limits"]
-        for i in range(n):
-            if interval_limits[i][0] >=  interval_limits[i][1]:
-                raise Exception("Lines should be sorted in ascending order.")
-
-    if not init_x_def:
-        init_x = [ np.random.uniform( interval_limits[k][0], interval_limits[k][1] ) for k in range(n) ]
-
-    '''
-    var = [ x, λ ] is a (n+rankQ-1+1) dimensional array, where:
-    x is n-dimensional
-    theta is (rankQ-1)-dimensional, representing the angular parameters of the ellipsoid
-    λ is a scalar (must be positive for a valid equilibrium solution)
-    '''
-    def invariant_set_constraint(var):
-        '''
-        Returns the vector residues of invariant set -> is zero for x in the invariant set
-        '''
-        x = var[0:n]
-        l = var[-1]
-
-        V = clf.function(x)
-        m = kernel.function(x)
-
-        vecQ = np.zeros(n)
-        vecP = np.zeros(n)
-        for k in range(n):
-            vecQ[k] = m.T @ A_list[k].T @ Q @ m
-            vecP[k] = m.T @ A_list[k].T @ ( slack_gain*clf_gain*V*P - F ) @ m
-
-        return l * vecQ - vecP      # = 0
-
-    def boundary_constr(var):
-        '''
-        Returns the diff between mQm and 1
-        '''
-        x = var[0:n]
-        m = kernel.function(x)
-        return np.abs( m.T @ Q @ m - 1 )
-
-    def objective(var):
-        '''
-        Objective function
-        '''
-        return np.linalg.norm(invariant_set_constraint(var))**2 + boundary_constr(var)**2
-
-    x_bounds = [ (-np.inf, np.inf) for _ in range(n) ]
-    l_bounds = [ (0, np.inf) ]
-
-    eq_sol = {"x": None, "lambda": None, "init_x": init_x, "cost": np.inf }
-    try:
-        
-        init_l = np.random.rand()
-        init_var = init_x + [init_l]
-
-        sol = minimize(objective, init_var, bounds=x_bounds+l_bounds)
-
-        eq_sol["x"] = sol.x[0:n].tolist()
-        eq_sol["lambda"] = sol.x[-1]
-        eq_sol["init_x"] = init_x
-        eq_sol["cost"] = sol.fun
-
-    except Exception as error_msg:
-        print("Unable to find equilibrium. Error: " + str(error_msg))
-        
-    return eq_sol
+    is_new_sol = True
+    for sol in sols:
+        error_x = np.linalg.norm( np.array(sol["x"]) - cur_sol["x"] )
+        error_lambda = np.linalg.norm( np.array(sol["lambda"]) - cur_sol["lambda"] )
+        error_kappa = np.linalg.norm( np.array(sol["kappa"]) - cur_sol["kappa"] )
+        if error_x < 1e-2 and error_lambda < 1e-1 and error_kappa < 1e-1:
+            is_new_sol = False
+            break
+    return is_new_sol
 
 def generate_boundary(num_pts, **kwargs):
     '''
