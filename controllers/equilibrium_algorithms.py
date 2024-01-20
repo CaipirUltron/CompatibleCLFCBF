@@ -599,10 +599,8 @@ def compute_equilibria2(plant, clf, cbf, **kwargs):
         eq_sol["init_x"] = init_x
         eq_sol["cost"] = sol.fun
 
-        print(eq_sol["cost"])
-
     except Exception as error_msg:
-        print(error_msg)
+        print("Unable to find equilibrium. Error: " + str(error_msg))
         
     return eq_sol
 

@@ -252,7 +252,7 @@ class Plot2DSimulation():
 
         else:
             self.runs = False
-            self.animation.event_source.stop()
+            # self.animation.event_source.stop()
             
         graphical_elements = []
         graphical_elements.append(self.time_text)
@@ -275,6 +275,8 @@ class Plot2DSimulation():
         while self.runs:
             yield self.current_step
             self.current_step += int(max(1,np.ceil(self.anim_step)))
+        final_step = int(np.floor(self.time[-1]/self.sample_time))
+        yield final_step
 
     def animate(self, *args):
         '''

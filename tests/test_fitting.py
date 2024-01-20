@@ -99,5 +99,4 @@ print("Curvature of V at eq. = " + str( clf_curv ))
 print("Curvature of h at eq. = " + str( cbf_curv ))
 print("Diff between curvatures at eq. = " + str( cbf_curv - clf_curv ))
 
-
 plt.show()
