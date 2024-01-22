@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from common import rgb
-from controllers.equilibrium_algorithms import check_equilibrium, compute_equilibria2, closest_compatible
+from controllers.equilibrium_algorithms import check_equilibrium, compute_equilibria, closest_compatible
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -35,10 +35,12 @@ while True:
     init_x = [ pt[0][0], pt[0][1] ]
 
     t0 = time.time()
-    sol = compute_equilibria2(sim.plant, sim.clf, sim.cbf, init_x=init_x, limits=limits)
+    sol = compute_equilibria(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, init_x=init_x, limits=limits)
     delta_time = time.time() - t0
-
     print("Result took " +str(delta_time) + "s to compute.")
+    
+    if sol["x"] == None:
+        print("No equilibrium point was found.")
 
     if sol["x"] != None:
         x = sol["x"]
@@ -47,5 +49,8 @@ while True:
         ax.plot(sol["init_x"][0],sol["init_x"][1],'ob',alpha=0.5)
 
         ax.plot(x[0],x[1],'or',alpha=0.8)
+
+    P = closest_compatible(sim.plant, sim.clf, sim.cbf, [sol], slack_gain=sim.p, clf_gain=sim.alpha)
+    
 
 plt.show()

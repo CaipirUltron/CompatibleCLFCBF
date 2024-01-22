@@ -15,7 +15,7 @@ for step in range(0, num_steps):
     t = step*sim.sample_time
     if platform.system().lower() != 'windows':
         os.system('clear')
-    print("Simulating instant t = " + str(float(f'{t:.3f}')) + " s")
+    # print("Simulating instant t = " + str(float(f'{t:.3f}')) + " s")
     time.append( t )
 
     # Control

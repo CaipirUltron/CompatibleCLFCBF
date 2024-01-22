@@ -1,10 +1,10 @@
 import numpy as np
+import cvxpy as cp
 
-from common import sat, KKTmultipliers
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 from controllers.compatibility import CLFCBFPair
-from controllers.equilibrium_algorithms import check_invariant, check_equilibrium, closest_compatible, compute_equilibria
+from controllers.equilibrium_algorithms import equilibrium_field, compute_equilibria, S
 
 class NominalQP():
     '''
@@ -14,18 +14,23 @@ class NominalQP():
 
         # Dimensions and system model initialization
         self.plant = plant
-        self.clf = clf
-        self.cbf = cbf
+        self.clf, self.cbf = clf, cbf
 
-        clf_dim = self.clf._dim
-        cbf_dim = self.cbf._dim
-        if clf_dim != cbf_dim: raise Exception("CLF and CBF dimensions are not equal.")
+        if self.clf.kernel != self.cbf.kernel:
+            raise Exception("CLF and CBF must be based on the same kernel.")
+        self.kernel = self.clf.kernel
+        self.A_list = self.kernel.get_A_matrices()
 
-        self.state_dim = clf_dim
+        if self.clf._dim != self.cbf._dim:
+            raise Exception("CLF and CBF dimensions are not equal.")
+
+        self.state_dim = self.clf._dim
         self.control_dim = self.plant.m
+        self.kernel_dim = self.kernel.kernel_dim
 
         # QP parameters
         self.p, self.alpha, self.beta = p, alpha, beta
+        self.eq_params = {"slack_gain": self.p, "clf_gain": self.alpha}
         self.QP_dim = self.control_dim + 1
         P = np.eye(self.QP_dim)
         P[self.control_dim,self.control_dim] = self.p
@@ -35,15 +40,27 @@ class NominalQP():
 
         self.ctrl_dt = dt
 
-        self.min_curvature = 5.0
+        self.min_curvature = 0.5
         self.eq_dt = 0.1
         self.invariants = []
         self.equilibria = []
+        self.has_pivot = False
+        self.needs_update = False
         
         self.updated_timer = False
         self.timer = 0.0
         self.last_updated_by = None
         self.last_eq_t = 0.0
+
+        '''
+        Setup cvxpy problem for compatibility
+        '''
+        self.Pnom = cp.Parameter((self.kernel_dim,self.kernel_dim), symmetric=True)
+        self.Pnew = cp.Variable((self.kernel_dim,self.kernel_dim), symmetric=True)
+        self.l_pivot = cp.Variable()
+
+        self.objective = cp.Minimize( cp.norm( self.Pnew - self.Pnom ) )
+        self.constraints = { "psd": self.Pnew >> 0, "pivot": [], "gradient": [] }
 
     def get_control(self):
         '''
@@ -61,31 +78,56 @@ class NominalQP():
         self.QP_sol = self.QP.get_solution()
         control = self.QP_sol[0:self.control_dim,]
 
-        # Verifies if a point is an equilibrium/invariant
-        # x = self.plant.get_state()
-        # l0, l1 = KKTmultipliers(self.plant, self.clf, self.cbf, x, self.p, self.alpha)
-        # if l0 >= 0 and l1 >= 0:
-        # type, sol = check_equilibrium(self.plant, self.clf, self.cbf, x, slack_gain=self.p, clf_gain=self.alpha)
-        # if type["equilibrium"] and is_new(sol, self.equilibria):
-        #     print("Equilibrium found")
-        #     if sol["stability"] <= 0:
-        #         self.equilibria.append(sol)
-        #         Pnew = closest_compatible(self.plant, self.clf, self.cbf, self.equilibria, slack_gain=self.p, clf_gain=self.alpha, c_lim=self.min_curvature)
-        #         self.clf.set_param(P=Pnew)
-
-        # print(str(len(self.equilibria)) + " equilibrium points: ")
-        # for eq in self.equilibria:
-        #     print(eq)
-
         elapsed_time = self.timer - self.last_eq_t
-        # is_invariant, inv_pt = check_invariant(self.plant, self.clf, self.cbf, self.plant.get_state(), slack_gain=self.p, clf_gain=self.alpha)
         if elapsed_time > self.eq_dt:
             x = self.plant.get_state().tolist()
-            sol = compute_equilibria(self.plant, self.clf, self.cbf, init_x=x, slack_gain=self.p, clf_gain=self.alpha)
-            self.add_equilibrium(sol)
+            sol = compute_equilibria(self.plant, self.clf, self.cbf, self.eq_params, init_x=x)
+            if sol["x"] != None: 
+                self.add_equilibrium(sol)
+                if not self.has_pivot: self.set_pivot(sol)
+
+            self.garbage_collector()
             self.last_eq_t = self.timer
 
+            if self.needs_update:
+                self.update_clf()
+
         return control
+
+    def update_clf(self):
+        '''
+        Updates the CLF for compatibility
+        '''
+        constraints = [ self.constraints["psd"] ]
+        constraints += self.constraints["pivot"]
+        problem = cp.Problem(self.objective, constraints)
+        
+        try:
+            self.Pnom.value = self.clf.P
+            problem.solve()
+        except Exception as error:
+            print("New CLF cannot be computed. Error: " + str(error))
+
+        print("CLF updated. Optimization status exit as \"" + str(problem.status) + "\".")
+        print("Optimal value is %s." % problem.value)
+
+        if "optimal" in problem.status:
+            self.clf.set_param(P=self.Pnew.value)
+
+        self.needs_update = False
+
+    def garbage_collector(self):
+        '''
+        Verifies equilibrium conditions for all equilibrium points, removing from the list the garbage ones
+        '''
+        for eq_sol in self.equilibria:
+            x_e = eq_sol["x"]
+            l_e = eq_sol["lambda"]
+            m = self.kernel.function(x_e)
+            V = self.clf.function(x_e)
+            field = equilibrium_field(m, l_e, self.clf.P, V, self.plant, self.clf, self.cbf, self.eq_params)
+            if np.linalg.norm(field) > 1e-6:
+                del eq_sol
 
     def add_equilibrium(self, new_eq):
         '''
@@ -96,6 +138,63 @@ class NominalQP():
             if np.linalg.norm(np.array(new_eq["x"]) - np.array(eq["x"])) < 1e-03:
                 return
         self.equilibria.append(new_eq)
+
+        # if len(self.equilibria) > 0:
+        #     Pnew = closest_compatible(self.plant, self.clf, self.cbf, [self.equilibria[-1]], slack_gain=self.p, clf_gain=self.alpha)
+        #     self.clf.set_param(P=Pnew)
+
+    def equilibrium_constr(self, sol):
+        '''
+        Returns the cvxpy constraints to keep a given equilibrium sol as a valid equilibrium.
+        '''
+        x_e = sol["x"]
+        m = self.kernel.function(x_e)
+        V = self.clf.function(x_e)
+        return [ equilibrium_field(m, self.l_pivot, self.Pnew, V, self.plant, self.clf, self.cbf, self.eq_params) == 0, 
+                  V - 0.5 * m.T @ self.Pnew @ m == 0, 
+                  self.l_pivot >= 0 ]
+
+    def curvature_constr(self, sol, **kwargs):
+        '''
+        Returns the cvxpy curvature constraint for an equilibrium point sol
+        '''
+        c_lim = 1.0
+        for key in kwargs.keys():
+            aux_key = key.lower()
+            if aux_key == "c_lim":
+                c_lim = kwargs[key]
+                # continue
+
+        x_e = sol["x"]
+        n = self.state_dim
+
+        M = np.random.rand(n,n)
+        nablah_e = self.cbf.gradient(x_e)
+        normal = nablah_e / np.linalg.norm(nablah_e)
+
+        M[:,0] = normal
+        while np.abs( np.linalg.det(M) ) <= 1e-10:
+            M = np.random.rand(n,n)
+            M[:,0] = normal
+        Rot, _ = np.linalg.qr(M)
+
+        aux_M = np.vstack([ np.zeros(n-1), np.eye(n-1) ])
+        S_matrix = S(x_e, self.l_pivot, self.Pnew, self.plant, self.clf, self.cbf, self.eq_params)
+
+        return cp.lambda_min(aux_M.T @ Rot.T @ S_matrix @ Rot @ aux_M) >= c_lim
+
+    def set_pivot(self, pivot_pt):
+        '''
+        Sets up the pivot equilibrium point.
+        '''
+        if pivot_pt not in self.equilibria:
+            raise Exception("Pivot must be an equilibrium point.")
+        
+        self.constraints["pivot"] = []
+        self.constraints["pivot"] += self.equilibrium_constr(pivot_pt)
+        self.constraints["pivot"].append( self.curvature_constr(pivot_pt, clim=self.min_curvature) )
+        self.has_pivot = True
+        self.needs_update = True
 
     def get_clf_control(self):
         '''
@@ -108,13 +207,14 @@ class NominalQP():
         Sets the Lyapunov constraint.
         '''
         # Affine plant dynamics
-        f = self.plant.get_f()
-        g = self.plant.get_g()
         state = self.plant.get_state()
 
+        f = self.plant.get_f(state)
+        g = self.plant.get_g(state)
+
         # Lyapunov function and gradient
-        V = self.clf.evaluate_function(*state)[0]
-        nablaV = self.clf.evaluate_gradient(*state)[0]
+        V = self.clf.function(state)
+        nablaV = self.clf.gradient(state)
 
         # Lie derivatives
         LfV = nablaV.dot(f)
@@ -130,13 +230,14 @@ class NominalQP():
         '''
         Sets the i-th barrier constraint.
         '''
-        f = self.plant.get_f()
-        g = self.plant.get_g()
         state = self.plant.get_state()
 
+        f = self.plant.get_f(state)
+        g = self.plant.get_g(state)
+
         # Barrier function and gradient
-        h = self.cbf.evaluate_function(*state)[0]
-        nablah = self.cbf.evaluate_gradient(*state)[0]
+        h = self.cbf.function(state)
+        nablah = self.cbf.gradient(state)
 
         Lfh = nablah.dot(f)
         Lgh = g.T @ nablah

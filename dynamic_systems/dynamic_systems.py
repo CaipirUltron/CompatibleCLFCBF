@@ -386,26 +386,27 @@ class ConservativeAffineSystem(AffineSystem):
         super().__init__(initial_state, initial_control)
         self.f()
 
-    def get_fc(self):
-        return self.fc
+    def get_g(self, x):
+        return self.g_method(x)
+
+    def get_fc(self, x):
+        m = self.kernel.function(x)
+        Jac = self.kernel.jacobian(x)
+        return Jac.T @ self.F @ m
+
+    def get_f(self, x):
+        g = self.get_g(x)
+        G = g @ g.T
+        return G @ self.get_fc(x)
 
     def get_F(self):
         return self.F
 
     def f(self):
-        self.g()
-        g = self._g
-        G = g @ g.T
-        m = self.kernel.function(self._state)
-        Jac = self.kernel.jacobian(self._state)
-        self.fc = Jac.T @ self.F @ m
-        self._f = G @ self.fc
+        self._f = self.get_f(self._state)
 
     def g(self):
-        '''
-        g(x) is initialized as a an passed method argument
-        '''
-        self._g = self.g_method(self._state)
+        self._g = self.get_g(self._state)
 
     def __str__(self):
         text = "Conservative affine nonlinear system of the type dx = f(x) + g(x) u ,\n"

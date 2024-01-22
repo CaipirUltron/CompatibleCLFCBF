@@ -897,7 +897,7 @@ class KernelQuadratic(Function):
         For testing only. Only works in 2D
         '''
         if self._dim != 2:
-            raise Exception("Not intended to work with dimensions higher than 2")
+            raise Exception("Not intended to work with dimensions higher than 2.")
         
         grad = self.gradient(point)
         grad_norm = np.linalg.norm(grad)
