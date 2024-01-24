@@ -348,7 +348,7 @@ class QuadraticLyapunov(Quadratic):
         '''
         Sets the Lyapunov function critical point.
         '''
-        super().set_param(critical = pt)        
+        super().set_param(critical = pt)
 
     def set_critical_derivative(self, dcritical):
         '''
@@ -566,7 +566,7 @@ class Kernel(Function):
                 self._degree = kwargs[key]
                 self._num_monomials = num_comb(self._dim, self._degree)
                 self._coefficients = np.zeros([self._num_monomials, self._num_monomials])
-                
+
         self.kernel_dim = self._num_monomials
 
     def compute_A(self):
@@ -661,7 +661,7 @@ class Kernel(Function):
         '''
         # if not self.is_in_kernel_space(kernel_point):
         #     raise Exception("Given point is not in the kernel image.")
-        
+
         return np.flip(kernel_point[1:self._dim+1])
 
     def is_in_kernel_space(self, point):
@@ -702,10 +702,10 @@ class KernelQuadratic(Function):
 
         # Initialization
         super().__init__(*args)
-                
+
         self.point_list = []
         self.constant = 0.0
-        
+
         self.set_param(**kwargs)
         self.evaluate()
 
@@ -767,14 +767,14 @@ class KernelQuadratic(Function):
                 self.param = sym2vector( self.matrix_coefs )
                 self.dynamics.set_state(self.param)
 
-            # If a dictionary of points was passed, call interpolate to find an interpolating coefficient matrix 
+            # If a dictionary of points was passed, call interpolate to find an interpolating coefficient matrix
             if key == "points":
                 point_list = kwargs[key]
                 self.fit(point_list)
 
         if np.shape(self.matrix_coefs) != (self.kernel_dim, self.kernel_dim):
             raise Exception("P must be (p x p), where p is the kernel dimension!")
-        
+
     def update(self, param_ctrl, dt):
         '''
         Integrates the parameters.
@@ -787,19 +787,31 @@ class KernelQuadratic(Function):
     def fit(self, point_list):
         '''
         Fits the p.s.d. coefficient matrix to a list of desired points.
-        Parameters: point_list = [ { "point": , "level": , "gradient": , "curvature": } ], 
+        Parameters: point_list = [ { "point": , "level": , "gradient": , "curvature": } ],
                     a list with dicts containing each desired point, corresponding level set, gradient and curvature (2D only)
         Returns: the optimization error.
         '''
         self.point_list = point_list
-        
+
         n = self._dim
         p = self.kernel_dim
         A_list = self.kernel.get_A_matrices()
 
         obj_expr = 0.0
-        F_var = cp.Variable( (p,p), symmetric=True )               # Create p x p symmetric variable
-        constraints = [ F_var >> 0 ]                               # Basic constraint: F_var must be p.s.d.
+        F_var = cp.Variable( (p,p), symmetric=True )                                    # Create p x p symmetric variable
+
+        if isinstance(self, KernelLyapunov):
+            center = np.zeros(n)
+            for pt in self.point_list:
+                if pt["level"] == 0.0:
+                    center = pt["point"]
+                    break
+            Vvalue = 4
+            Pquadratic = create_quadratic((1/Vvalue)*np.ones(n), np.eye(n), center, p)
+            constraints = [ F_var >> Pquadratic ]                                       # Basic constraint: F_var must be p.s.d.
+            # constraints = [ F_var >> 0 ]
+        else:
+            constraints = [ F_var >> 0 ]
 
         '''
         Iterate over the input list to get problem requirements
@@ -815,7 +827,7 @@ class KernelQuadratic(Function):
             pt = pt_dict["point"]
             m = self.kernel.function(pt)
             Jm = self.kernel.jacobian(pt)
-                
+
             # Define point-level constraints
             if "level" in keys:
                 level_value = pt_dict["level"]
@@ -849,7 +861,7 @@ class KernelQuadratic(Function):
                 obj_expr += ( curvature_var - curvature )**2
 
         # Trying to keep the gradient norms close to 1
-        for gradient_norm in gradient_norms:    
+        for gradient_norm in gradient_norms:
             obj_expr += ( gradient_norm - 1.0 )**2
 
         '''
@@ -866,7 +878,7 @@ class KernelQuadratic(Function):
                 print("Barrier fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
             else:
                 print("Function fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
-            self.set_param( coefficients =  F_var.value )
+            self.set_param( coefficients = F_var.value )
             return fit_problem.value
         else:
             raise Exception("Problem is " + fit_problem.status + ".")
@@ -880,7 +892,7 @@ class KernelQuadratic(Function):
         '''
         point_list = []
         for pt in points:
-           point_list.append({ "point": pt, "level": level }) 
+           point_list.append({ "point": pt, "level": level })
         return self.fit(point_list)
 
     def fit_center(self, point):
@@ -898,7 +910,7 @@ class KernelQuadratic(Function):
         '''
         if self._dim != 2:
             raise Exception("Not intended to work with dimensions higher than 2.")
-        
+
         grad = self.gradient(point)
         grad_norm = np.linalg.norm(grad)
         normalized_grad = grad/grad_norm
@@ -1005,7 +1017,7 @@ class KernelLyapunov(KernelQuadratic):
         if "P" in kwargs.keys(): kwargs["coefficients"] = kwargs.pop("P")
         super().set_param(**kwargs)
         self.P = self.matrix_coefs
-    
+
 class KernelBarrier(KernelQuadratic):
     '''
     Class for kernel-based barrier functions.
@@ -1029,10 +1041,10 @@ class KernelBarrier(KernelQuadratic):
 
         if "boundary_points" in kwargs.keys():
             self.define_boundary(kwargs["boundary_points"])
-        
+
     def define_boundary(self, points):
         '''
-        Defines the CBF boundary, given a list of points 
+        Defines the CBF boundary, given a list of points
         '''
         cost = self.fit_level_set(points=points, level=0.0)
         self.Q = self.matrix_coefs

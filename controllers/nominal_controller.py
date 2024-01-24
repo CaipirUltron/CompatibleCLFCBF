@@ -1,10 +1,12 @@
 import numpy as np
 import cvxpy as cp
+import scipy as sp
 
+from common import create_quadratic
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 from controllers.compatibility import CLFCBFPair
-from controllers.equilibrium_algorithms import equilibrium_field, compute_equilibria, S
+from controllers.equilibrium_algorithms import equilibrium_field, compute_equilibria, S, L, is_equilibria
 
 class NominalQP():
     '''
@@ -16,13 +18,14 @@ class NominalQP():
         self.plant = plant
         self.clf, self.cbf = clf, cbf
 
-        if self.clf.kernel != self.cbf.kernel:
-            raise Exception("CLF and CBF must be based on the same kernel.")
         self.kernel = self.clf.kernel
         self.A_list = self.kernel.get_A_matrices()
 
-        if self.clf._dim != self.cbf._dim:
-            raise Exception("CLF and CBF dimensions are not equal.")
+        if self.cbf != None:
+            if self.clf.kernel != self.cbf.kernel:
+                raise Exception("CLF and CBF must be based on the same kernel.")
+            if self.clf._dim != self.cbf._dim:
+                raise Exception("CLF and CBF dimensions are not equal.")
 
         self.state_dim = self.clf._dim
         self.control_dim = self.plant.m
@@ -40,17 +43,22 @@ class NominalQP():
 
         self.ctrl_dt = dt
 
-        self.min_curvature = 0.5
-        self.eq_dt = 0.1
-        self.invariants = []
-        self.equilibria = []
-        self.has_pivot = False
-        self.needs_update = False
-        
+        # Compatibility timer
         self.updated_timer = False
         self.timer = 0.0
         self.last_updated_by = None
         self.last_eq_t = 0.0
+
+        # Init compatibility parameters
+        self.eq_dt = 0.1
+        self.min_curvature = 0.1
+        self.tilt = 0.3
+
+        self.Pref = self.clf.P
+        self.equilibria = []
+        self.pivot_pt = None
+        self.tracking_pt = None
+        self.needs_update = False
 
         '''
         Setup cvxpy problem for compatibility
@@ -58,9 +66,21 @@ class NominalQP():
         self.Pnom = cp.Parameter((self.kernel_dim,self.kernel_dim), symmetric=True)
         self.Pnew = cp.Variable((self.kernel_dim,self.kernel_dim), symmetric=True)
         self.l_pivot = cp.Variable()
+        self.tracking_grad_norm = cp.Variable()
 
-        self.objective = cp.Minimize( cp.norm( self.Pnew - self.Pnom ) )
-        self.constraints = { "psd": self.Pnew >> 0, "pivot": [], "gradient": [] }
+        center = np.zeros(self.state_dim)
+        for pt in self.clf.point_list:
+            if pt["level"] == 0.0:
+                center = pt["point"]
+                break
+        Vvalue = 10
+        self.Pquadratic = create_quadratic((1/Vvalue)*np.ones(self.state_dim), np.eye(self.state_dim), center, self.kernel_dim)
+
+        self.objective = cp.Minimize( cp.norm( self.Pnew - self.Pnom, p='fro' ) )
+        self.constraints = { "psd": [ self.Pnew >> 0.0 ], 
+                             "no_local_minima": [ A.T @ self.Pnew >> 0 for A in self.A_list ],
+                             "pivot": [],
+                             "tracking": [] }
 
     def get_control(self):
         '''
@@ -68,10 +88,14 @@ class NominalQP():
         '''
         # Gets CLF and CBF constraints
         a_clf, b_clf = self.get_clf_constraint()
-        a_cbf, b_cbf = self.get_cbf_constraint()
-
-        A = np.vstack([ a_clf, a_cbf ])
-        b = np.hstack([ b_clf, b_cbf ])
+        a_cbf, b_cbf = [], []
+        if self.cbf == None:
+            A = np.vstack([ a_clf ])
+            b = np.hstack([ b_clf ]) 
+        else:
+            a_cbf, b_cbf = self.get_cbf_constraint()
+            A = np.vstack([ a_clf, a_cbf ])
+            b = np.hstack([ b_clf, b_cbf ])            
 
         # Solve QP
         self.QP.set_inequality_constraints(A, b)
@@ -79,27 +103,31 @@ class NominalQP():
         control = self.QP_sol[0:self.control_dim,]
 
         elapsed_time = self.timer - self.last_eq_t
-        if elapsed_time > self.eq_dt:
+        if elapsed_time > self.eq_dt and self.cbf != None:
+
             x = self.plant.get_state().tolist()
             sol = compute_equilibria(self.plant, self.clf, self.cbf, self.eq_params, init_x=x)
+
             if sol["x"] != None: 
                 self.add_equilibrium(sol)
-                if not self.has_pivot: self.set_pivot(sol)
-
-            self.garbage_collector()
-            self.last_eq_t = self.timer
 
             if self.needs_update:
                 self.update_clf()
+                self.garbage_collector()
+
+            self.last_eq_t = self.timer
 
         return control
 
     def update_clf(self):
         '''
-        Updates the CLF for compatibility
+        Logic for locally updating the CLF
         '''
-        constraints = [ self.constraints["psd"] ]
+        constraints = []
+        constraints += self.constraints["psd"]
         constraints += self.constraints["pivot"]
+        constraints += self.constraints["tracking"]
+
         problem = cp.Problem(self.objective, constraints)
         
         try:
@@ -113,46 +141,89 @@ class NominalQP():
 
         if "optimal" in problem.status:
             self.clf.set_param(P=self.Pnew.value)
+            self.pivot_pt["lambda"] = float(self.l_pivot.value)
 
         self.needs_update = False
+
+    def print_eigen(self):
+        '''
+        For testing only. Erase when possible
+        '''
+        k = 0
+        print("Eigenvals of P = " + str(np.linalg.eigvals(self.clf.P)))
+        for A in self.A_list:
+            k+=1
+            # print("A"+str(k)+" = "+str(A))
+            print("Eigenvals of A" + str(k) + ".T P = " + str(np.linalg.eigvals(A.T @ self.clf.P)))
 
     def garbage_collector(self):
         '''
         Verifies equilibrium conditions for all equilibrium points, removing from the list the garbage ones
         '''
+        to_be_removed = []
         for eq_sol in self.equilibria:
-            x_e = eq_sol["x"]
-            l_e = eq_sol["lambda"]
-            m = self.kernel.function(x_e)
-            V = self.clf.function(x_e)
-            field = equilibrium_field(m, l_e, self.clf.P, V, self.plant, self.clf, self.cbf, self.eq_params)
-            if np.linalg.norm(field) > 1e-6:
-                del eq_sol
+
+            # Remove eq_point if no longer an equilibrium
+            if not is_equilibria( eq_sol, self.plant, self.clf, self.cbf, self.eq_params, opt_tol = eq_sol["cost"] ):
+
+                print("removing with cost " + str(eq_sol["cost"]) + " ...")
+                to_be_removed.append( eq_sol )
+
+                if eq_sol == self.pivot_pt:
+                    self.pivot_pt = None
+                    self.constraints["pivot"] = []
+
+                if eq_sol == self.tracking_pt:
+                    self.tracking_pt = None
+                    self.constraints["tracking"] = []
+
+        for item in to_be_removed:
+            self.equilibria.remove(item)
 
     def add_equilibrium(self, new_eq):
         '''
         Adds a new equilibrium point to the list.
         '''
-        # If point is already in the list, pass
+        # If point is already in the list, pass. If not, add it.
         for eq in self.equilibria:
-            if np.linalg.norm(np.array(new_eq["x"]) - np.array(eq["x"])) < 1e-03:
+            if np.linalg.norm(np.array(new_eq["x"]) - np.array(eq["x"])) < 1e-01:
                 return
         self.equilibria.append(new_eq)
 
-        # if len(self.equilibria) > 0:
-        #     Pnew = closest_compatible(self.plant, self.clf, self.cbf, [self.equilibria[-1]], slack_gain=self.p, clf_gain=self.alpha)
-        #     self.clf.set_param(P=Pnew)
+        # If new detected equilibrium point is stable...
+        if new_eq["type"] == "stable":
 
-    def equilibrium_constr(self, sol):
+            # Sets pivot as the first detected equilibrium point
+            if self.pivot_pt == None:
+                self.set_pivot(new_eq)
+            
+            # Sets the current tracking equilibrium point (other than the pivot) as the closest
+            distances = []
+            for k in range(len(self.equilibria)):
+                eq = self.equilibria[k]
+                if eq != self.pivot_pt and eq["type"] == "stable":
+                    distances.append( np.linalg.norm( eq["x"] - self.plant.get_state() ) )
+                else:
+                    distances.append( np.inf )
+
+            if np.min(distances) < np.inf:
+                tracking_pt = self.equilibria[np.argmin(distances)]
+                self.set_tracking(tracking_pt)
+
+            # Signals need for updating
+            self.needs_update = True
+
+    def equilibrium_constrs(self, sol):
         '''
         Returns the cvxpy constraints to keep a given equilibrium sol as a valid equilibrium.
         '''
         x_e = sol["x"]
-        m = self.kernel.function(x_e)
-        V = self.clf.function(x_e)
-        return [ equilibrium_field(m, self.l_pivot, self.Pnew, V, self.plant, self.clf, self.cbf, self.eq_params) == 0, 
-                  V - 0.5 * m.T @ self.Pnew @ m == 0, 
-                  self.l_pivot >= 0 ]
+        l_e = sol["lambda"]
+        m_e = self.kernel.function(x_e)
+        Ve = self.clf.function(x_e)
+        return [ equilibrium_field(m_e, self.l_pivot, self.Pnew, Ve, self.plant, self.clf, self.cbf, self.eq_params) == 0, 
+                 Ve == 0.5 * m_e.T @ self.Pnew @ m_e, 
+                 self.l_pivot == l_e ]
 
     def curvature_constr(self, sol, **kwargs):
         '''
@@ -163,7 +234,6 @@ class NominalQP():
             aux_key = key.lower()
             if aux_key == "c_lim":
                 c_lim = kwargs[key]
-                # continue
 
         x_e = sol["x"]
         n = self.state_dim
@@ -180,21 +250,57 @@ class NominalQP():
 
         aux_M = np.vstack([ np.zeros(n-1), np.eye(n-1) ])
         S_matrix = S(x_e, self.l_pivot, self.Pnew, self.plant, self.clf, self.cbf, self.eq_params)
+        shape_operator = aux_M.T @ Rot.T @ S_matrix @ Rot @ aux_M
 
-        return cp.lambda_min(aux_M.T @ Rot.T @ S_matrix @ Rot @ aux_M) >= c_lim
+        # Chooses random direction in the orthogonal complement
+        dir = np.random.rand(shape_operator.shape[0])
+        dir = dir/ np.linalg.norm(dir)
+
+        return dir.T @ shape_operator @ dir == c_lim
+        # return cp.lambda_min(shape_operator) >= c_lim
+
+    def gradient_constrs(self, sol, **kwargs):
+        '''
+        Returns the cvxpy constraints to modify the CLF gradient at a point, seeking to destroy the local equilibrium condition.
+        '''
+        tilt = 1.0
+        for key in kwargs.keys():
+            aux_key = key.lower()
+            if aux_key == "tilt":
+                tilt = kwargs[key]
+
+        x_e = np.array(sol["x"])
+        m_e = self.kernel.function(x_e)
+        Jm_e = self.kernel.jacobian(x_e)
+    
+        error_to_pivot = x_e - np.array(self.pivot_pt["x"])
+        tilted_grad = self.clf.gradient(x_e) - tilt * error_to_pivot/np.linalg.norm(error_to_pivot)
+
+        return [ Jm_e.T @ self.Pnew @ m_e == self.tracking_grad_norm * tilted_grad/np.linalg.norm(tilted_grad), 
+                 self.tracking_grad_norm >= 0 ]
+
+    def set_tracking(self, tracking_pt):
+        '''
+        Sets up the tracking equilibrium point.
+        '''
+        if tracking_pt not in self.equilibria or tracking_pt["type"] != "stable":
+            raise Exception("Tracking point must be an stable equilibrium point.")
+        
+        self.tracking_pt = tracking_pt
+        self.constraints["tracking"] = []
+        self.constraints["tracking"] += self.gradient_constrs(tracking_pt, tilt = self.tilt)
 
     def set_pivot(self, pivot_pt):
         '''
         Sets up the pivot equilibrium point.
         '''
-        if pivot_pt not in self.equilibria:
-            raise Exception("Pivot must be an equilibrium point.")
+        if pivot_pt not in self.equilibria or pivot_pt["type"] != "stable":
+            raise Exception("Pivot point must be an stable equilibrium point.")
         
+        self.pivot_pt = pivot_pt
         self.constraints["pivot"] = []
-        self.constraints["pivot"] += self.equilibrium_constr(pivot_pt)
-        self.constraints["pivot"].append( self.curvature_constr(pivot_pt, clim=self.min_curvature) )
-        self.has_pivot = True
-        self.needs_update = True
+        self.constraints["pivot"] += self.equilibrium_constrs(pivot_pt)
+        self.constraints["pivot"].append( self.curvature_constr(pivot_pt, c_lim=self.min_curvature) )
 
     def get_clf_control(self):
         '''
@@ -215,6 +321,8 @@ class NominalQP():
         # Lyapunov function and gradient
         V = self.clf.function(state)
         nablaV = self.clf.gradient(state)
+
+        # print("CLF = " + str(V))
 
         # Lie derivatives
         LfV = nablaV.dot(f)

@@ -119,7 +119,6 @@ class Plot2DSimulation():
             self.clf_param_dim = np.shape(np.array(self.clf_log))[0]
 
         # self.mode_log = self.logs["mode"]
-        self.invariants = self.logs["invariants"]
         self.equilibria = self.logs["equilibria"]
         self.num_steps = len(self.state_log[0])
         self.anim_step = (self.num_steps/self.time[-1])/self.fps
@@ -136,7 +135,6 @@ class Plot2DSimulation():
         self.trajectory, = self.main_ax.plot([],[],lw=2)
         self.init_state, = self.main_ax.plot([],[],'bo',lw=2)
         self.actual_state, = self.main_ax.plot([],[],'bo',lw=1,alpha=0.5)
-        self.invariant_plot, = self.main_ax.plot([],[], marker='*', mfc='none', lw=2, color=[0.,1.,0.], linestyle="None")
         self.equilibria_plot, = self.main_ax.plot([],[], marker='*', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
         # self.equilibria_plot, = self.main_ax.plot([],[], marker='o', color='r',lw=2)
         self.clf_grad_arrow, = self.main_ax.plot([],[],'b',lw=0.8)
@@ -162,13 +160,6 @@ class Plot2DSimulation():
         x_init, y_init = self.state_log[0][0], self.state_log[1][0]
         self.init_state.set_data(x_init, y_init)
 
-        if self.plot_config["invariants"]:
-            num_eq = len(self.invariants)
-            x_inv, y_inv = np.zeros(num_eq), np.zeros(num_eq)
-            for k in range(num_eq):
-                x_inv[k], y_inv[k] = self.invariants[k]["x"][0], self.invariants[k]["x"][1]
-            self.invariant_plot.set_data(x_inv, y_inv)
-
         if self.plot_config["equilibria"]:
             num_eq = len(self.equilibria)
             x_eq, y_eq = np.zeros(num_eq), np.zeros(num_eq)
@@ -185,7 +176,6 @@ class Plot2DSimulation():
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
         graphical_elements.append(self.actual_state)
-        graphical_elements.append(self.invariant_plot)
         graphical_elements.append(self.equilibria_plot)
         graphical_elements.append(self.clf_grad_arrow)
         graphical_elements.append(self.cbf_grad_arrow)
@@ -259,7 +249,6 @@ class Plot2DSimulation():
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
         graphical_elements.append(self.actual_state)
-        graphical_elements.append(self.invariant_plot)
         graphical_elements.append(self.equilibria_plot)
         graphical_elements.append(self.clf_grad_arrow)
         graphical_elements.append(self.cbf_grad_arrow)

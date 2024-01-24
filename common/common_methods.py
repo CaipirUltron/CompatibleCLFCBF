@@ -481,6 +481,80 @@ def KKTmultipliers(plant, clf, cbf, x, slack_gain, clf_gain):
 
     return l0, l1
 
+def ellipsoid_parametrization(Q, param):
+    '''
+    This method implements an angular parametrization of the (rank(Q)-1) dimensional ellipsoid.
+    Receives an (rank(Q)-1) dimensional vector of angular parameters for the ellipsoid,
+    Returns a corresponding point z in the p-dimensional space at the ellipsoid, that is, z.T @ Q @ z = 1.
+    '''
+    eigsQ, main_axes = np.linalg.eig(Q)
+    axes_lengths = 1/np.sqrt(eigsQ)
+
+    if Q.shape[0] != Q.shape[1]:
+        raise Exception("Q must be a square matrix.")
+    p = Q.shape[0]
+    if np.any(eigsQ < -1e-12):
+        raise Exception("Q must be a positive semi-definite matrix.")
+
+    rankQ = np.linalg.matrix_rank(Q, hermitian=True)
+    dim_elliptical_manifold = rankQ - 1
+
+    if len(param) != dim_elliptical_manifold:
+        raise Exception("Parameter has wrong dimensions")
+
+    reduced_z = np.zeros(rankQ)
+    for k in range(rankQ):
+        prod = axes_lengths[k]
+        if k != dim_elliptical_manifold:
+            for i in range(k): 
+                prod *= np.sin(param[i])
+            reduced_z[k] = prod * np.cos(param[k])
+        else:
+            for i in range(k): 
+                prod *= np.sin(param[i])
+            reduced_z[k] = prod
+
+    z = main_axes @ np.array(reduced_z.tolist() + [ 0.0 for _ in range(p-rankQ)])
+    return z
+
+# def ellipsoid_axes(Q):
+#     '''
+#     Computes maximum distance from origin to each axis of the ellipsoid given by Q
+#     '''
+#     eigsQ, main_axes = np.linalg.eig(Q)
+#     axes_lengths = 1/np.sqrt(eigsQ)
+#     max_dim = np.argmax(axes_lengths)
+
+#     if Q.shape[0] != Q.shape[1]:
+#         raise Exception("Q must be a square matrix.")
+#     if np.any(eigsQ < -1e-12):
+#         raise Exception("Q must be a positive semi-definite matrix.")
+
+#     rankQ = np.linalg.matrix_rank(Q, hermitian=True)
+#     dim_elliptical_manifold = rankQ - 1
+
+#     print("Rank of Q = " + str(rankQ))
+#     print("Eigs of Q = " + str(eigsQ))
+
+#     max_theta = np.ones(dim_elliptical_manifold)*np.pi/2
+#     if max_dim < dim_elliptical_manifold:
+#         max_theta[max_dim] = 0
+#     elif max_dim > dim_elliptical_manifold:
+#         max_theta[max_dim] = 
+
+#     max_thetas = np.zeros([dim_elliptical_manifold, rankQ])
+#     for k in range(rankQ):
+#         max_theta = np.zeros(dim_elliptical_manifold)
+
+#         if k != dim_elliptical_manifold:
+#             max_thetas[k,k] = 0.0
+#         for j in range(k):
+#             max_thetas[j,k] = np.pi/2
+
+#         max_thetas[:,k] = max_theta
+
+#     return np.sqrt(max_z2)
+
 class Rect():
     '''
     Simple rectangle.

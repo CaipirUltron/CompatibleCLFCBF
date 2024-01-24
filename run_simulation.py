@@ -32,8 +32,8 @@ sim.logs["time"] = time
 sim.logs["state"] = sim.plant.state_log
 sim.logs["control"] = sim.plant.control_log
 sim.logs["clf_log"] = sim.controller.clf.dynamics.state_log
-sim.logs["invariants"] = sim.controller.invariants
 sim.logs["equilibria"] = sim.controller.equilibria
+sim.logs["tracking"] = None
 
 if hasattr(sim, 'path'):
     sim.logs["gamma_log"] = sim.path.logs["gamma"]

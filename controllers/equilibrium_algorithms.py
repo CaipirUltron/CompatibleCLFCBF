@@ -5,7 +5,7 @@ import itertools
 from scipy.optimize import root, minimize, least_squares
 from scipy.linalg import null_space
 
-from common import compute_curvatures, KKTmultipliers, asymmetric_sat
+from common import compute_curvatures, KKTmultipliers, ellipsoid_parametrization
 from controllers.compatibility import LinearMatrixPencil2
 from functions import Kernel
 
@@ -55,6 +55,13 @@ def equilibrium_field(z, l, P, V, plant, clf, cbf, params):
     else:
         return l * np.array(vecQ) - np.array(vecP)
 
+def L(x, l, P, plant, clf, cbf, params):
+    '''
+    Returns L matrix: L = F + l Q - p gamma V P 
+    '''
+    check_kernel(plant, clf, cbf)
+    return plant.get_F() + l * cbf.Q - params["slack_gain"] * params["clf_gain"] * clf.function(x) * P
+
 def S(x, l, P, plant, clf, cbf, params):
     '''
     Returns S matrix: S = H(x,l,P) - (1/pgV^2) * fc fc.T
@@ -67,16 +74,69 @@ def S(x, l, P, plant, clf, cbf, params):
     m = kernel.function(x)
 
     fc = plant.get_fc(x)
-    F = plant.get_F()
-    Q = cbf.Q
 
-    L = F + l * Q - params["slack_gain"] * params["clf_gain"] * V * P
-    S = [ [ m.T @ A_list[i].T @ ( L @ A_list[j] + A_list[j].T @ L ) @ m - fc[i]*fc[j]/(params["slack_gain"] * params["clf_gain"] * (V**2)) for j in range(n) ] for i in range(n) ]
+    L_matrix = L(x, l, P, plant, clf, cbf, params)
+    S_matrix = [ [ m.T @ A_list[i].T @ ( L_matrix @ A_list[j] + A_list[j].T @ L_matrix ) @ m - fc[i]*fc[j]/(params["slack_gain"] * params["clf_gain"] * (V**2)) for j in range(n) ] for i in range(n) ]
 
     if cp.expressions.variable.Variable in [ type(l), type(P) ]:
-        return cp.bmat(S)
+        return cp.bmat(S_matrix)
     else:
-        return np.array(S)
+        return np.array(S_matrix)
+
+def is_equilibria(eq_sol, plant, clf, cbf, params, **kwargs):
+    '''
+    Verifies if a point x is an equilibrium point.
+    Returns: bool
+    '''
+    opt_tol, boundary_tol = 1e-05, 1e-03
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "opt_tol":
+            opt_tol = kwargs[key]
+            continue
+        if aux_key == "boundary_tol":
+            boundary_tol = kwargs[key]
+            continue
+
+    kernel = check_kernel(plant, clf, cbf)
+    
+    x = eq_sol["x"]
+    m = kernel.function(x)
+    if np.abs( m.T @ cbf.Q @ m - 1 ) > boundary_tol:
+        return False
+    
+    '''
+    var = λ (must be positive for a valid equilibrium solution)
+    '''
+    def invariant_set_constraint(l):
+        '''
+        Returns the vector residues of invariant set -> is zero for x in the invariant set
+        '''
+        return equilibrium_field(kernel.function(x), l[0], clf.P, clf.function(x), plant, clf, cbf, params)
+
+    def objective(l):
+        return np.linalg.norm(invariant_set_constraint(l))
+
+    is_eq = False
+    try:
+        init_l = np.random.rand()
+        init_var = [init_l]
+        sol = minimize(objective, init_var, bounds=[ (0.0, np.inf) ])
+
+        if sol.fun < opt_tol and sol.x[0] >= 0:
+            is_eq = True
+    except Exception as error_msg:
+        print("No equilibrium points were found. Error: " + str(error_msg))
+    
+    if is_eq:
+        eq_sol["lambda"], eq_sol["cost"] = sol.x[0], objective(sol.x)
+        stability, eta = compute_stability(eq_sol, plant, clf, cbf, params)
+        eq_sol["eta"], eq_sol["stability"] = eta, stability
+        eq_sol["type"] = "stable"
+        if stability > 0:
+            eq_sol["type"] = "unstable"
+    
+    return is_eq
 
 def compute_equilibria(plant, clf, cbf, params, **kwargs):
     '''
@@ -121,9 +181,7 @@ def compute_equilibria(plant, clf, cbf, params, **kwargs):
         '''
         x = var[0:n]
         l = var[-1]
-        m = kernel.function(x)
-        V = clf.function(x)
-        return equilibrium_field(m, l, clf.P, V, plant, clf, cbf, params)
+        return equilibrium_field(kernel.function(x), l, clf.P, clf.function(x), plant, clf, cbf, params)
 
     def boundary_constr(var):
         '''
@@ -137,7 +195,7 @@ def compute_equilibria(plant, clf, cbf, params, **kwargs):
         return np.linalg.norm(invariant_set_constraint(var))**2 + boundary_constr(var)**2
 
     x_bounds = [ (-np.inf, np.inf) for _ in range(n) ]
-    l_bounds = [ (0, np.inf) ]
+    l_bounds = [ (0.0, np.inf) ]
 
     eq_found = False
     eq_sol = {"x": None, "lambda": None, "init_x": init_x, "cost": np.inf, "stability": None, "type": None}
@@ -145,14 +203,14 @@ def compute_equilibria(plant, clf, cbf, params, **kwargs):
         init_l = np.random.rand()
         init_var = init_x + [init_l]
         sol = minimize(objective, init_var, bounds=x_bounds+l_bounds)
-        eq_sol["cost"] = sol.fun
-        if eq_sol["cost"] < tol:
+
+        if sol.fun < tol and sol.x[-1] >= 0:
             eq_found = True
     except Exception as error_msg:
         print("No equilibrium points were found. Error: " + str(error_msg))
     
     if eq_found:
-        eq_sol["x"], eq_sol["lambda"], eq_sol["init_x"], eq_sol["cost"] = sol.x[0:n].tolist(), sol.x[-1], init_x, sol.fun
+        eq_sol["x"], eq_sol["lambda"], eq_sol["init_x"], eq_sol["cost"] = sol.x[0:n].tolist(), sol.x[-1], init_x, np.linalg.norm( invariant_set_constraint(sol.x) )
         stability, eta = compute_stability(eq_sol, plant, clf, cbf, params)
         eq_sol["eta"], eq_sol["stability"] = eta, stability
         eq_sol["type"] = "stable"
@@ -296,13 +354,6 @@ def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
         print("Optimal value: %s" % problem.value)
 
     return P_var.value
-
-def surround_boundary():
-    '''
-    Given a known stable boundary equilibrium point, this function returns a P
-    whose corresponding level set completely surrounds the boundary
-    '''
-    pass
 
 '''
 The following algorithms are useful for initialization of the previous algorithms, among other utilities.
@@ -450,40 +501,6 @@ def generate_boundary(num_pts, **kwargs):
                 sols.append({"x": sol.x[0:n].tolist(), "cost": sol.cost})
 
     return sols, log
-
-def ellipsoid_parametrization(Q, param):
-    '''
-    This method implements an angular parametrization of the (rank(Q)-1) dimensional ellipsoid.
-    Receives an (rank(Q)-1) dimensional vector of angular parameters for the ellipsoid,
-    Returns a corresponding point z in the p-dimensional space at the ellipsoid, that is, z.T @ Q @ z = 1.
-    '''
-    eigsQ, eigvecsQ = np.linalg.eig(Q)
-
-    if Q.shape[0] != Q.shape[1]:
-        raise Exception("Q must be a square matrix.")
-    p = Q.shape[0]
-    if np.any(eigsQ < -1e-12):
-        raise Exception("Q must be a positive semi-definite matrix.")
-
-    rankQ = np.linalg.matrix_rank(Q)
-    dim_elliptical_manifold = rankQ - 1
-
-    if len(param) != dim_elliptical_manifold:
-        raise Exception("Parameter has wrong dimensions")
-
-    reduced_m = np.zeros(rankQ)
-    for k in range(rankQ):
-        if k != dim_elliptical_manifold:
-            prod = 1/np.sqrt(eigsQ[k])
-            for i in range(k): prod *= np.sin(param[i])
-            reduced_m[k] = prod * np.cos(param[k])
-        else:
-            prod = 1/np.sqrt(eigsQ[k])
-            for i in range(k): prod *= np.sin(param[i])
-            reduced_m[k] = prod
-
-    z = eigvecsQ @ np.array(reduced_m.tolist() + [ 0.0 for _ in range(p-rankQ)])
-    return z
 
 def generate_point_grid(Q, resolution):
     '''
