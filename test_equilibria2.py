@@ -4,6 +4,7 @@ import numpy as np
 import cvxpy as cp
 import scipy as sp
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 
 from common import rgb
 from controllers.equilibrium_algorithms import check_equilibrium, compute_equilibria, closest_compatible
@@ -34,8 +35,7 @@ dim_elliptical_manifold = rankQ - 1
 limits = [ [-10, 10], [-10, 10] ]
 
 while True:
-
-    sim.clf.plot_level(axes = ax, level = 10.0, axeslim = [-10, 10, -10, 10])
+    
     sim.cbf.plot_level(axes = ax, axeslim = [-10, 10, -10, 10])
     pt = plt.ginput(1, timeout=0)
     ax.clear()
@@ -47,10 +47,16 @@ while True:
     print("Result took " +str(delta_time) + "s to compute.")
             
     if sol["x"] != None:
+
         x = sol["x"]
         l = sol["lambda"]
         V = sim.clf.function(x)
         l0 = slack_gain*clf_gain*V
+
+        sim.clf.plot_level(axes = ax, level = V, axeslim = [-10, 10, -10, 10], color=mcolors.TABLEAU_COLORS['tab:cyan'])
+
+        print("Initial level set V = " + str( V ) )
+        print("Initial P eigenvalues = " + str(np.linalg.eigvals(P)))
 
         print("Solution found: " + str(sol))
         ax.plot(sol["init_x"][0],sol["init_x"][1],'ob',alpha=0.5)
@@ -70,9 +76,9 @@ while True:
 
         objective = cp.Minimize( l_var )
         constraint = [ invariant(l_var, P_var, alpha) == 0
-                      ,P_var >> 0
-                    ,m.T @ P_var @ m == 2*V
-                    ,cp.lambda_max(P_var) <= np.max(eigP) 
+                      ,P_var >> P
+                    #   ,m.T @ P_var @ m == 2*V
+                      ,cp.lambda_max(P_var) <= np.max(eigP)
                        ]
         problem = cp.Problem(objective, constraint)
 
@@ -82,17 +88,16 @@ while True:
             print("Problem cannot be computed. Error: " + str(error))
 
         print("Optimization status exit as \"" + str(problem.status) + "\".")
-        print("Optimal value is %s." % problem.value)
 
         if "optimal" in problem.status:
             print("Invariant error = " + str(np.linalg.norm( invariant(l_var.value, P_var.value, alpha.value) )) )
-            print("Level set error = " + str( m.T @ P_var.value @ m - 2*V ) )
+            print("Final level set V = " + str( 0.5 * m.T @ P_var.value @ m ) )
+            print("Final P eigenvalues = " + str(np.linalg.eigvals(P_var.value)))
             print("Gradient norm = " + str(np.linalg.norm( P_var.value @ m )) )
             print("Minimum lambda = " + str(l_var.value))
-            print("Final P eigenvalues = " + str(np.linalg.eigvals(P_var.value)))
 
         sim.clf.set_param(P=P_var.value)
-        sim.clf.plot_level(axes = ax, level = 10.0, axeslim = [-10, 10, -10, 10])
+        sim.clf.plot_level(axes = ax, level = 0.5 * m.T @ P_var.value @ m, axeslim = [-10, 10, -10, 10],color=mcolors.TABLEAU_COLORS['tab:blue'])
         sim.clf.set_param(P=P)
 
     else:

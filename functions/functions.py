@@ -806,10 +806,9 @@ class KernelQuadratic(Function):
                 if pt["level"] == 0.0:
                     center = pt["point"]
                     break
-            Vvalue = 6
-            Pquadratic = create_quadratic((1/Vvalue)*np.ones(n), np.eye(n), center, p)
+            Vvalue = 10
+            Pquadratic = create_quadratic((1/Vvalue)*np.array([6.0, 1.0]), rot2D(np.pi/10), center, p)
             constraints = [ F_var >> Pquadratic ]                                       # Basic constraint: F_var must be p.s.d.
-            # constraints = [ F_var >> 0 ]
         else:
             constraints = [ F_var >> 0 ]
 
