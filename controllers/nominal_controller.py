@@ -95,7 +95,7 @@ class NominalQP():
         else:
             a_cbf, b_cbf = self.get_cbf_constraint()
             A = np.vstack([ a_clf, a_cbf ])
-            b = np.hstack([ b_clf, b_cbf ])            
+            b = np.hstack([ b_clf, b_cbf ])
 
         # Solve QP
         self.QP.set_inequality_constraints(A, b)
@@ -111,9 +111,9 @@ class NominalQP():
             if sol["x"] != None: 
                 self.add_equilibrium(sol)
 
-            if self.needs_update:
-                self.update_clf()
-                self.garbage_collector()
+            # if self.needs_update:
+            #     self.update_clf()
+            #     self.garbage_collector()
 
             self.last_eq_t = self.timer
 

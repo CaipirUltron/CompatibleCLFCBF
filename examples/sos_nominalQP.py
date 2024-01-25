@@ -5,7 +5,7 @@ from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
 from common import create_quadratic, rot2D
 
-initial_state = [0.5, 6.0]
+initial_state = [2.5, 3.0]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
