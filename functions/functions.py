@@ -807,7 +807,7 @@ class KernelQuadratic(Function):
                     center = pt["point"]
                     break
             Vvalue = 10
-            Pquadratic = create_quadratic((1/Vvalue)*np.array([6.0, 1.0]), rot2D(np.pi/10), center, p)
+            Pquadratic = create_quadratic((1/Vvalue)*np.array([6.0, 1.0]), rot2D(0), center, p)
             constraints = [ F_var >> Pquadratic ]                                       # Basic constraint: F_var must be p.s.d.
         else:
             constraints = [ F_var >> 0 ]
@@ -973,8 +973,8 @@ class KernelQuadratic(Function):
         x_lim = self.plot_config["axeslim"][0:2]
         y_lim = self.plot_config["axeslim"][2:4]
 
-        ax.set_xlim(*x_lim)
-        ax.set_ylim(*y_lim)
+        # ax.set_xlim(*x_lim)
+        # ax.set_ylim(*y_lim)
 
         self.contour_plot(ax, levels=[level], colors=self.plot_config["color"], min_lims=[ x_lim[0], y_lim[0] ], max_lims=[ x_lim[1], y_lim[1] ], resolution=0.1)
         return ax

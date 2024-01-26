@@ -351,7 +351,7 @@ def create_quadratic(eigen, R, center, kernel_dim):
                 R          -> orthonormal matrix with the eigenvectors of H
                 center     -> the center point for the quadratic
                 kernel_dim -> the dimension of the polynominal kernel function used (standard form - with growing order of monomials)
-    Returns: a 
+    Returns: a symmetric, psd, (p,p) matrix representing the quadratic in kernel space (p is the kernel dimension)
     '''
     n = len(eigen)
     if np.shape(R) != (n,n) or len(center) != n:

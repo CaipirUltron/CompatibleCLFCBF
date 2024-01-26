@@ -138,6 +138,138 @@ def is_equilibria(eq_sol, plant, clf, cbf, params, **kwargs):
     
     return is_eq
 
+def is_removable(eq_sol, plant, clf, cbf):
+    '''
+    This code checks if a given equilibrium point is removable by performing arbitrary changes over the CLF matrix P (convex optimization problem)
+    '''
+    kernel = check_kernel(plant, clf, cbf)
+
+    p = kernel.kernel_dim
+    P = clf.P
+    Q = cbf.Q
+    eigP = np.linalg.eigvals(P)
+
+    x = eq_sol["x"]
+    m = kernel.function(x)
+    Jm = kernel.jacobian(x)
+    V = clf.function(x)
+
+    Null = null_space(Jm.T)
+    dimNull = Null.shape[1]
+
+    def invariant_set_constr(l, P, alpha):
+        return (l * Q - P) @ m - Null @ alpha
+
+    l_var = cp.Variable()
+    alpha = cp.Variable(dimNull)
+    P_var = cp.Variable((p,p), symmetric=True)
+
+    relevance = 100
+    objective = cp.Minimize( relevance*l_var + cp.norm(P_var - P, 'fro') )
+    constraint = [ invariant_set_constr(l_var, P_var, alpha) == 0
+                    ,P_var >> P
+                #   ,m.T @ P_var @ m == 2*V
+                    ,cp.lambda_max(P_var) <= np.max(eigP)
+                    ]
+    problem = cp.Problem(objective, constraint)
+    problem.solve(verbose=True)
+
+    if "optimal" in problem.status:
+        print("Invariant error = " + str(np.linalg.norm( invariant_set_constr(l_var.value, P_var.value, alpha.value) )) )
+        print("Final level set V = " + str( 0.5 * m.T @ P_var.value @ m ) )
+        print("Final P eigenvalues = " + str(np.linalg.eigvals(P_var.value)))
+        print("Gradient norm = " + str(np.linalg.norm( P_var.value @ m )) )
+        print("Minimum lambda = " + str(l_var.value))
+
+    return P_var.value
+
+def is_removable_by_rotations(eq_sol, plant, clf, cbf):
+    '''
+    This code checks if a given equilibrium point is removable by performing rotations over the CLF matrix P (nonconvex optimization problem)
+    '''
+    kernel = check_kernel(plant, clf, cbf)
+
+    n = kernel._dim
+    p = kernel.kernel_dim
+    P = clf.P
+    Q = cbf.Q
+    eigP, eigvecP = np.linalg.eig(P)
+
+    x = eq_sol["x"]
+    m = kernel.function(x)
+    Jm = kernel.jacobian(x)
+    V = clf.function(x)
+
+    Null = null_space(Jm.T)
+    dimNull = Null.shape[1]
+
+    '''
+    var = [ λ, R, alpha ] is a (n+rankQ-1+1) dimensional array, where:
+    λ is a scalar
+    R is the vectorized version of a p-dimensional orthogonal matrix representing possible rotations of P (p^2 dimensional)
+    alpha is an array with the dimension of the nullspace of the Jacobian transpose
+    '''
+    def invariant_set_constr(var):
+        '''
+        Invariant set constraint
+        '''
+        l = var[0]
+        R = var[1:1+p**2].reshape((p, p))
+        alpha = var[1+p**2:1+p**2+dimNull]
+        return ( l * Q - R.T @ np.diag(eigP) @ R ) @ m - Null @ alpha
+
+    def level_set_constr(var):
+        '''
+        Keeps the level set constant
+        '''
+        R = var[1:1+p**2].reshape((p, p))
+        return m @ R.T @ np.diag(eigP) @ R @ m - 2 * V
+
+    def orthonormality_constraint(var):
+        '''
+        Keeps matrix R orthonormal
+        '''
+        R = var[1:1+p**2].reshape((p, p))
+        return np.linalg.norm( R.T @ R - np.eye(p), 'fro' )
+
+    def objective(var):
+        '''
+        Minimizes lambda
+        '''
+        l = var[0]
+        R = var[1:1+p**2].reshape((p, p))
+        return l + np.linalg.norm( R.T @ np.diag(eigP) @ R - P , 'fro')
+
+    init_lambda = np.random.rand()
+    init_R = eigvecP.flatten()
+    init_alpha = np.random.rand(dimNull)
+    init_var = np.hstack([init_lambda, init_R, init_alpha])
+
+    result = minimize(fun=objective,
+                x0=init_var,
+                # method='trust-constr',
+                constraints = [ 
+                                {'type': 'eq', 'fun': invariant_set_constr}, 
+                                {'type': 'eq', 'fun': level_set_constr},
+                                {'type': 'eq', 'fun': orthonormality_constraint}
+                            ])
+
+    l = result.x[0]
+    R = result.x[1:1+p**2].reshape(p,p)
+    alpha = result.x[1+p**2:1+p**2+dimNull]
+
+    print("Lambda = " + str(l))
+    print("Invariant set error = " + str( invariant_set_constr(result.x) ))
+    print("Level set error = " + str( level_set_constr(result.x) ))
+    print("Orthogonality error = " + str( orthonormality_constraint(result.x) ))
+
+    Pnew = R.T @ np.diag(eigP) @ R
+    Pnew = (Pnew+Pnew.T)/2
+
+    print("Eigenvalues of P = " + str( np.linalg.eigvals(Pnew) ))
+
+    return Pnew
+
 def compute_equilibria(plant, clf, cbf, params, **kwargs):
     '''
     Finds equilibrium points solutions. If no initial point is specified, it selections a point at random from a speficied interval.
