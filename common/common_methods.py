@@ -364,6 +364,8 @@ def create_quadratic(eigen, R, center, kernel_dim):
         raise Exception("Quadratic should be positive semi-definite.")
 
     H = R.T @ np.diag(eigen) @ R
+    H = (H + H.T)/2
+
     std_centered_quadratic = np.zeros([kernel_dim, kernel_dim])
     std_centered_quadratic[0,0] = center.T @ H @ center
     for k in range(n):

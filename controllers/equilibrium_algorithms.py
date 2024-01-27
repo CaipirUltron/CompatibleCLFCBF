@@ -4,6 +4,7 @@ import itertools
 
 from scipy.optimize import root, minimize, least_squares
 from scipy.linalg import null_space
+import matplotlib.colors as mcolors
 
 from common import compute_curvatures, KKTmultipliers, ellipsoid_parametrization
 from controllers.compatibility import LinearMatrixPencil2
@@ -989,6 +990,75 @@ def solve_PEP(Q, P, **kwargs):
     Z = np.delete(Z, index_to_be_deleted, axis = 1)
 
     return lambdas, kappas, Z, init_kappas, init_lambdas
+
+def plot_invariant(plant, clf, cbf, params, **kwargs):
+    '''
+    Plots the invariant set at axis ax
+    '''
+    res = 0.1
+    color = 'k'
+    extended = False
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "ax":
+            ax = kwargs[key]
+            continue
+        if aux_key == "color":
+            color = kwargs[key]
+            continue
+        if aux_key == "res":
+            res = kwargs[key]
+            continue
+        if aux_key == "extended":
+            extended = kwargs[key]
+            continue
+
+    kernel = check_kernel(plant, clf, cbf)
+    F = plant.get_F()
+    P = clf.P
+    Q = cbf.Q
+    A_list = kernel.get_A_matrices()
+    n = kernel._dim
+
+    if n > 2:
+        raise Exception("Plot invariant was not designed for dimensions > 2.")
+
+    minusones, plusones = -np.ones([n,1], dtype=int), +np.ones([n,1], dtype=int)
+    interval_limits = np.hstack([ minusones, plusones ]).tolist()
+    if "limits" in kwargs.keys():
+        interval_limits = kwargs["limits"]
+        for i in range(n):
+            if interval_limits[i][0] >=  interval_limits[i][1]:
+                raise Exception("Lines should be sorted in ascending order.")
+    
+    x_min, x_max = interval_limits[0][0], interval_limits[0][1]
+    y_min, y_max = interval_limits[1][0], interval_limits[1][1]
+
+    x = np.arange(x_min, x_max, res)
+    y = np.arange(y_min, y_max, res)
+
+    x_grid, y_grid = np.meshgrid(x, y)
+
+    def determinant( x_grid, y_grid ):
+        '''
+        Evaluates det([ vecQ, vecP ]) over the grid
+        '''
+        det_grid = np.zeros([len(x), len(y)])
+        for (i,j) in itertools.product(range(len(x)), range(len(y))):
+            vecQ, vecP = np.zeros(n), np.zeros(n)
+            z = kernel.function([x_grid[i,j], y_grid[i,j]])
+            V = 0.5 * z.T @ P @ z
+            for k in range(n):
+                vecQ[k] = z.T @ A_list[k].T @ Q @ z
+                vecP[k] = z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z
+            l = vecQ.T @ vecP / vecQ.T @ vecQ
+            if l >= 0 or extended:
+                det_grid[i,j] = np.linalg.det( np.hstack([vecQ.reshape(n,1), vecP.reshape(n,1)]) )
+            else:
+                det_grid[i,j] = np.inf
+        return det_grid
+    
+    return ax.contour(x_grid, y_grid, determinant( x_grid, y_grid ), levels=[0], colors=color, linestyles='dashed', linewidths=1.0)
 
 # --------------------------------------------------------------- DEPRECATED CODE ----------------------------------------------------------
 

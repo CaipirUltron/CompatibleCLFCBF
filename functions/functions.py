@@ -713,7 +713,7 @@ class KernelQuadratic(Function):
         if isinstance(self, KernelLyapunov):
             default_color = mcolors.TABLEAU_COLORS['tab:blue']
         elif isinstance(self, KernelBarrier):
-            default_color = mcolors.TABLEAU_COLORS['tab:green']
+            default_color = mcolors.TABLEAU_COLORS['tab:red']
 
         default_plot_config = {"figsize": (5,5), "axeslim": (-6,6,-6,6), "color": default_color}
         self.plot_config = default_plot_config
@@ -973,11 +973,7 @@ class KernelQuadratic(Function):
         x_lim = self.plot_config["axeslim"][0:2]
         y_lim = self.plot_config["axeslim"][2:4]
 
-        # ax.set_xlim(*x_lim)
-        # ax.set_ylim(*y_lim)
-
-        self.contour_plot(ax, levels=[level], colors=self.plot_config["color"], min_lims=[ x_lim[0], y_lim[0] ], max_lims=[ x_lim[1], y_lim[1] ], resolution=0.1)
-        return ax
+        return self.contour_plot(ax, levels=[level], colors=self.plot_config["color"], min_lims=[ x_lim[0], y_lim[0] ], max_lims=[ x_lim[1], y_lim[1] ], resolution=0.1)
 
     def get_shape(self):
         '''

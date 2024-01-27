@@ -11,15 +11,13 @@ n = len(initial_state)
 m = len(initial_control)
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
-max_degree = 2
-kernel = Kernel(*initial_state, degree = max_degree)
-kern_dim = kernel.kernel_dim
+kernel = Kernel(*initial_state, degree=2)
+kernel_dim = kernel.kernel_dim
 print(kernel)
-print("Dimension of kappa space = " + str(len(kernel.get_N_matrices())))
 
 # -------------------------------------------------- Define system ---------------------------------------------------------
 fx, fy = 0.0, 0.0                       # constant force with fx, fy components
-F = np.zeros([kern_dim,kern_dim])
+F = np.zeros([kernel_dim,kernel_dim])
 F[1,0], F[2,0] = fx, fy
 
 def g(state):
@@ -29,18 +27,17 @@ plant = ConservativeAffineSystem(initial_state=initial_state, initial_control=in
 # ---------------------------------------------------- Define CLF ----------------------------------------------------------
 base_level = 16.0
 points = []
-points += [{ "point": [ 0.0,  0.0], "level": 0.0 }]
-# points += [{ "point": [ 3.0,  3.0], "level": base_level, "gradient": [ 1.0,  1.0] }]
-# points += [{ "point": [-3.0,  3.0], "level": base_level, "gradient": [-1.0,  1.0] }]
-# points += [{ "point": [ 0.0,  5.0],                      "gradient": [ 0.0,  1.0], "curvature": 0.2 }]
+points += [{ "point": [ 0.0,  -2.0], "level": 0.0 }]
+points += [{ "point": [ 3.0,  3.0], "level": base_level, "gradient": [ 1.0,  1.0] }]
+points += [{ "point": [-3.0,  3.0], "level": base_level, "gradient": [-1.0,  1.0] }]
+points += [{ "point": [ 0.0,  5.0],                      "gradient": [ 0.0,  1.0], "curvature": 0.2 }]
 # points += [{ "point": [ 0.0,  5.0],                      "gradient": [ 1.8,  1.0] }]
-
 clf = KernelLyapunov(*initial_state, kernel=kernel, points=points)
 
-# eig = [1.0, 1.0]
-# center = [0.0, 0.0]
-# P = create_quadratic(eig, rot2D(0.0), center, kern_dim)
-# clf = KernelLyapunov(*initial_state, kernel=kernel, P=P)
+# clf_eig = 0.05*np.array([ 12.0, 1.0 ])
+# clf_angle = np.pi/100
+# clf_center = [0.0, -2.0]
+# clf = KernelLyapunov(*initial_state, kernel=kernel, P=create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim))
 
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
 # boundary_points = [ [-4.0, 0.0], [-4.0, -1.0], [-2.0, 0.5], [2.0, 0.5], [4.0, -1.0], [4.0, 0.0], [0.0, 1.0], [0.0, -0.5] ]   # (sad smile)

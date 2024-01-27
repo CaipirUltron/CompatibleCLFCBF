@@ -129,20 +129,17 @@ class Plot2DSimulation():
 
         # Initalize some graphical objects
         self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str("Time = "), fontsize=14)
-        # self.mode_text = self.main_ax.text(self.x_lim[0]+0.5, self.y_lim[0]-1, "", fontweight="bold",  fontsize=18)
-
-        # self.origin, = self.main_ax.plot([],[],lw=4, marker='*', color=[0.,0.,0.])
         self.trajectory, = self.main_ax.plot([],[],lw=2)
         self.init_state, = self.main_ax.plot([],[],'bo',lw=2)
         self.actual_state, = self.main_ax.plot([],[],'bo',lw=1,alpha=0.5)
         self.equilibria_plot, = self.main_ax.plot([],[], marker='*', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
         # self.equilibria_plot, = self.main_ax.plot([],[], marker='o', color='r',lw=2)
         self.clf_grad_arrow, = self.main_ax.plot([],[],'b',lw=0.8)
-        self.cbf_grad_arrow, = self.main_ax.plot([],[],'g',lw=0.8)
+        self.cbf_grad_arrow, = self.main_ax.plot([],[],'r',lw=0.8)
         self.fc_arrow, = self.main_ax.plot([],[],'r',lw=0.8)
 
         self.clf_contour_color = mcolors.TABLEAU_COLORS['tab:blue']
-        self.cbf_contour_color = mcolors.TABLEAU_COLORS['tab:green']
+        self.cbf_contour_color = mcolors.TABLEAU_COLORS['tab:red']
 
         self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[0.0], colors=self.clf_contour_color, min_lims=[ self.x_lim[0], self.y_lim[0] ], max_lims=[ self.x_lim[1], self.y_lim[1] ], resolution=0.5)
         self.cbf_contours = []
@@ -154,8 +151,6 @@ class Plot2DSimulation():
         self.time_text.text = str("Time = ")
         # self.mode_text.text = ""
         self.trajectory.set_data([],[])
-
-        # self.origin.set_data([self.clf.critical_point[0]],[self.clf.critical_point[1]])
 
         x_init, y_init = self.state_log[0][0], self.state_log[1][0]
         self.init_state.set_data(x_init, y_init)
@@ -172,7 +167,6 @@ class Plot2DSimulation():
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
-        # graphical_elements.append(self.mode_text)
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
         graphical_elements.append(self.actual_state)
@@ -218,15 +212,11 @@ class Plot2DSimulation():
                     [ current_state[0], current_state[0] + fc_norm[0] ], 
                     [ current_state[1], current_state[1] + fc_norm[1] ] )
             
-            # print("Proportionality = " + str( fc.T @ nablaV/ (nablaV.T @ nablaV) ) + " , V = " + str( self.clf.function(current_state) ))
-
             if hasattr(self, 'clf_log'):
                 current_piv_state = [ self.clf_log[k][i] for k in range(self.clf_param_dim) ]
                 self.clf.set_param(current_piv_state)
 
             self.time_text.set_text("Time = " + str(current_time) + "s")
-            # h = self.cbfs[0].evaluate_function(*current_state)[0]
-            # self.time_text.set_text("h = " + str(h) + "s")
 
             # if len(self.equilibria) != 0 and self.equilibria[i] != None:
             #     x_eq, y_eq = self.equilibria[i][0], self.equilibria[i][1]
