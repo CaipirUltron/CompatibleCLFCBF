@@ -5,7 +5,7 @@ from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
 from common import create_quadratic, rot2D
 
-initial_state = [2.5, 3.0]
+initial_state = [6.5, 6.0]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
@@ -30,7 +30,7 @@ points = []
 points += [{ "point": [ 0.0,  -2.0], "level": 0.0 }]
 points += [{ "point": [ 3.0,  3.0], "level": base_level, "gradient": [ 1.0,  1.0] }]
 points += [{ "point": [-3.0,  3.0], "level": base_level, "gradient": [-1.0,  1.0] }]
-points += [{ "point": [ 0.0,  5.0],                      "gradient": [ 0.0,  1.0], "curvature": 0.2 }]
+points += [{ "point": [ 0.0,  5.0],                      "gradient": [ 0.0,  1.0], "curvature": -0.6 }]
 # points += [{ "point": [ 0.0,  5.0],                      "gradient": [ 1.8,  1.0] }]
 clf = KernelLyapunov(*initial_state, kernel=kernel, points=points)
 
