@@ -1052,13 +1052,15 @@ def plot_invariant(plant, clf, cbf, params, **kwargs):
                 vecQ[k] = z.T @ A_list[k].T @ Q @ z
                 vecP[k] = z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z
             l = vecQ.T @ vecP / vecQ.T @ vecQ
+            W = np.hstack([vecQ.reshape(n,1), vecP.reshape(n,1)])
             if l >= 0 or extended:
-                det_grid[i,j] = np.linalg.det( np.hstack([vecQ.reshape(n,1), vecP.reshape(n,1)]) )
+                # det_grid[i,j] = np.sqrt( np.linalg.det( W.T @ W ) ) # does not work
+                det_grid[i,j] = np.linalg.det( W )
             else:
                 det_grid[i,j] = np.inf
         return det_grid
     
-    return ax.contour(x_grid, y_grid, determinant( x_grid, y_grid ), levels=[0], colors=color, linestyles='dashed', linewidths=1.0)
+    return ax.contour(x_grid, y_grid, determinant( x_grid, y_grid ), levels=[0.5], colors=color, linestyles='dashed', linewidths=1.0)
 
 # --------------------------------------------------------------- DEPRECATED CODE ----------------------------------------------------------
 

@@ -5,7 +5,7 @@ from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
 from common import create_quadratic, rot2D
 
-initial_state = [6.5, 6.0]
+initial_state = [0.5, 6.0]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
@@ -16,7 +16,7 @@ kernel_dim = kernel.kernel_dim
 print(kernel)
 
 # -------------------------------------------------- Define system ---------------------------------------------------------
-fx, fy = 0.0, 0.0                       # constant force with fx, fy components
+fx, fy = 1.0, 0.0                       # constant force with fx, fy components
 F = np.zeros([kernel_dim,kernel_dim])
 F[1,0], F[2,0] = fx, fy
 
@@ -30,9 +30,11 @@ points = []
 points += [{ "point": [ 0.0,  -2.0], "level": 0.0 }]
 points += [{ "point": [ 3.0,  3.0], "level": base_level, "gradient": [ 1.0,  1.0] }]
 points += [{ "point": [-3.0,  3.0], "level": base_level, "gradient": [-1.0,  1.0] }]
-points += [{ "point": [ 0.0,  5.0],                      "gradient": [ 0.0,  1.0], "curvature": -0.6 }]
+points += [{ "point": [ 0.0,  5.0],                      "gradient": [ 0.0,  1.0], "curvature": -0.9 }]
 # points += [{ "point": [ 0.0,  5.0],                      "gradient": [ 1.8,  1.0] }]
 clf = KernelLyapunov(*initial_state, kernel=kernel, points=points)
+
+print(f"rank of P = {np.linalg.matrix_rank(clf.P)}")
 
 # clf_eig = 0.05*np.array([ 12.0, 1.0 ])
 # clf_angle = np.pi/100
@@ -59,6 +61,7 @@ for pt in points:
 
 cbf = KernelBarrier(*initial_state, kernel=kernel, points=points)
 # cbf = KernelBarrier(*initial_state, kernel=kernel, boundary_points=boundary_points)
+print(f"rank of Q = {np.linalg.matrix_rank(cbf.Q)}")
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
 T = 15

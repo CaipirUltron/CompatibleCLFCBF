@@ -27,7 +27,7 @@ plant = ConservativeAffineSystem(initial_state=initial_state, initial_control=in
 # --------------------------------------------- Define CLF (quadratic) -----------------------------------------------------
 # clf_eig = [ 1.0, 0.25 ]
 clf_eig = 0.1*np.array([ 3.0, 1.0 ])
-clf_angle = np.pi/20
+clf_angle = np.pi/15
 clf_center = [0.0, -2.0]
 clf = KernelLyapunov(*initial_state, kernel=kernel, P=create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim))
 

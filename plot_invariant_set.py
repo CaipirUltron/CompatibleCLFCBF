@@ -14,7 +14,7 @@ fig = plt.figure(constrained_layout=True)
 ax = fig.add_subplot(111)
 ax.set_title("Invariant set plot for Kernel-based CLF-CBFs")
 
-limits = np.array([ [-10, 10], [-10, 10] ])
+limits = np.array([ [-8, 8], [-8, 8] ])
 
 sim.cbf.plot_level(axes = ax, axeslim = limits.reshape(4,), level = -0.4)
 sim.cbf.plot_level(axes = ax, axeslim = limits.reshape(4,), level = -0.2)
