@@ -1,7 +1,9 @@
 import math
 import numpy as np
 import itertools
+
 from scipy.optimize import fsolve
+from shapely import geometry
 
 def cofactor(A):
     """
@@ -518,6 +520,25 @@ def ellipsoid_parametrization(Q, param):
 
     z = main_axes @ np.array(reduced_z.tolist() + [ 0.0 for _ in range(p-rankQ)])
     return z
+
+def find_intersection(contour1, contour2):
+    '''
+    Finds the intersection btw two contours
+    '''
+    p1 = contour1.collections[0].get_paths()[0]
+    v1 = p1.vertices
+
+    p2 = contour2.collections[0].get_paths()[0]
+    v2 = p2.vertices
+
+    poly1 = geometry.LineString(v1)
+    poly2 = geometry.LineString(v2)
+
+    intersection = poly1.intersection(poly2)
+
+    return intersection
+
+
 
 # def ellipsoid_axes(Q):
 #     '''

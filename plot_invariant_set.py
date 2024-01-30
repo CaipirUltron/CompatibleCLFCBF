@@ -3,7 +3,8 @@ import importlib
 import numpy as np
 import matplotlib.pyplot as plt
 
-from controllers.equilibrium_algorithms import compute_equilibria, plot_invariant, findIntersection
+from common import find_intersection
+from controllers.equilibrium_algorithms import compute_equilibria, plot_invariant
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -13,21 +14,20 @@ sim = importlib.import_module("examples."+simulation_file, package=None)
 fig = plt.figure(constrained_layout=True)
 ax = fig.add_subplot(111)
 ax.set_title("Invariant set plot for Kernel-based CLF-CBFs")
+ax.set_aspect('equal', adjustable='box')
 
-limits = np.array([ [-8, 8], [-8, 8] ])
+limits = [ [-6, 6],
+           [-4, 8] ]
 
-sim.cbf.plot_level(axes = ax, axeslim = limits.reshape(4,), level = -0.4)
-sim.cbf.plot_level(axes = ax, axeslim = limits.reshape(4,), level = -0.2)
-# sim.cbf.plot_level(axes = ax, axeslim = limits.reshape(4,))
-
-contour_boundary = sim.cbf.plot_level(axes = ax, axeslim = limits.reshape(4,), level = 0.3)
+sim.cbf.plot_levels(levels = [-0.4, -0.2], ax=ax, limits=limits)
+contour_boundary = sim.cbf.plot_levels(levels = [0.0], ax=ax, limits=limits)
 contour_invariant = plot_invariant(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, ax=ax, limits=limits, extended=True)
 
-intersections = findIntersection(contour_boundary,contour_invariant)
+intersections = find_intersection(contour_boundary, contour_invariant)
 
 print(f"intersections: {intersections.geoms}")
 for pt in intersections.geoms:
-    ax.plot(pt.x,pt.y,'*b', alpha=0.5)
+    ax.plot(pt.x,pt.y,'*k', alpha=0.5)
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 sol_x_plot, = ax.plot([],[],'or', alpha=0.8)
@@ -54,7 +54,7 @@ while True:
         if "clf_contour" in locals():
             for coll in clf_contour.collections:
                 coll.remove()
-        clf_contour = sim.clf.plot_level(axes = ax, level = V, axeslim = limits.reshape(4,))
+        clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits)
     else:
         print("No equilibrium point was found.")
 

@@ -2,6 +2,7 @@ import math
 import itertools
 import numpy as np
 import cvxpy as cp
+
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
@@ -181,15 +182,42 @@ class Function():
 
         return function
 
-    def contour_plot(self, ax, levels, colors, min_lims=(-10 -10), max_lims=(-10 -10), resolution=0.1):
+    def plot_levels(self, levels, **kwargs):
         '''
-        Return 2D contour plot object.
+        Method for plotting level sets.
+        Returns: QUadContour object for 2D contour plots.
         '''
-        # if self._dim != 2:
-        #     raise Exception("Contour plot can only be used for 2D functions.")
+        if self._dim != 2:
+            raise Exception("Contour plot can only be used for 2D functions.")
+        n = 2
 
-        x = np.arange(min_lims[0], max_lims[0], resolution)
-        y = np.arange(min_lims[1], max_lims[1], resolution)
+        resolution = 0.1
+        colors = 'k'
+        ax = plt
+        for key in kwargs.keys():
+            aux_key = key.lower()
+            if aux_key == "ax":
+                ax = kwargs[key]
+                continue
+            if aux_key == "resolution":
+                resolution = kwargs[key]
+                continue
+            if aux_key == "colors":
+                colors = kwargs[key]
+                continue
+
+        limits = [ [-1, +1] for _ in range(n) ]
+        if "limits" in kwargs.keys():
+            limits = kwargs["limits"]
+            for i in range(n):
+                if limits[i][0] >=  limits[i][1]:
+                    raise Exception("Lines should be sorted in ascending order.")
+
+        x_min, x_max = limits[0][0], limits[0][1]
+        y_min, y_max = limits[1][0], limits[1][1]
+
+        x = np.arange(x_min, x_max, resolution)
+        y = np.arange(y_min, y_max, resolution)
         xv, yv = np.meshgrid(x,y)
 
         mesh_fvalues = np.zeros([np.size(xv,0),np.size(xv,1)])
@@ -202,8 +230,7 @@ class Function():
             # mesh_fvalues[:,i] = np.array(self.evaluate_function(xv[:,i], yv[:,i]))
             mesh_fvalues[:,i] = np.array(self.evaluate_function(*args))
 
-        cs = ax.contour(xv, yv, mesh_fvalues, levels=levels, colors=colors)
-        return cs
+        return ax.contour(xv, yv, mesh_fvalues, levels=levels, colors=colors)
 
 class Quadratic(Function):
     '''
@@ -948,32 +975,14 @@ class KernelQuadratic(Function):
                 Hessian[i,j] = Jac_m_i @ self.matrix_coefs @ Jac_m_j + m @ self.matrix_coefs @ hessian_m_ij
         return Hessian
 
-    def plot_level(self, **kwargs):
+    def plot_levels(self, levels, **kwargs):
         '''
-        Plots the kernel-based function using matplotlib
+        Modifies the level plot functino for plotting with CLF/CBF colors
         '''
-        ax = None
-        level = 0.0
-        for key in kwargs:
-            if key == "level":
-                level = kwargs["level"]
-            if key == "axes":
-                ax = kwargs["axes"]
-            if key == "figsize":
-                self.plot_config["figsize"] = kwargs[key]
-            if key == "axeslim":
-                self.plot_config["axeslim"] = kwargs[key]
-            if key == "color":
-                self.plot_config["color"] = kwargs[key]
+        if "colors" not in kwargs.keys():
+            kwargs["colors"] = self.plot_config["color"]
 
-        if ax == None:
-            fig = plt.figure(figsize = self.plot_config["figsize"], constrained_layout=True)
-            ax = fig.add_subplot(111)
-
-        x_lim = self.plot_config["axeslim"][0:2]
-        y_lim = self.plot_config["axeslim"][2:4]
-
-        return self.contour_plot(ax, levels=[level], colors=self.plot_config["color"], min_lims=[ x_lim[0], y_lim[0] ], max_lims=[ x_lim[1], y_lim[1] ], resolution=0.1)
+        return super().plot_levels(levels, **kwargs)
 
     def get_shape(self):
         '''

@@ -30,11 +30,9 @@ points = []
 points += [{ "point": [ 0.0,  -2.0], "level": 0.0 }]
 points += [{ "point": [ 3.0,  3.0], "level": base_level, "gradient": [ 1.0,  1.0] }]
 points += [{ "point": [-3.0,  3.0], "level": base_level, "gradient": [-1.0,  1.0] }]
-points += [{ "point": [ 0.0,  5.0],                      "gradient": [ 0.0,  1.0], "curvature": -0.8 }]
+points += [{ "point": [ 0.0,  5.0],                      "gradient": [ 0.0,  1.0], "curvature": -0.2 }]
 # points += [{ "point": [ 0.0,  5.0],                      "gradient": [ 1.8,  1.0] }]
 clf = KernelLyapunov(*initial_state, kernel=kernel, points=points)
-
-print(f"rank of P = {np.linalg.matrix_rank(clf.P)}")
 
 # clf_eig = 0.05*np.array([ 12.0, 1.0 ])
 # clf_angle = np.pi/100
@@ -61,7 +59,6 @@ for pt in points:
 
 cbf = KernelBarrier(*initial_state, kernel=kernel, points=points)
 # cbf = KernelBarrier(*initial_state, kernel=kernel, boundary_points=boundary_points)
-print(f"rank of Q = {np.linalg.matrix_rank(cbf.Q)}")
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
 T = 15
@@ -70,9 +67,9 @@ p, alpha, beta = 1.0, 1.0, 1.0
 controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
-xlimits, ylimits = [-8, 8], [-8, 8]
+xlimits, ylimits = [-6, 6], [-4, 8]
 plot_config = {
-    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "axeslim": tuple(xlimits+ylimits),
+    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": [xlimits, ylimits],
     "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": True
 }
 

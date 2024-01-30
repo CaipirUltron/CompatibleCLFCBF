@@ -1,11 +1,11 @@
 import numpy as np
 import cvxpy as cp
 import itertools
+import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
 from scipy.optimize import root, minimize, least_squares
 from scipy.linalg import null_space
-from shapely import geometry
 
 from common import compute_curvatures, KKTmultipliers, ellipsoid_parametrization
 from controllers.compatibility import LinearMatrixPencil2
@@ -999,6 +999,8 @@ def plot_invariant(plant, clf, cbf, params, **kwargs):
     res = 0.1
     color = 'k'
     extended = False
+    transparency = 1.0
+    ax = plt
     for key in kwargs.keys():
         aux_key = key.lower()
         if aux_key == "ax":
@@ -1013,6 +1015,10 @@ def plot_invariant(plant, clf, cbf, params, **kwargs):
         if aux_key == "extended":
             extended = kwargs[key]
             continue
+        if aux_key == "visible":
+            if not kwargs[key]:
+                transparency = 0.0
+            continue
 
     kernel = check_kernel(plant, clf, cbf)
     F = plant.get_F()
@@ -1024,16 +1030,15 @@ def plot_invariant(plant, clf, cbf, params, **kwargs):
     if n > 2:
         raise Exception("Plot invariant was not designed for dimensions > 2.")
 
-    minusones, plusones = -np.ones([n,1], dtype=int), +np.ones([n,1], dtype=int)
-    interval_limits = np.hstack([ minusones, plusones ]).tolist()
+    limits = [ [-1, +1] for _ in range(n) ]
     if "limits" in kwargs.keys():
-        interval_limits = kwargs["limits"]
+        limits = kwargs["limits"]
         for i in range(n):
-            if interval_limits[i][0] >=  interval_limits[i][1]:
+            if limits[i][0] >=  limits[i][1]:
                 raise Exception("Lines should be sorted in ascending order.")
     
-    x_min, x_max = interval_limits[0][0], interval_limits[0][1]
-    y_min, y_max = interval_limits[1][0], interval_limits[1][1]
+    x_min, x_max = limits[0][0], limits[0][1]
+    y_min, y_max = limits[1][0], limits[1][1]
 
     x = np.arange(x_min, x_max, res)
     y = np.arange(y_min, y_max, res)
@@ -1061,24 +1066,23 @@ def plot_invariant(plant, clf, cbf, params, **kwargs):
                 det_grid[i,j] = np.inf
         return det_grid
     
-    return ax.contour(x_grid, y_grid, determinant( x_grid, y_grid ), levels=[0.5], colors=color, linestyles='dashed', linewidths=1.0)
+    return ax.contour(x_grid, y_grid, determinant( x_grid, y_grid ), levels=[0.0], colors=color, linestyles='dashed', linewidths=1.0, alpha=transparency)
 
-def findIntersection(contour1,contour2):
+def q_function(plant, clf, cbf, params, **kwargs):
     '''
-    Finds the intersection btw two contours
+    Builds corresponding q-function for a given plant and CLF-CBF pair. 
     '''
-    p1 = contour1.collections[0].get_paths()[0]
-    v1 = p1.vertices
+    kernel = check_kernel(plant, clf, cbf)
+    F = plant.get_F()
+    P = clf.P
+    Q = cbf.Q
+    A_list = kernel.get_A_matrices()
+    n = kernel._dim
 
-    p2 = contour2.collections[0].get_paths()[0]
-    v2 = p2.vertices
+    level_range = np.arange(0.0, )
 
-    poly1 = geometry.LineString(v1)
-    poly2 = geometry.LineString(v2)
+    cbf_level_contour = cbf.plot_level(axes = ax, axeslim = limits.reshape(4,), level = 0.3)
 
-    intersection = poly1.intersection(poly2)
-
-    return intersection
 
 # --------------------------------------------------------------- DEPRECATED CODE ----------------------------------------------------------
 

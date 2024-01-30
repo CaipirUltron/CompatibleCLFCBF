@@ -17,7 +17,7 @@ class Plot2DSimulation():
             "gridspec": (1,1,1),
             "widthratios": [1],
             "heightratios": [1],
-            "axeslim": (-6,6,-6,6),
+            "limits": [[-6,6], [-6,6]],
             "drawlevel": False,
             "resolution": 50,
             "fps":50,
@@ -91,9 +91,8 @@ class Plot2DSimulation():
         '''
         Configures plot
         '''
-        axes_lim = self.plot_config["axeslim"]
-        self.x_lim = axes_lim[0:2]
-        self.y_lim = axes_lim[2:4]
+        self.x_lim = self.plot_config["limits"][0]
+        self.y_lim = self.plot_config["limits"][1]
 
         self.main_ax.set_xlim(*self.x_lim)
         self.main_ax.set_ylim(*self.y_lim)
@@ -141,7 +140,7 @@ class Plot2DSimulation():
         self.clf_contour_color = mcolors.TABLEAU_COLORS['tab:blue']
         self.cbf_contour_color = mcolors.TABLEAU_COLORS['tab:red']
 
-        self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[0.0], colors=self.clf_contour_color, min_lims=[ self.x_lim[0], self.y_lim[0] ], max_lims=[ self.x_lim[1], self.y_lim[1] ], resolution=0.5)
+        self.clf_contours = self.clf.plot_levels(levels=[0.0], colors=self.clf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], resolution=0.5)
         self.cbf_contours = []
 
     def init(self):
@@ -163,7 +162,7 @@ class Plot2DSimulation():
             self.equilibria_plot.set_data(x_eq, y_eq)
 
         for cbf in self.cbfs:
-            self.cbf_contours.append( cbf.contour_plot(self.main_ax, levels=[0.0], colors=self.cbf_contour_color, min_lims=[ self.x_lim[0], self.y_lim[0] ], max_lims=[ self.x_lim[1], self.y_lim[1] ], resolution=0.1) )
+            self.cbf_contours.append( cbf.plot_levels(levels=[-0.4, -0.2, 0.0], colors=self.cbf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], resolution=0.1) )
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
@@ -228,7 +227,7 @@ class Plot2DSimulation():
                     coll.remove()
 
                 perimeter = 4*abs(current_state[0]) + 4*abs(current_state[1])
-                self.clf_contours = self.clf.contour_plot(self.main_ax, levels=[V], colors=self.clf_contour_color, min_lims=[ self.x_lim[0], self.y_lim[0] ], max_lims=[ self.x_lim[1], self.y_lim[1] ], resolution=0.005*perimeter+0.1)
+                self.clf_contours = self.clf.plot_levels(levels=[V], colors=self.clf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], resolution=0.005*perimeter+0.1)
 
         else:
             self.runs = False
