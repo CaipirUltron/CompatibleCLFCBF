@@ -1,10 +1,11 @@
 import numpy as np
 import cvxpy as cp
 import itertools
+import matplotlib.colors as mcolors
 
 from scipy.optimize import root, minimize, least_squares
 from scipy.linalg import null_space
-import matplotlib.colors as mcolors
+from shapely import geometry
 
 from common import compute_curvatures, KKTmultipliers, ellipsoid_parametrization
 from controllers.compatibility import LinearMatrixPencil2
@@ -1055,12 +1056,29 @@ def plot_invariant(plant, clf, cbf, params, **kwargs):
             W = np.hstack([vecQ.reshape(n,1), vecP.reshape(n,1)])
             if l >= 0 or extended:
                 # det_grid[i,j] = np.sqrt( np.linalg.det( W.T @ W ) ) # does not work
-                det_grid[i,j] = np.linalg.det( W )
+                det_grid[i,j] = np.linalg.det(W)
             else:
                 det_grid[i,j] = np.inf
         return det_grid
     
     return ax.contour(x_grid, y_grid, determinant( x_grid, y_grid ), levels=[0.5], colors=color, linestyles='dashed', linewidths=1.0)
+
+def findIntersection(contour1,contour2):
+    '''
+    Finds the intersection btw two contours
+    '''
+    p1 = contour1.collections[0].get_paths()[0]
+    v1 = p1.vertices
+
+    p2 = contour2.collections[0].get_paths()[0]
+    v2 = p2.vertices
+
+    poly1 = geometry.LineString(v1)
+    poly2 = geometry.LineString(v2)
+
+    intersection = poly1.intersection(poly2)
+
+    return intersection
 
 # --------------------------------------------------------------- DEPRECATED CODE ----------------------------------------------------------
 

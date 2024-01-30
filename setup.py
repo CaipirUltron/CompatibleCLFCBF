@@ -8,4 +8,4 @@ setup(name='compatible_clf_cbf',
       license='GPLv3',
       packages=find_packages(include=['compatible_clf_cbf.*']),
       zip_safe=False,
-      install_requires=[ 'numpy', 'scipy', 'sympy', 'matplotlib', 'qpsolvers', 'picos', 'cvxpy' ])
+      install_requires=[ 'numpy', 'scipy', 'sympy', 'matplotlib', 'qpsolvers', 'picos', 'cvxpy', 'shapely' ])

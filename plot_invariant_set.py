@@ -3,7 +3,7 @@ import importlib
 import numpy as np
 import matplotlib.pyplot as plt
 
-from controllers.equilibrium_algorithms import compute_equilibria, plot_invariant
+from controllers.equilibrium_algorithms import compute_equilibria, plot_invariant, findIntersection
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -18,8 +18,16 @@ limits = np.array([ [-8, 8], [-8, 8] ])
 
 sim.cbf.plot_level(axes = ax, axeslim = limits.reshape(4,), level = -0.4)
 sim.cbf.plot_level(axes = ax, axeslim = limits.reshape(4,), level = -0.2)
-sim.cbf.plot_level(axes = ax, axeslim = limits.reshape(4,))
-plot_invariant(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, ax=ax, limits=limits, extended=True)
+# sim.cbf.plot_level(axes = ax, axeslim = limits.reshape(4,))
+
+contour_boundary = sim.cbf.plot_level(axes = ax, axeslim = limits.reshape(4,), level = 0.3)
+contour_invariant = plot_invariant(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, ax=ax, limits=limits, extended=True)
+
+intersections = findIntersection(contour_boundary,contour_invariant)
+
+print(f"intersections: {intersections.geoms}")
+for pt in intersections.geoms:
+    ax.plot(pt.x,pt.y,'*b', alpha=0.5)
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 sol_x_plot, = ax.plot([],[],'or', alpha=0.8)
