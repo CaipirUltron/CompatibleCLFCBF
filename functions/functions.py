@@ -185,7 +185,7 @@ class Function():
     def plot_levels(self, levels, **kwargs):
         '''
         Method for plotting level sets.
-        Returns: QUadContour object for 2D contour plots.
+        Returns: QuadContour object for 2D contour plots.
         '''
         if self._dim != 2:
             raise Exception("Contour plot can only be used for 2D functions.")
@@ -1029,6 +1029,9 @@ class KernelBarrier(KernelQuadratic):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        # if type(self) == KernelBarrier:
+        #     self.q_function = QFunction(*args, **kwargs)
+
     def set_param(self, param=None, **kwargs):
         '''
         Set the parameters of the Kernel Barrier function.
@@ -1053,6 +1056,20 @@ class KernelBarrier(KernelQuadratic):
         cost = self.fit_level_set(points=points, level=0.0)
         self.Q = self.matrix_coefs
         return cost
+
+class QFunction(KernelBarrier):
+    '''
+    Class for kernel-based q-functions.
+    '''
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def function(self, point):
+        '''
+        Compute q-function
+        '''
+        m = self.kernel.function(point)
+        return np.log( m.T @ self.matrix_coefs @ m )
 
 class ApproxFunction(Function):
     '''

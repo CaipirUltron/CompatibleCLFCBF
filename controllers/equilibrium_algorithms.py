@@ -4,6 +4,7 @@ import itertools
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
+from shapely import geometry
 from scipy.optimize import root, minimize, least_squares
 from scipy.linalg import null_space
 
@@ -1022,8 +1023,7 @@ def plot_invariant(plant, clf, cbf, params, **kwargs):
 
     kernel = check_kernel(plant, clf, cbf)
     F = plant.get_F()
-    P = clf.P
-    Q = cbf.Q
+    P, Q = clf.P, cbf.Q
     A_list = kernel.get_A_matrices()
     n = kernel._dim
 
@@ -1050,6 +1050,7 @@ def plot_invariant(plant, clf, cbf, params, **kwargs):
         Evaluates det([ vecQ, vecP ]) over the grid
         '''
         det_grid = np.zeros([len(x), len(y)])
+
         for (i,j) in itertools.product(range(len(x)), range(len(y))):
             vecQ, vecP = np.zeros(n), np.zeros(n)
             z = kernel.function([x_grid[i,j], y_grid[i,j]])
@@ -1064,25 +1065,125 @@ def plot_invariant(plant, clf, cbf, params, **kwargs):
                 det_grid[i,j] = np.linalg.det(W)
             else:
                 det_grid[i,j] = np.inf
+
         return det_grid
     
     return ax.contour(x_grid, y_grid, determinant( x_grid, y_grid ), levels=[0.0], colors=color, linestyles='dashed', linewidths=1.0, alpha=transparency)
 
-def q_function(plant, clf, cbf, params, **kwargs):
+def check_invariant(x, plant, clf, cbf, params, **kwargs):
     '''
-    Builds corresponding q-function for a given plant and CLF-CBF pair. 
+    Given a state-space point, checks if it's inside the invariant manifold.
+    Returns: bool [True, False], 
+             lambda [float, None]
     '''
-    kernel = check_kernel(plant, clf, cbf)
+    tol = 1e-2
+    extended = False
+    if "tol" in kwargs.keys():
+        tol = kwargs["tol"]
+    if "extended" in kwargs.keys():
+        extended = kwargs["extended"]
+
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+
     F = plant.get_F()
     P = clf.P
     Q = cbf.Q
-    A_list = kernel.get_A_matrices()
-    n = kernel._dim
+    if clf.kernel != cbf.kernel:
+        raise Exception("CLF and CBF must be based on the same kernel.")
+    kernel = clf.kernel
+    p = kernel.kernel_dim
 
-    level_range = np.arange(0.0, )
+    m = kernel.function(x)
+    Jm = kernel.jacobian(x)
 
-    cbf_level_contour = cbf.plot_level(axes = ax, axeslim = limits.reshape(4,), level = 0.3)
+    '''
+    Find a basis for the transpose Jacobian null space of dimension l = p - rank(Jm) >= p - n
+    '''
+    N = null_space(Jm.T)
+    dimJm_nullspace = N.shape[1]
 
+    '''
+    Checks if the linear system ( λ Q - 0.5 c m P m P + F ) m(x) = SUM a_i n_i can be solved for (λ, a_1, ..., a_l),
+    where n_i are elements of the basis for the transpose Jacobian null space.
+    '''
+    A = np.zeros([p,dimJm_nullspace+1])
+    A[:,0] = Q @ m
+    for k in range(dimJm_nullspace):
+        A[:,k+1] = - N[:,k]
+    b = ( 0.5 * params["slack_gain"] * params["clf_gain"] * (m.T @ P @ m) * P - F ) @ m
+
+    sol = np.linalg.lstsq(A, b, rcond=None)
+    l = sol[0][0]
+    # alpha = sol[0][1:]          # nullspace coordinates
+    residue = np.sum(sol[1])
+
+    '''
+    Returns True if the resulting under-determined linear system of equations has an exact solution
+    '''
+    if np.linalg.norm(residue) < tol and ( not extended or l >= 0 ):
+        return True, l
+    else:
+        return False, None
+
+def q_function(plant, clf, cbf, params, **kwargs):
+    '''
+    Builds corresponding q-function for a given plant and CLF-CBF pair.
+    '''
+    num_levels = 10
+    max_level = 10
+    if "max_level" in kwargs.keys():
+        max_level = kwargs["max_level"]
+    if "num_levels" in kwargs.keys():
+        num_levels = kwargs["num_levels"]
+
+    levels, level_step = np.linspace(-0.5, max_level, num_levels, retstep=True)
+    levels = levels.tolist()
+    levels.pop(0)
+
+    cbf_contours = cbf.plot_levels(levels = levels, **kwargs)
+    inv_contour = plot_invariant(plant, clf, cbf, params, **kwargs)
+    inv_vertices = inv_contour.collections[0].get_paths()[0].vertices
+
+    '''
+    Finds the intersections btw the contours at each level set
+    '''
+    if len(cbf_contours.levels) != len(cbf_contours.collections):
+        raise Exception("Error in the number of levels.")
+
+    # Loop through each cbf contour: each corresponds to a different level (in increasing order)
+    lambdas, q_levels, pts = [], [], []
+    for k in range(len(levels)):
+
+        current_lvl = levels[k]
+
+        if len(cbf_contours.collections[k].get_paths()) == 0:
+            continue
+
+        k_cbf_contour_vertices = cbf_contours.collections[k].get_paths()[0].vertices
+        poly_cbf_k = geometry.LineString(k_cbf_contour_vertices)
+        poly_inv_k = geometry.LineString(inv_vertices)
+
+        # finds intersection points between vertices
+        intersections = poly_cbf_k.intersection(poly_inv_k)
+        intersection_pts = [ [pt.x, pt.y] for pt in intersections.geoms ]
+
+        # checks for outliers
+        for pt in intersection_pts:
+            is_inv, l = check_invariant(pt, plant, clf, cbf, params, **kwargs)
+            if is_inv: 
+                lambdas.append(l)
+                q_levels.append(current_lvl)
+                pts.append(pt)
+
+    # sorts by increasing order of lambda
+    indexes = np.argsort(lambdas)
+    lambdas = np.array(lambdas)[indexes].tolist()
+    q_levels = np.array(q_levels)[indexes].tolist()
+    pts = np.array(pts)[indexes].tolist()
+
+    # adds data to result struct
+    return {"lambdas": lambdas, "levels": q_levels, "points": pts}
 
 # --------------------------------------------------------------- DEPRECATED CODE ----------------------------------------------------------
 
@@ -1148,79 +1249,6 @@ def alpha2kappa(eq_sol, kernel):
     kappa, residuals = system_solution[0], system_solution[1]
 
     return kappa
-
-def check_invariant(plant, clf, cbf, x, **kwargs):
-    '''
-    Given a state-space point, returns True if it's inside an invariant manifold
-    '''
-    tol = 1e-12
-    slack_gain, clf_gain = 1.0, 1.0
-    for key in kwargs.keys():
-        aux_key = key.lower()
-        if aux_key == "slack_gain":
-            slack_gain = kwargs[key]
-            continue
-        if aux_key == "clf_gain":
-            clf_gain = kwargs[key]
-            continue
-
-    if clf._dim != cbf._dim:
-        raise Exception("CLF and CBF must have the same dimension.")
-
-    F = plant.get_F()
-    P = clf.P
-    Q = cbf.Q
-    if clf.kernel != cbf.kernel:
-        raise Exception("CLF and CBF must be based on the same kernel.")
-    kernel = clf.kernel
-    p = kernel.kernel_dim
-
-    m = kernel.function(x)
-    Jm = kernel.jacobian(x)
-
-    '''
-    Find a basis for the transpose Jacobian null space of dimension l = p - rank(Jm) >= p - n
-    '''
-    N = null_space(Jm.T)
-    dimJm_nullspace = N.shape[1]
-
-    '''
-    Checks if the linear system ( λ Q - 0.5 c m P m P + F ) m(x) = SUM a_i n_i can be solved for (λ, a_1, ..., a_l),
-    where n_i are elements of the basis for the transpose Jacobian null space.
-    '''
-    A = np.zeros([p,dimJm_nullspace+1])
-    A[:,0] = Q @ m
-    for k in range(dimJm_nullspace):
-        A[:,k+1] = - N[:,k]
-    b = ( 0.5 * slack_gain * clf_gain * (m.T @ P @ m) * P - F ) @ m
-
-    sol = np.linalg.lstsq(A, b, rcond=None)
-    l = sol[0][0]
-    alpha = sol[0][1:]          # nullspace coordinates
-    residue = np.sum(sol[1])
-
-    '''
-    If the resulting under-determined linear system of equations has an exact solution, 
-    and if the first sol. coord. is non-negative, then x is an equilibrium point.
-    '''
-    is_invariant = False
-    equilibrium_pt = { "x": None, "alpha": None, "lambda": None, "residue": residue }
-    if l >= 0 and np.linalg.norm(residue) < tol:
-
-        g = plant.g_method(x)
-        G = g @ g.T
-
-        nablaV = clf.gradient(x)
-        nablah = cbf.gradient(x)
-        z1 = nablah / np.linalg.norm(nablah)
-        z2 = nablaV - nablaV.T @ G @ z1 * z1
-        eta = 1/(1 + slack_gain * z2.T @ G @ z2 )
-
-        is_invariant = True
-        equilibrium_pt = { "x": x.tolist(), "alpha": alpha.tolist(), "lambda": l, "eta": eta, "residue": residue, "V": clf.function(x) }
-        equilibrium_pt["stability"], equilibrium_pt["kappa"] = compute_stability(plant, clf, cbf, equilibrium_pt, slack_gain=slack_gain, clf_gain=clf_gain )
-
-    return is_invariant, equilibrium_pt
 
 def check_equilibrium(plant, clf, cbf, x, **kwargs):
     '''

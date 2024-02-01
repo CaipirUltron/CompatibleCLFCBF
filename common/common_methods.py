@@ -521,22 +521,30 @@ def ellipsoid_parametrization(Q, param):
     z = main_axes @ np.array(reduced_z.tolist() + [ 0.0 for _ in range(p-rankQ)])
     return z
 
-def find_intersection(contour1, contour2):
-    '''
-    Finds the intersection btw two contours
-    '''
-    p1 = contour1.collections[0].get_paths()[0]
-    v1 = p1.vertices
+# def find_intersection(cbf_contours, invariant_contour):
+#     '''
+#     Finds the intersection btw two contours
+#     '''
+#     if cbf_contours.levels != len(cbf_contours.collections):
+#         raise Exception("Error in the number of levels.")
 
-    p2 = contour2.collections[0].get_paths()[0]
-    v2 = p2.vertices
+#     num_levels = cbf_contours.levels
 
-    poly1 = geometry.LineString(v1)
-    poly2 = geometry.LineString(v2)
+#     for level in cbf_contours.collections:
+        
 
-    intersection = poly1.intersection(poly2)
+#     p1 = cbf_contours.collections[0].get_paths()[0]
+#     v1 = p1.vertices
 
-    return intersection
+#     p2 = invariant_contour.collections[0].get_paths()[0]
+#     v2 = p2.vertices
+
+#     poly1 = geometry.LineString(v1)
+#     poly2 = geometry.LineString(v2)
+
+#     intersection = poly1.intersection(poly2)
+
+#     return intersection
 
 
 

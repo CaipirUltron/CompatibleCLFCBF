@@ -3,7 +3,6 @@ import numpy as np
 from dynamic_systems import ConservativeAffineSystem
 from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
-from common import create_quadratic, rot2D
 
 initial_state = [0.5, 6.0]
 initial_control = [0.0, 0.0]
@@ -16,7 +15,7 @@ kernel_dim = kernel.kernel_dim
 print(kernel)
 
 # -------------------------------------------------- Define system ---------------------------------------------------------
-fx, fy = 1.0, 0.0                       # constant force with fx, fy components
+fx, fy = 0.0, 0.0                       # constant force with fx, fy components
 F = np.zeros([kernel_dim,kernel_dim])
 F[1,0], F[2,0] = fx, fy
 
