@@ -34,32 +34,35 @@ while True:
     init_x = [ pt[0][0], pt[0][1] ]
     init_x_plot.set_data([init_x[0]], [init_x[1]])
 
+    if "clf_contour" in locals():
+        for coll in clf_contour.collections:
+            coll.remove()
+
     # Find equilibrium point
     sol_eq = compute_equilibria(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, init_x=init_x, limits=limits)
     if sol_eq["x"] != None:
         x_eq = sol_eq["x"]
         l_eq = sol_eq["lambda"]
         type = sol_eq["type"]
-        print(f"{type} equilibrium found at {x_eq}, with lambda = {l_eq}")
+        print(f"{type} equilibrium point found at {x_eq}, with lambda = {l_eq}")
         sol_x_plot.set_data([x_eq[0]], [x_eq[1]])
-        init_x_min = x_eq
+
+        V = sim.clf.function(x_eq)
+        clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits)
+
+        # Find minimum point in the invariant set branch
+        sol_minimize = minimize_branch(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, init_x=x_eq, init_lambda=l_eq)
+        if sol_minimize != None:
+            x_min = sol_minimize["x"]
+            l_min = sol_minimize["lambda"]
+            grad_norm = np.linalg.norm(sim.cbf.gradient(x_min))
+            print(f"minimizer found at {x_min}, with lambda = {l_min} and gradient norm = {grad_norm}")
+            if grad_norm < 1e-5 or l_min < 1e-5:
+                print(f"{type} equilibrium found at {x_eq} is non-removable.")
+            else:
+                print(f"{type} equilibrium found at {x_eq} is removable.")
+            sol_x_minimize_plot.set_data([x_min[0]], [x_min[1]])
     else:
-        init_x_min = init_x
-
-    if "clf_contour" in locals():
-        for coll in clf_contour.collections:
-            coll.remove()
-    V = sim.clf.function(x_eq)
-    clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits)
-
-    # Find minimum point in the invariant set branch
-    
-    sol_minimize = minimize_branch(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, init_x=init_x_min, limits=limits)
-    if sol_minimize != None:
-        x_min = sol_minimize["x"]
-        l_min = sol_minimize["lambda"]
-        print(f"Minimization found point {x_min}, with lambda = {l_min}")
-        print(f"CBF gradient norm at the minimization point is {np.linalg.norm(sim.cbf.gradient(x_min))}")
-        sol_x_minimize_plot.set_data([x_min[0]], [x_min[1]])
+        print("No equilibrium point was found.")
 
 plt.show()

@@ -1189,12 +1189,16 @@ def minimize_branch(plant, clf, cbf, params, **kwargs):
     Finds the minimum value of the CBF along a branch of the invariant set
     '''
     tol = 1e-05
-    init_x_def = False
+    init_x_def, init_lambda_def = False, False
     for key in kwargs.keys():
         aux_key = key.lower()
         if aux_key == "init_x":
             init_x = kwargs[key]
             init_x_def = True
+            continue
+        if aux_key == "init_lambda":
+            init_lambda = kwargs[key]
+            init_lambda_def = True
             continue
         if aux_key == "tol":
             tol = kwargs[key]
@@ -1212,10 +1216,10 @@ def minimize_branch(plant, clf, cbf, params, **kwargs):
 
     if not init_x_def:
         init_x = [ np.random.uniform( limits[k][0], limits[k][1] ) for k in range(n) ]
+    if not init_lambda_def:
+        init_lambda = np.random.rand()
 
     n = kernel._dim
-    F, P, Q = plant.get_F(), clf.P, cbf.Q
-    A_list = kernel.get_A_matrices()
 
     '''
     var = [ x, λ ] is a (n+1) dimensional array, where:
@@ -1227,16 +1231,8 @@ def minimize_branch(plant, clf, cbf, params, **kwargs):
         '''
         x = var[0:n]
         l = var[-1]
-        
-        vecQ, vecP = np.zeros(n), np.zeros(n)
-        z = kernel.function(x)
         V = clf.function(x)
-
-        for k in range(n):
-            vecQ[k] = z.T @ A_list[k].T @ Q @ z
-            vecP[k] = z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z
-        
-        return l * vecQ - vecP
+        return equilibrium_field(kernel.function(x), l, clf.P, V, plant, clf, cbf, params)
 
     def objective(var):
         '''
@@ -1245,7 +1241,6 @@ def minimize_branch(plant, clf, cbf, params, **kwargs):
         x = var[0:n]
         return cbf.function(x)
 
-    init_lambda = np.random.rand()
     init_var = np.hstack([init_x, init_lambda])
 
     x_bounds = [ (-np.inf, np.inf) for _ in range(n) ]
@@ -1253,12 +1248,9 @@ def minimize_branch(plant, clf, cbf, params, **kwargs):
 
     eq_found = False
     try:
-        result = minimize(fun=objective,
-                        x0=init_var,
-                        # method='trust-constr',
-                        constraints = [ {'type': 'eq', 'fun': invariant_set_constr} ],
-                        bounds=x_bounds+l_bounds)
-        
+        result = minimize( fun=objective, x0=init_var,
+                           constraints = [{'type': 'eq', 'fun': invariant_set_constr}],
+                           bounds=x_bounds+l_bounds, options={"disp": False} )
         if result.fun < tol and result.x[-1] >= 0:
             eq_found = True
     except Exception as error_msg:
