@@ -10,32 +10,22 @@ simulation_file = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples."+simulation_file, package=None)
 
 # ----------------------------------------------------- Plotting ---------------------------------------------------------
-fig = plt.figure(figsize=(10, 5),constrained_layout=True)
-ax1 = fig.add_subplot(121)
-ax1.set_title("Invariant set plot for Kernel-based CLF-CBFs")
-ax1.set_aspect('equal', adjustable='box')
-
-ax2 = fig.add_subplot(122)
-ax2.set_title("Q-function for Kernel-based CLF-CBFs")
-# ax2.set_aspect('equal', adjustable='box')
-# ax2.set_xlim(0, 1000)
-# ax2.set_ylim(-1, 30)
+fig = plt.figure(constrained_layout=True)
+ax = fig.add_subplot(111)
+ax.set_title("Invariant set plot for Kernel-based CLF-CBFs")
+ax.set_aspect('equal', adjustable='box')
 
 limits = [ [-6, 6],
            [-4, 8] ]
 
-# sim.cbf.plot_levels(levels = [-0.4, -0.2], ax=ax, limits=limits)
-# contour_boundary = sim.cbf.plot_levels(levels = [-0.4, -0.2, 0.0], ax=ax, limits=limits)
-contour_invariant = plot_invariant(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, ax=ax1, limits=limits, extended=True)
+ax.set_xlim(limits[0][0], limits[0][1])
+ax.set_ylim(limits[1][0], limits[1][1])
 
-# qfun = q_function(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, ax=ax1, limits=limits, num_levels=20, max_level=1.0, extended=True, tol=1e-1)
-# ax2.plot(qfun["lambdas"], qfun["levels"],'b.')
+contour_boundary = sim.cbf.plot_levels(levels = [-0.4, -0.2, 0.0], ax=ax, limits=limits)
+contour_invariant = plot_invariant(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, ax=ax, limits=limits, extended=True)
 
-# for pt in qfun["points"]:
-#     ax1.plot(pt[0],pt[1],'*k', alpha=0.5)
-
-init_x_plot, = ax1.plot([],[],'ob', alpha=0.5)
-sol_x_plot, = ax1.plot([],[],'or', alpha=0.8)
+init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
+sol_x_plot, = ax.plot([],[],'or', alpha=0.8)
 
 while True:
     pt = plt.ginput(1, timeout=0)
@@ -59,7 +49,7 @@ while True:
         if "clf_contour" in locals():
             for coll in clf_contour.collections:
                 coll.remove()
-        clf_contour = sim.clf.plot_levels(levels=[V], ax=ax1, limits=limits)
+        clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits)
     else:
         print("No equilibrium point was found.")
 
