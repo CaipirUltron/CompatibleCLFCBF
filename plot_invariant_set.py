@@ -1,6 +1,5 @@
-import sys, time
+import sys
 import importlib
-import numpy as np
 import matplotlib.pyplot as plt
 
 from controllers.equilibrium_algorithms import compute_equilibria, plot_invariant, minimize_branch
