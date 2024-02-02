@@ -1065,7 +1065,6 @@ def plot_invariant(plant, clf, cbf, params, **kwargs):
                 det_grid[i,j] = np.linalg.det(W)
             else:
                 det_grid[i,j] = np.inf
-
         return det_grid
     
     return ax.contour(x_grid, y_grid, determinant( x_grid, y_grid ), levels=[0.0], colors=color, linestyles='dashed', linewidths=1.0, alpha=transparency)
@@ -1184,6 +1183,86 @@ def q_function(plant, clf, cbf, params, **kwargs):
 
     # adds data to result struct
     return {"lambdas": lambdas, "levels": q_levels, "points": pts}
+
+def minimize_branch(plant, clf, cbf, x_init):
+    '''
+    Finds the minimum value of the CBF along a branch of the invariant set
+    '''
+    kernel = check_kernel(plant, clf, cbf)
+
+    n = kernel._dim
+    p = kernel.kernel_dim
+    P = clf.P
+    Q = cbf.Q
+    eigP, eigvecP = np.linalg.eig(P)
+
+    m = kernel.function(x)
+    Jm = kernel.jacobian(x)
+    V = clf.function(x)
+
+    Null = null_space(Jm.T)
+    dimNull = Null.shape[1]
+
+    '''
+    var = [ λ, R, alpha ] is a (n+rankQ-1+1) dimensional array, where:
+    λ is a scalar
+    R is the vectorized version of a p-dimensional orthogonal matrix representing possible rotations of P (p^2 dimensional)
+    alpha is an array with the dimension of the nullspace of the Jacobian transpose
+    '''
+    def invariant_set_constr(var):
+        '''
+        Invariant set constraint
+        '''
+        l = var[0]
+        x = var[1:]
+        
+        vecQ, vecP = np.zeros(n), np.zeros(n)
+        z = kernel.function(x)
+        V = clf.
+        for k in range(n):
+            vecQ[k] = z.T @ A_list[k].T @ Q @ z
+            vecP[k] = z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z
+        l = vecQ.T @ vecP / vecQ.T @ vecQ
+
+    def level_set_constr(var):
+        '''
+        Keeps the level set constant
+        '''
+        R = var[1:1+p**2].reshape((p, p))
+        return m @ R.T @ np.diag(eigP) @ R @ m - 2 * V
+
+    def orthonormality_constraint(var):
+        '''
+        Keeps matrix R orthonormal
+        '''
+        R = var[1:1+p**2].reshape((p, p))
+        return np.linalg.norm( R.T @ R - np.eye(p), 'fro' )
+
+    def objective(var):
+        '''
+        Minimizes lambda
+        '''
+        l = var[0]
+        R = var[1:1+p**2].reshape((p, p))
+        return l + np.linalg.norm( R.T @ np.diag(eigP) @ R - P , 'fro')
+
+    init_lambda = np.random.rand()
+    init_R = eigvecP.flatten()
+    init_alpha = np.random.rand(dimNull)
+    init_var = np.hstack([init_lambda, init_R, init_alpha])
+
+    result = minimize(fun=objective,
+                x0=init_var,
+                # method='trust-constr',
+                constraints = [ 
+                                {'type': 'eq', 'fun': invariant_set_constr}, 
+                                {'type': 'eq', 'fun': level_set_constr},
+                                {'type': 'eq', 'fun': orthonormality_constraint}
+                            ])
+
+    l = result.x[0]
+    R = result.x[1:1+p**2].reshape(p,p)
+    alpha = result.x[1+p**2:1+p**2+dimNull]
 
 # --------------------------------------------------------------- DEPRECATED CODE ----------------------------------------------------------
 
