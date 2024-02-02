@@ -1251,6 +1251,7 @@ def minimize_branch(plant, clf, cbf, params, **kwargs):
     x_bounds = [ (-np.inf, np.inf) for _ in range(n) ]
     l_bounds = [ (0.0, np.inf) ]
 
+    eq_found = False
     try:
         result = minimize(fun=objective,
                         x0=init_var,
@@ -1267,7 +1268,7 @@ def minimize_branch(plant, clf, cbf, params, **kwargs):
         x = result.x[0:n]
         l = result.x[-1]
         return {"x": x, "lambda": l}
-    return {"x": None, "lambda": None}
+    return None
 
 # --------------------------------------------------------------- DEPRECATED CODE ----------------------------------------------------------
 

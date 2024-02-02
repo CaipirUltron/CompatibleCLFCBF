@@ -1,5 +1,7 @@
 import sys
 import importlib
+
+import numpy as np
 import matplotlib.pyplot as plt
 
 from controllers.equilibrium_algorithms import compute_equilibria, plot_invariant, minimize_branch
@@ -34,10 +36,15 @@ while True:
 
     # Find equilibrium point
     sol_eq = compute_equilibria(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, init_x=init_x, limits=limits)
-    x_eq = sol_eq["x"]
-    l_eq = sol_eq["lambda"]
-    print(f"Equilibrium found point {x_eq}, with lambda = {l_eq}")
-    sol_x_plot.set_data([x_eq[0]], [x_eq[1]])
+    if sol_eq["x"] != None:
+        x_eq = sol_eq["x"]
+        l_eq = sol_eq["lambda"]
+        type = sol_eq["type"]
+        print(f"{type} equilibrium found at {x_eq}, with lambda = {l_eq}")
+        sol_x_plot.set_data([x_eq[0]], [x_eq[1]])
+        init_x_min = x_eq
+    else:
+        init_x_min = init_x
 
     if "clf_contour" in locals():
         for coll in clf_contour.collections:
@@ -46,10 +53,13 @@ while True:
     clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits)
 
     # Find minimum point in the invariant set branch
-    sol_minimize = minimize_branch(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, init_x=init_x, limits=limits)
-    x_min = sol_minimize["x"]
-    l_min = sol_minimize["lambda"]
-    print(f"Minimization found point {x_min}, with lambda = {l_min}")
-    sol_x_minimize_plot.set_data([x_min[0]], [x_min[1]])
+    
+    sol_minimize = minimize_branch(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, init_x=init_x_min, limits=limits)
+    if sol_minimize != None:
+        x_min = sol_minimize["x"]
+        l_min = sol_minimize["lambda"]
+        print(f"Minimization found point {x_min}, with lambda = {l_min}")
+        print(f"CBF gradient norm at the minimization point is {np.linalg.norm(sim.cbf.gradient(x_min))}")
+        sol_x_minimize_plot.set_data([x_min[0]], [x_min[1]])
 
 plt.show()
