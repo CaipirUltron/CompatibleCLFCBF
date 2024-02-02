@@ -1184,85 +1184,90 @@ def q_function(plant, clf, cbf, params, **kwargs):
     # adds data to result struct
     return {"lambdas": lambdas, "levels": q_levels, "points": pts}
 
-def minimize_branch(plant, clf, cbf, x_init):
+def minimize_branch(plant, clf, cbf, params, **kwargs):
     '''
     Finds the minimum value of the CBF along a branch of the invariant set
     '''
+    tol = 1e-05
+    init_x_def = False
+    for key in kwargs.keys():
+        aux_key = key.lower()
+        if aux_key == "init_x":
+            init_x = kwargs[key]
+            init_x_def = True
+            continue
+        if aux_key == "tol":
+            tol = kwargs[key]
+            continue
+
     kernel = check_kernel(plant, clf, cbf)
 
     n = kernel._dim
-    p = kernel.kernel_dim
-    P = clf.P
-    Q = cbf.Q
-    eigP, eigvecP = np.linalg.eig(P)
+    limits = [ [-1, +1] for _ in range(n) ]
+    if "limits" in kwargs.keys():
+        limits = kwargs["limits"]
+        for i in range(n):
+            if limits[i][0] >=  limits[i][1]:
+                raise Exception("Lines should be sorted in ascending order.")
 
-    m = kernel.function(x)
-    Jm = kernel.jacobian(x)
-    V = clf.function(x)
+    if not init_x_def:
+        init_x = [ np.random.uniform( limits[k][0], limits[k][1] ) for k in range(n) ]
 
-    Null = null_space(Jm.T)
-    dimNull = Null.shape[1]
+    n = kernel._dim
+    F, P, Q = plant.get_F(), clf.P, cbf.Q
+    A_list = kernel.get_A_matrices()
 
     '''
-    var = [ λ, R, alpha ] is a (n+rankQ-1+1) dimensional array, where:
-    λ is a scalar
-    R is the vectorized version of a p-dimensional orthogonal matrix representing possible rotations of P (p^2 dimensional)
-    alpha is an array with the dimension of the nullspace of the Jacobian transpose
+    var = [ x, λ ] is a (n+1) dimensional array, where:
+    λ is a scalar, x in a n-dimensional array
     '''
     def invariant_set_constr(var):
         '''
         Invariant set constraint
         '''
-        l = var[0]
-        x = var[1:]
+        x = var[0:n]
+        l = var[-1]
         
         vecQ, vecP = np.zeros(n), np.zeros(n)
         z = kernel.function(x)
-        V = clf.
+        V = clf.function(x)
+
         for k in range(n):
             vecQ[k] = z.T @ A_list[k].T @ Q @ z
             vecP[k] = z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z
-        l = vecQ.T @ vecP / vecQ.T @ vecQ
-
-    def level_set_constr(var):
-        '''
-        Keeps the level set constant
-        '''
-        R = var[1:1+p**2].reshape((p, p))
-        return m @ R.T @ np.diag(eigP) @ R @ m - 2 * V
-
-    def orthonormality_constraint(var):
-        '''
-        Keeps matrix R orthonormal
-        '''
-        R = var[1:1+p**2].reshape((p, p))
-        return np.linalg.norm( R.T @ R - np.eye(p), 'fro' )
+        
+        return l * vecQ - vecP
 
     def objective(var):
         '''
-        Minimizes lambda
+        Minimizes cbf value over the invariant set branch
         '''
-        l = var[0]
-        R = var[1:1+p**2].reshape((p, p))
-        return l + np.linalg.norm( R.T @ np.diag(eigP) @ R - P , 'fro')
+        x = var[0:n]
+        return cbf.function(x)
 
     init_lambda = np.random.rand()
-    init_R = eigvecP.flatten()
-    init_alpha = np.random.rand(dimNull)
-    init_var = np.hstack([init_lambda, init_R, init_alpha])
+    init_var = np.hstack([init_x, init_lambda])
 
-    result = minimize(fun=objective,
-                x0=init_var,
-                # method='trust-constr',
-                constraints = [ 
-                                {'type': 'eq', 'fun': invariant_set_constr}, 
-                                {'type': 'eq', 'fun': level_set_constr},
-                                {'type': 'eq', 'fun': orthonormality_constraint}
-                            ])
+    x_bounds = [ (-np.inf, np.inf) for _ in range(n) ]
+    l_bounds = [ (0.0, np.inf) ]
 
-    l = result.x[0]
-    R = result.x[1:1+p**2].reshape(p,p)
-    alpha = result.x[1+p**2:1+p**2+dimNull]
+    try:
+        result = minimize(fun=objective,
+                        x0=init_var,
+                        # method='trust-constr',
+                        constraints = [ {'type': 'eq', 'fun': invariant_set_constr} ],
+                        bounds=x_bounds+l_bounds)
+        
+        if result.fun < tol and result.x[-1] >= 0:
+            eq_found = True
+    except Exception as error_msg:
+        print("No minimum was found. Error: " + str(error_msg))
+
+    if eq_found:
+        x = result.x[0:n]
+        l = result.x[-1]
+        return {"x": x, "lambda": l}
+    return {"x": None, "lambda": None}
 
 # --------------------------------------------------------------- DEPRECATED CODE ----------------------------------------------------------
 
