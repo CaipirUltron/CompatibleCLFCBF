@@ -2,6 +2,7 @@ import math
 import numpy as np
 import itertools
 
+from scipy.spatial import ConvexHull
 from scipy.optimize import fsolve
 from shapely import geometry
 
@@ -348,7 +349,7 @@ def kernel_constraints( z, terms_by_degree ):
 def create_quadratic(eigen, R, center, kernel_dim):
     '''
     This function generates the coefficient matrix for a kernel quadratic function
-    corresponding to a general quadratic function f(x) = x.T H x.
+    corresponding to a general quadratic function f(x) = (x-center).T H (x-center)
     Parameters: eigen      -> the list of eigenvalues of H
                 R          -> orthonormal matrix with the eigenvectors of H
                 center     -> the center point for the quadratic
@@ -521,70 +522,76 @@ def ellipsoid_parametrization(Q, param):
     z = main_axes @ np.array(reduced_z.tolist() + [ 0.0 for _ in range(p-rankQ)])
     return z
 
-# def find_intersection(cbf_contours, invariant_contour):
-#     '''
-#     Finds the intersection btw two contours
-#     '''
-#     if cbf_contours.levels != len(cbf_contours.collections):
-#         raise Exception("Error in the number of levels.")
+def minimum_bounding_rectangle(points):
+    """
+    Find the smallest bounding rectangle for a set of points.
+    Returns a set of points representing the corners of the bounding box.
 
-#     num_levels = cbf_contours.levels
+    :param points: an nx2 matrix of coordinates
+    :rval: an nx2 matrix of coordinates
+    """
+    from scipy.ndimage.interpolation import rotate
+    pi2 = np.pi/2.
 
-#     for level in cbf_contours.collections:
-        
+    # get the convex hull for the points
+    hull_points = points[ConvexHull(points).vertices]
 
-#     p1 = cbf_contours.collections[0].get_paths()[0]
-#     v1 = p1.vertices
+    # calculate edge angles
+    edges = np.zeros((len(hull_points)-1, 2))
+    edges = hull_points[1:] - hull_points[:-1]
 
-#     p2 = invariant_contour.collections[0].get_paths()[0]
-#     v2 = p2.vertices
+    angles = np.zeros((len(edges)))
+    angles = np.arctan2(edges[:, 1], edges[:, 0])
 
-#     poly1 = geometry.LineString(v1)
-#     poly2 = geometry.LineString(v2)
+    angles = np.abs(np.mod(angles, pi2))
+    angles = np.unique(angles)
 
-#     intersection = poly1.intersection(poly2)
+    # find rotation matrices
+    # XXX both work
+    rotations = np.vstack([
+        np.cos(angles),
+        np.cos(angles-pi2),
+        np.cos(angles+pi2),
+        np.cos(angles)]).T
+#     rotations = np.vstack([
+#         np.cos(angles),
+#         -np.sin(angles),
+#         np.sin(angles),
+#         np.cos(angles)]).T
+    rotations = rotations.reshape((-1, 2, 2))
 
-#     return intersection
+    # apply rotations to the hull
+    rot_points = np.dot(rotations, hull_points.T)
 
+    # find the bounding points
+    min_x = np.nanmin(rot_points[:, 0], axis=1)
+    max_x = np.nanmax(rot_points[:, 0], axis=1)
+    min_y = np.nanmin(rot_points[:, 1], axis=1)
+    max_y = np.nanmax(rot_points[:, 1], axis=1)
 
+    # find the box with the best area
+    areas = (max_x - min_x) * (max_y - min_y)
+    best_idx = np.argmin(areas)
 
-# def ellipsoid_axes(Q):
-#     '''
-#     Computes maximum distance from origin to each axis of the ellipsoid given by Q
-#     '''
-#     eigsQ, main_axes = np.linalg.eig(Q)
-#     axes_lengths = 1/np.sqrt(eigsQ)
-#     max_dim = np.argmax(axes_lengths)
+    # return the best box
+    x1 = max_x[best_idx]
+    x2 = min_x[best_idx]
+    y1 = max_y[best_idx]
+    y2 = min_y[best_idx]
+    r = rotations[best_idx]
 
-#     if Q.shape[0] != Q.shape[1]:
-#         raise Exception("Q must be a square matrix.")
-#     if np.any(eigsQ < -1e-12):
-#         raise Exception("Q must be a positive semi-definite matrix.")
+    rval = np.zeros((4, 2))
+    rval[0] = np.dot([x1, y2], r)
+    rval[1] = np.dot([x2, y2], r)
+    rval[2] = np.dot([x2, y1], r)
+    rval[3] = np.dot([x1, y1], r)
 
-#     rankQ = np.linalg.matrix_rank(Q, hermitian=True)
-#     dim_elliptical_manifold = rankQ - 1
+    factor = 2          # must be greater than 1
+    centroid = rval.mean(axis=0)
+    diffs = rval - centroid
+    new_bbox = centroid + factor*diffs
 
-#     print("Rank of Q = " + str(rankQ))
-#     print("Eigs of Q = " + str(eigsQ))
-
-#     max_theta = np.ones(dim_elliptical_manifold)*np.pi/2
-#     if max_dim < dim_elliptical_manifold:
-#         max_theta[max_dim] = 0
-#     elif max_dim > dim_elliptical_manifold:
-#         max_theta[max_dim] = 
-
-#     max_thetas = np.zeros([dim_elliptical_manifold, rankQ])
-#     for k in range(rankQ):
-#         max_theta = np.zeros(dim_elliptical_manifold)
-
-#         if k != dim_elliptical_manifold:
-#             max_thetas[k,k] = 0.0
-#         for j in range(k):
-#             max_thetas[j,k] = np.pi/2
-
-#         max_thetas[:,k] = max_theta
-
-#     return np.sqrt(max_z2)
+    return new_bbox
 
 class Rect():
     '''

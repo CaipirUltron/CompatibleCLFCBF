@@ -339,7 +339,7 @@ def compute_equilibria(plant, clf, cbf, params, **kwargs):
         init_var = init_x + [init_l]
         sol = minimize(objective, init_var, bounds=x_bounds+l_bounds)
 
-        if sol.fun < tol and sol.x[-1] >= 0:
+        if sol.fun < tol and sol.x[-1] > 0:
             eq_found = True
     except Exception as error_msg:
         print("No equilibrium points were found. Error: " + str(error_msg))
@@ -489,6 +489,18 @@ def closest_compatible(plant, clf, cbf, eq_sols, **kwargs):
         print("Optimal value: %s" % problem.value)
 
     return P_var.value
+
+def closest_to_image(z, kernel):
+    '''
+    Returns a point in the state space such that minimizes the distance from its image to z.
+    '''
+    n = kernel._dim
+    p = kernel.kernel_dim
+    if len(z) != p:
+        raise Exception("Dimensions are incorrect.")
+    result = minimize( fun=lambda x: np.linalg.norm( kernel.function(x) - z ), x0 = [ 0.0 for _ in range(n) ] )
+
+    return result.x
 
 '''
 The following algorithms are useful for initialization of the previous algorithms, among other utilities.
@@ -1184,17 +1196,19 @@ def q_function(plant, clf, cbf, params, **kwargs):
     # adds data to result struct
     return {"lambdas": lambdas, "levels": q_levels, "points": pts}
 
-def minimize_branch(plant, clf, cbf, params, **kwargs):
+def optimize_branch(plant, clf, cbf, params, **kwargs):
     '''
-    Finds the minimum value of the CBF along a branch of the invariant set
+    Finds the optimum value of λ along a branch of the invariant set (maximum or minimum)
     '''
     tol = 1e-05
-    init_x_def, init_lambda_def = False, False
+    init_pt_def = False
+    init_lambda_def = False
+
     for key in kwargs.keys():
         aux_key = key.lower()
-        if aux_key == "init_x":
-            init_x = kwargs[key]
-            init_x_def = True
+        if aux_key == "init_pt":
+            init_pt = kwargs[key]
+            init_pt_def = True
             continue
         if aux_key == "init_lambda":
             init_lambda = kwargs[key]
@@ -1205,8 +1219,9 @@ def minimize_branch(plant, clf, cbf, params, **kwargs):
             continue
 
     kernel = check_kernel(plant, clf, cbf)
-
     n = kernel._dim
+    p = kernel.kernel_dim
+
     limits = [ [-1, +1] for _ in range(n) ]
     if "limits" in kwargs.keys():
         limits = kwargs["limits"]
@@ -1214,12 +1229,10 @@ def minimize_branch(plant, clf, cbf, params, **kwargs):
             if limits[i][0] >=  limits[i][1]:
                 raise Exception("Lines should be sorted in ascending order.")
 
-    if not init_x_def:
-        init_x = [ np.random.uniform( limits[k][0], limits[k][1] ) for k in range(n) ]
+    if not init_pt_def:
+        init_pt = [ np.random.uniform( limits[k][0], limits[k][1] ) for k in range(n) ]
     if not init_lambda_def:
         init_lambda = np.random.rand()
-
-    n = kernel._dim
 
     '''
     var = [ x, λ ] is a (n+1) dimensional array, where:
@@ -1230,37 +1243,53 @@ def minimize_branch(plant, clf, cbf, params, **kwargs):
         Invariant set constraint
         '''
         x = var[0:n]
-        l = var[-1]
+        z = kernel.function(x)
         V = clf.function(x)
-        return equilibrium_field(kernel.function(x), l, clf.P, V, plant, clf, cbf, params)
+
+        l = var[-1]
+        V = 0.5 * z.T @ clf.P @ z
+        return equilibrium_field(z, l, clf.P, V, plant, clf, cbf, params)
 
     def objective(var):
         '''
         Minimizes cbf value over the invariant set branch
         '''
         x = var[0:n]
-        return cbf.function(x)
+        z = kernel.function(x)
+        # l = var[-1]
+        return z.T @ cbf.Q @ z - 1
 
-    init_var = np.hstack([init_x, init_lambda])
+    init_var = np.hstack([init_pt, init_lambda])
 
     x_bounds = [ (-np.inf, np.inf) for _ in range(n) ]
     l_bounds = [ (0.0, np.inf) ]
 
-    eq_found = False
+    min_sol = {"pt": None, "lambda": None}
+    max_sol = {"pt": None, "lambda": None}
     try:
-        result = minimize( fun=objective, x0=init_var,
-                           constraints = [{'type': 'eq', 'fun': invariant_set_constr}],
-                           bounds=x_bounds+l_bounds, options={"disp": False} )
-        if result.fun < tol and result.x[-1] >= 0:
-            eq_found = True
-    except Exception as error_msg:
-        print("No minimum was found. Error: " + str(error_msg))
 
-    if eq_found:
-        x = result.x[0:n]
-        l = result.x[-1]
-        return {"x": x, "lambda": l}
-    return None
+        # Minimization
+        result = minimize( fun= lambda var: objective(var), x0 = init_var,
+                           constraints = [{'type': 'eq', 'fun': invariant_set_constr}],
+                           bounds = x_bounds + l_bounds, options = {"disp": False}, tol=tol )
+        print(f"Minimization exit: {result.message}")
+        min_sol["pt"], min_sol["lambda"] = result.x[0:n].tolist(), result.x[-1]
+        min_sol["h"] = objective(result.x)
+        min_sol["norm_grad_h"] = np.linalg.norm( cbf.gradient(min_sol["pt"]) )
+
+        # Maximization
+        result = minimize( fun= lambda var: -objective(var), x0 = init_var,
+                           constraints = [{'type': 'eq', 'fun': invariant_set_constr}],
+                           bounds = x_bounds + l_bounds, options = {"disp": False}, tol=tol )
+        print(f"Maximization exit: {result.message}")
+        max_sol["pt"], max_sol["lambda"] = result.x[0:n].tolist(), result.x[-1]
+        max_sol["h"]= objective(result.x)
+        max_sol["norm_grad_h"] = np.linalg.norm( cbf.gradient(max_sol["pt"]) )
+
+    except Exception as error_msg:
+        print("No optimal point was found. Error: " + str(error_msg))
+
+    return min_sol, max_sol
 
 # --------------------------------------------------------------- DEPRECATED CODE ----------------------------------------------------------
 

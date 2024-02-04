@@ -1,6 +1,7 @@
 import math
 import itertools
 import numpy as np
+import scipy as sp
 import cvxpy as cp
 
 import matplotlib.pyplot as plt
@@ -733,17 +734,17 @@ class KernelQuadratic(Function):
         self.point_list = []
         self.constant = 0.0
 
-        self.set_param(**kwargs)
-        self.evaluate()
+        self.default_fit_options = {"lower_bounded": True, "quadratic_like": False, "force_all": True } # doesnt avoid non-convexity... but forcing a center point helps A LOT 
 
         default_color = "black"
         if isinstance(self, KernelLyapunov):
             default_color = mcolors.TABLEAU_COLORS['tab:blue']
         elif isinstance(self, KernelBarrier):
             default_color = mcolors.TABLEAU_COLORS['tab:red']
+        self.default_plot_config = {"figsize": (5,5), "axeslim": (-6,6,-6,6), "color": default_color}
 
-        default_plot_config = {"figsize": (5,5), "axeslim": (-6,6,-6,6), "color": default_color}
-        self.plot_config = default_plot_config
+        self.set_param(**kwargs)
+        self.evaluate()
 
     def set_param(self, **kwargs):
         '''
@@ -751,12 +752,25 @@ class KernelQuadratic(Function):
         '''
         # If constant was passed, initialize it imediately (other methods need it). Otherwise it's just zero
         if "constant" in kwargs.keys():
-                self.constant = kwargs["constant"]
+            self.constant = kwargs["constant"]
+
+        self.fit_options = self.default_fit_options
+        if "fit_options" in kwargs.keys():
+            for default_key in self.default_fit_options.keys():
+                if default_key in kwargs["fit_options"].keys():
+                    self.fit_options[default_key] = kwargs["fit_options"][default_key]
+
+        self.plot_config = self.default_plot_config
+        if "plot_config" in kwargs.keys():
+            for default_key in self.default_plot_config.keys():
+                if default_key in kwargs["plot_config"].keys():
+                    self.plot_config[default_key] = kwargs["plot_config"][default_key]
 
         for key in kwargs:
 
-            if key == "constant":
-                continue            # already dealt with
+            # already dealt with
+            if key == "constant" or key == "fit_options" or key == "plot_config":
+                continue
 
             # If degree was passed, create Kernel() of appropriate degree and initialize parameter dynamics
             if key == "degree":
@@ -786,7 +800,7 @@ class KernelQuadratic(Function):
                     raise Exception("Matrix of coefficients must be a two-dimensional array.")
                 if matrix_shape[0] != matrix_shape[1]:
                     raise Exception("Matrix of coefficients must be a square.")
-                if not np.all(np.linalg.eigvals(matrix_coefs) >= -1e-3):
+                if not np.all(np.linalg.eigvals(matrix_coefs) >= -1e-5):
                     raise Exception("Matrix of coefficients must be positive semi-definite.")
                 if not np.all( matrix_coefs == matrix_coefs.T ):
                     raise Warning("Matrix of coefficients is not symmetric. The symmetric part will be used.")
@@ -796,8 +810,8 @@ class KernelQuadratic(Function):
 
             # If a dictionary of points was passed, call interpolate to find an interpolating coefficient matrix
             if key == "points":
-                point_list = kwargs[key]
-                self.fit(point_list)
+                self.point_list = kwargs["points"]
+                self.fit()
 
         if np.shape(self.matrix_coefs) != (self.kernel_dim, self.kernel_dim):
             raise Exception("P must be (p x p), where p is the kernel dimension!")
@@ -811,89 +825,102 @@ class KernelQuadratic(Function):
         new_param = self.dynamics.get_state()
         self.set_param( coefficients = vector2sym(new_param) )
 
-    def fit(self, point_list):
+    def fit(self):
         '''
         Fits the p.s.d. coefficient matrix to a list of desired points.
-        Parameters: point_list = [ { "point": , "level": , "gradient": , "curvature": } ],
-                    a list with dicts containing each desired point, corresponding level set, gradient and curvature (2D only)
+        Parameters: point_list = [ { "point": ArrayLike, 
+                                     "level": float >= -self.constant, 
+                                     "gradient": ArrayLike, 
+                                     "curvature": float, 
+                                     "force": bool }, ... ],
+        A list with dicts containing each the fitting coordinates to corresponding level set value, gradient and curvature (2D only). 
+        Additionally, a force flag can be specifed for forcing the specified level set to the given coordinates.
         Returns: the optimization error.
         '''
-        self.point_list = point_list
-
         n = self._dim
         p = self.kernel_dim
-        A_list = self.kernel.get_A_matrices()
+        A_list = self.kernel.get_A_matrices()            
 
-        obj_expr = 0.0
-        F_var = cp.Variable( (p,p), symmetric=True )                                    # Create p x p symmetric variable
+        # Computes the enclosing quadratic and adds a center point to point_list (the center of the quadratic)
+        Pquad, center = self.enclosing_quadratic()
+        self.point_list.append({"coords": center, "level":-self.constant})
 
-        if isinstance(self, KernelLyapunov):
-            center = np.zeros(n)
-            for pt in self.point_list:
-                if pt["level"] == 0.0:
-                    center = pt["point"]
-                    break
-            Vvalue = 10
-            Pquadratic = create_quadratic((1/Vvalue)*np.array([6.0, 1.0]), rot2D(0), center, p)
-            constraints = [ F_var >> Pquadratic ]                                       # Basic constraint: F_var must be p.s.d.
-        else:
-            constraints = [ F_var >> 0 ]
+        F_var = cp.Variable( (p,p), symmetric=True )
 
-        '''
-        Iterate over the input list to get problem requirements
-        '''
+        # Type of lower bound to F_var
+        constraints = [ F_var >> 0 ]
+        if self.fit_options["lower_bounded"]:
+            constraints = [ F_var >> Pquad ]
+
+        # Quadratic-like or not
+        cost = 0.0
+        if self.fit_options["quadratic_like"]:
+            cost = cp.norm(F_var - Pquad, 'fro')
+            
+        # Iterate over the input list to get problem requirements
         gradient_norms = []
-        for pt_dict in point_list:
-            keys = pt_dict.keys()
+        for pt in self.point_list:
+            keys = pt.keys()
 
-            # Define point-level constraints
-            if "point" not in keys:
-                    raise Exception("A point must be specified.")
+            if "coords" not in keys:
+                raise Exception("The point coordinates must be specified.")
+            if "force" not in keys:
+                pt["force"] = False
 
-            pt = pt_dict["point"]
-            m = self.kernel.function(pt)
-            Jm = self.kernel.jacobian(pt)
+            coords = pt["coords"]
+            if type(coords) == np.ndarray:
+                coords = coords.tolist()
+
+            m = self.kernel.function(coords)
+            Jm = self.kernel.jacobian(coords)
 
             # Define point-level constraints
             if "level" in keys:
-                level_value = pt_dict["level"]
-                obj_expr += ( 0.5 * m.T @ F_var @ m - self.constant - level_value )**2
+                level_value = pt["level"]
+                if level_value >= -self.constant:
+                    if self.fit_options["force_all"] or pt["force"]:
+                        constraints += [ 0.5 * m.T @ F_var @ m - self.constant == level_value ]
+                    else:
+                        cost += ( 0.5 * m.T @ F_var @ m - self.constant - level_value )**2
+                else: # -self.constant is lower bound for kernel-based functions; ignore lower values
+                    continue
 
             # Define point-gradient constraints
             if "gradient" in keys:
                 gradient_norms.append( cp.Variable() )
-
-                gradient = pt_dict["gradient"]
+                gradient = np.array(pt["gradient"])
                 normalized = gradient/np.linalg.norm(gradient)
-                constraints += [ Jm.T @ F_var @ m == gradient_norms[-1] * normalized ]
+
+                # constraints += [ Jm.T @ F_var @ m == gradient_norms[-1] * normalized ]
+                # constraints += [ gradient_norms[-1] >= 0 ]
+
+                cost += cp.norm( Jm.T @ F_var @ m - gradient_norms[-1] * normalized )
                 constraints += [ gradient_norms[-1] >= 0 ]
 
             # Define point-curvature constraints (2D only)
             if "curvature" in keys:
-
                 if n != 2:
                     raise Exception("Error: curvature fitting was not implemented for dimensions > 2. ")
                 if "gradient" not in keys:
                     raise Exception("Cannot specify a curvature without specifying the gradient.")
 
-                curvature = pt_dict["curvature"]
+                curvature = pt["curvature"]
                 v = rot2D(np.pi/2) @ normalized
 
                 curvature_var = 0.0
                 for i,j in itertools.product(range(n),range(n)):
                     Hij = m.T @ ( A_list[i].T @ F_var + F_var @ A_list[i] ) @ A_list[j] @ m
                     curvature_var += Hij * v[i] * v[j]
-
-                obj_expr += ( curvature_var - curvature )**2
+                cost += ( curvature_var - curvature )**2
 
         # Trying to keep the gradient norms close to 1
-        for gradient_norm in gradient_norms:
-            obj_expr += ( gradient_norm - 1.0 )**2
+        # for gradient_norm in gradient_norms:
+        #     costcost += ( gradient_norm - 1.0 )**2
 
         '''
         Define first optimization, fitting only the points to their corresponding level sets and gradients
         '''
-        objective = cp.Minimize( obj_expr )
+        objective = cp.Minimize( cost )
         fit_problem = cp.Problem(objective, constraints)
         fit_problem.solve()
 
@@ -905,30 +932,22 @@ class KernelQuadratic(Function):
             else:
                 print("Function fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
             self.set_param( coefficients = F_var.value )
+            # self.set_param( coefficients = Pquad )
             return fit_problem.value
         else:
             raise Exception("Problem is " + fit_problem.status + ".")
 
     def fit_level_set(self, points, level):
         '''
-        Fits the function coefficients to points on a single level set.
-        Parameters: points -> list of points
+        Fits the function coefficients to points on a predefined level set.
+        Parameters: points -> list of dict with {"coords": mandatory, "gradient": optional, "curvature": optional}
                     level  -> value of level set
         Returns: the optmization error.
         '''
-        point_list = []
-        for pt in points:
-           point_list.append({ "point": pt, "level": level })
-        return self.fit(point_list)
-
-    def fit_center(self, point):
-        '''
-        Fits the function coefficients to match f(point) = 0.0
-        Parameters: point -> single point to be fit
-        Returns: the optmization error.
-        '''
-        self.point_list.append({ "point": point, "level": 0.0 })
-        return self.fit(self.point_list)
+        self.point_list = points
+        for pt in self.point_list:
+           pt["level"] = level
+        return self.fit()
 
     def get_curvature(self, point):
         '''
@@ -944,6 +963,39 @@ class KernelQuadratic(Function):
         Hessian = self.hessian(point)
 
         return z.T @ Hessian @ z / grad_norm
+
+    def enclosing_quadratic(self):
+        '''
+        Find the P matrix of a quadratic enclosing all defined points
+        '''
+        num_pts = len(self.point_list)
+        points = np.zeros([num_pts, self._dim])
+        levels = []
+        for k in range(num_pts):
+            pt = self.point_list[k]
+            points[k,:] = np.array(pt["coords"])
+            if "level" in pt.keys():
+                levels.append(pt["level"])
+            
+        lvl_max = np.max(levels)
+
+        H = cp.Variable((self._dim, self._dim), symmetric = True)
+        b = cp.Variable((self._dim,1))
+        a = cp.Variable((1,1))
+
+        Pquad = cp.bmat([ [a, b.T], [b, H] ])
+
+        objective = cp.Maximize( cp.log_det(H) )
+        constraints = [ Pquad >> 0 ]
+        for vertex in minimum_bounding_rectangle(points):
+            constraints += [ vertex.T @ H @ vertex + 2 * b.T @ vertex + a == 2*(lvl_max+self.constant) ]
+        problem = cp.Problem(objective, constraints)
+        problem.solve()
+
+        P = sp.linalg.block_diag(Pquad.value, np.zeros([self.kernel_dim-3,self.kernel_dim-3]))
+        center = (- np.linalg.inv(H.value) @ b.value ).reshape(2)
+
+        return P, center
 
     def function(self, point):
         '''
@@ -977,7 +1029,7 @@ class KernelQuadratic(Function):
 
     def plot_levels(self, levels, **kwargs):
         '''
-        Modifies the level plot functino for plotting with CLF/CBF colors
+        Modifies the level plot function for plotting with CLF/CBF colors
         '''
         if "colors" not in kwargs.keys():
             kwargs["colors"] = self.plot_config["color"]
@@ -1046,13 +1098,17 @@ class KernelBarrier(KernelQuadratic):
         super().set_param(**kwargs)
         self.Q = self.matrix_coefs
 
-        if "boundary_points" in kwargs.keys():
-            self.define_boundary(kwargs["boundary_points"])
+        if "boundary" in kwargs.keys():
+            self.define_boundary(kwargs["boundary"])
 
     def define_boundary(self, points):
         '''
         Defines the CBF boundary, given a list of points
         '''
+        for pt in points:
+            if "coords" not in pt.keys():
+                raise Exception("Point coords were not passed.")
+
         cost = self.fit_level_set(points=points, level=0.0)
         self.Q = self.matrix_coefs
         return cost
