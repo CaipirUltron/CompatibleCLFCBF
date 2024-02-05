@@ -29,15 +29,14 @@ clf_center = [0.0, -5.0]
 base_level = 25
 
 points = []
-points.append({ "coords": clf_center, "level": 0.0, "force": True })
-points.append({ "coords": [ 4.0,  0.0], "level": base_level, "gradient": [ 1.0,  0.0], "force": True })
-points.append({ "coords": [-4.0,  0.0], "level": base_level, "gradient": [-1.0,  0.0], "force": True })
-points.append({ "coords": [ 0.0,  5.0], "level": base_level, "gradient": [ 0.0,  1.0], "force": True })
-points.append({ "coords": [ 0.0,  -8.0], "gradient": [ 0.0,  -1.0] })
-clf = KernelLyapunov(*initial_state, kernel=kernel, points=points, centers=[])
+points.append({ "coords": [-4.0,  6.0], "gradient": [-1.0,  0.5] })
+points.append({ "coords": [ 4.0,  6.0], "gradient": [ 0.0,  6.5] })
+points.append({ "coords": [ 0.0,  5.0], "gradient": [ 2.0,  6.0] })
+# points.append({ "coords": [ 0.0,  -8.0], "gradient": [ 0.0,  -1.0] })
+clf = KernelLyapunov(*initial_state, kernel=kernel, points=points, center = clf_center)
 
-clf_eig = 0.01*np.array([ 40.0, 1.0 ])
-clf_angle = 0.0
+clf_eig = 0.01*np.array([ 6.0, 1.0 ])
+clf_angle = np.deg2rad(15)
 # clf = KernelLyapunov(*initial_state, kernel=kernel, P=create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim))
 
 clf.is_sos_convex(verbose=True)

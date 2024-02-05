@@ -767,13 +767,13 @@ class KernelQuadratic(Function):
                 if default_key in kwargs["plot_config"].keys():
                     self.plot_config[default_key] = kwargs["plot_config"][default_key]
 
-        if "centers" in kwargs.keys():
-            self.centers = kwargs["centers"]
+        if "center" in kwargs.keys():
+            self.center = kwargs["center"]
 
         for key in kwargs:
 
             # already dealt with
-            if key == "constant" or key == "centers" or key == "fit_options" or key == "plot_config":
+            if key == "constant" or key == "center" or key == "fit_options" or key == "plot_config":
                 continue
 
             # If degree was passed, create Kernel() of appropriate degree and initialize parameter dynamics
@@ -870,13 +870,16 @@ class KernelQuadratic(Function):
             '''
             If KernelLyapunov, make is SOS convex
             '''
-            factor = 0.0
+            m_center = self.kernel.function(self.center)
+            Pquad = create_quadratic(eigen=[0.05, 0.05], R=rot2D(0.0), center=self.center, kernel_dim=self.kernel_dim)
             SOSConvexMatrix = cp.bmat([[ Aj.T @ ( Ai.T @ F_var + F_var @ Ai ) + ( Ai.T @ F_var + F_var @ Ai ) @ Aj for Aj in A_list ] for Ai in A_list ])
-            # constraints = [ SOSConvexMatrix >> factor*np.eye(n*p) ]
-            constraints = [ SOSConvexMatrix >> factor*np.eye(n*p), F_var >> 0.0*np.eye(p) ]
+            constraints = [ F_var >> 0,
+                            SOSConvexMatrix >> 0,
+                            m_center.T @ F_var @ m_center == 0 ]
+            cost += cp.norm(F_var - Pquad)
 
-            for center in self.centers:
-                self.point_list.append({"coords": center, "level": 0.0, "force": False})
+            # for center in self.centers:
+            #     self.point_list.append({"coords": center, "level": 0.0, "force": False})
 
         # Computes the enclosing quadratic and adds a center point to point_list (the center of the quadratic)
         if isinstance(self, KernelBarrier):
@@ -927,9 +930,11 @@ class KernelQuadratic(Function):
                 gradient = np.array(pt["gradient"])
                 normalized = gradient/np.linalg.norm(gradient)
 
-                constraints += [ Jm.T @ F_var @ m == gradient_norms[-1] * normalized ]
-                # cost += cp.norm( Jm.T @ F_var @ m - gradient_norms[-1] * normalized )
-                
+                if isinstance(self, KernelLyapunov):
+                    cost += cp.norm( Jm.T @ F_var @ m - gradient_norms[-1] * normalized )
+                if isinstance(self, KernelBarrier):
+                    constraints += [ Jm.T @ F_var @ m == gradient_norms[-1] * normalized ]
+
                 constraints += [ gradient_norms[-1] >= 0 ]
 
             # Define point-curvature constraints (2D only)
@@ -950,7 +955,7 @@ class KernelQuadratic(Function):
 
         # Trying to keep the gradient norms close to 1
         # for gradient_norm in gradient_norms:
-        #     costcost += ( gradient_norm - 1.0 )**2
+        #     cost += ( gradient_norm - 1.0 )**2
 
         '''
         Define first optimization, fitting only the points to their corresponding level sets and gradients
