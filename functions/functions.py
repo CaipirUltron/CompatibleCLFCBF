@@ -733,13 +733,14 @@ class KernelQuadratic(Function):
 
         self.point_list = []
         self.constant = 0.0
-
-        self.default_fit_options = {"lower_bounded": True, "quadratic_like": False, "force_all": True } # doesnt avoid non-convexity... but forcing a center point helps A LOT 
+        self.centers = []
 
         default_color = "black"
         if isinstance(self, KernelLyapunov):
+            self.default_fit_options = {"lower_bounded": False, "quadratic_like": False, "force_all": False } # doesnt avoid non-convexity... but forcing a center point helps A LOT 
             default_color = mcolors.TABLEAU_COLORS['tab:blue']
         elif isinstance(self, KernelBarrier):
+            self.default_fit_options = {"lower_bounded": True, "quadratic_like": False, "force_all": True } # doesnt avoid non-convexity... but forcing a center point helps A LOT 
             default_color = mcolors.TABLEAU_COLORS['tab:red']
         self.default_plot_config = {"figsize": (5,5), "axeslim": (-6,6,-6,6), "color": default_color}
 
@@ -766,10 +767,13 @@ class KernelQuadratic(Function):
                 if default_key in kwargs["plot_config"].keys():
                     self.plot_config[default_key] = kwargs["plot_config"][default_key]
 
+        if "centers" in kwargs.keys():
+            self.centers = kwargs["centers"]
+
         for key in kwargs:
 
             # already dealt with
-            if key == "constant" or key == "fit_options" or key == "plot_config":
+            if key == "constant" or key == "centers" or key == "fit_options" or key == "plot_config":
                 continue
 
             # If degree was passed, create Kernel() of appropriate degree and initialize parameter dynamics
@@ -800,8 +804,8 @@ class KernelQuadratic(Function):
                     raise Exception("Matrix of coefficients must be a two-dimensional array.")
                 if matrix_shape[0] != matrix_shape[1]:
                     raise Exception("Matrix of coefficients must be a square.")
-                if not np.all(np.linalg.eigvals(matrix_coefs) >= -1e-5):
-                    raise Exception("Matrix of coefficients must be positive semi-definite.")
+                # if not np.all(np.linalg.eigvals(matrix_coefs) >= -1e-5):
+                #     raise Exception("Matrix of coefficients must be positive semi-definite.")
                 if not np.all( matrix_coefs == matrix_coefs.T ):
                     raise Warning("Matrix of coefficients is not symmetric. The symmetric part will be used.")
                 self.matrix_coefs = 0.5 * ( matrix_coefs + matrix_coefs.T )
@@ -825,6 +829,23 @@ class KernelQuadratic(Function):
         new_param = self.dynamics.get_state()
         self.set_param( coefficients = vector2sym(new_param) )
 
+    def is_sos_convex(self, verbose=False):
+        '''
+        Returns True if the function is SOS convex.
+        '''
+        sos_convex = False
+        A_list = self.kernel.get_A_matrices()
+        SOSConvexMatrix = np.block([[ Ai.T @ self.matrix_coefs @ Aj + Aj.T @ Ai.T @ self.matrix_coefs for Aj in A_list ] for Ai in A_list ])
+        eigs = np.linalg.eigvals(SOSConvexMatrix+SOSConvexMatrix.T)
+        if np.all(eigs >= 0.0):
+            sos_convex = True
+
+        if verbose:
+            if sos_convex: print(f"{self} is SOS convex.")
+            else: print(f"{self} is not SOS convex, with negative eigenvalues = {eigs[eigs < 0.0]}")
+
+        return sos_convex
+
     def fit(self):
         '''
         Fits the p.s.d. coefficient matrix to a list of desired points.
@@ -841,21 +862,36 @@ class KernelQuadratic(Function):
         p = self.kernel_dim
         A_list = self.kernel.get_A_matrices()            
 
-        # Computes the enclosing quadratic and adds a center point to point_list (the center of the quadratic)
-        Pquad, center = self.enclosing_quadratic()
-        self.point_list.append({"coords": center, "level":-self.constant})
-
         F_var = cp.Variable( (p,p), symmetric=True )
-
-        # Type of lower bound to F_var
-        constraints = [ F_var >> 0 ]
-        if self.fit_options["lower_bounded"]:
-            constraints = [ F_var >> Pquad ]
-
-        # Quadratic-like or not
         cost = 0.0
-        if self.fit_options["quadratic_like"]:
-            cost = cp.norm(F_var - Pquad, 'fro')
+        constraints = [ F_var >> 0 ]
+
+        if isinstance(self, KernelLyapunov):
+            '''
+            If KernelLyapunov, make is SOS convex
+            '''
+            factor = 0.0
+            SOSConvexMatrix = cp.bmat([[ Aj.T @ ( Ai.T @ F_var + F_var @ Ai ) + ( Ai.T @ F_var + F_var @ Ai ) @ Aj for Aj in A_list ] for Ai in A_list ])
+            # constraints = [ SOSConvexMatrix >> factor*np.eye(n*p) ]
+            constraints = [ SOSConvexMatrix >> factor*np.eye(n*p), F_var >> 0.0*np.eye(p) ]
+
+            for center in self.centers:
+                self.point_list.append({"coords": center, "level": 0.0, "force": False})
+
+        # Computes the enclosing quadratic and adds a center point to point_list (the center of the quadratic)
+        if isinstance(self, KernelBarrier):
+            Pquad, center_quad = self.enclosing_quadratic()
+            if len(self.centers) == 0:
+                self.centers.append(center_quad)
+            else:
+                for center in self.centers:
+                    self.point_list.append({"coords": center, "level":-self.constant})
+
+            if self.fit_options["lower_bounded"]:
+                constraints = [ F_var >> Pquad ]
+
+            if self.fit_options["quadratic_like"]:
+                cost = cp.norm(F_var - Pquad, 'fro')
             
         # Iterate over the input list to get problem requirements
         gradient_norms = []
@@ -891,10 +927,9 @@ class KernelQuadratic(Function):
                 gradient = np.array(pt["gradient"])
                 normalized = gradient/np.linalg.norm(gradient)
 
-                # constraints += [ Jm.T @ F_var @ m == gradient_norms[-1] * normalized ]
-                # constraints += [ gradient_norms[-1] >= 0 ]
-
-                cost += cp.norm( Jm.T @ F_var @ m - gradient_norms[-1] * normalized )
+                constraints += [ Jm.T @ F_var @ m == gradient_norms[-1] * normalized ]
+                # cost += cp.norm( Jm.T @ F_var @ m - gradient_norms[-1] * normalized )
+                
                 constraints += [ gradient_norms[-1] >= 0 ]
 
             # Define point-curvature constraints (2D only)
@@ -1049,11 +1084,12 @@ class KernelQuadratic(Function):
         return self.kernel
 
     def __str__(self):
-        '''
-        Print method
-        '''
-        text = "Polynomial function m(x)' P m(x) , where the kernel function m(x) is given by \n" + self.kernel.__str__()
-        return text
+        type_fun = "Polynominal function ½ k(x)' P k(x)"
+        if isinstance(self, KernelLyapunov):
+            type_fun = "CLF ½ k(x)' P k(x)"
+        if isinstance(self, KernelBarrier):
+            type_fun = "CBF ½ ( k(x)' Q k(x) - 1 )"
+        return type_fun
 
 class KernelLyapunov(KernelQuadratic):
     '''

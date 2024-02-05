@@ -50,17 +50,17 @@ while True:
         sol_x_plot.set_data([x_eq[0]], [x_eq[1]])
 
         # Find minimum point in the invariant set branch
-        min_sol, max_sol = optimize_branch(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, init_pt=x_eq, init_lambda=l_eq)
-        print(f"Min = {min_sol}")
-        print(f"Max = {max_sol}")
+        # min_sol, max_sol = optimize_branch(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, init_pt=x_eq, init_lambda=l_eq)
+        # print(f"Min = {min_sol}")
+        # print(f"Max = {max_sol}")
 
-        x_min = min_sol["pt"]
-        x_max = max_sol["pt"]
+        # x_min = min_sol["pt"]
+        # x_max = max_sol["pt"]
 
-        if x_min != None:
-            sol_x_minimize_plot.set_data([x_min[0]], [x_min[1]])
-        if x_max != None:
-            sol_x_maximize_plot.set_data([x_max[0]], [x_max[1]])
+        # if x_min != None:
+        #     sol_x_minimize_plot.set_data([x_min[0]], [x_min[1]])
+        # if x_max != None:
+        #     sol_x_maximize_plot.set_data([x_max[0]], [x_max[1]])
 
     else:
         print("No equilibrium point was found.")
@@ -69,6 +69,7 @@ while True:
         sol_x_maximize_plot.set_data([],[])
 
     V = sim.clf.function(init_x)
+    print(f"V = {V}")
     clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits)
 
 plt.show()

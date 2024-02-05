@@ -4,7 +4,6 @@ import itertools
 
 from scipy.spatial import ConvexHull
 from scipy.optimize import fsolve
-from shapely import geometry
 
 def cofactor(A):
     """
@@ -586,7 +585,7 @@ def minimum_bounding_rectangle(points):
     rval[2] = np.dot([x2, y1], r)
     rval[3] = np.dot([x1, y1], r)
 
-    factor = 2          # must be greater than 1
+    factor = 1          # must be greater than 1
     centroid = rval.mean(axis=0)
     diffs = rval - centroid
     new_bbox = centroid + factor*diffs

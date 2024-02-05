@@ -68,13 +68,13 @@ class NominalQP():
         self.l_pivot = cp.Variable()
         self.tracking_grad_norm = cp.Variable()
 
-        center = np.zeros(self.state_dim)
-        for pt in self.clf.point_list:
-            if pt["level"] == 0.0:
-                center = pt["point"]
-                break
-        Vvalue = 10
-        self.Pquadratic = create_quadratic((1/Vvalue)*np.ones(self.state_dim), np.eye(self.state_dim), center, self.kernel_dim)
+        # center = np.zeros(self.state_dim)
+        # for pt in self.clf.point_list:
+        #     if pt["level"] == 0.0:
+        #         center = pt["point"]
+        #         break
+        # Vvalue = 10
+        # self.Pquadratic = create_quadratic((1/Vvalue)*np.ones(self.state_dim), np.eye(self.state_dim), center, self.kernel_dim)
 
         self.objective = cp.Minimize( cp.norm( self.Pnew - self.Pnom, p='fro' ) )
         self.constraints = { "psd": [ self.Pnew >> 0.0 ], 

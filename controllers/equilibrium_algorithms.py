@@ -1257,7 +1257,7 @@ def optimize_branch(plant, clf, cbf, params, **kwargs):
         x = var[0:n]
         z = kernel.function(x)
         # l = var[-1]
-        return z.T @ cbf.Q @ z - 1
+        return cbf.function(x)
 
     init_var = np.hstack([init_pt, init_lambda])
 
