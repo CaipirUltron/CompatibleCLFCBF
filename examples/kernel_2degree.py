@@ -3,7 +3,7 @@ import numpy as np
 from dynamic_systems import ConservativeAffineSystem
 from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
-from common import create_quadratic, rot2D
+from common import create_quadratic, rot2D, box
 
 initial_state = [0.5, 6.0]
 initial_control = [0.0, 0.0]
@@ -33,40 +33,19 @@ points.append({ "coords": [-4.0,  6.0], "gradient": [-1.0,  0.5] })
 points.append({ "coords": [ 4.0,  6.0], "gradient": [ 0.0,  6.5] })
 points.append({ "coords": [ 0.0,  5.0], "gradient": [ 2.0,  6.0] })
 # points.append({ "coords": [ 0.0,  -8.0], "gradient": [ 0.0,  -1.0] })
-clf = KernelLyapunov(*initial_state, kernel=kernel, points=points, center = clf_center)
+# clf = KernelLyapunov(*initial_state, kernel=kernel, points=points, centers=[clf_center])
 
 clf_eig = 0.01*np.array([ 6.0, 1.0 ])
 clf_angle = np.deg2rad(15)
-# clf = KernelLyapunov(*initial_state, kernel=kernel, P=create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim))
-
+clf = KernelLyapunov(*initial_state, kernel=kernel, P=create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim))
 clf.is_sos_convex(verbose=True)
+
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
-# boundary_points = [ [-4.0, 0.0], [-4.0, -1.0], [-2.0, 0.5], [2.0, 0.5], [4.0, -1.0], [4.0, 0.0], [0.0, 1.0], [0.0, -0.5] ]   # (sad smile)
-# boundary_points = [ [-4.0, 0.0], [-4.0, 1.0], [-2.0, -0.5], [2.0, -0.5], [4.0, 1.0], [4.0, 0.0] ]                            # (bell shaped)
 
-c = np.array([0.0, 3.0])
-height, width = 4, 4
-t = (height/2)*np.array([  0, +1 ])
-b = (height/2)*np.array([  0, -1 ])
-l = (width/2) *np.array([ -1,  0 ])
-r = (width/2) *np.array([ +1,  0 ])
-tl = t+l
-tr = t+r
-bl = b+l
-br = b+r
-
-points = []
-
-points.append( {"coords": t+c, "gradient": t} )
-points.append( {"coords": b+c, "gradient": b} )
-points.append( {"coords": l+c, "gradient": l} )
-points.append( {"coords": r+c, "gradient": r} )
-points.append( {"coords": tl+c, "gradient": tl} )
-points.append( {"coords": tr+c, "gradient": tr} )
-points.append( {"coords": bl+c, "gradient": bl} )
-points.append( {"coords": br+c, "gradient": br} )
-
-cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=points, centers=[c])
+# Creates box points to be fitted
+c = [0.0, 4.0]
+pts = box( center=c, height=5, width=5, angle=15, res=3 )
+cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=[c])
 cbf.is_sos_convex(verbose=True)
 # ------------------------------------------------- Define controller ------------------------------------------------------
 T = 15

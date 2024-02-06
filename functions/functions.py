@@ -3,6 +3,7 @@ import itertools
 import numpy as np
 import scipy as sp
 import cvxpy as cp
+import sympy 
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -731,16 +732,18 @@ class KernelQuadratic(Function):
         # Initialization
         super().__init__(*args)
 
-        self.point_list = []
         self.constant = 0.0
         self.centers = []
+        self.points = []
+        self.cost = 0.0
+        self.constraints = []
+
+        self.default_fit_options = {"force_coords": False, "force_gradients": False }
 
         default_color = "black"
         if isinstance(self, KernelLyapunov):
-            self.default_fit_options = {"lower_bounded": False, "quadratic_like": False, "force_all": False } # doesnt avoid non-convexity... but forcing a center point helps A LOT 
             default_color = mcolors.TABLEAU_COLORS['tab:blue']
         elif isinstance(self, KernelBarrier):
-            self.default_fit_options = {"lower_bounded": True, "quadratic_like": False, "force_all": True } # doesnt avoid non-convexity... but forcing a center point helps A LOT 
             default_color = mcolors.TABLEAU_COLORS['tab:red']
         self.default_plot_config = {"figsize": (5,5), "axeslim": (-6,6,-6,6), "color": default_color}
 
@@ -767,13 +770,14 @@ class KernelQuadratic(Function):
                 if default_key in kwargs["plot_config"].keys():
                     self.plot_config[default_key] = kwargs["plot_config"][default_key]
 
-        if "center" in kwargs.keys():
-            self.center = kwargs["center"]
+        # Defines the centers of both CLF and CBF
+        if "centers" in kwargs.keys():
+            self.centers = kwargs["centers"]
 
         for key in kwargs:
 
             # already dealt with
-            if key == "constant" or key == "center" or key == "fit_options" or key == "plot_config":
+            if key == "constant" or key == "centers" or key == "fit_options" or key == "plot_config":
                 continue
 
             # If degree was passed, create Kernel() of appropriate degree and initialize parameter dynamics
@@ -814,8 +818,10 @@ class KernelQuadratic(Function):
 
             # If a dictionary of points was passed, call interpolate to find an interpolating coefficient matrix
             if key == "points":
-                self.point_list = kwargs["points"]
+                self.points = kwargs["points"]
                 self.fit()
+
+        self.SHAPE = cp.Variable( (self.kernel_dim,self.kernel_dim), symmetric=True )
 
         if np.shape(self.matrix_coefs) != (self.kernel_dim, self.kernel_dim):
             raise Exception("P must be (p x p), where p is the kernel dimension!")
@@ -829,6 +835,61 @@ class KernelQuadratic(Function):
         new_param = self.dynamics.get_state()
         self.set_param( coefficients = vector2sym(new_param) )
 
+    def SOS_convexity(self):
+        '''
+        Given a cvxpy P_var matrix and the function kernel, construct an efficient parametrization
+        for SDP.
+        '''
+        n = self._dim
+        p = self.kernel_dim
+        A_list = self.kernel.get_A_matrices()
+
+        y_alpha, _ = generate_monomial_list( self._dim, 1 )
+        y_alpha = np.delete(y_alpha, 0, axis=0)
+
+        augmented_alpha = np.array([ powers.tolist() + y_powers.tolist() for powers in self.kernel.alpha for y_powers in y_alpha ])
+        # print( augmented_alpha )
+
+        def add_monomial( monomials1, monomials2, current_alpha ):
+            '''
+            Adds monomial1 and/or monomial2 to monomial list, IFF 
+            monomials1 and monomials2 cannot be made with the current alpha. 
+            '''
+            alpha_size = len(current_alpha)
+            if alpha_size == 0:
+                current_alpha.append( monomials1.tolist() )
+
+            # for i in range(alpha_size):
+            #     for j in range(i,alpha_size):
+            #         if monomials1 + monomials2 == np.array(current_alpha[i]) + np.array(current_alpha[j]):
+            #             continue
+
+            return current_alpha
+
+        # Builds symbolic prototype for the SOS convex matrix
+        current_alpha = []
+        Prototype = sympy.MatrixSymbol('P', self.kernel_dim, self.kernel_dim)
+        for i in range(n):
+            for j in range(i,n):
+
+                # Inside each block matrix
+                Ai, Aj = A_list[i], A_list[j]
+                Block = Aj.T @ ( Ai.T @ Prototype + Prototype @ Ai ) + ( Ai.T @ Prototype + Prototype @ Ai ) @ Aj
+                NullElements = Block == 0
+
+                curr_row_alpha = augmented_alpha[augmented_alpha[:,n+i] == 1,:]
+                curr_col_alpha = augmented_alpha[augmented_alpha[:,n+j] == 1,:]
+
+                # print(curr_row_alpha)
+                # print(curr_col_alpha)
+
+                for k in range(p):
+                    for l in range(k,p):
+
+                        # Inside each element of the current block
+                        if not NullElements[k,l]:
+                            current_alpha = add_monomial( curr_row_alpha[k,:], curr_col_alpha[l,:], current_alpha )
+
     def is_sos_convex(self, verbose=False):
         '''
         Returns True if the function is SOS convex.
@@ -836,75 +897,52 @@ class KernelQuadratic(Function):
         sos_convex = False
         A_list = self.kernel.get_A_matrices()
         SOSConvexMatrix = np.block([[ Ai.T @ self.matrix_coefs @ Aj + Aj.T @ Ai.T @ self.matrix_coefs for Aj in A_list ] for Ai in A_list ])
-        eigs = np.linalg.eigvals(SOSConvexMatrix+SOSConvexMatrix.T)
-        if np.all(eigs >= 0.0):
+        eigs = np.linalg.eigvals(SOSConvexMatrix)
+        if np.all(eigs >= -1e-3):
             sos_convex = True
 
         if verbose:
-            if sos_convex: print(f"{self} is SOS convex.")
+            if sos_convex: print(f"{self} is SOS convex, with negative eigenvalues = {eigs[eigs < 0.0]}")
             else: print(f"{self} is not SOS convex, with negative eigenvalues = {eigs[eigs < 0.0]}")
 
         return sos_convex
 
+    def init_optimization(self):
+        '''
+        Initialize optimization. Initially, cost is zero and the only constraint should be self.SHAPE >> 0
+        '''
+        self.cost = 0.0
+        self.constraints = [ self.SHAPE >> 0 ]
+
     def fit(self):
         '''
-        Fits the p.s.d. coefficient matrix to a list of desired points.
-        Parameters: point_list = [ { "point": ArrayLike, 
-                                     "level": float >= -self.constant, 
-                                     "gradient": ArrayLike, 
-                                     "curvature": float, 
-                                     "force": bool }, ... ],
-        A list with dicts containing each the fitting coordinates to corresponding level set value, gradient and curvature (2D only). 
-        Additionally, a force flag can be specifed for forcing the specified level set to the given coordinates.
-        Returns: the optimization error.
+        Fits the coefficient matrix to a list of desired points.
+        Parameters: uses the list 
+        points = [ { "point"     : ArrayLike, 
+                     "level"     : float >= -self.constant, 
+                     "gradient"  : ArrayLike, 
+                     "curvature" : float }, ... ]
+        to add more constraints or terms to the cost function before trying to solve the optimization. 
+        Returns: the optimization results.
         '''
         n = self._dim
         p = self.kernel_dim
-        A_list = self.kernel.get_A_matrices()            
+        A_list = self.kernel.get_A_matrices()
 
-        F_var = cp.Variable( (p,p), symmetric=True )
-        cost = 0.0
-        constraints = [ F_var >> 0 ]
+        for center in self.centers:
+            self.points.append({"coords": center, "level":-self.constant})
 
-        if isinstance(self, KernelLyapunov):
-            '''
-            If KernelLyapunov, make is SOS convex
-            '''
-            m_center = self.kernel.function(self.center)
-            Pquad = create_quadratic(eigen=[0.05, 0.05], R=rot2D(0.0), center=self.center, kernel_dim=self.kernel_dim)
-            SOSConvexMatrix = cp.bmat([[ Aj.T @ ( Ai.T @ F_var + F_var @ Ai ) + ( Ai.T @ F_var + F_var @ Ai ) @ Aj for Aj in A_list ] for Ai in A_list ])
-            constraints = [ F_var >> 0,
-                            SOSConvexMatrix >> 0,
-                            m_center.T @ F_var @ m_center == 0 ]
-            cost += cp.norm(F_var - Pquad)
-
-            # for center in self.centers:
-            #     self.point_list.append({"coords": center, "level": 0.0, "force": False})
-
-        # Computes the enclosing quadratic and adds a center point to point_list (the center of the quadratic)
-        if isinstance(self, KernelBarrier):
-            Pquad, center_quad = self.enclosing_quadratic()
-            if len(self.centers) == 0:
-                self.centers.append(center_quad)
-            else:
-                for center in self.centers:
-                    self.point_list.append({"coords": center, "level":-self.constant})
-
-            if self.fit_options["lower_bounded"]:
-                constraints = [ F_var >> Pquad ]
-
-            if self.fit_options["quadratic_like"]:
-                cost = cp.norm(F_var - Pquad, 'fro')
-            
         # Iterate over the input list to get problem requirements
         gradient_norms = []
-        for pt in self.point_list:
+        for pt in self.points:
             keys = pt.keys()
 
             if "coords" not in keys:
                 raise Exception("The point coordinates must be specified.")
-            if "force" not in keys:
-                pt["force"] = False
+            if "force_coord" not in keys:
+                pt["force_coord"] = False
+            if "force_gradient" not in keys:
+                pt["force_gradient"] = False
 
             coords = pt["coords"]
             if type(coords) == np.ndarray:
@@ -917,27 +955,26 @@ class KernelQuadratic(Function):
             if "level" in keys:
                 level_value = pt["level"]
                 if level_value >= -self.constant:
-                    if self.fit_options["force_all"] or pt["force"]:
-                        constraints += [ 0.5 * m.T @ F_var @ m - self.constant == level_value ]
+                    if self.fit_options["force_coords"] or pt["force_coord"]:
+                        self.constraints += [ 0.5 * m.T @ self.SHAPE @ m - self.constant == level_value ]
                     else:
-                        cost += ( 0.5 * m.T @ F_var @ m - self.constant - level_value )**2
-                else: # -self.constant is lower bound for kernel-based functions; ignore lower values
+                        self.cost += ( 0.5 * m.T @ self.SHAPE @ m - self.constant - level_value )**2
+                else:
                     continue
 
-            # Define point-gradient constraints
+            # Define gradient constraints
             if "gradient" in keys:
                 gradient_norms.append( cp.Variable() )
                 gradient = np.array(pt["gradient"])
                 normalized = gradient/np.linalg.norm(gradient)
 
-                if isinstance(self, KernelLyapunov):
-                    cost += cp.norm( Jm.T @ F_var @ m - gradient_norms[-1] * normalized )
-                if isinstance(self, KernelBarrier):
-                    constraints += [ Jm.T @ F_var @ m == gradient_norms[-1] * normalized ]
+                if self.fit_options["force_gradients"] or pt["force_gradient"]:
+                    self.constraints += [ Jm.T @ self.SHAPE @ m == gradient_norms[-1] * normalized ]
+                else:
+                    self.cost += cp.norm( Jm.T @ self.SHAPE @ m - gradient_norms[-1] * normalized )
+                self.constraints += [ gradient_norms[-1] >= 0 ]
 
-                constraints += [ gradient_norms[-1] >= 0 ]
-
-            # Define point-curvature constraints (2D only)
+            # Define curvature constraints (2D only)
             if "curvature" in keys:
                 if n != 2:
                     raise Exception("Error: curvature fitting was not implemented for dimensions > 2. ")
@@ -949,19 +986,11 @@ class KernelQuadratic(Function):
 
                 curvature_var = 0.0
                 for i,j in itertools.product(range(n),range(n)):
-                    Hij = m.T @ ( A_list[i].T @ F_var + F_var @ A_list[i] ) @ A_list[j] @ m
+                    Hij = m.T @ ( A_list[i].T @ self.SHAPE + self.SHAPE @ A_list[i] ) @ A_list[j] @ m
                     curvature_var += Hij * v[i] * v[j]
-                cost += ( curvature_var - curvature )**2
+                self.cost += ( curvature_var - curvature )**2
 
-        # Trying to keep the gradient norms close to 1
-        # for gradient_norm in gradient_norms:
-        #     cost += ( gradient_norm - 1.0 )**2
-
-        '''
-        Define first optimization, fitting only the points to their corresponding level sets and gradients
-        '''
-        objective = cp.Minimize( cost )
-        fit_problem = cp.Problem(objective, constraints)
+        fit_problem = cp.Problem( cp.Minimize( self.cost ), self.constraints )
         fit_problem.solve()
 
         if "optimal" in fit_problem.status:
@@ -971,23 +1000,28 @@ class KernelQuadratic(Function):
                 print("Barrier fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
             else:
                 print("Function fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
-            self.set_param( coefficients = F_var.value )
-            # self.set_param( coefficients = Pquad )
-            return fit_problem.value
+            self.set_param( coefficients = self.SHAPE.value )
+            return fit_problem
         else:
             raise Exception("Problem is " + fit_problem.status + ".")
-
-    def fit_level_set(self, points, level):
+        
+    def fit_level_set(self, points, level, contained=False):
         '''
         Fits the function coefficients to points on a predefined level set.
         Parameters: points -> list of dict with {"coords": mandatory, "gradient": optional, "curvature": optional}
                     level  -> value of level set
         Returns: the optmization error.
         '''
-        self.point_list = points
-        for pt in self.point_list:
-           pt["level"] = level
-        return self.fit()
+        self.init_optimization()
+
+        for pt in points:
+            self.points.append( {"coords": pt, "level": level} )
+
+            if isinstance(self, KernelBarrier) and contained:
+                m = self.kernel.function(pt)
+                self.constraints.append( m.T @ self.SHAPE @ m <= 1.0 )
+
+        self.fit()
 
     def get_curvature(self, point):
         '''
@@ -1115,6 +1149,41 @@ class KernelLyapunov(KernelQuadratic):
         super().set_param(**kwargs)
         self.P = self.matrix_coefs
 
+    def init(self):
+        pass
+                # if isinstance(self, KernelLyapunov):
+        #     '''
+        #     If KernelLyapunov, make is SOS convex
+        #     '''
+        #     m_center = self.kernel.function(self.centers[0])
+        #     Pquad = create_quadratic(eigen=[0.05, 0.05], R=rot2D(0.0), center=self.centers[0], kernel_dim=self.kernel_dim)
+        #     # SOSConvexMatrix = cp.bmat([[ Aj.T @ ( Ai.T @ self.SHAPE + self.SHAPE @ Ai ) + ( Ai.T @ self.SHAPE + self.SHAPE @ Ai ) @ Aj for Aj in A_list ] for Ai in A_list ])
+        #     constraints = [ self.SHAPE >> 0,
+        #                     # SOSConvexMatrix >> 0,
+        #                     m_center.T @ self.SHAPE @ m_center == 0 ]
+        #     cost += cp.norm(self.SHAPE - Pquad)
+
+        #     # for center in self.centers:
+        #     #     self.point_list.append({"coords": center, "level": 0.0, "force": False})
+
+        # Computes the enclosing quadratic and adds a center point to point_list (the center of the quadratic)
+        # if isinstance(self, KernelBarrier):
+
+        #     # Pquad, center_quad = self.enclosing_quadratic()
+        #     # if len(self.centers) == 0:
+        #     #     self.centers.append(center_quad)
+        #     # else:
+
+        #     for center in self.centers:
+        #         self.point_list.append({"coords": center, "level":-self.constant})
+        #         m = self.kernel.function(center)
+
+            # if self.fit_options["lower_bounded"]:
+            #     constraints = [ F_var >> Pquad ]
+
+            # if self.fit_options["quadratic_like"]:
+            #     cost = cp.norm(F_var - Pquad, 'fro')
+
 class KernelBarrier(KernelQuadratic):
     '''
     Class for kernel-based barrier functions.
@@ -1146,13 +1215,9 @@ class KernelBarrier(KernelQuadratic):
         '''
         Defines the CBF boundary, given a list of points
         '''
-        for pt in points:
-            if "coords" not in pt.keys():
-                raise Exception("Point coords were not passed.")
-
-        cost = self.fit_level_set(points=points, level=0.0)
+        self.init_optimization()
+        self.fit_level_set(points=points, level=0.0, contained=True)
         self.Q = self.matrix_coefs
-        return cost
 
 class QFunction(KernelBarrier):
     '''

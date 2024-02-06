@@ -521,6 +521,40 @@ def ellipsoid_parametrization(Q, param):
     z = main_axes @ np.array(reduced_z.tolist() + [ 0.0 for _ in range(p-rankQ)])
     return z
 
+def box(center, height, width, angle, res = 1):
+    '''
+    Create points fitting a box.
+    '''
+    t = (height/2)*np.array([  0, +1 ])
+    b = (height/2)*np.array([  0, -1 ])
+    l = (width/2) *np.array([ -1,  0 ])
+    r = (width/2) *np.array([ +1,  0 ])
+    tl = t+l
+    tr = t+r
+    bl = b+l
+    br = b+r
+
+    top = center + t @ rot2D( np.deg2rad(angle) )
+    bottom = center + b @ rot2D( np.deg2rad(angle) )
+    left = center + l @ rot2D( np.deg2rad(angle) )
+    right = center + r @ rot2D( np.deg2rad(angle) )
+
+    top_left = center + tl @ rot2D( np.deg2rad(angle) )
+    top_right = center + tr @ rot2D( np.deg2rad(angle) )
+    bottom_left = center + bl @ rot2D( np.deg2rad(angle) )
+    bottom_right = center + br @ rot2D( np.deg2rad(angle) )
+
+    pts = []
+    boundary_bbox = [ top, top_right, right, bottom_right, bottom, bottom_left, left, top_left, top ]
+    for k in range(len(boundary_bbox)-1):
+        current = boundary_bbox[k]
+        next = boundary_bbox[k+1]
+        delta = next-current
+        for i in range(res):
+            pts.append( (current + (i/res) * delta).tolist() )
+
+    return pts
+
 def minimum_bounding_rectangle(points):
     """
     Find the smallest bounding rectangle for a set of points.
