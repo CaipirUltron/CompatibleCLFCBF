@@ -10,7 +10,7 @@ from controllers.equilibrium_algorithms import compute_equilibria, plot_invarian
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 initial_state = [0.5, 6.0]
-kernel = Kernel(*initial_state, degree=3)
+kernel = Kernel(*initial_state, degree=2)
 kernel_dim = kernel.kernel_dim
 print(kernel)
 
@@ -26,15 +26,16 @@ constraints = [ P >> 0,
                 ]
 
 # Define CBF centers
-centers = [ [ 0.0, 0.0 ], [-4.0, 2.0 ], [ 4.0, 2.0 ] ]
+centers = [ [ 0.0, 0.0 ], [ -4.0, 3.0 ], [ 4.0, 3.0 ] ]
 
 # Fits CBF to a box-shaped obstacle
-pts = [ [-5.0,-1.0 ], [-5.0, 3.0 ], [-3.0, 3.0 ], [-3.0, 1.0 ],
-        [ 3.0, 1.0 ], [ 3.0, 3.0 ], [ 5.0, 3.0 ], [ 5.0,-1.0 ] ]
-pts = polygon( vertices=pts, spacing=0.2, closed=True )
-# pts = box( center=centers[0], height=5, width=5, angle=15, spacing=0.2 )
+pts = [ [ 5.0,-1.0 ], [ 5.0, 3.0 ], [ 3.0, 3.0 ], [ 3.0, 1.0 ],
+        [-3.0, 1.0 ], [-3.0, 3.0 ], [-5.0, 3.0 ], [-5.0,-1.0 ] ]
 
-cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=centers)
+# pts = polygon( vertices=pts, spacing=0.2, closed=True, gradients=0, at_edge=False )
+pts = box( center=centers[0], height=5, width=5, angle=15, spacing=0.2, gradients=1, at_edge=True )
+
+cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=[centers[0]])
 cbf.is_sos_convex(verbose=True)
 
 # ----------------------------------------------- Plotting ----------------------------------------------
@@ -44,11 +45,14 @@ ax.set_title("Invariant set plot for Kernel-based CLF-CBFs")
 ax.set_aspect('equal', adjustable='box')
 
 for pt in pts:
-    ax.plot(pt[0], pt[1], 'k*')
+    coords = np.array(pt["coords"])
+    ax.plot(coords[0], coords[1], 'k*', alpha=0.6)
 
-print(f"h at center = {cbf.function(centers[0])}")
+    if "gradient" in pt.keys():
+        gradient_vec = coords + np.array(pt["gradient"])
+        ax.plot([ coords[0], gradient_vec[0]], [ coords[1], gradient_vec[1]], 'k-', alpha=0.6)
 
-limits = (9*np.array([[-1, 1],[-1, 1]])).tolist()
+limits = (16*np.array([[-1, 1],[-1, 1]])).tolist()
 
 ax.set_xlim(limits[0][0], limits[0][1])
 ax.set_ylim(limits[1][0], limits[1][1])

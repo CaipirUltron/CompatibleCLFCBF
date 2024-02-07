@@ -43,9 +43,9 @@ clf.is_sos_convex(verbose=True)
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
 # Fits CBF to a U shaped obstacle
 centers = [ [-3.0, 0.0 ],[ 3.0, 0.0 ], [ -4.0, 3.0 ], [ 4.0, 3.0 ] ]
-pts = [ [-5.0,-1.0 ], [-5.0, 3.0 ], [-3.0, 3.0 ], [-3.0, 1.0 ],
-        [ 3.0, 1.0 ], [ 3.0, 3.0 ], [ 5.0, 3.0 ], [ 5.0,-1.0 ] ]
-pts = polygon( vertices=pts, spacing=0.2, closed=True )
+pts = [ [ 5.0,-1.0 ], [ 5.0, 3.0 ], [ 3.0, 3.0 ], [ 3.0, 1.0 ],
+        [-3.0, 1.0 ], [-3.0, 3.0 ], [-5.0, 3.0 ], [-5.0,-1.0 ] ]
+pts = polygon( vertices=pts, spacing=0.2, closed=True, gradients=0, at_edge=False )
 
 cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=centers)
 cbf.is_sos_convex(verbose=True)
@@ -56,9 +56,10 @@ p, alpha, beta = 1.0, 1.0, 1.0
 controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
-xlimits, ylimits = [-6, 6], [-4, 8]
+limits = (15*np.array([[-1, 1],[-1, 1]])).tolist()
+
 plot_config = {
-    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": [xlimits, ylimits],
+    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits,
     "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": True
 }
 

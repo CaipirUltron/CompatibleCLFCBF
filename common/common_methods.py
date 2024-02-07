@@ -521,7 +521,79 @@ def ellipsoid_parametrization(Q, param):
     z = main_axes @ np.array(reduced_z.tolist() + [ 0.0 for _ in range(p-rankQ)])
     return z
 
-def box(center, height, width, angle, spacing=0.1):
+def polygon(vertices, spacing=0.1, closed=False, gradients=0, at_edge=False ):
+    '''
+    Returns equally spaced points of a polygon with previously defined vertices.
+    Parameters: vertices (N x 2 ArrayLike) - point coordinates. The sequence is determined by the right-hand rule.
+                spacing (float) - the spacing between points
+                gradients (int: -1, 0, 1) -
+                                            0 means no gradients, 
+                                            +-1 means gradient pointing 90° in the counter/clockwise 
+                                            direction to the polygonal sequence.
+                closed (bool) - if the polygon is open (False) or closed (True)
+    Returns: list of dicts containing the point coordinates along the polygon edges and (possibly) gradients 
+    '''
+
+    # Compute segments and normals - for N vertices, polygon will have N - 1 segments if it's open, or N segments if it's closed
+    vertices = np.array(vertices)
+    segments = np.zeros(vertices.shape)
+    normals = np.zeros(vertices.shape)
+    for k in range(len(vertices)):
+        if k < len(vertices)-1:
+            segment = vertices[k+1,:] - vertices[k,:]
+        else:
+            segment = vertices[0,:] - vertices[-1,:]
+        segments[k,:] = segment
+        normals[k,:] = rot2D(-gradients*np.pi/2) @ segment/np.linalg.norm(segment)
+
+    def add_side_points( vertex, segment, normal ):
+        '''
+        Adds points starting from vertex and following the direction segment.
+        If gradients != 0, adds the gradient in the normal direction too.
+        '''
+        pts = []
+        segment_size = np.linalg.norm(segment)
+        num_segment_pts = int(np.ceil(segment_size/spacing))
+        unit_segment = segment / segment_size
+
+        added_grad = False
+
+        for i in range(1,num_segment_pts):
+            dist_over_segment = i*spacing
+            pt = vertex + dist_over_segment*unit_segment
+            pts.append({"coords": pt.tolist()})
+
+            if gradients != 0 and dist_over_segment > (segment_size-spacing)/2 and not added_grad:
+                pts[-1]["gradient"] = normal.tolist()
+                added_grad = True
+
+        return pts
+
+    # Start adding points
+    pts = []
+    for k in range(len(vertices)-1):
+        pts += add_side_points( vertices[k,:], segments[k,:], normals[k,:] )
+        pts.append({ "coords": vertices[k+1,:].tolist() })
+
+        if ( k+1 < len(vertices)-1 or closed ) and at_edge:
+            vertex_perp = normals[k] + normals[k+1]
+            vertex_perp = vertex_perp/np.linalg.norm(vertex_perp)
+            pts[-1]["gradient"] = vertex_perp
+
+    # Adds points for the last segment
+    if closed:
+        pts += add_side_points( vertices[-1,:], segments[-1,:], normals[-1,:] )
+        pts.append({"coords": vertices[0,:].tolist() })
+        if at_edge:
+            vertex_perp = normals[0] + normals[-1]
+            vertex_perp = vertex_perp/np.linalg.norm(vertex_perp)
+            pts[-1]["gradient"] = vertex_perp
+    else:
+        pts.append({"coords": vertices[0,:].tolist() })
+
+    return pts
+
+def box(center, height, width, angle, spacing=0.1, gradients=0, at_edge=False):
     '''
     Returns equally spaced points fitting a box.
     '''
@@ -539,30 +611,10 @@ def box(center, height, width, angle, spacing=0.1):
     bottom_left = center + bl @ rot2D( np.deg2rad(angle) )
     bottom_right = center + br @ rot2D( np.deg2rad(angle) )
 
-    return polygon( vertices=np.vstack([ top_left, top_right, bottom_right, bottom_left ]), spacing=spacing, closed=True )
-
-def polygon(vertices, spacing=0.1, closed=False):
-    '''
-    Returns equally spaced points of a polygon with previously defined vertices.
-    '''
-    vertices = np.array(vertices)
-    pts = []
-    def add_side_points( origin, destiny, spacing ):
-        side = destiny - origin
-        num_side_pts = int(np.ceil(np.linalg.norm(side)/spacing))
-        normal_side = side / np.linalg.norm(side)
-        for i in range(num_side_pts):
-            pts.append(( origin + spacing*i*normal_side ).tolist())
-
-    for k in range(len(vertices)-1):
-        add_side_points( vertices[k,:], vertices[k+1,:], spacing )
-
-    if closed:
-        add_side_points( vertices[-1,:], vertices[0,:], spacing )
-    else:
-        pts.append(( vertices[-1,:] ).tolist())
-
-    return pts    
+    box_pts = polygon( vertices=np.vstack([ bottom_left, bottom_right, top_right, top_left ]), 
+                       spacing=spacing, closed=True, gradients=gradients, at_edge=False )
+    
+    return box_pts
 
 def minimum_bounding_rectangle(points):
     """

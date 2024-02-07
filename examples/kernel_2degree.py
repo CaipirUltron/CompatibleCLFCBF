@@ -3,7 +3,7 @@ import numpy as np
 from dynamic_systems import ConservativeAffineSystem
 from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
-from common import create_quadratic, rot2D, box, polygon
+from common import create_quadratic, rot2D, box
 
 initial_state = [0.5, 6.0]
 initial_control = [0.0, 0.0]
@@ -43,7 +43,7 @@ clf.is_sos_convex(verbose=True)
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
 # Fits CBF to a box-shaped obstacle
 center = [ 0.0, 0.0 ]
-pts = box( center=center, height=5, width=5, angle=0, spacing=0.4 )
+pts = box( center=center, height=5, width=5, angle=0, spacing=0.4, gradients=1, at_edge=True )
 cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=[center])
 cbf.is_sos_convex(verbose=True)
 # ------------------------------------------------- Define controller ------------------------------------------------------
@@ -53,9 +53,10 @@ p, alpha, beta = 1.0, 1.0, 1.0
 controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
-xlimits, ylimits = [-9, 9], [-9, 9]
+limits = (15*np.array([[-1, 1],[-1, 1]])).tolist()
+
 plot_config = {
-    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": [xlimits, ylimits],
+    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits,
     "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": True
 }
 logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": cbf.Q.tolist() }

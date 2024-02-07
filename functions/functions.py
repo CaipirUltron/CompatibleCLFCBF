@@ -3,7 +3,7 @@ import itertools
 import numpy as np
 import scipy as sp
 import cvxpy as cp
-import sympy 
+import sympy
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -958,12 +958,19 @@ class KernelQuadratic(Function):
         Returns: the optmization error.
         '''
         self.init_optimization()
-
         for pt in points:
-            self.points.append( {"coords": pt, "level": level} )
+
+            if isinstance(pt, list) or isinstance(pt, np.ndarray):
+                self.points.append( {"coords": pt, "level": level} )
+            elif isinstance(pt, dict):
+                pt_dict = pt
+                pt_dict["level"] = level
+                self.points.append(pt_dict)
+            else:
+                raise Exception("Point structure was not recognized.")
 
             if isinstance(self, KernelBarrier) and contained:
-                m = self.kernel.function(pt)
+                m = self.kernel.function(self.points[-1]["coords"])
                 self.constraints.append( m.T @ self.SHAPE @ m <= 1.0 )
 
         self.fit()

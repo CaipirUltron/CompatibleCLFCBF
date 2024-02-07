@@ -16,17 +16,21 @@ ax = fig.add_subplot(111)
 ax.set_title("Invariant set plot for Kernel-based CLF-CBFs")
 ax.set_aspect('equal', adjustable='box')
 
-limits = (9*np.array([[-1, 1],[-1, 1]])).tolist()
-
+limits = sim.plot_config["limits"]
 ax.set_xlim(limits[0][0], limits[0][1])
 ax.set_ylim(limits[1][0], limits[1][1])
 
 for pt in sim.pts:
-    ax.plot(pt[0], pt[1], 'k*', alpha=0.6)
+    coords = np.array(pt["coords"])
+    ax.plot(coords[0], coords[1], 'k*', alpha=0.6)
+
+    if "gradient" in pt.keys():
+        gradient_vec = coords + np.array(pt["gradient"])
+        ax.plot([ coords[0], gradient_vec[0]], [ coords[1], gradient_vec[1]], 'k-', alpha=0.6)
 
 contour_unsafe = sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
-# contour_safe = sim.cbf.plot_levels(levels = [ 0.1*k for k in range(0,5,1) ], ax=ax, limits=limits)
-contour_invariant = plot_invariant(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, ax=ax, limits=limits, extended=False)
+contour_invariant = plot_invariant(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, 
+                                   ax=ax, limits=limits, extended=False, res=0.1)
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 sol_x_plot, = ax.plot([],[],'ok', alpha=0.8)
@@ -74,6 +78,6 @@ while True:
 
     V = sim.clf.function(init_x)
     print(f"V = {V}")
-    clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits)
+    clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits, resolution=0.5)
 
 plt.show()
