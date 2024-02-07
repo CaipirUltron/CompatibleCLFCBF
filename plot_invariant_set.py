@@ -21,7 +21,11 @@ limits = (9*np.array([[-1, 1],[-1, 1]])).tolist()
 ax.set_xlim(limits[0][0], limits[0][1])
 ax.set_ylim(limits[1][0], limits[1][1])
 
-contour_boundary = sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
+for pt in sim.pts:
+    ax.plot(pt[0], pt[1], 'k*', alpha=0.6)
+
+contour_unsafe = sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
+# contour_safe = sim.cbf.plot_levels(levels = [ 0.1*k for k in range(0,5,1) ], ax=ax, limits=limits)
 contour_invariant = plot_invariant(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, ax=ax, limits=limits, extended=False)
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)

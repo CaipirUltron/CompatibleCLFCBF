@@ -4,13 +4,13 @@ import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 
-from common import create_quadratic, rot2D, box
+from common import create_quadratic, rot2D, box, polygon
 from functions import Kernel, KernelBarrier
 from controllers.equilibrium_algorithms import compute_equilibria, plot_invariant, closest_to_image
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 initial_state = [0.5, 6.0]
-kernel = Kernel(*initial_state, degree=2)
+kernel = Kernel(*initial_state, degree=3)
 kernel_dim = kernel.kernel_dim
 print(kernel)
 
@@ -21,18 +21,21 @@ p = kernel.kernel_dim
 # ---------------------------------------------- Define basic SOS constraints ---------------------------------------------
 P = cp.Variable( (p,p), symmetric=True )
 SOSConvexMatrix = cp.bmat([[ Aj.T @ ( Ai.T @ P + P @ Ai ) + ( Ai.T @ P + P @ Ai ) @ Aj for Aj in A_list ] for Ai in A_list ])
-constraints = [ 
-                P >> 0, 
+constraints = [ P >> 0, 
                 # SOSConvexMatrix >> 0
                 ]
 
-# Define CBF center
-c = [0.0, 4.0]
-m_c = kernel.function(c)
-constraints.append( m_c.T @ P @ m_c == 0.0 )
+# Define CBF centers
+centers = [ [ 0.0, 0.0 ], [-4.0, 2.0 ], [ 4.0, 2.0 ] ]
 
-# Creates box points to be fitted
-pts = box( center=c, height=5, width=5, angle=15, res=3 )
+# Fits CBF to a box-shaped obstacle
+pts = [ [-5.0,-1.0 ], [-5.0, 3.0 ], [-3.0, 3.0 ], [-3.0, 1.0 ],
+        [ 3.0, 1.0 ], [ 3.0, 3.0 ], [ 5.0, 3.0 ], [ 5.0,-1.0 ] ]
+pts = polygon( vertices=pts, spacing=0.2, closed=True )
+# pts = box( center=centers[0], height=5, width=5, angle=15, spacing=0.2 )
+
+cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=centers)
+cbf.is_sos_convex(verbose=True)
 
 # ----------------------------------------------- Plotting ----------------------------------------------
 fig = plt.figure(constrained_layout=True)
@@ -43,10 +46,7 @@ ax.set_aspect('equal', adjustable='box')
 for pt in pts:
     ax.plot(pt[0], pt[1], 'k*')
 
-cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=[c])
-cbf.is_sos_convex(verbose=True)
-
-print(f"h at center = {cbf.function(c)}")
+print(f"h at center = {cbf.function(centers[0])}")
 
 limits = (9*np.array([[-1, 1],[-1, 1]])).tolist()
 
@@ -57,18 +57,6 @@ num_lvls = 10
 contour_boundary = cbf.plot_levels(levels = [ 0.5*(k - (num_lvls - 1))/(num_lvls - 1) for k in range(0,num_lvls,1) ], ax=ax, limits=limits)
 # contour_boundary = cbf.plot_levels(levels = [ 2*k for k in range(0,num_lvls,1) ], ax=ax, limits=limits)
 
-# A1, A2 = A_list[0], A_list[1]
-# P1 = ( A1.T @ P.value + P.value @ A1 )
-# P2 = ( A2.T @ P.value + P.value @ A2 )
-
-# Aj.T @ Pi + Pi @ Aj
-# P11 = A1.T @ P1 + P1 @ A1
-# P12 = A2.T @ P1 + P1 @ A2
-# P21 = A1.T @ P2 + P2 @ A1
-# P22 = A2.T @ P2 + P2 @ A2
-
 np.set_printoptions(precision=2, suppress=False)
-
-cbf.SOS_convexity()
 
 plt.show()

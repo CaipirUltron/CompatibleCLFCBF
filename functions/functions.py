@@ -835,61 +835,6 @@ class KernelQuadratic(Function):
         new_param = self.dynamics.get_state()
         self.set_param( coefficients = vector2sym(new_param) )
 
-    def SOS_convexity(self):
-        '''
-        Given a cvxpy P_var matrix and the function kernel, construct an efficient parametrization
-        for SDP.
-        '''
-        n = self._dim
-        p = self.kernel_dim
-        A_list = self.kernel.get_A_matrices()
-
-        y_alpha, _ = generate_monomial_list( self._dim, 1 )
-        y_alpha = np.delete(y_alpha, 0, axis=0)
-
-        augmented_alpha = np.array([ powers.tolist() + y_powers.tolist() for powers in self.kernel.alpha for y_powers in y_alpha ])
-        # print( augmented_alpha )
-
-        def add_monomial( monomials1, monomials2, current_alpha ):
-            '''
-            Adds monomial1 and/or monomial2 to monomial list, IFF 
-            monomials1 and monomials2 cannot be made with the current alpha. 
-            '''
-            alpha_size = len(current_alpha)
-            if alpha_size == 0:
-                current_alpha.append( monomials1.tolist() )
-
-            # for i in range(alpha_size):
-            #     for j in range(i,alpha_size):
-            #         if monomials1 + monomials2 == np.array(current_alpha[i]) + np.array(current_alpha[j]):
-            #             continue
-
-            return current_alpha
-
-        # Builds symbolic prototype for the SOS convex matrix
-        current_alpha = []
-        Prototype = sympy.MatrixSymbol('P', self.kernel_dim, self.kernel_dim)
-        for i in range(n):
-            for j in range(i,n):
-
-                # Inside each block matrix
-                Ai, Aj = A_list[i], A_list[j]
-                Block = Aj.T @ ( Ai.T @ Prototype + Prototype @ Ai ) + ( Ai.T @ Prototype + Prototype @ Ai ) @ Aj
-                NullElements = Block == 0
-
-                curr_row_alpha = augmented_alpha[augmented_alpha[:,n+i] == 1,:]
-                curr_col_alpha = augmented_alpha[augmented_alpha[:,n+j] == 1,:]
-
-                # print(curr_row_alpha)
-                # print(curr_col_alpha)
-
-                for k in range(p):
-                    for l in range(k,p):
-
-                        # Inside each element of the current block
-                        if not NullElements[k,l]:
-                            current_alpha = add_monomial( curr_row_alpha[k,:], curr_col_alpha[l,:], current_alpha )
-
     def is_sos_convex(self, verbose=False):
         '''
         Returns True if the function is SOS convex.
@@ -1129,6 +1074,61 @@ class KernelQuadratic(Function):
         if isinstance(self, KernelBarrier):
             type_fun = "CBF ½ ( k(x)' Q k(x) - 1 )"
         return type_fun
+
+    def SOS_convexity(self):
+            '''
+            Given a cvxpy P_var matrix and the function kernel, construct an efficient parametrization
+            for SDP.
+            '''
+            n = self._dim
+            p = self.kernel_dim
+            A_list = self.kernel.get_A_matrices()
+
+            y_alpha, _ = generate_monomial_list( self._dim, 1 )
+            y_alpha = np.delete(y_alpha, 0, axis=0)
+
+            augmented_alpha = np.array([ powers.tolist() + y_powers.tolist() for powers in self.kernel.alpha for y_powers in y_alpha ])
+            # print( augmented_alpha )
+
+            def add_monomial( monomials1, monomials2, current_alpha ):
+                '''
+                Adds monomial1 and/or monomial2 to monomial list, IFF 
+                monomials1 and monomials2 cannot be made with the current alpha. 
+                '''
+                alpha_size = len(current_alpha)
+                if alpha_size == 0:
+                    current_alpha.append( monomials1.tolist() )
+
+                # for i in range(alpha_size):
+                #     for j in range(i,alpha_size):
+                #         if monomials1 + monomials2 == np.array(current_alpha[i]) + np.array(current_alpha[j]):
+                #             continue
+
+                return current_alpha
+
+            # Builds symbolic prototype for the SOS convex matrix
+            current_alpha = []
+            Prototype = sympy.MatrixSymbol('P', self.kernel_dim, self.kernel_dim)
+            for i in range(n):
+                for j in range(i,n):
+
+                    # Inside each block matrix
+                    Ai, Aj = A_list[i], A_list[j]
+                    Block = Aj.T @ ( Ai.T @ Prototype + Prototype @ Ai ) + ( Ai.T @ Prototype + Prototype @ Ai ) @ Aj
+                    NullElements = Block == 0
+
+                    curr_row_alpha = augmented_alpha[augmented_alpha[:,n+i] == 1,:]
+                    curr_col_alpha = augmented_alpha[augmented_alpha[:,n+j] == 1,:]
+
+                    # print(curr_row_alpha)
+                    # print(curr_col_alpha)
+
+                    for k in range(p):
+                        for l in range(k,p):
+
+                            # Inside each element of the current block
+                            if not NullElements[k,l]:
+                                current_alpha = add_monomial( curr_row_alpha[k,:], curr_col_alpha[l,:], current_alpha )
 
 class KernelLyapunov(KernelQuadratic):
     '''

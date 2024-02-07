@@ -521,9 +521,9 @@ def ellipsoid_parametrization(Q, param):
     z = main_axes @ np.array(reduced_z.tolist() + [ 0.0 for _ in range(p-rankQ)])
     return z
 
-def box(center, height, width, angle, res = 1):
+def box(center, height, width, angle, spacing=0.1):
     '''
-    Create points fitting a box.
+    Returns equally spaced points fitting a box.
     '''
     t = (height/2)*np.array([  0, +1 ])
     b = (height/2)*np.array([  0, -1 ])
@@ -534,26 +534,35 @@ def box(center, height, width, angle, res = 1):
     bl = b+l
     br = b+r
 
-    top = center + t @ rot2D( np.deg2rad(angle) )
-    bottom = center + b @ rot2D( np.deg2rad(angle) )
-    left = center + l @ rot2D( np.deg2rad(angle) )
-    right = center + r @ rot2D( np.deg2rad(angle) )
-
     top_left = center + tl @ rot2D( np.deg2rad(angle) )
     top_right = center + tr @ rot2D( np.deg2rad(angle) )
     bottom_left = center + bl @ rot2D( np.deg2rad(angle) )
     bottom_right = center + br @ rot2D( np.deg2rad(angle) )
 
-    pts = []
-    boundary_bbox = [ top, top_right, right, bottom_right, bottom, bottom_left, left, top_left, top ]
-    for k in range(len(boundary_bbox)-1):
-        current = boundary_bbox[k]
-        next = boundary_bbox[k+1]
-        delta = next-current
-        for i in range(res):
-            pts.append( (current + (i/res) * delta).tolist() )
+    return polygon( vertices=np.vstack([ top_left, top_right, bottom_right, bottom_left ]), spacing=spacing, closed=True )
 
-    return pts
+def polygon(vertices, spacing=0.1, closed=False):
+    '''
+    Returns equally spaced points of a polygon with previously defined vertices.
+    '''
+    vertices = np.array(vertices)
+    pts = []
+    def add_side_points( origin, destiny, spacing ):
+        side = destiny - origin
+        num_side_pts = int(np.ceil(np.linalg.norm(side)/spacing))
+        normal_side = side / np.linalg.norm(side)
+        for i in range(num_side_pts):
+            pts.append(( origin + spacing*i*normal_side ).tolist())
+
+    for k in range(len(vertices)-1):
+        add_side_points( vertices[k,:], vertices[k+1,:], spacing )
+
+    if closed:
+        add_side_points( vertices[-1,:], vertices[0,:], spacing )
+    else:
+        pts.append(( vertices[-1,:] ).tolist())
+
+    return pts    
 
 def minimum_bounding_rectangle(points):
     """

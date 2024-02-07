@@ -3,7 +3,7 @@ import numpy as np
 from dynamic_systems import ConservativeAffineSystem
 from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
-from common import create_quadratic, rot2D, box, polygon
+from common import create_quadratic, rot2D, polygon
 
 initial_state = [0.5, 6.0]
 initial_control = [0.0, 0.0]
@@ -11,7 +11,7 @@ n = len(initial_state)
 m = len(initial_control)
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
-kernel = Kernel(*initial_state, degree=2)
+kernel = Kernel(*initial_state, degree=3)
 kernel_dim = kernel.kernel_dim
 print(kernel)
 
@@ -25,7 +25,7 @@ def g(state):
 plant = ConservativeAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
 
 # ---------------------------------------------------- Define CLF ----------------------------------------------------------
-clf_center = [0.0, -3.0]
+clf_center = [0.0, -5.0]
 base_level = 25
 
 points = []
@@ -35,16 +35,19 @@ points.append({ "coords": [ 0.0,  5.0], "gradient": [ 2.0,  6.0] })
 # points.append({ "coords": [ 0.0,  -8.0], "gradient": [ 0.0,  -1.0] })
 # clf = KernelLyapunov(*initial_state, kernel=kernel, points=points, centers=[clf_center])
 
-clf_eig = 1.1*np.array([ 6.0, 1.0 ])
-clf_angle = np.deg2rad(-45)
+clf_eig = 0.01*np.array([ 6.0, 1.0 ])
+clf_angle = np.deg2rad(0)
 clf = KernelLyapunov(*initial_state, kernel=kernel, P=create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim))
 clf.is_sos_convex(verbose=True)
 
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
-# Fits CBF to a box-shaped obstacle
-center = [ 0.0, 0.0 ]
-pts = box( center=center, height=5, width=5, angle=0, spacing=0.4 )
-cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=[center])
+# Fits CBF to a U shaped obstacle
+centers = [ [-3.0, 0.0 ],[ 3.0, 0.0 ], [ -4.0, 3.0 ], [ 4.0, 3.0 ] ]
+pts = [ [-5.0,-1.0 ], [-5.0, 3.0 ], [-3.0, 3.0 ], [-3.0, 1.0 ],
+        [ 3.0, 1.0 ], [ 3.0, 3.0 ], [ 5.0, 3.0 ], [ 5.0,-1.0 ] ]
+pts = polygon( vertices=pts, spacing=0.2, closed=True )
+
+cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=centers)
 cbf.is_sos_convex(verbose=True)
 # ------------------------------------------------- Define controller ------------------------------------------------------
 T = 15
@@ -53,9 +56,10 @@ p, alpha, beta = 1.0, 1.0, 1.0
 controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
-xlimits, ylimits = [-9, 9], [-9, 9]
+xlimits, ylimits = [-6, 6], [-4, 8]
 plot_config = {
     "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": [xlimits, ylimits],
     "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": True
 }
+
 logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": cbf.Q.tolist() }
