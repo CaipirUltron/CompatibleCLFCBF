@@ -28,7 +28,8 @@ for pt in sim.pts:
         gradient_vec = coords + np.array(pt["gradient"])
         ax.plot([ coords[0], gradient_vec[0]], [ coords[1], gradient_vec[1]], 'k-', alpha=0.6)
 
-contour_unsafe = sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
+contour_unsafe = sim.cbf.plot_levels(levels = [0.0], ax=ax, limits=limits)
+# contour_unsafe = sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
 contour_invariant = plot_invariant(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, 
                                    ax=ax, limits=limits, extended=False, res=0.1)
 

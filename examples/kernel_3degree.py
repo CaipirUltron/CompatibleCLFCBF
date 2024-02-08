@@ -22,6 +22,7 @@ F[1,0], F[2,0] = fx, fy
 
 def g(state):
     return np.eye(m)
+
 plant = ConservativeAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
 
 # ---------------------------------------------------- Define CLF ----------------------------------------------------------
@@ -37,18 +38,27 @@ points.append({ "coords": [ 0.0,  5.0], "gradient": [ 2.0,  6.0] })
 
 clf_eig = 0.01*np.array([ 6.0, 1.0 ])
 clf_angle = np.deg2rad(0)
-clf = KernelLyapunov(*initial_state, kernel=kernel, P=create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim))
+Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
+
+# clf = KernelLyapunov(*initial_state, kernel=kernel, P=Pquadratic)
+clf = KernelLyapunov(*initial_state, kernel=kernel, leading={ "shape": Pquadratic, "uses": ["lower_bound", "approximation"] })
 clf.is_sos_convex(verbose=True)
 
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
 # Fits CBF to a U shaped obstacle
-centers = [ [-3.0, 0.0 ],[ 3.0, 0.0 ], [ -4.0, 3.0 ], [ 4.0, 3.0 ] ]
-pts = [ [ 5.0,-1.0 ], [ 5.0, 3.0 ], [ 3.0, 3.0 ], [ 3.0, 1.0 ],
-        [-3.0, 1.0 ], [-3.0, 3.0 ], [-5.0, 3.0 ], [-5.0,-1.0 ] ]
-pts = polygon( vertices=pts, spacing=0.2, closed=True, gradients=0, at_edge=False )
+cbf_center = [0.0, 0.0]
 
-cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=centers)
+centers = [ [-3.0, 0.0 ],[ 3.0, 0.0 ], [ -4.0, 3.0 ], [ 4.0, 3.0 ] ]
+vertices = [ [ 5.0,-1.0 ], [ 5.0, 3.0 ], [ 3.0, 3.0 ], [ 3.0, 1.0 ],
+             [-3.0, 1.0 ], [-3.0, 3.0 ], [-5.0, 3.0 ], [-5.0,-1.0 ] ]
+pts = polygon( vertices=vertices, spacing=0.5, closed=True, gradients=0, at_edge=False )
+
+cbf_eig = 0.02*np.array([ 1.0, 1.0 ])
+cbf_angle = np.deg2rad(0)
+Qquadratic = create_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
+cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=centers, leading={ "shape": Qquadratic, "uses": ["approximation"] })
 cbf.is_sos_convex(verbose=True)
+
 # ------------------------------------------------- Define controller ------------------------------------------------------
 T = 15
 sample_time = .002
@@ -56,11 +66,10 @@ p, alpha, beta = 1.0, 1.0, 1.0
 controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
-limits = (15*np.array([[-1, 1],[-1, 1]])).tolist()
+limits = 25*np.array([[-1, 1],[-1, 1]])
 
 plot_config = {
-    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits,
+    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits.tolist(),
     "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": True
 }
-
 logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": cbf.Q.tolist() }

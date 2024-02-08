@@ -1036,6 +1036,7 @@ def plot_invariant(plant, clf, cbf, params, **kwargs):
     kernel = check_kernel(plant, clf, cbf)
     F = plant.get_F()
     P, Q = clf.P, cbf.Q
+
     A_list = kernel.get_A_matrices()
     n = kernel._dim
 

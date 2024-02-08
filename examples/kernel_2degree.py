@@ -35,9 +35,12 @@ points.append({ "coords": [ 0.0,  5.0], "gradient": [ 2.0,  6.0] })
 # points.append({ "coords": [ 0.0,  -8.0], "gradient": [ 0.0,  -1.0] })
 # clf = KernelLyapunov(*initial_state, kernel=kernel, points=points, centers=[clf_center])
 
-clf_eig = 1.1*np.array([ 6.0, 1.0 ])
+clf_eig = 0.01*np.array([ 6.0, 1.0 ])
 clf_angle = np.deg2rad(-45)
-clf = KernelLyapunov(*initial_state, kernel=kernel, P=create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim))
+Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
+
+# clf = KernelLyapunov(*initial_state, kernel=kernel, P=Pquadratic)
+clf = KernelLyapunov(*initial_state, kernel=kernel, leading={ "shape": Pquadratic, "uses": ["lower_bound", "approximation"] })
 clf.is_sos_convex(verbose=True)
 
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
@@ -53,10 +56,11 @@ p, alpha, beta = 1.0, 1.0, 1.0
 controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
-limits = (15*np.array([[-1, 1],[-1, 1]])).tolist()
+limits = 15*np.array([[-1, 1],[-1, 1]])
 
 plot_config = {
-    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits,
+    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits.tolist(),
     "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": True
 }
+
 logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": cbf.Q.tolist() }
