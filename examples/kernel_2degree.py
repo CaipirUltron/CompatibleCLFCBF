@@ -39,8 +39,8 @@ clf_eig = 0.01*np.array([ 6.0, 1.0 ])
 clf_angle = np.deg2rad(-45)
 Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
 
-# clf = KernelLyapunov(*initial_state, kernel=kernel, P=Pquadratic)
-clf = KernelLyapunov(*initial_state, kernel=kernel, leading={ "shape": Pquadratic, "uses": ["lower_bound", "approximation"] })
+clf = KernelLyapunov(*initial_state, kernel=kernel, P=Pquadratic)
+# clf = KernelLyapunov(*initial_state, kernel=kernel, leading={ "shape": Pquadratic, "uses": ["lower_bound", "approximation"] })
 clf.is_sos_convex(verbose=True)
 
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
@@ -49,6 +49,7 @@ center = [ 0.0, 0.0 ]
 pts = box( center=center, height=5, width=5, angle=0, spacing=0.4, gradients=1, at_edge=True )
 cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=[center])
 cbf.is_sos_convex(verbose=True)
+
 # ------------------------------------------------- Define controller ------------------------------------------------------
 T = 15
 sample_time = .002

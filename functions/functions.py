@@ -747,7 +747,7 @@ class KernelQuadratic(Function):
         self.set_param(**kwargs)
         self.evaluate()
 
-        if len(self.points) > 0 or type(self.cost) != int or len(self.constraints) > 1:
+        if len(self.points) > 0 or type(self.cost) != float or len(self.constraints) > 1:
             self.fit()
 
     def init_kernel(self):
@@ -1051,11 +1051,11 @@ class KernelQuadratic(Function):
         '''
         Find the P matrix of a quadratic enclosing all defined points
         '''
-        num_pts = len(self.point_list)
+        num_pts = len(self.points)
         points = np.zeros([num_pts, self._dim])
         levels = []
         for k in range(num_pts):
-            pt = self.point_list[k]
+            pt = self.points[k]
             points[k,:] = np.array(pt["coords"])
             if "level" in pt.keys():
                 levels.append(pt["level"])

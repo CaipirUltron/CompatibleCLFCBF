@@ -29,13 +29,15 @@ plant = ConservativeAffineSystem(initial_state=initial_state, initial_control=in
 clf_eig = 0.1*np.array([ 3.0, 1.0 ])
 clf_angle = np.pi/15
 clf_center = [0.0, -2.0]
-clf = KernelLyapunov(*initial_state, kernel=kernel, P=create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim))
+Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
+clf = KernelLyapunov(*initial_state, kernel=kernel, P=Pquadratic)
 
 # --------------------------------------------- Define CBF (quadratic) -----------------------------------------------------
 cbf_eig = [ 0.2, 1.2 ]
 cbf_angle = 0.0
 cbf_center = [0.0, 3.0]
-cbf = KernelBarrier(*initial_state, kernel=kernel, Q=create_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim))
+Qquadratic = create_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
+cbf = KernelBarrier(*initial_state, kernel=kernel, Q=Qquadratic)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
 T = 15
@@ -44,9 +46,10 @@ p, alpha, beta = 1.0, 1.0, 1.0
 controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
-xlimits, ylimits = [-8, 8], [-8, 8]
+limits = 8*np.array([[-1, 1],[-1, 1]])
+
 plot_config = {
-    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": [xlimits, ylimits],
+    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits.tolist(),
     "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": True
 }
 
