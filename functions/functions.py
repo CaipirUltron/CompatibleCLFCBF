@@ -747,7 +747,7 @@ class KernelQuadratic(Function):
         self.set_param(**kwargs)
         self.evaluate()
 
-        if len(self.points) > 0 or type(self.cost) != int or len(self.constraints) > 1:
+        if len(self.points) > 0 or type(self.cost) != float or len(self.constraints) > 1:
             self.fit()
 
     def init_kernel(self):
