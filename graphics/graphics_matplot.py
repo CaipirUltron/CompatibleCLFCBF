@@ -131,7 +131,7 @@ class Plot2DSimulation():
         self.trajectory, = self.main_ax.plot([],[],lw=2)
         self.init_state, = self.main_ax.plot([],[],'bo',lw=2)
         self.actual_state, = self.main_ax.plot([],[],'bo',lw=1,alpha=0.5)
-        self.equilibria_plot, = self.main_ax.plot([],[], marker='*', mfc='none', lw=2, color=[1.,0.,0.], linestyle="None")
+        self.equilibria_plot, = self.main_ax.plot([],[], marker='*', mfc='none', lw=2, color='k', linestyle="None")
         # self.equilibria_plot, = self.main_ax.plot([],[], marker='o', color='r',lw=2)
         self.clf_grad_arrow, = self.main_ax.plot([],[],'b',lw=0.8)
         self.cbf_grad_arrow, = self.main_ax.plot([],[],'r',lw=0.8)
@@ -162,7 +162,7 @@ class Plot2DSimulation():
             self.equilibria_plot.set_data(x_eq, y_eq)
 
         for cbf in self.cbfs:
-            self.cbf_contours.append( cbf.plot_levels(levels=[-0.4, -0.2, 0.0], colors=self.cbf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], resolution=0.1) )
+            self.cbf_contours.append( cbf.plot_levels(levels=[-0.1*k for k in range(4,-1,-1)], colors=self.cbf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], resolution=0.1) )
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
@@ -173,9 +173,9 @@ class Plot2DSimulation():
         graphical_elements.append(self.clf_grad_arrow)
         graphical_elements.append(self.cbf_grad_arrow)
         graphical_elements.append(self.fc_arrow)
-        graphical_elements += self.clf_contours.collections
+        graphical_elements += self.clf_contours
         for cbf_countour in self.cbf_contours:
-            graphical_elements += cbf_countour.collections
+            graphical_elements += cbf_countour
 
         return graphical_elements
 
@@ -223,7 +223,7 @@ class Plot2DSimulation():
 
             if self.draw_level:
                 V = self.clf.evaluate_function(*current_state)[0]
-                for coll in self.clf_contours.collections:
+                for coll in self.clf_contours:
                     coll.remove()
 
                 perimeter = 4*abs(current_state[0]) + 4*abs(current_state[1])
@@ -242,9 +242,9 @@ class Plot2DSimulation():
         graphical_elements.append(self.clf_grad_arrow)
         graphical_elements.append(self.cbf_grad_arrow)
         graphical_elements.append(self.fc_arrow)
-        graphical_elements += self.clf_contours.collections
+        graphical_elements += self.clf_contours
         for cbf_countour in self.cbf_contours:
-            graphical_elements += cbf_countour.collections
+            graphical_elements += cbf_countour
 
         return graphical_elements
 

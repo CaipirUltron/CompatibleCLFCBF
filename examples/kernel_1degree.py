@@ -1,7 +1,7 @@
 import numpy as np
 
 from dynamic_systems import ConservativeAffineSystem
-from functions import Kernel, KernelLyapunov, KernelBarrier
+from functions import Kernel, KernelLyapunov, KernelBarrier, KernelPair
 from controllers import NominalQP
 from common import create_quadratic, rot2D
 
@@ -44,6 +44,7 @@ T = 15
 sample_time = .002
 p, alpha, beta = 1.0, 1.0, 1.0
 controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
+clf_cbf_pair = KernelPair(clf, cbf, plant, params={"slack_gain": p, "clf_gain": alpha})
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 limits = 8*np.array([[-1, 1],[-1, 1]])

@@ -1,7 +1,7 @@
 import numpy as np
 
 from dynamic_systems import ConservativeAffineSystem
-from functions import Kernel, KernelLyapunov, KernelBarrier
+from functions import Kernel, KernelLyapunov, KernelBarrier, KernelPair
 from controllers import NominalQP
 from common import create_quadratic, rot2D, polygon
 
@@ -36,7 +36,7 @@ points.append({ "coords": [ 0.0,  5.0], "gradient": [ 2.0,  6.0] })
 # points.append({ "coords": [ 0.0,  -8.0], "gradient": [ 0.0,  -1.0] })
 # clf = KernelLyapunov(*initial_state, kernel=kernel, points=points, centers=[clf_center])
 
-clf_eig = 0.01*np.array([ 6.0, 1.0 ])
+clf_eig = 1*np.array([ 6.0, 1.0 ])
 clf_angle = np.deg2rad(0)
 Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
 
@@ -64,6 +64,7 @@ T = 15
 sample_time = .002
 p, alpha, beta = 1.0, 1.0, 1.0
 controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
+clf_cbf_pair = KernelPair(clf, cbf, plant, params={"slack_gain": p, "clf_gain": alpha})
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 limits = 25*np.array([[-1, 1],[-1, 1]])

@@ -43,7 +43,7 @@ class Function():
     '''
     Implementation of general class for scalar functions.
     '''
-    def __init__(self, *args):
+    def __init__(self, *args, **kwargs):
 
         self.set_value(*args)
         self.functions = []
@@ -56,6 +56,26 @@ class Function():
         else:
             self._gradient = 0.0
             self._hessian = 0.0
+
+        limits = None
+        spacing = None
+        self.plot_config = {"color": mcolors.BASE_COLORS["k"], "linestyle": 'solid'}
+        for key in kwargs.keys():
+            if key == "limits":
+                limits = kwargs["limits"]
+                continue
+            if key == "spacing":
+                spacing = kwargs["spacing"]
+                continue
+            if key == "plot_config":
+                self.plot_config = kwargs["plot_config"]
+                continue
+
+        if limits != None:
+            if spacing != None:
+                self.gen_contour(limits, spacing)
+            else:
+                self.gen_contour(limits)
 
     def set_value(self, *args):
         '''
@@ -189,10 +209,11 @@ class Function():
     def gen_contour(self, limits, spacing=0.1):
         '''
         Create contour generator object for the given function.
-        '''
+        Parameters: limits (2x2 array) - min/max limits for x,y coords
+                    spacing - grid spacing for contour generation
+        '''        
         if self._dim != 2:
             raise Exception("Contour plot can only be used for 2D functions.")
-        n = 2
 
         x_min, x_max = limits[0][0], limits[0][1]
         y_min, y_max = limits[1][0], limits[1][1]
@@ -212,57 +233,65 @@ class Function():
             mesh_fvalues[:,i] = np.array(self.evaluate_function(*args))
         
         self.contour = ctp.contour_generator(x=xg, y=yg, z=mesh_fvalues )
-        # self.contour_segments = self.contour.lines(0.0)
+        return self.contour
+
+    def gen_levels(self, levels, **kwargs):
+        '''
+        Generates function level sets.
+        Parameters: levels (list of floats)
+        Returns: a list with all level segments, in the same order as levels
+        '''
+        limits = None
+        spacing = 0.1
+        for key in kwargs.keys():
+            aux_key = key.lower()
+            if aux_key == "limits":     # Must always be required if self.contours still does not exist
+                limits = kwargs[key]
+                continue
+            if aux_key == "spacing":    # Must always be required if self.contours still does not exist
+                spacing = kwargs[key]
+                continue
+
+        if not hasattr(self, "contour"):
+            if limits == None:
+                raise Exception("Grid limits are required to create contours.")
+            self.gen_contour(limits, spacing=spacing)
+
+        level_contours = []
+        for lvl in levels:
+            level_contours.append( self.contour.lines(lvl) )
+
+        return level_contours
 
     def plot_levels(self, levels, **kwargs):
         '''
-        Method for plotting level sets.
-        Returns: QuadContour object for 2D contour plots.
+        Plots function level sets.
+        Parameters: levels (list of floats)
+        Returns: plot collections
         '''
-        if self._dim != 2:
-            raise Exception("Contour plot can only be used for 2D functions.")
-        n = 2
-
-        resolution = 0.1
-        colors = 'k'
         ax = plt
+        color = self.plot_config["color"]
+        linestyle = self.plot_config["linestyle"]
         for key in kwargs.keys():
             aux_key = key.lower()
             if aux_key == "ax":
-                ax = kwargs[key]
+                ax = kwargs["ax"]
                 continue
-            if aux_key == "resolution":
-                resolution = kwargs[key]
+            if aux_key == "color":
+                color = kwargs["color"]
                 continue
-            if aux_key == "colors":
-                colors = kwargs[key]
+            if aux_key == "linestyle":
+                linestyle = kwargs["linestyle"]
                 continue
 
-        limits = [ [-1, +1] for _ in range(n) ]
-        if "limits" in kwargs.keys():
-            limits = kwargs["limits"]
-            for i in range(n):
-                if limits[i][0] >=  limits[i][1]:
-                    raise Exception("Lines should be sorted in ascending order.")
+        collections = []
+        level_contours = self.gen_levels(levels, **kwargs)
+        for level in level_contours:
+            for segment in level:
+                line2D = ax.plot( segment[:,0], segment[:,1], color=color, linestyle=linestyle )
+                collections.append(line2D[0])
 
-        x_min, x_max = limits[0][0], limits[0][1]
-        y_min, y_max = limits[1][0], limits[1][1]
-
-        x = np.arange(x_min, x_max, resolution)
-        y = np.arange(y_min, y_max, resolution)
-        xv, yv = np.meshgrid(x,y)
-
-        mesh_fvalues = np.zeros([np.size(xv,0),np.size(xv,1)])
-        for i in range(np.size(xv,1)):
-            args = []
-            args.append(xv[:,i])
-            args.append(yv[:,i])
-            for k in range(self._dim-2):
-                args.append( [self._var[k+2,0] for _ in range(len(xv[:,i]))] )
-            # mesh_fvalues[:,i] = np.array(self.evaluate_function(xv[:,i], yv[:,i]))
-            mesh_fvalues[:,i] = np.array(self.evaluate_function(*args))
-
-        return ax.contour(xv, yv, mesh_fvalues, levels=levels, colors=colors)
+        return collections
 
 class Quadratic(Function):
     '''
@@ -765,13 +794,14 @@ class KernelQuadratic(Function):
         self.default_fit_options = {"force_coords": False, "force_gradients": False }
         self.fit_options = self.default_fit_options
 
-        default_color = "black"
+        default_color = mcolors.BASE_COLORS['k']
         if isinstance(self, KernelLyapunov):
             default_color = mcolors.TABLEAU_COLORS['tab:blue']
         elif isinstance(self, KernelBarrier):
             default_color = mcolors.TABLEAU_COLORS['tab:red']
-        self.default_plot_config = {"figsize": (5,5), "axeslim": (-6,6,-6,6), "color": default_color}
-        self.plot_config = self.default_plot_config
+        self.plot_config["color"] = default_color
+        self.plot_config["figsize"] = (5,5)
+        self.plot_config["axeslim"] = (-6,6,-6,6)
 
         self.set_param(**kwargs)
         self.evaluate()
@@ -1304,7 +1334,7 @@ class KernelPair():
     '''
     Class for kernel-based CLF-CBF pairs
     '''
-    def __init__(self, clf, cbf, plant, params = {"slack_gain": 1.0, "clf_gain": 1.0}):
+    def __init__(self, clf, cbf, plant, params = {"slack_gain": 1.0, "clf_gain": 1.0}, **kwargs):
         
         self.clf = clf
         self.cbf = cbf
@@ -1320,7 +1350,25 @@ class KernelPair():
         self.kernel_dim = self.kernel.kernel_dim
         self.A_list = self.kernel.get_A_matrices()
 
-        self.plot_config = { "invariant_color": mcolors.BASE_COLORS['k'] }
+        limits = None
+        spacing = None
+        self.invariant_color = mcolors.BASE_COLORS["k"]
+        for key in kwargs.keys():
+            if key == "limits":
+                limits = kwargs["limits"]
+                continue
+            if key == "spacing":
+                spacing = kwargs["spacing"]
+                continue
+            if key == "invariant_color":
+                self.invariant_color = kwargs["invariant_color"]
+                continue
+
+        if limits != None:
+            if spacing != None:
+                self.invariant_set(limits, spacing)
+            else:
+                self.invariant_set(limits)
 
     def det_invariant(self, xg, yg, extended=False):
         '''
@@ -1365,10 +1413,12 @@ class KernelPair():
         Plots the invariant set segments into ax.
         '''
         self.invariant_set(limits, spacing=spacing, extended=extended)
+        collections = []
         for seg in self.invariant_segments:
-            ax.plot( seg[:,0], seg[:,1], color=self.plot_config["invariant_color"], linestyle='dashed', linewidth=1.0 )
-
-
+            line2D = ax.plot( seg[:,0], seg[:,1], color=self.invariant_color, linestyle='dashed', linewidth=1.0 )
+            collections.append( line2D[0] )
+        return collections
+    
 class ApproxFunction(Function):
     '''
     Class for functions that can be approximated by a quadratic.

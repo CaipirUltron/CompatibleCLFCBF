@@ -1,10 +1,9 @@
 import sys
 import importlib
-
 import numpy as np
 import matplotlib.pyplot as plt
 
-from controllers.equilibrium_algorithms import compute_equilibria, plot_invariant, optimize_branch
+from controllers.equilibrium_algorithms import compute_equilibria, optimize_branch
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -30,8 +29,7 @@ if hasattr(sim, "pts"):
             ax.plot([ coords[0], gradient_vec[0]], [ coords[1], gradient_vec[1]], 'k-', alpha=0.6)
 
 contour_unsafe = sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
-contour_invariant = plot_invariant(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, 
-                                   ax=ax, limits=limits, extended=False, res=0.1)
+sim.clf_cbf_pair.plot_invariant(ax=ax, limits=sim.plot_config["limits"], spacing=0.2, extended=False)
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 sol_x_plot, = ax.plot([],[],'ok', alpha=0.8)
@@ -44,7 +42,7 @@ while True:
     init_x_plot.set_data([init_x[0]], [init_x[1]])
 
     if "clf_contour" in locals():
-        for coll in clf_contour.collections:
+        for coll in clf_contour:
             coll.remove()
         del clf_contour
 
@@ -79,6 +77,6 @@ while True:
 
     V = sim.clf.function(init_x)
     print(f"V = {V}")
-    clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits, resolution=0.5)
+    clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits, spacing=0.2)
 
 plt.show()

@@ -593,7 +593,7 @@ def polygon(vertices, spacing=0.1, closed=False, gradients=0, at_edge=False ):
 
     return pts
 
-def box(center, height, width, angle, spacing=0.1, gradients=0, at_edge=False):
+def box(center, height, width, angle=0, spacing=0.1, gradients=0, at_edge=False):
     '''
     Returns equally spaced points fitting a box.
     '''
