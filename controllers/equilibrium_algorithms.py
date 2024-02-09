@@ -8,7 +8,7 @@ from shapely import geometry
 from scipy.optimize import root, minimize, least_squares
 from scipy.linalg import null_space
 
-from common import compute_curvatures, KKTmultipliers, ellipsoid_parametrization
+from common import compute_curvatures, KKTmultipliers, ellipsoid_parametrization, check_kernel
 from controllers.compatibility import LinearMatrixPencil2
 from functions import Kernel
 
@@ -17,22 +17,6 @@ ZERO_ACCURACY = 1e-9
 ''' 
 Verification / computation of equilibrium points and their stability 
 '''
-def check_kernel(plant, clf, cbf):
-    '''
-    Basic debugging for equilibrium point algorithms
-    '''
-    if not hasattr(plant, "kernel"):
-        raise Exception("Plant model is not kernel based!")
-    kernel = plant.kernel
-
-    if kernel != clf.kernel or kernel != cbf.kernel or clf.kernel != cbf.kernel:
-        raise Exception("The plant model, the CLF and the CBF must have the same kernel.")
-    
-    if clf._dim != cbf._dim:
-        raise Exception("CLF and CBF must have the same dimension.")
-
-    return kernel
-
 def equilibrium_field(z, l, P, V, plant, clf, cbf, params):
     '''
     Returns equilibrium field: l vecQ(z) - vecP(x)

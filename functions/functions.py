@@ -6,6 +6,7 @@ import cvxpy as cp
 import sympy
 import warnings
 
+import contourpy as ctp
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
@@ -184,6 +185,34 @@ class Function():
         function.functions.append(func)
 
         return function
+
+    def gen_contour(self, limits, spacing=0.1):
+        '''
+        Create contour generator object for the given function.
+        '''
+        if self._dim != 2:
+            raise Exception("Contour plot can only be used for 2D functions.")
+        n = 2
+
+        x_min, x_max = limits[0][0], limits[0][1]
+        y_min, y_max = limits[1][0], limits[1][1]
+
+        x = np.arange(x_min, x_max, spacing)
+        y = np.arange(y_min, y_max, spacing)
+        xg, yg = np.meshgrid(x,y)
+
+        mesh_fvalues = np.zeros([np.size(xg,0),np.size(xg,1)])
+        for i in range(np.size(xg,1)):
+            args = []
+            args.append(xg[:,i])
+            args.append(yg[:,i])
+            for k in range(self._dim-2):
+                args.append( [self._var[k+2,0] for _ in range(len(xg[:,i]))] )
+            # mesh_fvalues[:,i] = np.array(self.evaluate_function(xv[:,i], yv[:,i]))
+            mesh_fvalues[:,i] = np.array(self.evaluate_function(*args))
+        
+        self.contour = ctp.contour_generator(x=xg, y=yg, z=mesh_fvalues )
+        # self.contour_segments = self.contour.lines(0.0)
 
     def plot_levels(self, levels, **kwargs):
         '''
@@ -1049,7 +1078,7 @@ class KernelQuadratic(Function):
 
     def enclosing_quadratic(self):
         '''
-        Find the P matrix of a quadratic enclosing all defined points
+        Find the P matrix of a quadratic enclosing all defined points in self.points
         '''
         num_pts = len(self.points)
         points = np.zeros([num_pts, self._dim])
@@ -1275,12 +1304,69 @@ class KernelPair():
     '''
     Class for kernel-based CLF-CBF pairs
     '''
-    def __init__(self, clf, cbf, plant):
+    def __init__(self, clf, cbf, plant, params = {"slack_gain": 1.0, "clf_gain": 1.0}):
         
         self.clf = clf
         self.cbf = cbf
         self.plant = plant
+        self.params = params
 
+        self.F = self.plant.get_F()
+        self.P = self.clf.P
+        self.Q = self.cbf.Q
+
+        self.kernel = check_kernel(self.plant, self.clf, self.cbf)
+        self.n = self.kernel._dim
+        self.kernel_dim = self.kernel.kernel_dim
+        self.A_list = self.kernel.get_A_matrices()
+
+        self.plot_config = { "invariant_color": mcolors.BASE_COLORS['k'] }
+
+    def det_invariant(self, xg, yg, extended=False):
+        '''
+        Evaluates det([ vecQ, vecP ]) = 0 over a grid.
+        Parameters: xg, yg: (x,y) coords of each point in the grid
+        Returns: a grid with the same size of xg, yg with the determinant values. 
+        '''
+        if xg.shape != yg.shape:
+            raise Exception("x,y grid coordinates must have the same shape!")
+
+        det_grid = np.zeros(xg.shape)
+        for (i,j) in itertools.product(range( xg.shape[0] ), range( yg.shape[1] )):
+            vecQ, vecP = np.zeros(self.n), np.zeros(self.n)
+            z = self.kernel.function([xg[i,j], yg[i,j]])
+            V = 0.5 * z.T @ self.P @ z
+            for k in range(self.n):
+                vecQ[k] = z.T @ self.A_list[k].T @ self.Q @ z
+                vecP[k] = z.T @ self.A_list[k].T @ ( self.params["slack_gain"] * self.params["clf_gain"] * V * self.P - self.F ) @ z
+            l = vecQ.T @ vecP / vecQ.T @ vecQ
+            W = np.hstack([vecQ.reshape(self.n,1), vecP.reshape(self.n,1)])
+            if l >= 0 or extended:
+                # det_grid[i,j] = np.sqrt( np.linalg.det( W.T @ W ) ) # does not work
+                det_grid[i,j] = np.linalg.det(W)
+            else:
+                det_grid[i,j] = np.inf
+
+        return det_grid
+    
+    def invariant_set(self, limits, spacing=0.1, extended=False):
+        '''
+        Computes the invariant set for the given CLF-CBF pair
+        '''
+        x = np.arange(limits[0][0], limits[0][1],spacing)
+        y = np.arange(limits[1][0], limits[1][1],spacing)
+        xg, yg = np.meshgrid(x,y)
+
+        invariant_contour = ctp.contour_generator(x=xg, y=yg, z=self.det_invariant(xg, yg, extended=extended) )
+        self.invariant_segments = invariant_contour.lines(0.0)
+
+    def plot_invariant(self, ax, limits, spacing=0.1, extended=False):
+        '''
+        Plots the invariant set segments into ax.
+        '''
+        self.invariant_set(limits, spacing=spacing, extended=extended)
+        for seg in self.invariant_segments:
+            ax.plot( seg[:,0], seg[:,1], color=self.plot_config["invariant_color"], linestyle='dashed', linewidth=1.0 )
 
 
 class ApproxFunction(Function):

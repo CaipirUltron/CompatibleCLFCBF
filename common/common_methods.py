@@ -687,6 +687,25 @@ def minimum_bounding_rectangle(points):
 
     return new_bbox
 
+def check_kernel(plant, clf, cbf):
+    '''
+    Basic debugging for equilibrium point algorithms
+    '''
+    if not hasattr(plant, "kernel"):
+        raise Exception("Plant model is not kernel based!")
+    kernel = plant.kernel
+
+    if kernel != clf.kernel or kernel != cbf.kernel or clf.kernel != cbf.kernel:
+        raise Exception("The plant model, the CLF and the CBF must have the same kernel.")
+    
+    if clf._dim != cbf._dim:
+        raise Exception("CLF and CBF must have the same dimension.")
+
+    if clf._dim != plant.n:
+        raise Exception("Plant must have the same dimension as the CLF-CBF pair.")
+
+    return kernel
+
 class Rect():
     '''
     Simple rectangle.
