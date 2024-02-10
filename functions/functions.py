@@ -3,7 +3,6 @@ import itertools
 import numpy as np
 import scipy as sp
 import cvxpy as cp
-import sympy
 import warnings
 
 import contourpy as ctp
@@ -58,7 +57,7 @@ class Function():
             self._hessian = 0.0
 
         limits = None
-        spacing = None
+        spacing = 0.1
         self.plot_config = {"color": mcolors.BASE_COLORS["k"], "linestyle": 'solid'}
         for key in kwargs.keys():
             if key == "limits":
@@ -72,10 +71,7 @@ class Function():
                 continue
 
         if limits != None:
-            if spacing != None:
-                self.gen_contour(limits, spacing)
-            else:
-                self.gen_contour(limits)
+            self.gen_contour(limits, spacing=spacing)
 
     def set_value(self, *args):
         '''
@@ -235,7 +231,7 @@ class Function():
         self.contour = ctp.contour_generator(x=xg, y=yg, z=mesh_fvalues )
         return self.contour
 
-    def gen_levels(self, levels, **kwargs):
+    def get_levels(self, levels, **kwargs):
         '''
         Generates function level sets.
         Parameters: levels (list of floats)
@@ -252,9 +248,10 @@ class Function():
                 spacing = kwargs[key]
                 continue
 
-        if not hasattr(self, "contour"):
-            if limits == None:
+        if limits == None:
+            if not hasattr(self, "contour"):
                 raise Exception("Grid limits are required to create contours.")
+        else:
             self.gen_contour(limits, spacing=spacing)
 
         level_contours = []
@@ -285,7 +282,7 @@ class Function():
                 continue
 
         collections = []
-        level_contours = self.gen_levels(levels, **kwargs)
+        level_contours = self.get_levels(levels, **kwargs)
         for level in level_contours:
             for segment in level:
                 line2D = ax.plot( segment[:,0], segment[:,1], color=color, linestyle=linestyle )
@@ -1329,95 +1326,12 @@ class KernelBarrier(KernelQuadratic):
         # Defines the CBF boundary
         if "boundary" in kwargs.keys():
             self.define_level_set(points=kwargs["boundary"], level=0.0, contained=True)
-        
-class KernelPair():
-    '''
-    Class for kernel-based CLF-CBF pairs
-    '''
-    def __init__(self, clf, cbf, plant, params = {"slack_gain": 1.0, "clf_gain": 1.0}, **kwargs):
-        
-        self.clf = clf
-        self.cbf = cbf
-        self.plant = plant
-        self.params = params
-
-        self.F = self.plant.get_F()
-        self.P = self.clf.P
-        self.Q = self.cbf.Q
-
-        self.kernel = check_kernel(self.plant, self.clf, self.cbf)
-        self.n = self.kernel._dim
-        self.kernel_dim = self.kernel.kernel_dim
-        self.A_list = self.kernel.get_A_matrices()
-
-        limits = None
-        spacing = None
-        self.invariant_color = mcolors.BASE_COLORS["k"]
-        for key in kwargs.keys():
-            if key == "limits":
-                limits = kwargs["limits"]
-                continue
-            if key == "spacing":
-                spacing = kwargs["spacing"]
-                continue
-            if key == "invariant_color":
-                self.invariant_color = kwargs["invariant_color"]
-                continue
-
-        if limits != None:
-            if spacing != None:
-                self.invariant_set(limits, spacing)
-            else:
-                self.invariant_set(limits)
-
-    def det_invariant(self, xg, yg, extended=False):
-        '''
-        Evaluates det([ vecQ, vecP ]) = 0 over a grid.
-        Parameters: xg, yg: (x,y) coords of each point in the grid
-        Returns: a grid with the same size of xg, yg with the determinant values. 
-        '''
-        if xg.shape != yg.shape:
-            raise Exception("x,y grid coordinates must have the same shape!")
-
-        det_grid = np.zeros(xg.shape)
-        for (i,j) in itertools.product(range( xg.shape[0] ), range( yg.shape[1] )):
-            vecQ, vecP = np.zeros(self.n), np.zeros(self.n)
-            z = self.kernel.function([xg[i,j], yg[i,j]])
-            V = 0.5 * z.T @ self.P @ z
-            for k in range(self.n):
-                vecQ[k] = z.T @ self.A_list[k].T @ self.Q @ z
-                vecP[k] = z.T @ self.A_list[k].T @ ( self.params["slack_gain"] * self.params["clf_gain"] * V * self.P - self.F ) @ z
-            l = vecQ.T @ vecP / vecQ.T @ vecQ
-            W = np.hstack([vecQ.reshape(self.n,1), vecP.reshape(self.n,1)])
-            if l >= 0 or extended:
-                # det_grid[i,j] = np.sqrt( np.linalg.det( W.T @ W ) ) # does not work
-                det_grid[i,j] = np.linalg.det(W)
-            else:
-                det_grid[i,j] = np.inf
-
-        return det_grid
     
-    def invariant_set(self, limits, spacing=0.1, extended=False):
+    def get_boundary(self, **kwargs):
         '''
-        Computes the invariant set for the given CLF-CBF pair
+        Computes the boundary level set.
         '''
-        x = np.arange(limits[0][0], limits[0][1],spacing)
-        y = np.arange(limits[1][0], limits[1][1],spacing)
-        xg, yg = np.meshgrid(x,y)
-
-        invariant_contour = ctp.contour_generator(x=xg, y=yg, z=self.det_invariant(xg, yg, extended=extended) )
-        self.invariant_segments = invariant_contour.lines(0.0)
-
-    def plot_invariant(self, ax, limits, spacing=0.1, extended=False):
-        '''
-        Plots the invariant set segments into ax.
-        '''
-        self.invariant_set(limits, spacing=spacing, extended=extended)
-        collections = []
-        for seg in self.invariant_segments:
-            line2D = ax.plot( seg[:,0], seg[:,1], color=self.invariant_color, linestyle='dashed', linewidth=1.0 )
-            collections.append( line2D[0] )
-        return collections
+        return self.get_levels(levels=[0.0], **kwargs)[0]
     
 class ApproxFunction(Function):
     '''

@@ -1,14 +1,16 @@
+import itertools
+import warnings
+
 import numpy as np
 import cvxpy as cp
-import itertools
-import matplotlib.pyplot as plt
+import contourpy as ctp
 import matplotlib.colors as mcolors
 
-from shapely import geometry
+from shapely import geometry, intersection
 from scipy.optimize import root, minimize, least_squares
 from scipy.linalg import null_space
 
-from common import compute_curvatures, KKTmultipliers, ellipsoid_parametrization, check_kernel
+from common import *
 from controllers.compatibility import LinearMatrixPencil2
 from functions import Kernel
 
@@ -17,6 +19,18 @@ ZERO_ACCURACY = 1e-9
 ''' 
 Verification / computation of equilibrium points and their stability 
 '''
+def vecQ(z, A_list, Q):
+    vecQ = []
+    for k in range(len(A_list)):
+        vecQ.append( z.T @ A_list[k].T @ Q @ z )
+    return vecQ
+
+def vecP(z, A_list, P, params, V, F):
+    vecP = []
+    for k in range(len(A_list)):
+        vecP.append( z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z )
+    return vecP
+
 def equilibrium_field(z, l, P, V, plant, clf, cbf, params):
     '''
     Returns equilibrium field: l vecQ(z) - vecP(x)
@@ -27,20 +41,16 @@ def equilibrium_field(z, l, P, V, plant, clf, cbf, params):
         raise Exception("Input to equilibrium vector field must have the kernel dimension.")
 
     A_list = kernel.get_A_matrices()
-    n = len(A_list)
-
     F = plant.get_F()
     Q = cbf.Q
 
-    vecQ, vecP = [], []
-    for k in range(n):
-        vecQ.append( z.T @ A_list[k].T @ Q @ z )
-        vecP.append( z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z )
+    vecQ_list = vecQ(z, A_list, Q)
+    vecP_list = vecP(z, A_list, P, params, V, F)
 
     if cp.expressions.variable.Variable in [ type(l), type(P) ]:
-        return l * cp.vstack(vecQ) - cp.vstack(vecP)
+        return l * cp.vstack(vecQ_list) - cp.vstack(vecP_list)
     else:
-        return l * np.array(vecQ) - np.array(vecP)
+        return l * np.array(vecQ_list) - np.array(vecP_list)
 
 def L(x, l, P, plant, clf, cbf, params):
     '''
@@ -75,9 +85,14 @@ def is_equilibria(eq_sol, plant, clf, cbf, params, **kwargs):
     Verifies if a point x is an equilibrium point.
     Returns: bool
     '''
-    opt_tol, boundary_tol = 1e-05, 1e-03
+    opt_tol, boundary_tol = 1e-03, 1e-03
+    init_l_def = False
     for key in kwargs.keys():
         aux_key = key.lower()
+        if aux_key == "init_lambda":
+            init_l = kwargs[key]
+            init_l_def = True
+            continue
         if aux_key == "opt_tol":
             opt_tol = kwargs[key]
             continue
@@ -86,9 +101,13 @@ def is_equilibria(eq_sol, plant, clf, cbf, params, **kwargs):
             continue
 
     kernel = check_kernel(plant, clf, cbf)
-    
+
+    if not init_l_def:
+        init_l = np.random.rand()
+
     x = eq_sol["x"]
     m = kernel.function(x)
+
     if np.abs( m.T @ cbf.Q @ m - 1 ) > boundary_tol:
         return False
     
@@ -106,7 +125,6 @@ def is_equilibria(eq_sol, plant, clf, cbf, params, **kwargs):
 
     is_eq = False
     try:
-        init_l = np.random.rand()
         init_var = [init_l]
         sol = minimize(objective, init_var, bounds=[ (0.0, np.inf) ])
 
@@ -114,14 +132,13 @@ def is_equilibria(eq_sol, plant, clf, cbf, params, **kwargs):
             is_eq = True
     except Exception as error_msg:
         print("No equilibrium points were found. Error: " + str(error_msg))
-    
-    if is_eq:
-        eq_sol["lambda"], eq_sol["cost"] = sol.x[0], objective(sol.x)
-        stability, eta = compute_stability(eq_sol, plant, clf, cbf, params)
-        eq_sol["eta"], eq_sol["stability"] = eta, stability
-        eq_sol["type"] = "stable"
-        if stability > 0:
-            eq_sol["type"] = "unstable"
+
+    eq_sol["lambda"], eq_sol["cost"] = sol.x[0], objective(sol.x)
+    stability, eta = compute_stability(eq_sol, plant, clf, cbf, params)
+    eq_sol["eta"], eq_sol["stability"] = eta, stability
+    eq_sol["type"] = "stable"
+    if stability > 0:
+        eq_sol["type"] = "unstable"
     
     return is_eq
 
@@ -257,36 +274,55 @@ def is_removable_by_rotations(eq_sol, plant, clf, cbf):
 
     return Pnew
 
+def compute_lambda(eq_pt, plant, clf, cbf, params):
+    '''
+    Given a known equilibrium point eq_pt, compute its corresponding lambda
+    '''
+    kernel = check_kernel(plant, clf, cbf)
+    A_list = kernel.get_A_matrices()
+    
+    z = kernel.function(eq_pt)
+    vecQ_a = np.array( vecQ(z, A_list, cbf.Q) )
+    vecP_a = np.array( vecP(z, A_list, clf.P, params, clf.function(eq_pt), plant.get_F()) )
+
+    return vecQ_a.T @ vecP_a / vecQ_a.T @ vecQ_a
+
 def compute_equilibria(plant, clf, cbf, params, **kwargs):
     '''
     Finds equilibrium points solutions. If no initial point is specified, it selections a point at random from a speficied interval.
     Returns a dict containing all relevant data about the found equilibrium point, including its stability.
     '''
-    tol = 1e-05
+    tol = 1e-02
     init_x_def = False
+    init_l_def = False
     for key in kwargs.keys():
         aux_key = key.lower()
         if aux_key == "init_x":
             init_x = kwargs[key]
             init_x_def = True
             continue
+        if aux_key == "init_l":
+            init_l = kwargs[key]
+            init_l_def = True
+            continue
         if aux_key == "tol":
             tol = kwargs[key]
             continue
 
     kernel = check_kernel(plant, clf, cbf)
-
+    A_list = kernel.get_A_matrices()
     n = kernel._dim
-    minusones, plusones = -np.ones([n,1]), +np.ones([n,1])
-    interval_limits = np.hstack([ minusones, plusones ]).tolist()
+
+    limits = [ [-1, +1] for _ in range(n) ]
     if "limits" in kwargs.keys():
-        interval_limits = kwargs["limits"]
+        limits = kwargs["limits"]
         for i in range(n):
-            if interval_limits[i][0] >=  interval_limits[i][1]:
+            if limits[i][0] >=  limits[i][1]:
                 raise Exception("Lines should be sorted in ascending order.")
 
     if not init_x_def:
-        init_x = [ np.random.uniform( interval_limits[k][0], interval_limits[k][1] ) for k in range(n) ]
+        init_x = [ np.random.uniform( limits[k][0], limits[k][1] ) for k in range(n) ]
+    init_l = compute_lambda(init_x, plant, clf, cbf, params)
 
     '''
     var = [ x, λ ] is a (n+rankQ-1+1) dimensional array, where:
@@ -299,37 +335,71 @@ def compute_equilibria(plant, clf, cbf, params, **kwargs):
         Returns the vector residues of invariant set -> is zero for x in the invariant set
         '''
         x = var[0:n]
-        l = var[-1]
-        return equilibrium_field(kernel.function(x), l, clf.P, clf.function(x), plant, clf, cbf, params)
+        z = kernel.function(x)
+        
+        vecQ_a = np.array( vecQ(z, A_list, cbf.Q) )
+        vecP_a = np.array( vecP(z, A_list, clf.P, params, clf.function(x), plant.get_F()) )
+        W = np.hstack([vecQ_a.reshape(n,1), vecP_a.reshape(n,1)])
+
+        return np.abs( np.linalg.det(W) )
+
+    def invariant_set_constraint2(var):
+        '''
+        Returns the vector residues of invariant set -> is zero for x in the invariant set
+        '''
+        x = var[0:n]
+        z = kernel.function(x)
+        l = var[n]
+        
+        vecQ_a = np.array( vecQ(z, A_list, cbf.Q) )
+        vecP_a = np.array( vecP(z, A_list, clf.P, params, clf.function(x), plant.get_F()) )
+
+        return np.linalg.norm( l*vecQ_a - vecP_a )
+
+    def lambda_constraint(var):
+        '''
+        Returns the vector residues of invariant set -> is zero for x in the invariant set
+        '''
+        x = var[0:n]
+        l = var[n]
+    
+        return ( l - compute_lambda(x, plant, clf, cbf,params) )**2
 
     def boundary_constr(var):
         '''
         Returns the diff between mQm and 1
         '''
         x = var[0:n]
-        m = kernel.function(x)
-        return np.abs( m.T @ cbf.Q @ m - 1 )
+        z = kernel.function(x)
+        return np.abs( z.T @ cbf.Q @ z - 1 )
 
     def objective(var):
-        return np.linalg.norm(invariant_set_constraint(var))**2 + boundary_constr(var)**2
+        return invariant_set_constraint(var)
+
+    def objective2(var):
+        return invariant_set_constraint2(var) + lambda_constraint(var) + boundary_constr(var)
 
     x_bounds = [ (-np.inf, np.inf) for _ in range(n) ]
     l_bounds = [ (0.0, np.inf) ]
 
     eq_found = False
-    eq_sol = {"x": None, "lambda": None, "init_x": init_x, "cost": np.inf, "stability": None, "type": None}
-    try:
-        init_l = np.random.rand()
-        init_var = init_x + [init_l]
-        sol = minimize(objective, init_var, bounds=x_bounds+l_bounds)
+    eq_sol = {"init_x": init_x}
+    
+    # First, optimize invariant set
+    # sol = minimize(objective, init_x, bounds=x_bounds)
+    # if sol.fun < 1e-6:
+    #     z = kernel.function(sol.x)
+    #     vecQ_a = np.array( vecQ(z, A_list, cbf.Q) )
+    #     vecP_a = np.array( vecP(z, A_list, clf.P, params, clf.function(sol.x), plant.get_F()) )
+    #     init_l = vecQ_a.T @ vecP_a / vecQ_a.T @ vecQ_a
 
-        if sol.fun < tol and sol.x[-1] > 0:
-            eq_found = True
-    except Exception as error_msg:
-        print("No equilibrium points were found. Error: " + str(error_msg))
+    # Second, optimize lambda at the invariant set
+    sol = minimize(objective2, init_x+[init_l], bounds=x_bounds+l_bounds, options={"maxiter": 1e+3})
+    if sol.fun < 1e-1 and sol.x[n] >= 0:
+        eq_found = True
     
     if eq_found:
-        eq_sol["x"], eq_sol["lambda"], eq_sol["init_x"], eq_sol["cost"] = sol.x[0:n].tolist(), sol.x[-1], init_x, np.linalg.norm( invariant_set_constraint(sol.x) )
+        eq_sol["x"], eq_sol["lambda"], eq_sol["cost"], eq_sol["init_cost"] = sol.x[0:n].tolist(), sol.x[n], objective2(sol.x), objective2(init_x+[init_l])
         stability, eta = compute_stability(eq_sol, plant, clf, cbf, params)
         eq_sol["eta"], eq_sol["stability"] = eta, stability
         eq_sol["type"] = "stable"
@@ -485,6 +555,153 @@ def closest_to_image(z, kernel):
     result = minimize( fun=lambda x: np.linalg.norm( kernel.function(x) - z ), x0 = [ 0.0 for _ in range(n) ] )
 
     return result.x
+
+class KernelPair():
+    '''
+    Class for kernel-based CLF-CBF pairs
+    '''
+    def __init__(self, clf, cbf, plant, params = {"slack_gain": 1.0, "clf_gain": 1.0}, **kwargs):
+        
+        self.clf = clf
+        self.cbf = cbf
+        self.plant = plant
+        self.params = params
+
+        self.F = self.plant.get_F()
+        self.P = self.clf.P
+        self.Q = self.cbf.Q
+
+        self.kernel = check_kernel(self.plant, self.clf, self.cbf)
+        self.n = self.kernel._dim
+        self.kernel_dim = self.kernel.kernel_dim
+        self.A_list = self.kernel.get_A_matrices()
+
+        self.set_param(**kwargs)
+        self.invariant_segments = None
+        self.invariant_set(self.limits, spacing=self.spacing)
+
+    def set_param(self, **kwargs):
+        '''
+        Set parameters for computing the invariant set, equilibrium points, etc
+        '''
+        if "limits" not in kwargs.keys():
+            self.limits = [ [-1, +1] for _ in range(2) ]
+            if len(self.cbf.points) > 0:
+                pts = np.array([ pt["coords"] for pt in self.cbf.points ])
+                bbox = minimum_bounding_rectangle(pts)
+                self.limits = [ [np.min( bbox[:,0] ), np.max( bbox[:,0] )],
+                                [np.min( bbox[:,1] ), np.max( bbox[:,1] )] ]
+        
+        self.spacing = 0.1
+        self.invariant_color = mcolors.BASE_COLORS["k"]
+        for key in kwargs.keys():
+            if key == "limits":
+                self.limits = kwargs["limits"]
+                continue
+            if key == "spacing":
+                self.spacing = kwargs["spacing"]
+                continue
+            if key == "invariant_color":
+                self.invariant_color = kwargs["invariant_color"]
+                continue
+
+    def det_invariant(self, xg, yg, extended=False):
+        '''
+        Evaluates det([ vecQ, vecP ]) = 0 over a grid.
+        Parameters: xg, yg: (x,y) coords of each point in the grid
+        Returns: a grid with the same size of xg, yg with the determinant values. 
+        '''
+        if xg.shape != yg.shape:
+            raise Exception("x,y grid coordinates must have the same shape!")
+
+        det_grid = np.zeros(xg.shape)
+        for (i,j) in itertools.product(range( xg.shape[0] ), range( yg.shape[1] )):
+            vecQ, vecP = np.zeros(self.n), np.zeros(self.n)
+            z = self.kernel.function([xg[i,j], yg[i,j]])
+            V = 0.5 * z.T @ self.P @ z
+            for k in range(self.n):
+                vecQ[k] = z.T @ self.A_list[k].T @ self.Q @ z
+                vecP[k] = z.T @ self.A_list[k].T @ ( self.params["slack_gain"] * self.params["clf_gain"] * V * self.P - self.F ) @ z
+            l = vecQ.T @ vecP / vecQ.T @ vecQ
+            W = np.hstack([vecQ.reshape(self.n,1), vecP.reshape(self.n,1)])
+            if l >= 0 or extended:
+                # det_grid[i,j] = np.sqrt( np.linalg.det( W.T @ W ) ) # does not work
+                det_grid[i,j] = np.linalg.det(W)
+            else:
+                det_grid[i,j] = np.inf
+
+        return det_grid
+    
+    def invariant_set(self, limits, spacing=0.1, extended=False):
+        '''
+        Computes the invariant set for the given CLF-CBF pair
+        '''
+        if self.n > 2:
+            warnings.warn("Currently, the computation of the invariant set is not available for dimensions higher than 2.")
+            return
+        
+        x = np.arange(limits[0][0], limits[0][1],spacing)
+        y = np.arange(limits[1][0], limits[1][1],spacing)
+        xg, yg = np.meshgrid(x,y)
+
+        invariant_contour = ctp.contour_generator(x=xg, y=yg, z=self.det_invariant(xg, yg, extended=extended) )
+        self.invariant_branches = invariant_contour.lines(0.0)
+
+    def plot_invariant(self, ax, limits, spacing=0.1, extended=False):
+        '''
+        Plots the invariant set segments into ax.
+        '''
+        self.invariant_set(limits, spacing=spacing, extended=extended)
+        collections = []
+        for seg in self.invariant_branches:
+            line2D = ax.plot( seg[:,0], seg[:,1], color=self.invariant_color, linestyle='dashed', linewidth=1.0 )
+            collections.append( line2D[0] )
+        return collections
+    
+    def compute_equilibria(self, **kwargs):
+        '''
+        Computes all equilibrium points of the CLF-CBF pair, using the invariant set intersections with the CBF boundary.
+        '''
+        self.set_param(**kwargs)
+        boundary_segments = self.cbf.get_boundary(limits=self.limits, spacing=self.spacing)
+        self.invariant_set(self.limits, spacing=self.spacing, extended=False)
+
+        # Finds intersections between boundary and invariant set segments
+        self.boundary_equilibria = []
+        for boundary_seg in boundary_segments:
+            for invariant_branch in self.invariant_branches:
+                
+                boundary_curve = geometry.LineString(boundary_seg)
+                invariant_branch_curve = geometry.LineString(invariant_branch)
+                intersections = intersection( boundary_curve, invariant_branch_curve )
+
+                new_candidates = []
+                if not intersections.is_empty:
+                    if hasattr(intersections, "geoms"):
+                        for geo in intersections.geoms:
+                            x, y = geo.xy
+                            x, y = list(x), list(y)
+                            new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
+                    else:
+                        x, y = intersections.xy
+                        x, y = list(x), list(y)
+                        new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
+                
+                for pt in new_candidates:
+                    eq_sol = {"x": pt}
+                    eq_sol["lambda"] = compute_lambda(pt, self.plant, self.clf, self.cbf, self.params)
+                    stability, eta = compute_stability(eq_sol, self.plant, self.clf, self.cbf, self.params)
+                    eq_sol["eta"], eq_sol["stability"] = eta, stability
+                    eq_sol["type"] = "stable"
+                    if stability > 0:
+                        eq_sol["type"] = "unstable"
+
+                    self.boundary_equilibria.append(eq_sol)
+
+        num_equilibria = len(self.boundary_equilibria)
+        print(f"Found {num_equilibria} boundary equilibrium points.")
+        for eq in self.boundary_equilibria:
+            print(eq)
 
 '''
 The following algorithms are useful for initialization of the previous algorithms, among other utilities.

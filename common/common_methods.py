@@ -624,7 +624,7 @@ def minimum_bounding_rectangle(points):
     :param points: an nx2 matrix of coordinates
     :rval: an nx2 matrix of coordinates
     """
-    from scipy.ndimage.interpolation import rotate
+    # from scipy.ndimage.interpolation import rotate
     pi2 = np.pi/2.
 
     # get the convex hull for the points
@@ -680,7 +680,7 @@ def minimum_bounding_rectangle(points):
     rval[2] = np.dot([x2, y1], r)
     rval[3] = np.dot([x1, y1], r)
 
-    factor = 1          # must be greater than 1
+    factor = 1                      # must be greater than 1
     centroid = rval.mean(axis=0)
     diffs = rval - centroid
     new_bbox = centroid + factor*diffs

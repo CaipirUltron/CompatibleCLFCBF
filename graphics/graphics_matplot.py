@@ -140,7 +140,7 @@ class Plot2DSimulation():
         self.clf_contour_color = mcolors.TABLEAU_COLORS['tab:blue']
         self.cbf_contour_color = mcolors.TABLEAU_COLORS['tab:red']
 
-        self.clf_contours = self.clf.plot_levels(levels=[0.0], colors=self.clf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], resolution=0.5)
+        self.clf_contours = self.clf.plot_levels(levels=[0.0], colors=self.clf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], spacing=0.5)
         self.cbf_contours = []
 
     def init(self):
@@ -162,7 +162,7 @@ class Plot2DSimulation():
             self.equilibria_plot.set_data(x_eq, y_eq)
 
         for cbf in self.cbfs:
-            self.cbf_contours.append( cbf.plot_levels(levels=[-0.1*k for k in range(4,-1,-1)], colors=self.cbf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], resolution=0.1) )
+            self.cbf_contours.append( cbf.plot_levels(levels=[-0.1*k for k in range(4,-1,-1)], colors=self.cbf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], spacing=0.1) )
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
@@ -222,12 +222,13 @@ class Plot2DSimulation():
             #     self.equilibria_plot.set_data(x_eq, y_eq)
 
             if self.draw_level:
-                V = self.clf.evaluate_function(*current_state)[0]
+                V = self.clf.function(current_state)
                 for coll in self.clf_contours:
                     coll.remove()
 
-                perimeter = 4*abs(current_state[0]) + 4*abs(current_state[1])
-                self.clf_contours = self.clf.plot_levels(levels=[V], colors=self.clf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], resolution=0.005*perimeter+0.1)
+                # perimeter = 4*abs(current_state[0]) + 4*abs(current_state[1])
+                # self.clf_contours = self.clf.plot_levels(levels=[V], colors=self.clf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], spacing=0.005*perimeter+0.1)
+                self.clf_contours = self.clf.plot_levels(levels=[V], colors=self.clf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], spacing=0.5)
 
         else:
             self.runs = False

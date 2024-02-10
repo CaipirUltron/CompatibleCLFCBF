@@ -106,10 +106,10 @@ class NominalQP():
         if elapsed_time > self.eq_dt and self.cbf != None:
 
             x = self.plant.get_state().tolist()
-            sol = compute_equilibria(self.plant, self.clf, self.cbf, self.eq_params, init_x=x)
+            # sol = compute_equilibria(self.plant, self.clf, self.cbf, self.eq_params, init_x=x)
 
-            if sol["x"] != None: 
-                self.add_equilibrium(sol)
+            # if sol["x"] != None: 
+            #     self.add_equilibrium(sol)
 
             # if self.needs_update:
             #     self.update_clf()
