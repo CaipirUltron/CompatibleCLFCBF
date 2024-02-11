@@ -35,7 +35,9 @@ def adjugate(A):
     """
     Calculate adjugate matrix of A
     """
-    return cofactor(A).T
+    if A.shape != (2,2):
+        raise Exception("Adjugate currently working only in 2D.")
+    return np.array([ [ A[1,1], -A[0,1] ], [ -A[1,0], A[0,0] ] ])
 
 def asymmetric_sat(u, limits, slope):
     '''

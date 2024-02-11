@@ -25,11 +25,40 @@ def vecQ(z, A_list, Q):
         vecQ.append( z.T @ A_list[k].T @ Q @ z )
     return vecQ
 
+def vecQ_jac(x, cbf):
+    kernel = cbf.kernel
+    A_list = kernel.get_A_matrices()
+    z = kernel.function(x)
+    Jm = kernel.jacobian(x)
+    J_vQ = np.zeros([len(z), len(A_list)])
+    for k in range(len(A_list)):
+        Qi = A_list[k].T @ cbf.Q + cbf.Q @ A_list[k]
+        J_vQ[k,:] = 2*z.T @ Qi @ Jm
+
+    return J_vQ
+
 def vecP(z, A_list, P, params, V, F):
     vecP = []
     for k in range(len(A_list)):
         vecP.append( z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z )
     return vecP
+
+def vecP_jac(x, clf, cbf, plant, params):
+    F = plant.get_F()
+    kernel = check_kernel(plant, clf, cbf)
+    A_list = kernel.get_A_matrices()
+    z = kernel.function(x)
+    Jm = kernel.jacobian(x)
+    V = clf.function(x)
+    gradV = clf.gradient(x)
+    J_vP = np.zeros([len(z), len(A_list)])
+    const = params["slack_gain"]*params["clf_gain"]
+    for k in range(len(A_list)):
+        Pi = A_list[k].T @ clf.P + clf.P @ A_list[k]
+        Fi = A_list[k].T @ F + F.T @ A_list[k]
+        J_vP[k,:] = ( z.T @ Pi @ z ) * const * gradV +  2 * ( const*V * z.T @ Pi - z.T @ Fi ) @ Jm
+
+    return J_vP
 
 def equilibrium_field(z, l, P, V, plant, clf, cbf, params):
     '''
@@ -285,28 +314,19 @@ def compute_lambda(eq_pt, plant, clf, cbf, params):
     vecQ_a = np.array( vecQ(z, A_list, cbf.Q) )
     vecP_a = np.array( vecP(z, A_list, clf.P, params, clf.function(eq_pt), plant.get_F()) )
 
-    return vecQ_a.T @ vecP_a / vecQ_a.T @ vecQ_a
+    return (vecQ_a.T @ vecP_a) / np.linalg.norm(vecQ_a)**2
 
 def compute_equilibria(plant, clf, cbf, params, **kwargs):
     '''
-    Finds equilibrium points solutions. If no initial point is specified, it selections a point at random from a speficied interval.
+    Finds equilibrium points solutions using sliding mode control. If no initial point is specified, it selections a point at random from a speficied interval.
     Returns a dict containing all relevant data about the found equilibrium point, including its stability.
     '''
-    tol = 1e-02
     init_x_def = False
-    init_l_def = False
     for key in kwargs.keys():
         aux_key = key.lower()
         if aux_key == "init_x":
             init_x = kwargs[key]
             init_x_def = True
-            continue
-        if aux_key == "init_l":
-            init_l = kwargs[key]
-            init_l_def = True
-            continue
-        if aux_key == "tol":
-            tol = kwargs[key]
             continue
 
     kernel = check_kernel(plant, clf, cbf)
@@ -322,84 +342,48 @@ def compute_equilibria(plant, clf, cbf, params, **kwargs):
 
     if not init_x_def:
         init_x = [ np.random.uniform( limits[k][0], limits[k][1] ) for k in range(n) ]
-    init_l = compute_lambda(init_x, plant, clf, cbf, params)
 
-    '''
-    var = [ x, λ ] is a (n+rankQ-1+1) dimensional array, where:
-    x is n-dimensional
-    theta is (rankQ-1)-dimensional, representing the angular parameters of the ellipsoid
-    λ is a scalar (must be positive for a valid equilibrium solution)
-    '''
-    def invariant_set_constraint(var):
+    def invariant_set(var):
         '''
         Returns the vector residues of invariant set -> is zero for x in the invariant set
         '''
         x = var[0:n]
         z = kernel.function(x)
+        # delta = var[n]
         
         vecQ_a = np.array( vecQ(z, A_list, cbf.Q) )
         vecP_a = np.array( vecP(z, A_list, clf.P, params, clf.function(x), plant.get_F()) )
         W = np.hstack([vecQ_a.reshape(n,1), vecP_a.reshape(n,1)])
+        return np.linalg.det(W)
 
-        return np.abs( np.linalg.det(W) )
-
-    def invariant_set_constraint2(var):
-        '''
-        Returns the vector residues of invariant set -> is zero for x in the invariant set
-        '''
-        x = var[0:n]
-        z = kernel.function(x)
-        l = var[n]
-        
-        vecQ_a = np.array( vecQ(z, A_list, cbf.Q) )
-        vecP_a = np.array( vecP(z, A_list, clf.P, params, clf.function(x), plant.get_F()) )
-
-        return np.linalg.norm( l*vecQ_a - vecP_a )
-
-    def lambda_constraint(var):
-        '''
-        Returns the vector residues of invariant set -> is zero for x in the invariant set
-        '''
-        x = var[0:n]
-        l = var[n]
-    
-        return ( l - compute_lambda(x, plant, clf, cbf,params) )**2
-
-    def boundary_constr(var):
+    def boundary_constraint(var):
         '''
         Returns the diff between mQm and 1
         '''
         x = var[0:n]
-        z = kernel.function(x)
-        return np.abs( z.T @ cbf.Q @ z - 1 )
+        delta = var[n]
+        h = cbf.function(x)
+        return delta - np.abs(h)
 
     def objective(var):
-        return invariant_set_constraint(var)
+        delta = var[n]
+        return delta**2
 
-    def objective2(var):
-        return invariant_set_constraint2(var) + lambda_constraint(var) + boundary_constr(var)
+    init_delta = 1.0
+    init_var = init_x + [init_delta]
 
-    x_bounds = [ (-np.inf, np.inf) for _ in range(n) ]
-    l_bounds = [ (0.0, np.inf) ]
-
-    eq_found = False
     eq_sol = {"init_x": init_x}
-    
-    # First, optimize invariant set
-    # sol = minimize(objective, init_x, bounds=x_bounds)
-    # if sol.fun < 1e-6:
-    #     z = kernel.function(sol.x)
-    #     vecQ_a = np.array( vecQ(z, A_list, cbf.Q) )
-    #     vecP_a = np.array( vecP(z, A_list, clf.P, params, clf.function(sol.x), plant.get_F()) )
-    #     init_l = vecQ_a.T @ vecP_a / vecQ_a.T @ vecQ_a
-
-    # Second, optimize lambda at the invariant set
-    sol = minimize(objective2, init_x+[init_l], bounds=x_bounds+l_bounds, options={"maxiter": 1e+3})
-    if sol.fun < 1e-1 and sol.x[n] >= 0:
-        eq_found = True
-    
-    if eq_found:
-        eq_sol["x"], eq_sol["lambda"], eq_sol["cost"], eq_sol["init_cost"] = sol.x[0:n].tolist(), sol.x[n], objective2(sol.x), objective2(init_x+[init_l])
+    sol = minimize(objective, init_var, constraints=[ {"type": "ineq", "fun": boundary_constraint},
+                                                      {"type": "eq", "fun": invariant_set} ])
+    eq_coords = sol.x[0:n].tolist()
+    l = compute_lambda(eq_coords, plant, clf, cbf, params)
+    h = cbf.function(eq_coords)
+    if l >= 0 and np.abs(h) <= 1e-3:
+        eq_sol["x"] = eq_coords
+        eq_sol["lambda"] = l
+        eq_sol["delta"] = sol.x[n]
+        eq_sol["invariant_cost"] = invariant_set(sol.x)
+        eq_sol["h"] = h
         stability, eta = compute_stability(eq_sol, plant, clf, cbf, params)
         eq_sol["eta"], eq_sol["stability"] = eta, stability
         eq_sol["type"] = "stable"
@@ -434,6 +418,7 @@ def compute_stability(sol, plant, clf, cbf, params):
     eta = 1/(1 + params["slack_gain"] * z2.T @ G @ z2 )
 
     V = clf.function(x)
+
     max_index = np.argmax(curvatures)
     stability_number = curvatures[max_index] / ( params["slack_gain"] * params["clf_gain"] * V * norm_nablaV )
     # principal_direction = basis_for_TpS[:,max_index]
@@ -445,8 +430,10 @@ def compute_stability(sol, plant, clf, cbf, params):
     #     curv_V = clf.get_curvature(x)
     #     curv_h = cbf.get_curvature(x)
     #     diff_curvatures = curv_h - curv_V
-    #     if np.abs(diff_curvatures - stability_number) > 1e-5:
-    #         raise Exception("Stability number is different then the difference of curvatures.")
+        # print(f"Difference of curvatures = {diff_curvatures}")
+        # print(f"Stability = {stability_number}")
+        # if np.abs(diff_curvatures - stability_number) > 1e-3:
+        #     raise Exception("Stability number is different then the difference of curvatures.")
 
     return stability_number, eta
 
@@ -579,7 +566,7 @@ class KernelPair():
         self.set_param(**kwargs)
         self.invariant_segments = None
         self.invariant_set(self.limits, spacing=self.spacing)
-
+        
     def set_param(self, **kwargs):
         '''
         Set parameters for computing the invariant set, equilibrium points, etc
@@ -688,14 +675,7 @@ class KernelPair():
                         new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
                 
                 for pt in new_candidates:
-                    eq_sol = {"x": pt}
-                    eq_sol["lambda"] = compute_lambda(pt, self.plant, self.clf, self.cbf, self.params)
-                    stability, eta = compute_stability(eq_sol, self.plant, self.clf, self.cbf, self.params)
-                    eq_sol["eta"], eq_sol["stability"] = eta, stability
-                    eq_sol["type"] = "stable"
-                    if stability > 0:
-                        eq_sol["type"] = "unstable"
-
+                    eq_sol = compute_equilibria(self.plant, self.clf, self.cbf, self.params, init_x=pt)
                     self.boundary_equilibria.append(eq_sol)
 
         num_equilibria = len(self.boundary_equilibria)

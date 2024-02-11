@@ -31,12 +31,18 @@ if hasattr(sim, "pts"):
 contour_unsafe = sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
 sim.clf_cbf_pair.plot_invariant(ax=ax, limits=sim.plot_config["limits"], spacing=0.2, extended=False)
 
-sim.clf_cbf_pair.compute_equilibria(limits=limits, spacing=0.2)
-
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 sol_x_plot, = ax.plot([],[],'ok', alpha=0.8)
 sol_x_minimize_plot, = ax.plot([],[],'og', alpha=0.8)
 sol_x_maximize_plot, = ax.plot([],[],'or', alpha=0.8)
+
+sim.clf_cbf_pair.compute_equilibria(limits=limits, spacing=0.2)
+for eq in sim.clf_cbf_pair.boundary_equilibria:
+    x_eq = eq["x"]
+    z_eq = sim.kernel.function(x_eq)
+    l_eq = eq["lambda"]
+    type = eq["type"]
+    ax.plot(x_eq[0], x_eq[1],'og', alpha=0.8, linewidth=0.6)
 
 while True:
     pt = plt.ginput(1, timeout=0)
@@ -48,35 +54,36 @@ while True:
             coll.remove()
         del clf_contour
 
-    # Find equilibrium point
-    sol_eq = compute_equilibria(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, init_x=init_x, limits=limits)
-    if "x" in sol_eq.keys():
-        x_eq = sol_eq["x"]
-        z_eq = sim.kernel.function(x_eq)
-        l_eq = sol_eq["lambda"]
-        type = sol_eq["type"]
-        print(sol_eq)
-        # print(f"{type} equilibrium point found at {x_eq}, with lambda = {l_eq}")
-        sol_x_plot.set_data([x_eq[0]], [x_eq[1]])
+    # # Find equilibrium point
+    # sol_eq = compute_equilibria(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, init_x=init_x, limits=limits)
 
-        # Find minimum point in the invariant set branch
-        min_sol, max_sol = optimize_branch(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, init_pt=x_eq, init_lambda=l_eq)
-        print(f"Min = {min_sol}")
-        print(f"Max = {max_sol}")
+    # if sol_eq in sim.clf_cbf_pair.boundary_equilibria:
+    #     x_eq = sol_eq["x"]
+    #     z_eq = sim.kernel.function(x_eq)
+    #     l_eq = sol_eq["lambda"]
+    #     type = sol_eq["type"]
+    #     print(sol_eq)
+    #     # print(f"{type} equilibrium point found at {x_eq}, with lambda = {l_eq}")
+    #     sol_x_plot.set_data([x_eq[0]], [x_eq[1]])
 
-        x_min = min_sol["pt"]
-        x_max = max_sol["pt"]
+        # # Find minimum point in the invariant set branch
+        # min_sol, max_sol = optimize_branch(sim.plant, sim.clf, sim.cbf, {"slack_gain": sim.p, "clf_gain": sim.alpha}, init_pt=x_eq, init_lambda=l_eq)
+        # print(f"Min = {min_sol}")
+        # print(f"Max = {max_sol}")
 
-        if x_min != None:
-            sol_x_minimize_plot.set_data([x_min[0]], [x_min[1]])
-        if x_max != None:
-            sol_x_maximize_plot.set_data([x_max[0]], [x_max[1]])
+        # x_min = min_sol["pt"]
+        # x_max = max_sol["pt"]
 
-    else:
-        print("No equilibrium point was found.")
-        sol_x_plot.set_data([],[])
-        sol_x_minimize_plot.set_data([],[])
-        sol_x_maximize_plot.set_data([],[])
+        # if x_min != None:
+        #     sol_x_minimize_plot.set_data([x_min[0]], [x_min[1]])
+        # if x_max != None:
+        #     sol_x_maximize_plot.set_data([x_max[0]], [x_max[1]])
+
+    # else:
+    #     print("No equilibrium point was found.")
+    #     sol_x_plot.set_data([],[])
+    #     sol_x_minimize_plot.set_data([],[])
+    #     sol_x_maximize_plot.set_data([],[])
 
     V = sim.clf.function(init_x)
     clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits, spacing=0.2)
