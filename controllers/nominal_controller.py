@@ -12,14 +12,15 @@ class NominalQP():
     '''
     Class for the nominal QP controller.
     '''
-    def __init__(self, plant, clf, cbf, alpha = 1.0, beta = 1.0, p = 1.0, dt = 0.001):
+    def __init__(self, kernel_triplet, dt = 0.001):
 
         # Dimensions and system model initialization
-        self.plant = plant
-        self.clf, self.cbf = clf, cbf
+        self.plant = kernel_triplet.plant
+        self.clf = kernel_triplet.clf
+        self.cbf = kernel_triplet.cbf
 
-        self.kernel = self.clf.kernel
-        self.A_list = self.kernel.get_A_matrices()
+        self.kernel = kernel_triplet.kernel
+        self.A_list = kernel_triplet.A_list
 
         if self.cbf != None:
             if self.clf.kernel != self.cbf.kernel:
@@ -32,8 +33,10 @@ class NominalQP():
         self.kernel_dim = self.kernel.kernel_dim
 
         # QP parameters
-        self.p, self.alpha, self.beta = p, alpha, beta
-        self.eq_params = {"slack_gain": self.p, "clf_gain": self.alpha}
+        self.p = kernel_triplet.params["slack_gain"]
+        self.alpha = kernel_triplet.params["clf_gain"]
+        self.beta = kernel_triplet.params["cbf_gain"]
+
         self.QP_dim = self.control_dim + 1
         P = np.eye(self.QP_dim)
         P[self.control_dim,self.control_dim] = self.p

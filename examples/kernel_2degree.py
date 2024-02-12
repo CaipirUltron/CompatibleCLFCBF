@@ -1,8 +1,8 @@
 import numpy as np
 
-from dynamic_systems import ConservativeAffineSystem
-from functions import Kernel, KernelLyapunov, KernelBarrier
-from controllers import NominalQP, KernelPair
+from dynamic_systems import KernelAffineSystem
+from functions import Kernel, KernelLyapunov, KernelBarrier, KernelTriplet
+from controllers import NominalQP
 from common import create_quadratic, rot2D, box
 
 initial_state = [0.5, 6.0]
@@ -23,7 +23,7 @@ F[1,0], F[2,0] = fx, fy
 
 def g(state):
     return np.eye(m)
-plant = ConservativeAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
+plant = KernelAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
 
 # ---------------------------------------------------- Define CLF ----------------------------------------------------------
 clf_center = [0.0, -3.0]
@@ -52,11 +52,14 @@ cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=[center
 cbf.is_sos_convex(verbose=True)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
-T = 15
 sample_time = .002
 p, alpha, beta = 1.0, 1.0, 1.0
-controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
-clf_cbf_pair = KernelPair(clf, cbf, plant, params={"slack_gain": p, "clf_gain": alpha})
+kerneltriplet = KernelTriplet( plant=plant, clf=clf, cbf=cbf,
+                              params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta},
+                              limits=limits.tolist(), spacing=0.2 )
+
+controller = NominalQP(kerneltriplet, dt=sample_time)
+T = 15
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 plot_config = {

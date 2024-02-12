@@ -1,22 +1,18 @@
 import itertools
-import warnings
 
 import numpy as np
 import cvxpy as cp
-import contourpy as ctp
-import matplotlib.colors as mcolors
 
-from shapely import geometry, intersection
+from shapely import geometry
 from scipy.optimize import root, minimize, least_squares
 from scipy.linalg import null_space
 
 from common import *
 from controllers.compatibility import LinearMatrixPencil2
-from functions import Kernel
 
 ZERO_ACCURACY = 1e-9
 
-''' 
+'''
 Verification / computation of equilibrium points and their stability 
 '''
 def vecQ(z, A_list, Q):
@@ -25,40 +21,11 @@ def vecQ(z, A_list, Q):
         vecQ.append( z.T @ A_list[k].T @ Q @ z )
     return vecQ
 
-def vecQ_jac(x, cbf):
-    kernel = cbf.kernel
-    A_list = kernel.get_A_matrices()
-    z = kernel.function(x)
-    Jm = kernel.jacobian(x)
-    J_vQ = np.zeros([len(z), len(A_list)])
-    for k in range(len(A_list)):
-        Qi = A_list[k].T @ cbf.Q + cbf.Q @ A_list[k]
-        J_vQ[k,:] = 2*z.T @ Qi @ Jm
-
-    return J_vQ
-
 def vecP(z, A_list, P, params, V, F):
     vecP = []
     for k in range(len(A_list)):
         vecP.append( z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z )
     return vecP
-
-def vecP_jac(x, clf, cbf, plant, params):
-    F = plant.get_F()
-    kernel = check_kernel(plant, clf, cbf)
-    A_list = kernel.get_A_matrices()
-    z = kernel.function(x)
-    Jm = kernel.jacobian(x)
-    V = clf.function(x)
-    gradV = clf.gradient(x)
-    J_vP = np.zeros([len(z), len(A_list)])
-    const = params["slack_gain"]*params["clf_gain"]
-    for k in range(len(A_list)):
-        Pi = A_list[k].T @ clf.P + clf.P @ A_list[k]
-        Fi = A_list[k].T @ F + F.T @ A_list[k]
-        J_vP[k,:] = ( z.T @ Pi @ z ) * const * gradV +  2 * ( const*V * z.T @ Pi - z.T @ Fi ) @ Jm
-
-    return J_vP
 
 def equilibrium_field(z, l, P, V, plant, clf, cbf, params):
     '''
@@ -542,146 +509,6 @@ def closest_to_image(z, kernel):
     result = minimize( fun=lambda x: np.linalg.norm( kernel.function(x) - z ), x0 = [ 0.0 for _ in range(n) ] )
 
     return result.x
-
-class KernelPair():
-    '''
-    Class for kernel-based CLF-CBF pairs
-    '''
-    def __init__(self, clf, cbf, plant, params = {"slack_gain": 1.0, "clf_gain": 1.0}, **kwargs):
-        
-        self.clf = clf
-        self.cbf = cbf
-        self.plant = plant
-        self.params = params
-
-        self.F = self.plant.get_F()
-        self.P = self.clf.P
-        self.Q = self.cbf.Q
-
-        self.kernel = check_kernel(self.plant, self.clf, self.cbf)
-        self.n = self.kernel._dim
-        self.kernel_dim = self.kernel.kernel_dim
-        self.A_list = self.kernel.get_A_matrices()
-
-        self.set_param(**kwargs)
-        self.invariant_segments = None
-        self.invariant_set(self.limits, spacing=self.spacing)
-        
-    def set_param(self, **kwargs):
-        '''
-        Set parameters for computing the invariant set, equilibrium points, etc
-        '''
-        if "limits" not in kwargs.keys():
-            self.limits = [ [-1, +1] for _ in range(2) ]
-            if len(self.cbf.points) > 0:
-                pts = np.array([ pt["coords"] for pt in self.cbf.points ])
-                bbox = minimum_bounding_rectangle(pts)
-                self.limits = [ [np.min( bbox[:,0] ), np.max( bbox[:,0] )],
-                                [np.min( bbox[:,1] ), np.max( bbox[:,1] )] ]
-        
-        self.spacing = 0.1
-        self.invariant_color = mcolors.BASE_COLORS["k"]
-        for key in kwargs.keys():
-            if key == "limits":
-                self.limits = kwargs["limits"]
-                continue
-            if key == "spacing":
-                self.spacing = kwargs["spacing"]
-                continue
-            if key == "invariant_color":
-                self.invariant_color = kwargs["invariant_color"]
-                continue
-
-    def det_invariant(self, xg, yg, extended=False):
-        '''
-        Evaluates det([ vecQ, vecP ]) = 0 over a grid.
-        Parameters: xg, yg: (x,y) coords of each point in the grid
-        Returns: a grid with the same size of xg, yg with the determinant values. 
-        '''
-        if xg.shape != yg.shape:
-            raise Exception("x,y grid coordinates must have the same shape!")
-
-        det_grid = np.zeros(xg.shape)
-        for (i,j) in itertools.product(range( xg.shape[0] ), range( yg.shape[1] )):
-            vecQ, vecP = np.zeros(self.n), np.zeros(self.n)
-            z = self.kernel.function([xg[i,j], yg[i,j]])
-            V = 0.5 * z.T @ self.P @ z
-            for k in range(self.n):
-                vecQ[k] = z.T @ self.A_list[k].T @ self.Q @ z
-                vecP[k] = z.T @ self.A_list[k].T @ ( self.params["slack_gain"] * self.params["clf_gain"] * V * self.P - self.F ) @ z
-            l = vecQ.T @ vecP / vecQ.T @ vecQ
-            W = np.hstack([vecQ.reshape(self.n,1), vecP.reshape(self.n,1)])
-            if l >= 0 or extended:
-                # det_grid[i,j] = np.sqrt( np.linalg.det( W.T @ W ) ) # does not work
-                det_grid[i,j] = np.linalg.det(W)
-            else:
-                det_grid[i,j] = np.inf
-
-        return det_grid
-    
-    def invariant_set(self, limits, spacing=0.1, extended=False):
-        '''
-        Computes the invariant set for the given CLF-CBF pair
-        '''
-        if self.n > 2:
-            warnings.warn("Currently, the computation of the invariant set is not available for dimensions higher than 2.")
-            return
-        
-        x = np.arange(limits[0][0], limits[0][1],spacing)
-        y = np.arange(limits[1][0], limits[1][1],spacing)
-        xg, yg = np.meshgrid(x,y)
-
-        invariant_contour = ctp.contour_generator(x=xg, y=yg, z=self.det_invariant(xg, yg, extended=extended) )
-        self.invariant_branches = invariant_contour.lines(0.0)
-
-    def plot_invariant(self, ax, limits, spacing=0.1, extended=False):
-        '''
-        Plots the invariant set segments into ax.
-        '''
-        self.invariant_set(limits, spacing=spacing, extended=extended)
-        collections = []
-        for seg in self.invariant_branches:
-            line2D = ax.plot( seg[:,0], seg[:,1], color=self.invariant_color, linestyle='dashed', linewidth=1.0 )
-            collections.append( line2D[0] )
-        return collections
-    
-    def compute_equilibria(self, **kwargs):
-        '''
-        Computes all equilibrium points of the CLF-CBF pair, using the invariant set intersections with the CBF boundary.
-        '''
-        self.set_param(**kwargs)
-        boundary_segments = self.cbf.get_boundary(limits=self.limits, spacing=self.spacing)
-        self.invariant_set(self.limits, spacing=self.spacing, extended=False)
-
-        # Finds intersections between boundary and invariant set segments
-        self.boundary_equilibria = []
-        for boundary_seg in boundary_segments:
-            for invariant_branch in self.invariant_branches:
-                
-                boundary_curve = geometry.LineString(boundary_seg)
-                invariant_branch_curve = geometry.LineString(invariant_branch)
-                intersections = intersection( boundary_curve, invariant_branch_curve )
-
-                new_candidates = []
-                if not intersections.is_empty:
-                    if hasattr(intersections, "geoms"):
-                        for geo in intersections.geoms:
-                            x, y = geo.xy
-                            x, y = list(x), list(y)
-                            new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
-                    else:
-                        x, y = intersections.xy
-                        x, y = list(x), list(y)
-                        new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
-                
-                for pt in new_candidates:
-                    eq_sol = compute_equilibria(self.plant, self.clf, self.cbf, self.params, init_x=pt)
-                    self.boundary_equilibria.append(eq_sol)
-
-        num_equilibria = len(self.boundary_equilibria)
-        print(f"Found {num_equilibria} boundary equilibrium points.")
-        for eq in self.boundary_equilibria:
-            print(eq)
 
 '''
 The following algorithms are useful for initialization of the previous algorithms, among other utilities.

@@ -3,7 +3,7 @@ import importlib
 import numpy as np
 import matplotlib.pyplot as plt
 
-from controllers.equilibrium_algorithms import compute_equilibria, optimize_branch
+# from controllers.equilibrium_algorithms import compute_equilibria, optimize_branch
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -29,15 +29,14 @@ if hasattr(sim, "pts"):
             ax.plot([ coords[0], gradient_vec[0]], [ coords[1], gradient_vec[1]], 'k-', alpha=0.6)
 
 contour_unsafe = sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
-sim.clf_cbf_pair.plot_invariant(ax=ax, limits=sim.plot_config["limits"], spacing=0.2, extended=False)
+sim.kerneltriplet.plot_invariant(ax=ax, extended=False)
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 sol_x_plot, = ax.plot([],[],'ok', alpha=0.8)
 sol_x_minimize_plot, = ax.plot([],[],'og', alpha=0.8)
 sol_x_maximize_plot, = ax.plot([],[],'or', alpha=0.8)
 
-sim.clf_cbf_pair.compute_equilibria(limits=limits, spacing=0.2)
-for eq in sim.clf_cbf_pair.boundary_equilibria:
+for eq in sim.kerneltriplet.boundary_equilibria:
     x_eq = eq["x"]
     z_eq = sim.kernel.function(x_eq)
     l_eq = eq["lambda"]
@@ -86,6 +85,6 @@ while True:
     #     sol_x_maximize_plot.set_data([],[])
 
     V = sim.clf.function(init_x)
-    clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits, spacing=0.2)
+    clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits, spacing=0.5)
 
 plt.show()

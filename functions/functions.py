@@ -9,8 +9,11 @@ import contourpy as ctp
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
+from shapely import geometry, intersection
+
 from common import *
-from dynamic_systems import Integrator
+from dynamic_systems import Integrator, KernelAffineSystem
+from controllers.equilibrium_algorithms import compute_equilibria
 
 def commutation_matrix(n):
     '''
@@ -248,7 +251,7 @@ class Function():
                 spacing = kwargs[key]
                 continue
 
-        if limits == None:
+        if not isinstance(limits, list):
             if not hasattr(self, "contour"):
                 raise Exception("Grid limits are required to create contours.")
         else:
@@ -1332,7 +1335,200 @@ class KernelBarrier(KernelQuadratic):
         Computes the boundary level set.
         '''
         return self.get_levels(levels=[0.0], **kwargs)[0]
+
+class KernelTriplet():
+    '''
+    Class for kernel-based triplets of: plant
+    '''
+    def __init__(self, **kwargs):
+        
+        self.plant = None
+        self.clf = None
+        self.cbf = None
+        self.params = {"slack_gain": 1.0, "clf_gain": 1.0, "cbf_gain": 1.0}
+
+        self.limits = [ [-1, +1] for _ in range(2) ]
+        self.spacing = 0.1
+        self.invariant_color = mcolors.BASE_COLORS["k"]
+        self.equilibria_color = mcolors.BASE_COLORS["g"]
+
+        self.set_param(**kwargs)
+        self.invariant_set()
+        self.equilibria()
+
+    def verify(self):
+        '''
+        Verifies if the kernel pair is consistent and fully defined
+        '''
+        try:
+            if not isinstance(self.plant, KernelAffineSystem) or not isinstance(self.plant.kernel, Kernel):
+                raise Exception("Plant is not kernel affine.")
+            if not isinstance(self.clf, KernelLyapunov) or not isinstance(self.clf.kernel, Kernel):
+                raise Exception("CLF is not kernel-based.")
+            if not isinstance(self.cbf, KernelBarrier) or not isinstance(self.cbf.kernel, Kernel):
+                raise Exception("CBF is not kernel-based.")
+            if not (self.plant.kernel == self.clf.kernel and self.plant.kernel == self.cbf.kernel):
+                raise Exception("Kernels are not compatible.")
+
+            self.kernel = self.plant.kernel
+
+            if (self.kernel._dim != self.plant.n) or (self.kernel._dim != self.clf._dim) or (self.kernel._dim != self.cbf._dim):
+                raise Exception("Dimensions are not compatible.")
+            
+            self.n = self.kernel._dim
+            self.p = self.kernel.kernel_dim
+            self.A_list = self.kernel.get_A_matrices()
+
+            self.F = self.plant.get_F()
+            self.P = self.clf.P
+            self.Q = self.cbf.Q
+            
+        except Exception as error:
+            print(error)
+            return False
+
+    def set_param(self, **kwargs):
+        '''
+        Sets the following parameters: limits, spacing (for invariant set and equilibria computation)
+                                       invariant_color, equilibria_color
+                                       plant, clf, cbf, params
+        '''
+        for key in kwargs.keys():
+            if key == "limits":
+                self.limits = kwargs["limits"]
+                continue
+            if key == "spacing":
+                self.spacing = kwargs["spacing"]
+                continue
+            if key == "invariant_color":
+                self.invariant_color = kwargs["invariant_color"]
+                continue
+            if key == "equilibria_color":
+                self.equilibria_color = kwargs["equilibria_color"]
+                continue
+            if key == "plant":
+                self.plant = kwargs["plant"]
+                continue
+            if key == "clf":
+                self.clf = kwargs["clf"]
+                continue
+            if key == "cbf":
+                self.cbf = kwargs["cbf"]
+                continue
+            if key == "params":
+                params = kwargs["params"]
+                for key in params.keys():
+                    if "slack_gain":
+                        self.params["slack_gain"] = params["slack_gain"]
+                    if "clf_gain":
+                        self.params["clf_gain"] = params["clf_gain"]
+                    if "cbf_gain":
+                        self.params["cbf_gain"] = params["cbf_gain"]
+
+        if "limits" not in kwargs.keys():
+            if len(self.cbf.points) > 0:
+                pts = np.array([ pt["coords"] for pt in self.cbf.points ])
+                bbox = minimum_bounding_rectangle(pts)
+                self.limits = [ [np.min( bbox[:,0] ), np.max( bbox[:,0] )],
+                                [np.min( bbox[:,1] ), np.max( bbox[:,1] )] ]
+
+        self.verify()
+
+    def det_invariant(self, xg, yg, extended=False):
+        '''
+        Evaluates det([ vecQ, vecP ]) = 0 over a grid.
+        Parameters: xg, yg: (x,y) coords of each point in the grid
+        Returns: a grid with the same size of xg, yg with the determinant values. 
+        '''
+        if xg.shape != yg.shape:
+            raise Exception("x,y grid coordinates must have the same shape!")
+
+        det_grid = np.zeros(xg.shape)
+        for (i,j) in itertools.product(range( xg.shape[0] ), range( yg.shape[1] )):
+            vecQ, vecP = np.zeros(self.n), np.zeros(self.n)
+            z = self.kernel.function([xg[i,j], yg[i,j]])
+            V = 0.5 * z.T @ self.P @ z
+            for k in range(self.n):
+                vecQ[k] = z.T @ self.A_list[k].T @ self.Q @ z
+                vecP[k] = z.T @ self.A_list[k].T @ ( self.params["slack_gain"] * self.params["clf_gain"] * V * self.P - self.F ) @ z
+            l = vecQ.T @ vecP / vecQ.T @ vecQ
+            W = np.hstack([vecQ.reshape(self.n,1), vecP.reshape(self.n,1)])
+            if l >= 0 or extended:
+                # det_grid[i,j] = np.sqrt( np.linalg.det( W.T @ W ) ) # does not work
+                det_grid[i,j] = np.linalg.det(W)
+            else:
+                det_grid[i,j] = np.inf
+
+        return det_grid
     
+    def invariant_set(self, extended=False):
+        '''
+        Computes the invariant set for the given CLF-CBF pair
+        '''
+        if self.n > 2:
+            warnings.warn("Currently, the computation of the invariant set is not available for dimensions higher than 2.")
+            return
+        
+        x = np.arange(self.limits[0][0], self.limits[0][1], self.spacing)
+        y = np.arange(self.limits[1][0], self.limits[1][1], self.spacing)
+        xg, yg = np.meshgrid(x,y)
+
+        invariant_contour = ctp.contour_generator(x=xg, y=yg, z=self.det_invariant(xg, yg, extended=extended) )
+        self.invariant_branches = invariant_contour.lines(0.0)
+    
+    def equilibria(self):
+        '''
+        Computes all equilibrium points of the CLF-CBF pair, using the invariant set intersections with the CBF boundary.
+        '''
+        boundary_segments = self.cbf.get_boundary(limits=self.limits, spacing=self.spacing)
+        if len(self.invariant_branches) == 0:
+            self.invariant_set(extended=False)
+
+        # Finds intersections between boundary and invariant set segments
+        self.boundary_equilibria = []
+        for boundary_seg in boundary_segments:
+            for invariant_branch in self.invariant_branches:
+                
+                boundary_curve = geometry.LineString(boundary_seg)
+                invariant_branch_curve = geometry.LineString(invariant_branch)
+                intersections = intersection( boundary_curve, invariant_branch_curve )
+
+                new_candidates = []
+                if not intersections.is_empty:
+                    if hasattr(intersections, "geoms"):
+                        for geo in intersections.geoms:
+                            x, y = geo.xy
+                            x, y = list(x), list(y)
+                            new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
+                    else:
+                        x, y = intersections.xy
+                        x, y = list(x), list(y)
+                        new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
+                
+                for pt in new_candidates:
+                    eq_sol = compute_equilibria(self.plant, self.clf, self.cbf, self.params, init_x=pt)
+                    self.boundary_equilibria.append(eq_sol)
+
+        num_equilibria = len(self.boundary_equilibria)
+        print(f"Found {num_equilibria} boundary equilibrium points at:")
+        for eq in self.boundary_equilibria:
+            x_eq = eq["x"]
+            l_eq = eq["lambda"]
+            stability = eq["stability"]
+            type_of = eq["type"]
+            print(f"x = {x_eq}, lambda = {l_eq}, stability = {stability}, type = {type_of}")
+
+    def plot_invariant(self, ax, extended=False):
+        '''
+        Plots the invariant set segments into ax.
+        '''
+        self.invariant_set(extended=extended)
+        collections = []
+        for branch in self.invariant_branches:
+            line2D = ax.plot( branch[:,0], branch[:,1], color=self.invariant_color, linestyle='dashed', linewidth=1.0 )
+            collections.append( line2D[0] )
+        return collections
+
 class ApproxFunction(Function):
     '''
     Class for functions that can be approximated by a quadratic.

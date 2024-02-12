@@ -360,7 +360,7 @@ class PolynomialSystem(AffineSystem):
         '''
         return len(self._G_list)
     
-class ConservativeAffineSystem(AffineSystem):
+class KernelAffineSystem(AffineSystem):
     '''
     Class for affine nonlinear systems of the type xdot = f(x) + g(x) u, where f(x) is given by the gradient
         f(x) = g(x) g'(x) d ( m(x)' F m(x) ) / dx

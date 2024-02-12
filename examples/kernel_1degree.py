@@ -1,8 +1,8 @@
 import numpy as np
 
-from dynamic_systems import ConservativeAffineSystem
-from functions import Kernel, KernelLyapunov, KernelBarrier
-from controllers import NominalQP, KernelPair
+from dynamic_systems import KernelAffineSystem
+from functions import Kernel, KernelLyapunov, KernelBarrier, KernelTriplet
+from controllers import NominalQP
 from common import create_quadratic, rot2D
 
 initial_state = [0.2, 5.0]
@@ -23,7 +23,7 @@ F[1,0], F[2,0] = fx, fy
 
 def g(state):
     return np.eye(m)
-plant = ConservativeAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
+plant = KernelAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
 
 # --------------------------------------------- Define CLF (quadratic) -----------------------------------------------------
 clf_eig = 0.01*np.array([ 3.0, 1.0 ])
@@ -39,14 +39,16 @@ cbf_center = [0.0, 3.0]
 Qquadratic = create_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
 cbf = KernelBarrier(*initial_state, kernel=kernel, Q=Qquadratic)
 
-# ------------------------------------------------- Define controller ------------------------------------------------------
-T = 30
+# -------------------------------------------Define triplet and controller -------------------------------------------------
 sample_time = .002
 p, alpha, beta = 1.0, 1.0, 1.0
-controller = NominalQP(plant, clf, cbf, alpha, beta, p, dt=sample_time)
+kerneltriplet = KernelTriplet( plant=plant, clf=clf, cbf=cbf, 
+                              params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta}, 
+                              limits=limits.tolist(), spacing=0.2 )
 
-clf_cbf_pair = KernelPair(clf, cbf, plant, params={"slack_gain": p, "clf_gain": alpha}, limits=[[-3, 3],[1, 5]])
+controller = NominalQP(kerneltriplet, dt=.002)
 
+T = 30
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 plot_config = {
     "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits.tolist(),
