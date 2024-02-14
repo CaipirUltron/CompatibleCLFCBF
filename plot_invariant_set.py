@@ -37,11 +37,14 @@ sol_x_minimize_plot, = ax.plot([],[],'og', alpha=0.8)
 sol_x_maximize_plot, = ax.plot([],[],'or', alpha=0.8)
 
 for eq in sim.kerneltriplet.boundary_equilibria:
-    x_eq = eq["x"]
-    z_eq = sim.kernel.function(x_eq)
-    l_eq = eq["lambda"]
-    type = eq["type"]
-    ax.plot(x_eq[0], x_eq[1],'og', alpha=0.8, linewidth=0.6)
+    if "x" in eq.keys():
+        x_eq = eq["x"]
+        ax.plot(x_eq[0], x_eq[1],'og', alpha=0.8, linewidth=0.6)
+
+for sol in sim.kerneltriplet.branch_minimizers:
+    if "x" in sol.keys():
+        x_min = sol["x"]
+        ax.plot(x_min[0], x_min[1],'oc', alpha=0.8, linewidth=0.6)
 
 while True:
     pt = plt.ginput(1, timeout=0)

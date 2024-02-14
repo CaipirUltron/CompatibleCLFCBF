@@ -1355,7 +1355,7 @@ class KernelTriplet():
 
         self.set_param(**kwargs)
         self.invariant_set()
-        self.equilibria()
+        self.equilibria(verbose=True)
 
     def verify(self):
         '''
@@ -1477,7 +1477,7 @@ class KernelTriplet():
         invariant_contour = ctp.contour_generator(x=xg, y=yg, z=self.det_invariant(xg, yg, extended=extended) )
         self.invariant_branches = invariant_contour.lines(0.0)
     
-    def equilibria(self):
+    def equilibria(self, verbose=False):
         '''
         Computes all equilibrium points of the CLF-CBF pair, using the invariant set intersections with the CBF boundary.
         '''
@@ -1487,6 +1487,7 @@ class KernelTriplet():
 
         # Finds intersections between boundary and invariant set segments
         self.boundary_equilibria = []
+        self.branch_minimizers = []
         for boundary_seg in boundary_segments:
             for invariant_branch in self.invariant_branches:
                 
@@ -1508,16 +1509,32 @@ class KernelTriplet():
                 
                 for pt in new_candidates:
                     eq_sol = self.minimize_over("boundary", init_x=pt)
-                    self.boundary_equilibria.append(eq_sol)
+                    if np.any(eq_sol):
+                        self.boundary_equilibria.append(eq_sol)
 
-        num_equilibria = len(self.boundary_equilibria)
-        print(f"Found {num_equilibria} boundary equilibrium points at:")
-        for eq in self.boundary_equilibria:
-            x_eq = eq["x"]
-            l_eq = eq["lambda"]
-            stability = eq["stability"]
-            type_of = eq["type"]
-            print(f"x = {x_eq}, lambda = {l_eq}, stability = {stability}, type = {type_of}")
+                    branch_minimizer = self.minimize_over("branch", init_x=eq_sol["x"])
+                    if np.any(branch_minimizer):
+                        self.branch_minimizers.append(branch_minimizer)
+
+        if verbose:
+            num_equilibria = len(self.boundary_equilibria)
+            print(f"Found {num_equilibria} boundary equilibrium points at:")
+            for eq in self.boundary_equilibria:
+                if "x" in eq.keys():
+                    x_eq = eq["x"]
+                    l_eq = eq["lambda"]
+                    stability = eq["stability"]
+                    type_of = eq["type"]
+                    print(f"x = {x_eq}, lambda = {l_eq}, stability = {stability}, type = {type_of}")
+
+            num_minimizers = len(self.branch_minimizers)
+            print(f"Found {num_minimizers} branch minimizers at:")
+            for sol in self.branch_minimizers:
+                if "x" in sol.keys():
+                    x_min = sol["x"]
+                    l_min = sol["lambda"]
+                    h_min = sol["h"]
+                    print(f"x = {x_min}, lambda = {l_min}, h = {h_min}")
 
     def minimize_over(self, optimization, **kwargs):
         '''
@@ -1559,36 +1576,51 @@ class KernelTriplet():
             return delta - np.abs(h)
 
         def objective(var):
+            '''
+            Objective function to be minimized
+            '''
             delta = var[self.n]
+            x = var[0:self.n]
+            
             if optimization == "boundary":
                 return delta**2
             elif optimization == "branch":
-                return delta
+                h = self.cbf.function(x)
+                return h
             else:
                 raise Exception("Unspecified type of optimization.")
 
         init_delta = 1.0
         init_var = init_x + [init_delta]
 
-        eq_sol = {"init_x": init_x}
-        sol = minimize( objective, init_var, constraints=[ {"type": "ineq", "fun": boundary_constraint},
-                                                           {"type":   "eq", "fun": invariant_set      }])
+
+        constraints = [ {"type": "eq", "fun": invariant_set} ]
+        if optimization == "boundary":
+            constraints.append({"type": "ineq", "fun": boundary_constraint})
+
+        sol = minimize( objective, init_var, constraints=constraints)
         eq_coords = sol.x[0:self.n].tolist()
         l = self.compute_lambda(eq_coords)
         h = self.cbf.function(eq_coords)
-        if l >= 0 and np.abs(h) <= 1e-3:
-            eq_sol["x"] = eq_coords
-            eq_sol["lambda"] = l
-            eq_sol["delta"] = sol.x[self.n]
-            eq_sol["invariant_cost"] = invariant_set(sol.x)
-            eq_sol["h"] = h
-            stability, eta = self.compute_stability(eq_sol)
-            eq_sol["eta"], eq_sol["stability"] = eta, stability
-            eq_sol["type"] = "stable"
-            if stability > 0:
-                eq_sol["type"] = "unstable"
 
-        return eq_sol
+        sol_dict = None
+        if l >= 0 and (np.abs(h) <= 1e-3 or optimization == "branch"):
+            sol_dict = {}
+            sol_dict["x"] = eq_coords
+            sol_dict["lambda"] = l
+            sol_dict["delta"] = sol.x[self.n]
+            sol_dict["invariant_cost"] = invariant_set(sol.x)
+            sol_dict["h"] = h
+            sol_dict["init_x"] = init_x
+            sol_dict["message"] = sol.message
+            if optimization == "boundary":
+                stability, eta = self.compute_stability(sol_dict)
+                sol_dict["eta"], sol_dict["stability"] = eta, stability
+                sol_dict["type"] = "stable"
+                if stability > 0:
+                    sol_dict["type"] = "unstable"
+
+        return sol_dict
 
     def compute_lambda(self, eq_pt):
         '''
