@@ -9,11 +9,12 @@ import contourpy as ctp
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
+from scipy.optimize import minimize
 from shapely import geometry, intersection
 
 from common import *
 from dynamic_systems import Integrator, KernelAffineSystem
-from controllers.equilibrium_algorithms import compute_equilibria
+from controllers.equilibrium_algorithms import vecQ, vecP, S, compute_curvatures
 
 def commutation_matrix(n):
     '''
@@ -1506,7 +1507,7 @@ class KernelTriplet():
                         new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
                 
                 for pt in new_candidates:
-                    eq_sol = compute_equilibria(self.plant, self.clf, self.cbf, self.params, init_x=pt)
+                    eq_sol = self.minimize_over("boundary", init_x=pt)
                     self.boundary_equilibria.append(eq_sol)
 
         num_equilibria = len(self.boundary_equilibria)
@@ -1517,6 +1518,131 @@ class KernelTriplet():
             stability = eq["stability"]
             type_of = eq["type"]
             print(f"x = {x_eq}, lambda = {l_eq}, stability = {stability}, type = {type_of}")
+
+    def minimize_over(self, optimization, **kwargs):
+        '''
+        Finds equilibrium points solutions using sliding mode control. If no initial point is specified, it selections a point at random from a speficied interval.
+        Returns a dict containing all relevant data about the found equilibrium point, including its stability.
+        '''
+        init_x_def = False
+        for key in kwargs.keys():
+            aux_key = key.lower()
+            if aux_key == "init_x":
+                init_x = kwargs[key]
+                init_x_def = True
+                continue
+
+        if not init_x_def:
+            init_x = [ np.random.uniform( self.limits[k][0], self.limits[k][1] ) for k in range(n) ]
+
+        def invariant_set(var):
+            '''
+            Returns the vector residues of invariant set -> is zero for x in the invariant set
+            '''
+            x = var[0:self.n]
+            z = self.kernel.function(x)
+            
+            vecQ_a = np.array( vecQ(z, self.A_list, self.cbf.Q) )
+            vecP_a = np.array( vecP(z, self.A_list, self.clf.P, self.params, self.clf.function(x), self.plant.get_F()) )
+            W = np.hstack([vecQ_a.reshape(self.n,1), vecP_a.reshape(self.n,1)])
+
+            return np.linalg.det(W)
+
+        def boundary_constraint(var):
+            '''
+            Returns the diff between mQm and 1
+            '''
+            x = var[0:self.n]
+            delta = var[self.n]
+
+            h = self.cbf.function(x)
+            return delta - np.abs(h)
+
+        def objective(var):
+            delta = var[self.n]
+            if optimization == "boundary":
+                return delta**2
+            elif optimization == "branch":
+                return delta
+            else:
+                raise Exception("Unspecified type of optimization.")
+
+        init_delta = 1.0
+        init_var = init_x + [init_delta]
+
+        eq_sol = {"init_x": init_x}
+        sol = minimize( objective, init_var, constraints=[ {"type": "ineq", "fun": boundary_constraint},
+                                                           {"type":   "eq", "fun": invariant_set      }])
+        eq_coords = sol.x[0:self.n].tolist()
+        l = self.compute_lambda(eq_coords)
+        h = self.cbf.function(eq_coords)
+        if l >= 0 and np.abs(h) <= 1e-3:
+            eq_sol["x"] = eq_coords
+            eq_sol["lambda"] = l
+            eq_sol["delta"] = sol.x[self.n]
+            eq_sol["invariant_cost"] = invariant_set(sol.x)
+            eq_sol["h"] = h
+            stability, eta = self.compute_stability(eq_sol)
+            eq_sol["eta"], eq_sol["stability"] = eta, stability
+            eq_sol["type"] = "stable"
+            if stability > 0:
+                eq_sol["type"] = "unstable"
+
+        return eq_sol
+
+    def compute_lambda(self, eq_pt):
+        '''
+        Given a known equilibrium point eq_pt, compute its corresponding lambda
+        '''        
+        z = self.kernel.function(eq_pt)
+        vecQ_a = np.array( vecQ(z, self.A_list, self.cbf.Q) )
+        vecP_a = np.array( vecP(z, self.A_list, self.clf.P, self.params, self.clf.function(eq_pt), self.plant.get_F()) )
+
+        return (vecQ_a.T @ vecP_a) / np.linalg.norm(vecQ_a)**2
+
+    def compute_stability(self, sol):
+        '''
+        Compute the stability number for a given equilibrium point.
+        '''
+        x = sol["x"]
+        l = sol["lambda"]
+        S_matrix = S(x, l, self.clf.P, self.plant, self.clf, self.cbf, self.params)
+
+        '''
+        Compute stability number
+        '''
+        nablaV = self.clf.gradient(x)
+        nablah = self.cbf.gradient(x)
+        norm_nablaV = np.linalg.norm(nablaV)
+        norm_nablah = np.linalg.norm(nablah)
+        unit_nablah = nablah/norm_nablah
+        curvatures, basis_for_TpS = compute_curvatures( S_matrix, unit_nablah )
+
+        # Compute eta - might be relevant latter
+        g = self.plant.get_g(x)
+        G = g @ g.T
+        z1 = nablah / np.linalg.norm(nablah)
+        z2 = nablaV - nablaV.T @ G @ z1 * z1
+        eta = 1/(1 + self.params["slack_gain"] * z2.T @ G @ z2 )
+
+        V = self.clf.function(x)
+        max_index = np.argmax(curvatures)
+        stability_number = curvatures[max_index] / ( self.params["slack_gain"] * self.params["clf_gain"] * V * norm_nablaV )
+        # principal_direction = basis_for_TpS[:,max_index]
+
+        '''
+        If the CLF-CBF gradients are collinear, then the stability_number is equivalent to the diff. btw CBF and CLF curvatures at the equilibrium point
+        '''
+        # if (eta - 1) < 1e-10:
+        #     curv_V = clf.get_curvature(x)
+        #     curv_h = cbf.get_curvature(x)
+        #     diff_curvatures = curv_h - curv_V
+            # print(f"Difference of curvatures = {diff_curvatures}")
+            # print(f"Stability = {stability_number}")
+            # if np.abs(diff_curvatures - stability_number) > 1e-3:
+            #     raise Exception("Stability number is different then the difference of curvatures.")
+
+        return stability_number, eta
 
     def plot_invariant(self, ax, extended=False):
         '''
