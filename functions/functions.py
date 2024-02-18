@@ -1485,9 +1485,8 @@ class KernelTriplet():
         if len(self.invariant_branches) == 0:
             self.invariant_set(extended=False)
 
-        # Finds intersections between boundary and invariant set segments
+        # Finds intersections between boundary and invariant set segments (boundary equilibria)
         self.boundary_equilibria = []
-        self.branch_minimizers = []
         for boundary_seg in boundary_segments:
             for invariant_branch in self.invariant_branches:
                 
@@ -1508,13 +1507,21 @@ class KernelTriplet():
                         new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
                 
                 for pt in new_candidates:
-                    eq_sol = self.minimize_over("boundary", init_x=pt)
+                    eq_sol = self.optimize_over("boundary", init_x=pt)
                     if np.any(eq_sol):
                         self.boundary_equilibria.append(eq_sol)
 
-                    branch_minimizer = self.minimize_over("branch", init_x=eq_sol["x"])
-                    if np.any(branch_minimizer):
-                        self.branch_minimizers.append(branch_minimizer)
+        # Compute the branch optimizers
+        self.branch_minimizers = []
+        self.branch_maximizers = []
+        for eq_sol in self.boundary_equilibria:
+            branch_minimizer = self.optimize_over("min_branch", init_x=eq_sol["x"])
+            if np.any(branch_minimizer):
+                self.branch_minimizers.append(branch_minimizer)
+
+            branch_maximizer = self.optimize_over("max_branch", init_x=eq_sol["x"])
+            if np.any(branch_maximizer):
+                self.branch_maximizers.append(branch_maximizer)
 
         if verbose:
             num_equilibria = len(self.boundary_equilibria)
@@ -1536,7 +1543,16 @@ class KernelTriplet():
                     h_min = sol["h"]
                     print(f"x = {x_min}, lambda = {l_min}, h = {h_min}")
 
-    def minimize_over(self, optimization, **kwargs):
+            num_maximizers = len(self.branch_maximizers)
+            print(f"Found {num_maximizers} branch maximizers at:")
+            for sol in self.branch_maximizers:
+                if "x" in sol.keys():
+                    x_max = sol["x"]
+                    l_max = sol["lambda"]
+                    h_max = sol["h"]
+                    print(f"x = {x_max}, lambda = {l_max}, h = {h_max}")
+
+    def optimize_over(self, optimization, **kwargs):
         '''
         Finds equilibrium points solutions using sliding mode control. If no initial point is specified, it selections a point at random from a speficied interval.
         Returns a dict containing all relevant data about the found equilibrium point, including its stability.
@@ -1550,7 +1566,7 @@ class KernelTriplet():
                 continue
 
         if not init_x_def:
-            init_x = [ np.random.uniform( self.limits[k][0], self.limits[k][1] ) for k in range(n) ]
+            init_x = [ np.random.uniform( self.limits[k][0], self.limits[k][1] ) for k in range(self.n) ]
 
         def invariant_set(var):
             '''
@@ -1584,27 +1600,27 @@ class KernelTriplet():
             
             if optimization == "boundary":
                 return delta**2
-            elif optimization == "branch":
-                h = self.cbf.function(x)
-                return h
-            else:
-                raise Exception("Unspecified type of optimization.")
+            elif optimization == "min_branch":
+                return self.cbf.function(x)
+            elif optimization == "max_branch":
+                return -self.cbf.function(x)
+            else: raise Exception("Unspecified type of optimization.")
 
         init_delta = 1.0
         init_var = init_x + [init_delta]
-
 
         constraints = [ {"type": "eq", "fun": invariant_set} ]
         if optimization == "boundary":
             constraints.append({"type": "ineq", "fun": boundary_constraint})
 
-        sol = minimize( objective, init_var, constraints=constraints)
+        sol = minimize(objective, init_var, constraints=constraints)
+
         eq_coords = sol.x[0:self.n].tolist()
         l = self.compute_lambda(eq_coords)
         h = self.cbf.function(eq_coords)
 
         sol_dict = None
-        if l >= 0 and (np.abs(h) <= 1e-3 or optimization == "branch"):
+        if l >= 0 and (np.abs(h) <= 1e-3 or "branch" in optimization):
             sol_dict = {}
             sol_dict["x"] = eq_coords
             sol_dict["lambda"] = l

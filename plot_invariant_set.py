@@ -46,6 +46,11 @@ for sol in sim.kerneltriplet.branch_minimizers:
         x_min = sol["x"]
         ax.plot(x_min[0], x_min[1],'oc', alpha=0.8, linewidth=0.6)
 
+for sol in sim.kerneltriplet.branch_maximizers:
+    if "x" in sol.keys():
+        x_max = sol["x"]
+        ax.plot(x_max[0], x_max[1],'or', alpha=0.8, linewidth=0.6)
+
 while True:
     pt = plt.ginput(1, timeout=0)
     init_x = [ pt[0][0], pt[0][1] ]
