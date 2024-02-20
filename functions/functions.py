@@ -1486,6 +1486,19 @@ class KernelTriplet():
         if len(self.invariant_branches) == 0:
             self.invariant_set(extended=False)
 
+        def add_to(point, l):
+            '''
+            Adds point to list l, if new.
+            '''
+            pt = np.array(point["x"])
+            if len(l) > 0:
+                for ele in l:
+                    print(point)
+                    if np.linalg.norm(pt - np.array(ele["x"])) > 1e-3:
+                        l.append(point)
+                        break
+            else: l.append(point)
+
         # Finds intersections between boundary and invariant set segments (boundary equilibria)
         self.boundary_equilibria = []
         for boundary_seg in boundary_segments:
@@ -1510,7 +1523,7 @@ class KernelTriplet():
                 for pt in new_candidates:
                     eq_sol = self.optimize_over("boundary", init_x=pt)
                     if np.any(eq_sol):
-                        self.boundary_equilibria.append(eq_sol)
+                        add_to(eq_sol, self.boundary_equilibria)
 
         # Compute the branch optimizers
         self.branch_minimizers = []
@@ -1518,11 +1531,11 @@ class KernelTriplet():
         for eq_sol in self.boundary_equilibria:
             branch_minimizer = self.optimize_over("min_branch", init_x=eq_sol["x"])
             if np.any(branch_minimizer):
-                self.branch_minimizers.append(branch_minimizer)
+                add_to(branch_minimizer, self.branch_minimizers)
 
             branch_maximizer = self.optimize_over("max_branch", init_x=eq_sol["x"])
             if np.any(branch_maximizer):
-                self.branch_maximizers.append(branch_maximizer)
+                add_to(branch_maximizer, self.branch_maximizers)
 
         def show_message(pts, text):
             num_pts = len(pts)
@@ -1533,13 +1546,12 @@ class KernelTriplet():
                     l = sol["lambda"]
                     h = sol["h"]
                     gradh = sol["gradh"]
-                    output_text = "x = " + str(x) + ", lambda = " + str(l) + ", h = " + str(h) + ", ||∇h|| = " + str(np.linalg.norm(gradh)) 
+                    type_of = sol["type"]
+                    output_text = "x = " + str(x) + ", lambda = " + str(l) + ", h = " + str(h) + ", ||∇h|| = " + str(gradh) + ", type = " + str(type_of)
                     if "stability" in sol.keys() and "type" in sol.keys():
                         stability = sol["stability"]
-                        type_of = sol["type"]
-                        output_text += ", stability = " + str(stability) + ", type = " + str(type_of)
+                        output_text += ", stability = " + str(stability)
                 print(output_text)
-
         if verbose:
             show_message(self.boundary_equilibria, "boundary equilibrium points")
             show_message(self.branch_minimizers, "branch minimizers")
@@ -1621,15 +1633,26 @@ class KernelTriplet():
             sol_dict["delta"] = sol.x[self.n]
             sol_dict["invariant_cost"] = invariant_set(sol.x)
             sol_dict["h"] = h
-            sol_dict["gradh"] = gradh
+            sol_dict["gradh"] = np.linalg.norm(gradh)
             sol_dict["init_x"] = init_x
             sol_dict["message"] = sol.message
+            
             if optimization == "boundary":
                 stability, eta = self.compute_stability(sol_dict)
                 sol_dict["eta"], sol_dict["stability"] = eta, stability
                 sol_dict["type"] = "stable"
                 if stability > 0:
                     sol_dict["type"] = "unstable"
+
+            if optimization == "min_branch":
+                if sol_dict["gradh"] < 1e-03:
+                    sol_dict["type"] = "cbf_minimum"
+                else: sol_dict["type"] = "regular_minimizer"
+
+            if optimization == "max_branch":
+                if sol_dict["gradh"] > 1e+06:
+                    sol_dict = None                 # filters unbounded maximizers
+                else: sol_dict["type"] = "regular_maximizer"
 
         return sol_dict
 
