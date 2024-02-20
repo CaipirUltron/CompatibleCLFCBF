@@ -1339,7 +1339,8 @@ class KernelBarrier(KernelQuadratic):
 
 class KernelTriplet():
     '''
-    Class for kernel-based triplets of: plant
+    Class for kernel-based triplets of: plant, CLF and CBF.
+    Defines common algorithms for CLF-CBF compatibility, such as computation of the invariat set, equilibrium points, and optimizations over the invariant set branches.
     '''
     def __init__(self, **kwargs):
         
@@ -1479,7 +1480,7 @@ class KernelTriplet():
     
     def equilibria(self, verbose=False):
         '''
-        Computes all equilibrium points of the CLF-CBF pair, using the invariant set intersections with the CBF boundary.
+        Computes all equilibrium points and local branch optimizers of the CLF-CBF pair, using the invariant set intersections with the CBF boundary.
         '''
         boundary_segments = self.cbf.get_boundary(limits=self.limits, spacing=self.spacing)
         if len(self.invariant_branches) == 0:
@@ -1523,34 +1524,26 @@ class KernelTriplet():
             if np.any(branch_maximizer):
                 self.branch_maximizers.append(branch_maximizer)
 
+        def show_message(pts, text):
+            num_pts = len(pts)
+            print(f"Found {num_pts} {text} at:")
+            for sol in pts:
+                if "x" in sol.keys():
+                    x = sol["x"]
+                    l = sol["lambda"]
+                    h = sol["h"]
+                    gradh = sol["gradh"]
+                    output_text = "x = " + str(x) + ", lambda = " + str(l) + ", h = " + str(h) + ", ||∇h|| = " + str(np.linalg.norm(gradh)) 
+                    if "stability" in sol.keys() and "type" in sol.keys():
+                        stability = sol["stability"]
+                        type_of = sol["type"]
+                        output_text += ", stability = " + str(stability) + ", type = " + str(type_of)
+                print(output_text)
+
         if verbose:
-            num_equilibria = len(self.boundary_equilibria)
-            print(f"Found {num_equilibria} boundary equilibrium points at:")
-            for eq in self.boundary_equilibria:
-                if "x" in eq.keys():
-                    x_eq = eq["x"]
-                    l_eq = eq["lambda"]
-                    stability = eq["stability"]
-                    type_of = eq["type"]
-                    print(f"x = {x_eq}, lambda = {l_eq}, stability = {stability}, type = {type_of}")
-
-            num_minimizers = len(self.branch_minimizers)
-            print(f"Found {num_minimizers} branch minimizers at:")
-            for sol in self.branch_minimizers:
-                if "x" in sol.keys():
-                    x_min = sol["x"]
-                    l_min = sol["lambda"]
-                    h_min = sol["h"]
-                    print(f"x = {x_min}, lambda = {l_min}, h = {h_min}")
-
-            num_maximizers = len(self.branch_maximizers)
-            print(f"Found {num_maximizers} branch maximizers at:")
-            for sol in self.branch_maximizers:
-                if "x" in sol.keys():
-                    x_max = sol["x"]
-                    l_max = sol["lambda"]
-                    h_max = sol["h"]
-                    print(f"x = {x_max}, lambda = {l_max}, h = {h_max}")
+            show_message(self.boundary_equilibria, "boundary equilibrium points")
+            show_message(self.branch_minimizers, "branch minimizers")
+            show_message(self.branch_maximizers, "branch maximizers")
 
     def optimize_over(self, optimization, **kwargs):
         '''
@@ -1618,6 +1611,7 @@ class KernelTriplet():
         eq_coords = sol.x[0:self.n].tolist()
         l = self.compute_lambda(eq_coords)
         h = self.cbf.function(eq_coords)
+        gradh = self.cbf.gradient(eq_coords)
 
         sol_dict = None
         if l >= 0 and (np.abs(h) <= 1e-3 or "branch" in optimization):
@@ -1627,6 +1621,7 @@ class KernelTriplet():
             sol_dict["delta"] = sol.x[self.n]
             sol_dict["invariant_cost"] = invariant_set(sol.x)
             sol_dict["h"] = h
+            sol_dict["gradh"] = gradh
             sol_dict["init_x"] = init_x
             sol_dict["message"] = sol.message
             if optimization == "boundary":
