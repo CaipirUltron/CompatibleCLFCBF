@@ -1486,18 +1486,25 @@ class KernelTriplet():
         if len(self.invariant_branches) == 0:
             self.invariant_set(extended=False)
 
-        def add_to(point, l):
+        def add_to(point, l, *connections):
             '''
             Adds point to list l, if new.
             '''
+            if len(connections) > 1: raise Exception("Add accepts only 1 optional argument.")
+            
             pt = np.array(point["x"])
             if len(l) > 0:
                 for ele in l:
-                    print(point)
-                    if np.linalg.norm(pt - np.array(ele["x"])) > 1e-3:
+                    if np.linalg.norm(pt - np.array(ele["x"])) > 1e-3:  # is new
                         l.append(point)
+                        pt_list_index = len(l)-1
                         break
-            else: l.append(point)
+                    else: pt_list_index = l.index(ele)
+            else: 
+                l.append(point)
+                pt_list_index = len(l)-1
+            
+            if len(connections) == 1: connections[0].append(pt_list_index)
 
         # Finds intersections between boundary and invariant set segments (boundary equilibria)
         self.boundary_equilibria = []
@@ -1526,16 +1533,28 @@ class KernelTriplet():
                         add_to(eq_sol, self.boundary_equilibria)
 
         # Compute the branch optimizers
+        self.connections_to_min = { i:[] for i in range(0,len(self.boundary_equilibria)) }
+        self.connections_to_max = { i:[] for i in range(0,len(self.boundary_equilibria)) }
         self.branch_minimizers = []
         self.branch_maximizers = []
-        for eq_sol in self.boundary_equilibria:
+        for num_eq in range(len(self.boundary_equilibria)):
+            eq_sol = self.boundary_equilibria[num_eq]
+
             branch_minimizer = self.optimize_over("min_branch", init_x=eq_sol["x"])
             if np.any(branch_minimizer):
-                add_to(branch_minimizer, self.branch_minimizers)
-
+                add_to(branch_minimizer, self.branch_minimizers, self.connections_to_min[num_eq])
+                
             branch_maximizer = self.optimize_over("max_branch", init_x=eq_sol["x"])
             if np.any(branch_maximizer):
-                add_to(branch_maximizer, self.branch_maximizers)
+                add_to(branch_maximizer, self.branch_maximizers, self.connections_to_max[num_eq])
+
+        # Checks which equilibrium point is removable
+        for num_eq in range(len(self.boundary_equilibria)):
+            remover = self.is_removable(num_eq)
+            if "minimizer" in remover.keys():
+                self.boundary_equilibria[num_eq]["rem_by_minimizer"] = remover["minimizer"]
+            if "maximizer" in remover.keys():
+                self.boundary_equilibria[num_eq]["rem_by_maximizer"] = remover["maximizer"]
 
         def show_message(pts, text):
             num_pts = len(pts)
@@ -1551,11 +1570,42 @@ class KernelTriplet():
                     if "stability" in sol.keys() and "type" in sol.keys():
                         stability = sol["stability"]
                         output_text += ", stability = " + str(stability)
+                    if "rem_by_minimizer" in sol.keys():
+                        output_text += ", rem_by_minimizer " + str(sol["rem_by_minimizer"])
+                    if "rem_by_maximizer" in sol.keys():
+                        output_text += ", rem_by_maximizer " + str(sol["rem_by_maximizer"])
                 print(output_text)
         if verbose:
             show_message(self.boundary_equilibria, "boundary equilibrium points")
             show_message(self.branch_minimizers, "branch minimizers")
             show_message(self.branch_maximizers, "branch maximizers")
+
+            print(f"Connections to minimizers = {self.connections_to_min}")
+            print(f"Connections to maximizers = {self.connections_to_max}")
+
+    def is_removable(self, i):
+        '''
+        Checks if equilibrium point with index i is removable.
+        Returns the corresponding minimizer/maximizer that removes the equilibrium point.
+        '''
+        removable = {}
+        for minimizer_index in self.connections_to_min[i]:
+            for eq_index in self.connections_to_min.keys():
+                if eq_index == i:       # ignore if self
+                    continue
+                if minimizer_index in self.connections_to_min[eq_index]:
+                    removable["minimizer"] = minimizer_index
+                    break
+
+        for maximizer_index in self.connections_to_max[i]:
+            for eq_index in self.connections_to_max.keys():
+                if eq_index == i:       # ignore if self
+                    continue
+                if maximizer_index in self.connections_to_max[eq_index]:
+                    removable["maximizer"] = maximizer_index
+                    break
+
+        return removable
 
     def optimize_over(self, optimization, **kwargs):
         '''
@@ -1656,6 +1706,12 @@ class KernelTriplet():
 
         return sol_dict
 
+    def compatibize(self):
+        '''
+        This function computes a new CLF geometry that is completely compatible with the CBF 
+        '''
+
+        
     def compute_lambda(self, eq_pt):
         '''
         Given a known equilibrium point eq_pt, compute its corresponding lambda
