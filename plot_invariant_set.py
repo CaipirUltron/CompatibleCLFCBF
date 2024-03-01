@@ -29,7 +29,9 @@ if hasattr(sim, "pts"):
             ax.plot([ coords[0], gradient_vec[0]], [ coords[1], gradient_vec[1]], 'k-', alpha=0.6)
 
 contour_unsafe = sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
-sim.kerneltriplet.plot_invariant(ax=ax, extended=False)
+sim.kerneltriplet.invariant_set(extended=False)
+
+sim.kerneltriplet.plot_invariant(ax)
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 sol_x_plot, = ax.plot([],[],'ok', alpha=0.8)

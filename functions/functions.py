@@ -1354,7 +1354,15 @@ class KernelTriplet():
         self.invariant_color = mcolors.BASE_COLORS["k"]
         self.equilibria_color = mcolors.BASE_COLORS["g"]
 
+        self.num_branches = 0
+        self.branch_lines = []
+
+        self.num_eq = 0
+        self.eq_pts = []
+        
         self.set_param(**kwargs)
+
+        self.boundary_segments = self.cbf.get_boundary(limits=self.limits, spacing=self.spacing)
         self.invariant_set()
         self.equilibria(verbose=True)
 
@@ -1477,12 +1485,11 @@ class KernelTriplet():
 
         invariant_contour = ctp.contour_generator(x=xg, y=yg, z=self.det_invariant(xg, yg, extended=extended) )
         self.invariant_branches = invariant_contour.lines(0.0)
-    
+
     def equilibria(self, verbose=False):
         '''
         Computes all equilibrium points and local branch optimizers of the CLF-CBF pair, using the invariant set intersections with the CBF boundary.
         '''
-        boundary_segments = self.cbf.get_boundary(limits=self.limits, spacing=self.spacing)
         if len(self.invariant_branches) == 0:
             self.invariant_set(extended=False)
 
@@ -1508,7 +1515,7 @@ class KernelTriplet():
 
         # Finds intersections between boundary and invariant set segments (boundary equilibria)
         self.boundary_equilibria = []
-        for boundary_seg in boundary_segments:
+        for boundary_seg in self.boundary_segments:
             for invariant_branch in self.invariant_branches:
                 
                 boundary_curve = geometry.LineString(boundary_seg)
@@ -1711,7 +1718,6 @@ class KernelTriplet():
         This function computes a new CLF geometry that is completely compatible with the CBF 
         '''
 
-        
     def compute_lambda(self, eq_pt):
         '''
         Given a known equilibrium point eq_pt, compute its corresponding lambda
@@ -1766,16 +1772,41 @@ class KernelTriplet():
 
         return stability_number, eta
 
-    def plot_invariant(self, ax, extended=False):
+    def plot_invariant(self, ax):
         '''
         Plots the invariant set segments into ax.
         '''
-        self.invariant_set(extended=extended)
-        collections = []
-        for branch in self.invariant_branches:
-            line2D = ax.plot( branch[:,0], branch[:,1], color=self.invariant_color, linestyle='dashed', linewidth=1.0 )
-            collections.append( line2D[0] )
-        return collections
+        # Initializes branch lines (if enough branches are still not initialized)
+        if len(self.invariant_branches) >= self.num_branches:
+            for _ in range(len(self.invariant_branches) - self.num_branches):
+                line2D, = ax.plot([],[], color=self.invariant_color, linestyle='dashed', linewidth=1.0 )
+                self.branch_lines.append(line2D)
+        else:
+            for _ in range(self.num_branches - len(self.invariant_branches)):
+                self.branch_lines[-1].remove()
+                del self.branch_lines[-1]
+
+        # Updates branch lines
+        self.num_branches = len(self.branch_lines)
+        for k in range(self.num_branches):
+            self.branch_lines[k].set_data( self.invariant_branches[k][:,0], self.invariant_branches[k][:,1] )
+
+    def plot_equilibria(self, ax):
+        '''
+        Plots the equilibrium points and minimizers/maximizers into ax.
+        '''
+        if len(self.boundary_equilibria) >= self.num_eq:
+            for _ in range(len(self.boundary_equilibria) - self.num_eq):
+                line2D, = ax.plot([],[], 'o', color=self.equilibria_color, alpha=0.8, linewidth=0.6 )
+                self.eq_pts.append(line2D)
+        else:
+            for _ in range(self.num_eq - len(self.boundary_equilibria)):
+                self.eq_pts[-1].remove()
+                del self.eq_pts[-1]
+
+        self.num_eq = len(self.eq_pts)
+        for k in range(self.num_eq):
+            self.eq_pts[k].set_data( self.boundary_equilibria[k]["x"][0], self.boundary_equilibria[k]["x"][1] )
 
 class ApproxFunction(Function):
     '''
