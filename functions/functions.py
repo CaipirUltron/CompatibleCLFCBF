@@ -878,8 +878,8 @@ class KernelQuadratic(Function):
                     raise Exception("Matrix of coefficients must be a two-dimensional array.")
                 if matrix_coefs.shape[0] != matrix_coefs.shape[1]:
                     raise Exception("Matrix of coefficients must be a square.")
-                if not np.all(np.linalg.eigvals(matrix_coefs) >= -1e-5):
-                    raise Exception("Matrix of coefficients must be positive semi-definite.")
+                # if not np.all(np.linalg.eigvals(matrix_coefs) >= -1e-5):
+                #     raise Exception("Matrix of coefficients must be positive semi-definite.")
                 if not np.all( matrix_coefs == matrix_coefs.T ):
                     warnings.warn("Matrix of coefficients is not symmetric. The symmetric part will be used.")
                 if matrix_coefs.shape[0] != self.kernel_dim:
@@ -1449,10 +1449,10 @@ class KernelTriplet():
         for (i,j) in itertools.product(range( xg.shape[0] ), range( yg.shape[1] )):
             vecQ, vecP = np.zeros(self.n), np.zeros(self.n)
             z = self.kernel.function([xg[i,j], yg[i,j]])
-            V = 0.5 * z.T @ self.P @ z
+            V = 0.5 * z.T @ self.clf.P @ z
             for k in range(self.n):
-                vecQ[k] = z.T @ self.A_list[k].T @ self.Q @ z
-                vecP[k] = z.T @ self.A_list[k].T @ ( self.params["slack_gain"] * self.params["clf_gain"] * V * self.P - self.F ) @ z
+                vecQ[k] = z.T @ self.A_list[k].T @ self.cbf.Q @ z
+                vecP[k] = z.T @ self.A_list[k].T @ ( self.params["slack_gain"] * self.params["clf_gain"] * V * self.clf.P - self.plant.get_F() ) @ z
             l = vecQ.T @ vecP / vecQ.T @ vecQ
             W = np.hstack([vecQ.reshape(self.n,1), vecP.reshape(self.n,1)])
             if l >= 0 or extended:
