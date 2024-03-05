@@ -4,8 +4,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
 
-# from controllers.equilibrium_algorithms import compute_equilibria, optimize_branch
-
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples."+simulation_file, package=None)
@@ -50,12 +48,13 @@ def update(i):
         Pnew = sim.clf.P + deltaP.T @ deltaP
         sim.clf.set_param(P=Pnew)
 
-        sim.kerneltriplet.invariant_set(extended=False)
-        sim.kerneltriplet.equilibria(verbose=True)
-        
+        # sim.kerneltriplet.invariant_set(extended=False)
+        # sim.kerneltriplet.equilibria(verbose=True)
+        sim.kerneltriplet.fast_equilibria(verbose=True)
+
         sim.kerneltriplet.plot_invariant(ax)
         sim.kerneltriplet.plot_equilibria(ax)
-    
+
 fps = 60
 animation = anim.FuncAnimation(fig, func=update, init_func=init, interval=1000/fps, repeat=False, cache_frame_data=False)
 plt.show()

@@ -1364,7 +1364,7 @@ class KernelTriplet():
 
         self.boundary_segments = self.cbf.get_boundary(limits=self.limits, spacing=self.spacing)
         self.invariant_set()
-        self.equilibria(verbose=True)
+        self.fast_equilibria(verbose=True)
 
     def verify(self):
         '''
@@ -1462,10 +1462,23 @@ class KernelTriplet():
                 det_grid[i,j] = np.inf
 
         return det_grid
-    
+
+    def get_zero_det(self, xg, yg):
+        '''
+        Returns the points where the determinant is zero over a 1D array with coords given by xg, yg 
+        '''
+        det_grid = self.det_invariant(xg, yg, extended=True)
+        index = np.where(np.sign(det_grid[:-1]) != np.sign(det_grid[1:]))[0] + 1
+        x_coords, y_coords = xg[index][0], yg[index][0]
+
+        pts = [] 
+        for k in range(len(x_coords)):
+            pts.append( [x_coords[k], y_coords[k]] )
+        return pts
+
     def invariant_set(self, extended=False):
         '''
-        Computes the invariant set for the given CLF-CBF pair
+        Computes the invariant set for the given CLF-CBF pair.
         '''
         if self.n > 2:
             warnings.warn("Currently, the computation of the invariant set is not available for dimensions higher than 2.")
@@ -1484,26 +1497,6 @@ class KernelTriplet():
         '''
         if len(self.invariant_branches) == 0:
             self.invariant_set(extended=False)
-
-        def add_to(point, l, *connections):
-            '''
-            Adds point to list l, if new.
-            '''
-            if len(connections) > 1: raise Exception("Add accepts only 1 optional argument.")
-            
-            pt = np.array(point["x"])
-            if len(l) > 0:
-                for ele in l:
-                    if np.linalg.norm(pt - np.array(ele["x"])) > 1e-3:  # is new
-                        l.append(point)
-                        pt_list_index = len(l)-1
-                        break
-                    else: pt_list_index = l.index(ele)
-            else: 
-                l.append(point)
-                pt_list_index = len(l)-1
-            
-            if len(connections) == 1: connections[0].append(pt_list_index)
 
         # Finds intersections between boundary and invariant set segments (boundary equilibria)
         self.boundary_equilibria = []
@@ -1555,25 +1548,84 @@ class KernelTriplet():
             if "maximizer" in remover.keys():
                 self.boundary_equilibria[num_eq]["rem_by_maximizer"] = remover["maximizer"]
 
-        def show_message(pts, text):
-            num_pts = len(pts)
-            print(f"Found {num_pts} {text} at:")
-            for sol in pts:
-                if "x" in sol.keys():
-                    x = sol["x"]
-                    l = sol["lambda"]
-                    h = sol["h"]
-                    gradh = sol["gradh"]
-                    type_of = sol["type"]
-                    output_text = "x = " + str(x) + ", lambda = " + str(l) + ", h = " + str(h) + ", ||∇h|| = " + str(gradh) + ", type = " + str(type_of)
-                    if "stability" in sol.keys() and "type" in sol.keys():
-                        stability = sol["stability"]
-                        output_text += ", stability = " + str(stability)
-                    if "rem_by_minimizer" in sol.keys():
-                        output_text += ", rem_by_minimizer " + str(sol["rem_by_minimizer"])
-                    if "rem_by_maximizer" in sol.keys():
-                        output_text += ", rem_by_maximizer " + str(sol["rem_by_maximizer"])
-                print(output_text)
+        if verbose:
+            show_message(self.boundary_equilibria, "boundary equilibrium points")
+            show_message(self.branch_minimizers, "branch minimizers")
+            show_message(self.branch_maximizers, "branch maximizers")
+
+            print(f"Connections to minimizers = {self.connections_to_min}")
+            print(f"Connections to maximizers = {self.connections_to_max}")
+
+    def fast_equilibria(self, verbose=False):
+        '''
+        Computes all equilibrium points and local branch optimizers of the CLF-CBF pair, using the invariant set rectangular limits as initializers for the optimization algorithm.
+        This method does not require the update of the complete invariant set geometry, 
+        and is capable of computing the equilibrium points and local branch optimizers faster than the previous method.
+        '''
+        x_min, x_max = self.limits[0][0], self.limits[0][1]
+        y_min, y_max = self.limits[1][0], self.limits[1][1]
+
+        spacing = 0.1
+        spam_x = np.arange(x_min, x_max, spacing)
+        spam_y = np.arange(y_min, y_max, spacing)
+        spam_x = spam_x.reshape( len(spam_x), 1 )
+        spam_y = spam_y.reshape( len(spam_y), 1 )
+
+        # Create 4 lines representing the window boundaries
+        lines = []
+        
+        top_x = spam_x
+        top_y = y_max * np.ones(spam_x.shape)
+        lines.append({"x": top_x, "y": top_y})
+
+        bottom_x = spam_x
+        bottom_y = y_min * np.ones(spam_x.shape)
+        lines.append({"x": bottom_x, "y": bottom_y})
+
+        left_x = x_min * np.ones(spam_y.shape)
+        left_y = spam_y
+        lines.append({"x": left_x, "y": left_y})
+
+        right_x = x_max * np.ones(spam_y.shape)
+        right_y = spam_y
+        lines.append({"x": right_x, "y": right_y})
+
+        # Get initializers in window boundaries
+        initializers = [] 
+        for line in lines:
+            initializers += self.get_zero_det(line["x"], line["y"])
+
+        # Find boundary equilibria
+        self.boundary_equilibria = []
+        for pt in initializers:
+            eq_sol = self.optimize_over("boundary", init_x=pt)
+            if eq_sol and "equilibrium" in eq_sol.keys():
+                add_to(eq_sol, self.boundary_equilibria)
+
+        # Compute the branch optimizers
+        self.connections_to_min = { i:[] for i in range(0,len(self.boundary_equilibria)) }
+        self.connections_to_max = { i:[] for i in range(0,len(self.boundary_equilibria)) }
+        self.branch_minimizers = []
+        self.branch_maximizers = []
+        for num_eq in range(len(self.boundary_equilibria)):
+            eq_sol = self.boundary_equilibria[num_eq]
+
+            branch_minimizer = self.optimize_over("min_branch", init_x=eq_sol["x"])
+            if np.any(branch_minimizer):
+                add_to(branch_minimizer, self.branch_minimizers, self.connections_to_min[num_eq])
+                
+            branch_maximizer = self.optimize_over("max_branch", init_x=eq_sol["x"])
+            if np.any(branch_maximizer):
+                add_to(branch_maximizer, self.branch_maximizers, self.connections_to_max[num_eq])
+
+        # Checks which equilibrium point is removable
+        for num_eq in range(len(self.boundary_equilibria)):
+            remover = self.is_removable(num_eq)
+            if "minimizer" in remover.keys():
+                self.boundary_equilibria[num_eq]["rem_by_minimizer"] = remover["minimizer"]
+            if "maximizer" in remover.keys():
+                self.boundary_equilibria[num_eq]["rem_by_maximizer"] = remover["maximizer"]
+
         if verbose:
             show_message(self.boundary_equilibria, "boundary equilibrium points")
             show_message(self.branch_minimizers, "branch minimizers")
@@ -1606,7 +1658,7 @@ class KernelTriplet():
 
         return removable
 
-    def optimize_over(self, optimization, **kwargs):
+    def optimize_over(self, optimization=None, **kwargs):
         '''
         Finds equilibrium points solutions using sliding mode control. If no initial point is specified, it selections a point at random from a speficied interval.
         Returns a dict containing all relevant data about the found equilibrium point, including its stability.
@@ -1631,14 +1683,7 @@ class KernelTriplet():
             Returns the vector residues of invariant set -> is zero for x in the invariant set
             '''
             x = var[0:self.n]
-            z = self.kernel.function(x)
-            V = self.clf.function(x)
-
-            vecQ_a = np.array( vecQ(x, self.kernel, self.cbf.Q) )
-            vecP_a = np.array( vecP(x, self.kernel, self.clf.P, self.plant.get_F(), self.params) )
-            W = np.hstack([vecQ_a.reshape(self.n,1), vecP_a.reshape(self.n,1)])
-
-            return np.linalg.det(W)
+            return det_invariant(x, self.kernel, P, self.cbf.Q, self.plant.get_F(), self.params)
 
         def boundary_constraint(var):
             '''
@@ -1663,7 +1708,7 @@ class KernelTriplet():
                 return self.cbf.function(x)
             elif optimization == "max_branch":
                 return -self.cbf.function(x)
-            else: raise Exception("Unspecified type of optimization.")
+            else: 1.0
 
         init_delta = 1.0
         init_var = init_x + [init_delta]
@@ -1680,7 +1725,9 @@ class KernelTriplet():
         gradh = self.cbf.gradient(eq_coords)
 
         sol_dict = None
-        if l >= 0 and (np.abs(h) <= 1e-3 or "branch" in optimization):
+
+        # Point on the invariant set
+        if l >= 0:
             sol_dict = {}
             sol_dict["x"] = eq_coords
             sol_dict["lambda"] = l
@@ -1690,23 +1737,26 @@ class KernelTriplet():
             sol_dict["gradh"] = np.linalg.norm(gradh)
             sol_dict["init_x"] = init_x
             sol_dict["message"] = sol.message
-            
-            if optimization == "boundary":
-                stability, eta = self.compute_stability(eq_coords, P)
-                sol_dict["eta"], sol_dict["stability"] = eta, stability
-                sol_dict["type"] = "stable"
-                if stability > 0:
-                    sol_dict["type"] = "unstable"
+        
+        # Equilibrium point - compute stability
+        if (sol_dict) and (np.abs(sol_dict["h"]) <= 1e-2):
+            stability, eta = self.compute_stability(eq_coords, P)
+            sol_dict["eta"], sol_dict["stability"] = eta, stability
+            sol_dict["equilibrium"] = "stable"
+            if stability > 0:
+                sol_dict["equilibrium"] = "unstable"
 
-            if optimization == "min_branch":
-                if sol_dict["gradh"] < 1e-03:
-                    sol_dict["type"] = "cbf_minimum"
-                else: sol_dict["type"] = "regular_minimizer"
+        # Minimizers
+        if (sol_dict) and optimization == "min_branch":
+            if sol_dict["gradh"] < 1e-03:
+                sol_dict["type"] = "cbf_minimum"
+            else: sol_dict["type"] = "regular_minimizer"
 
-            if optimization == "max_branch":
-                if sol_dict["gradh"] > 1e+06:
-                    sol_dict = None                 # filters unbounded maximizers
-                else: sol_dict["type"] = "regular_maximizer"
+        # Maximizers
+        if (sol_dict) and optimization == "max_branch":
+            if sol_dict["gradh"] > 1e+06:
+                sol_dict = None                 # filters unbounded maximizers
+            else: sol_dict["type"] = "regular_maximizer"
 
         return sol_dict
 

@@ -797,6 +797,47 @@ def S(x, kernel, P, Q, plant, params):
     S_matrix = [ [ z.T @ A_list[i].T @ ( L_matrix @ A_list[j] + A_list[j].T @ L_matrix ) @ z - fc[i]*fc[j]/(params["slack_gain"] * params["clf_gain"] * (V**2)) for j in range(n) ] for i in range(n) ]
     return np.array(S_matrix)
 
+def add_to(point, l, *connections):
+    '''
+    Adds point to list l, if new. point is the default dict for points in the invariant set 
+    '''
+    if len(connections) > 1: raise Exception("Add accepts only 1 optional argument.")
+    pt = np.array(point["x"])
+    if len(l) > 0:
+        for ele in l:
+            if np.linalg.norm(pt - np.array(ele["x"])) > 1e-3:  # is new
+                l.append(point)
+                pt_list_index = len(l)-1
+                break
+            else: pt_list_index = l.index(ele)
+    else: 
+        l.append(point)
+        pt_list_index = len(l)-1
+    if len(connections) == 1: connections[0].append(pt_list_index)
+
+def show_message(pts, text):
+    '''
+    Show message for points in the invariant set. 
+    '''
+    num_pts = len(pts)
+    print(f"Found {num_pts} {text} at:")
+    for sol in pts:
+        if "x" in sol.keys():
+            x = sol["x"]
+            l = sol["lambda"]
+            h = sol["h"]
+            gradh = sol["gradh"]
+            output_text = "x = " + str(x) + ", lambda = " + str(l) + ", h = " + str(h) + ", ||∇h|| = " + str(gradh)
+            if "equilibrium" in sol.keys() and "stability" in sol.keys():
+                type_of = sol["equilibrium"]
+                stability = sol["stability"]
+                output_text += ", equilibrium is " + str(type_of) + " (" + str(stability) + ")"
+            if "rem_by_minimizer" in sol.keys():
+                output_text += ", rem_by_minimizer " + str(sol["rem_by_minimizer"])
+            if "rem_by_maximizer" in sol.keys():
+                output_text += ", rem_by_maximizer " + str(sol["rem_by_maximizer"])
+        print(output_text)
+
 class Rect():
     '''
     Simple rectangle.
