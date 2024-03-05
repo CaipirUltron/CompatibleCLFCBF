@@ -14,7 +14,6 @@ from shapely import geometry, intersection
 
 from common import *
 from dynamic_systems import Integrator, KernelAffineSystem
-from controllers.equilibrium_algorithms import vecQ, vecP, S, compute_curvatures
 
 def commutation_matrix(n):
     '''
@@ -1353,6 +1352,7 @@ class KernelTriplet():
         self.spacing = 0.1
         self.invariant_color = mcolors.BASE_COLORS["k"]
         self.equilibria_color = mcolors.BASE_COLORS["g"]
+        self.comp_options = {"min_eig": 0.1, "min_sep": 0.1}
 
         self.num_branches = 0
         self.branch_lines = []
@@ -1455,17 +1455,9 @@ class KernelTriplet():
 
         det_grid = np.zeros(xg.shape)
         for (i,j) in itertools.product(range( xg.shape[0] ), range( yg.shape[1] )):
-            vecQ, vecP = np.zeros(self.n), np.zeros(self.n)
-            z = self.kernel.function([xg[i,j], yg[i,j]])
-            V = 0.5 * z.T @ self.clf.P @ z
-            for k in range(self.n):
-                vecQ[k] = z.T @ self.A_list[k].T @ self.cbf.Q @ z
-                vecP[k] = z.T @ self.A_list[k].T @ ( self.params["slack_gain"] * self.params["clf_gain"] * V * self.clf.P - self.plant.get_F() ) @ z
-            l = vecQ.T @ vecP / vecQ.T @ vecQ
-            W = np.hstack([vecQ.reshape(self.n,1), vecP.reshape(self.n,1)])
-            if l >= 0 or extended:
-                # det_grid[i,j] = np.sqrt( np.linalg.det( W.T @ W ) ) # does not work
-                det_grid[i,j] = np.linalg.det(W)
+            x = [xg[i,j], yg[i,j]]
+            if self.compute_lambda(x, self.clf.P) >= 0 or extended:
+                det_grid[i,j] = det_invariant(x, self.kernel, self.clf.P, self.cbf.Q, self.plant.get_F(), self.params)
             else:
                 det_grid[i,j] = np.inf
 
@@ -1620,11 +1612,15 @@ class KernelTriplet():
         Returns a dict containing all relevant data about the found equilibrium point, including its stability.
         '''
         init_x_def = False
+        P = self.clf.P
         for key in kwargs.keys():
             aux_key = key.lower()
             if aux_key == "init_x":
                 init_x = kwargs[key]
                 init_x_def = True
+                continue
+            if key == "P":
+                P = kwargs[key]
                 continue
 
         if not init_x_def:
@@ -1636,9 +1632,10 @@ class KernelTriplet():
             '''
             x = var[0:self.n]
             z = self.kernel.function(x)
-            
-            vecQ_a = np.array( vecQ(z, self.A_list, self.cbf.Q) )
-            vecP_a = np.array( vecP(z, self.A_list, self.clf.P, self.params, self.clf.function(x), self.plant.get_F()) )
+            V = self.clf.function(x)
+
+            vecQ_a = np.array( vecQ(x, self.kernel, self.cbf.Q) )
+            vecP_a = np.array( vecP(x, self.kernel, self.clf.P, self.plant.get_F(), self.params) )
             W = np.hstack([vecQ_a.reshape(self.n,1), vecP_a.reshape(self.n,1)])
 
             return np.linalg.det(W)
@@ -1678,7 +1675,7 @@ class KernelTriplet():
         sol = minimize(objective, init_var, constraints=constraints)
 
         eq_coords = sol.x[0:self.n].tolist()
-        l = self.compute_lambda(eq_coords)
+        l = self.compute_lambda(eq_coords, P)
         h = self.cbf.function(eq_coords)
         gradh = self.cbf.gradient(eq_coords)
 
@@ -1695,7 +1692,7 @@ class KernelTriplet():
             sol_dict["message"] = sol.message
             
             if optimization == "boundary":
-                stability, eta = self.compute_stability(sol_dict)
+                stability, eta = self.compute_stability(eq_coords, P)
                 sol_dict["eta"], sol_dict["stability"] = eta, stability
                 sol_dict["type"] = "stable"
                 if stability > 0:
@@ -1717,24 +1714,49 @@ class KernelTriplet():
         '''
         This function computes a new CLF geometry that is completely compatible with the CBF 
         '''
+        def list2matrix(var):
+            p = self.kernel.kernel_dim
+            P = np.array(var).reshape(p,p)
+            P = 0.5*(P + P.T)
+            return P
 
-    def compute_lambda(self, eq_pt):
+        def objective(var):
+            P = list2matrix(var)
+            return np.linalg.norm( P - self.clf.P )
+
+        def PSD_constraint(var):
+            P = list2matrix(var)
+            return np.min(np.linalg.eigvals(P)) - np.min(np.linalg.eigvals(self.clf.P))
+
+        def removability_constraint(var):
+            P = list2matrix(var)
+
+            self.clf.set_param(P=P)
+            self.invariant_set(extended=False)
+            self.equilibria()
+            pass 
+            # return h_min - self.comp_options["min_sep"]
+
+        constraints = [ {"type": "ineq", "fun": PSD_constraint} ]
+        for eq_sol in self.boundary_equilibria:
+            if "rem_by_minimizer" in eq_sol.keys():
+                pass
+                # constraints.append({"type": "ineq", "fun": removability_constraint})
+
+        init_var = self.clf.P.reshape(self.kernel.kernel_dim**2).tolist()
+        sol = minimize(objective, init_var, constraints=constraints)
+
+    def compute_lambda(self, x, P):
         '''
-        Given a known equilibrium point eq_pt, compute its corresponding lambda
-        '''        
-        z = self.kernel.function(eq_pt)
-        vecQ_a = np.array( vecQ(z, self.A_list, self.cbf.Q) )
-        vecP_a = np.array( vecP(z, self.A_list, self.clf.P, self.params, self.clf.function(eq_pt), self.plant.get_F()) )
-
-        return (vecQ_a.T @ vecP_a) / np.linalg.norm(vecQ_a)**2
-
-    def compute_stability(self, sol):
+        Given a point x in the invariant set, compute its corresponding lambda.
+        '''
+        return lambda_invariant(x, self.kernel, P, self.cbf.Q, self.plant.get_F(), self.params)
+    
+    def compute_stability(self, x, P):
         '''
         Compute the stability number for a given equilibrium point.
         '''
-        x = sol["x"]
-        l = sol["lambda"]
-        S_matrix = S(x, l, self.clf.P, self.plant, self.clf, self.cbf, self.params)
+        S_matrix = S(x, self.kernel, P, self.cbf.Q, self.plant, self.params)
 
         '''
         Compute stability number

@@ -51,7 +51,7 @@ def update(i):
         sim.clf.set_param(P=Pnew)
 
         sim.kerneltriplet.invariant_set(extended=False)
-        sim.kerneltriplet.equilibria()
+        sim.kerneltriplet.equilibria(verbose=True)
         
         sim.kerneltriplet.plot_invariant(ax)
         sim.kerneltriplet.plot_equilibria(ax)

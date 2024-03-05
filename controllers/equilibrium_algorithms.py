@@ -15,17 +15,48 @@ ZERO_ACCURACY = 1e-9
 '''
 Verification / computation of equilibrium points and their stability 
 '''
-def vecQ(z, A_list, Q):
-    vecQ = []
-    for k in range(len(A_list)):
-        vecQ.append( z.T @ A_list[k].T @ Q @ z )
-    return vecQ
+def vecQ(x, kernel, Q):
+    '''
+    vecQ function for the computation of the invariant set / equilibrium points.
+    '''
+    p = kernel.kernel_dim
+    if Q.shape != (p,p):
+        raise Exception("Matrix dimensions are not compatible.")
+    
+    z = kernel.function(x)
+    A_list = kernel.get_A_matrices()
 
-def vecP(z, A_list, P, params, V, F):
-    vecP = []
+    vecQ_list = []
     for k in range(len(A_list)):
-        vecP.append( z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z )
-    return vecP
+        vecQ_list.append( z.T @ A_list[k].T @ Q @ z )
+    return vecQ_list
+
+def vecP(x, kernel, P, F, params):
+    '''
+    vecP function for the computation of the invariant set / equilibrium points.
+    '''
+    p = kernel.kernel_dim
+    if P.shape != (p,p) or F.shape != (p,p):
+        raise Exception("Matrix dimensions are not compatible.")
+    
+    z = kernel.function(x)
+    A_list = kernel.get_A_matrices()
+    V = clf_function(x, kernel, P)
+
+    vecP_list = []
+    for k in range(len(A_list)):
+        vecP_list.append( z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z )
+    return vecP_list
+
+def det_invariant(x, kernel, P, Q, F, params):
+    '''
+    Returns the determinant det([ vecQ, vecP ]) for a given point x and CLF-CBF pair.
+    '''
+    n = len(x)
+    vecQ_a = np.array( vecQ(x, kernel, Q) )
+    vecP_a = np.array( vecP(x, kernel, P, F, params) )
+    W = np.hstack([vecQ_a.reshape(n,1), vecP_a.reshape(n,1)])
+    return np.linalg.det(W)
 
 def equilibrium_field(z, l, P, V, plant, clf, cbf, params):
     '''

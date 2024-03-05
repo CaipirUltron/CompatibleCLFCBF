@@ -1,6 +1,7 @@
 import math
-import numpy as np
 import itertools
+
+import numpy as np
 
 from scipy.spatial import ConvexHull
 from scipy.optimize import fsolve
@@ -707,6 +708,94 @@ def check_kernel(plant, clf, cbf):
         raise Exception("Plant must have the same dimension as the CLF-CBF pair.")
 
     return kernel
+
+def clf_function(x, kernel, P):
+    '''
+    Returns the CLF function value
+    '''
+    p = kernel.kernel_dim
+    if P.shape != (p,p):
+        raise Exception("Matrix dimensions are not compatible.")
+    z = kernel.function(x)
+    return 0.5 * z.T @ P @ z
+
+def vecQ(x, kernel, Q):
+    '''
+    vecQ function for the computation of the invariant set / equilibrium points.
+    '''
+    p = kernel.kernel_dim
+    if Q.shape != (p,p):
+        raise Exception("Matrix dimensions are not compatible.")
+    
+    z = kernel.function(x)
+    A_list = kernel.get_A_matrices()
+
+    vecQ_list = []
+    for k in range(len(A_list)):
+        vecQ_list.append( z.T @ A_list[k].T @ Q @ z )
+    return vecQ_list
+
+def vecP(x, kernel, P, F, params):
+    '''
+    vecP function for the computation of the invariant set / equilibrium points.
+    '''
+    p = kernel.kernel_dim
+    if P.shape != (p,p) or F.shape != (p,p):
+        raise Exception("Matrix dimensions are not compatible.")
+    
+    z = kernel.function(x)
+    A_list = kernel.get_A_matrices()
+    V = clf_function(x, kernel, P)
+
+    vecP_list = []
+    for k in range(len(A_list)):
+        vecP_list.append( z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z )
+    return vecP_list
+
+def det_invariant(x, kernel, P, Q, F, params):
+    '''
+    Returns the determinant det([ vecQ, vecP ]) for a given point x and CLF-CBF pair.
+    '''
+    n = len(x)
+    vecQ_a = np.array( vecQ(x, kernel, Q) )
+    vecP_a = np.array( vecP(x, kernel, P, F, params) )
+    W = np.hstack([vecQ_a.reshape(n,1), vecP_a.reshape(n,1)])
+    return np.linalg.det(W)
+    # return np.sqrt( np.linalg.det( W.T @ W ) ) # does not work
+
+def lambda_invariant(x, kernel, P, Q, F, params):
+    '''
+    Returns the lambda corresponding to a point on the invariant set det([ vecQ, vecP ]) = 0.
+    '''
+    vecQ_a = np.array( vecQ(x, kernel, Q) )
+    vecP_a = np.array( vecP(x, kernel, P, F, params) )
+    return (vecQ_a.T @ vecP_a) / np.linalg.norm(vecQ_a)**2
+
+def L(x, kernel, P, Q, F, params):
+    '''
+    Returns L matrix: L = F + l Q - p gamma V(x,P) P
+    '''
+    l = lambda_invariant(x, kernel, P, Q, F, params)
+    return F + l * Q - params["slack_gain"] * params["clf_gain"] * clf_function(x, kernel, P) * P
+
+def S(x, kernel, P, Q, plant, params):
+    '''
+    Returns the S matrix: S = H(x,l,P) - (1/pgV^2) * fc fc.T, for stability computation of equilibrium points 
+    '''
+    A_list = kernel.get_A_matrices()
+    n = len(A_list)
+    if len(x) != n:
+        raise Exception("Dimensions are incorrect.")
+
+    V = clf_function(x, kernel, P)
+    z = kernel.function(x)
+
+    fc = plant.get_fc(x)
+    F = plant.get_F()
+
+    L_matrix = L(x, kernel, P, Q, F, params)
+    S_matrix = [ [ z.T @ A_list[i].T @ ( L_matrix @ A_list[j] + A_list[j].T @ L_matrix ) @ z - fc[i]*fc[j]/(params["slack_gain"] * params["clf_gain"] * (V**2)) for j in range(n) ] for i in range(n) ]
+    return np.array(S_matrix)
 
 class Rect():
     '''
