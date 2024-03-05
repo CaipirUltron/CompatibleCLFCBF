@@ -1340,6 +1340,7 @@ class KernelTriplet():
     '''
     Class for kernel-based triplets of: plant, CLF and CBF.
     Defines common algorithms for CLF-CBF compatibility, such as computation of the invariat set, equilibrium points, and optimizations over the invariant set branches.
+    The variable self.P is used for online computations with the CLF shape.
     '''
     def __init__(self, **kwargs):
         
@@ -1361,11 +1362,41 @@ class KernelTriplet():
         self.eq_pts = []
         
         self.set_param(**kwargs)
-
+        self.create_boundary_lines()
         self.boundary_segments = self.cbf.get_boundary(limits=self.limits, spacing=self.spacing)
         self.invariant_set()
-        # self.equilibria(verbose=True)
         self.fast_equilibria(verbose=True)
+
+    def create_boundary_lines(self, spacing=0.1):
+        '''
+        Creates the 4 boundary lines used in fast_equilibria()
+        '''
+        x_min, x_max = self.limits[0][0], self.limits[0][1]
+        y_min, y_max = self.limits[1][0], self.limits[1][1]
+
+        spam_x = np.arange(x_min, x_max, spacing)
+        spam_y = np.arange(y_min, y_max, spacing)
+        spam_x = spam_x.reshape( len(spam_x), 1 )
+        spam_y = spam_y.reshape( len(spam_y), 1 )
+
+        # Create 4 lines representing the window boundaries
+        self.boundary_lines = []
+        
+        top_x = spam_x
+        top_y = y_max * np.ones(spam_x.shape)
+        self.boundary_lines.append({"x": top_x, "y": top_y})
+
+        bottom_x = spam_x
+        bottom_y = y_min * np.ones(spam_x.shape)
+        self.boundary_lines.append({"x": bottom_x, "y": bottom_y})
+
+        left_x = x_min * np.ones(spam_y.shape)
+        left_y = spam_y
+        self.boundary_lines.append({"x": left_x, "y": left_y})
+
+        right_x = x_max * np.ones(spam_y.shape)
+        right_y = spam_y
+        self.boundary_lines.append({"x": right_x, "y": right_y})
 
     def verify(self):
         '''
@@ -1457,8 +1488,8 @@ class KernelTriplet():
         det_grid = np.zeros(xg.shape)
         for (i,j) in itertools.product(range( xg.shape[0] ), range( yg.shape[1] )):
             x = [xg[i,j], yg[i,j]]
-            if self.compute_lambda(x, self.clf.P) >= 0 or extended:
-                det_grid[i,j] = det_invariant(x, self.kernel, self.clf.P, self.cbf.Q, self.plant.get_F(), self.params)
+            if self.compute_lambda(x, self.P) >= 0 or extended:
+                det_grid[i,j] = det_invariant(x, self.kernel, self.P, self.cbf.Q, self.plant.get_F(), self.params)
             else:
                 det_grid[i,j] = np.inf
 
@@ -1527,49 +1558,15 @@ class KernelTriplet():
 
         self.branch_optimizers(verbose)
 
-    def fast_equilibria(self, verbose=False, **kwargs):
+    def fast_equilibria(self, verbose=False):
         '''
         Computes all equilibrium points and local branch optimizers of the CLF-CBF pair, using the invariant set rectangular limits as initializers for the optimization algorithm.
         This method does not require the update of the complete invariant set geometry, 
         and is capable of computing the equilibrium points and local branch optimizers faster than the previous method.
         '''
-        # P = self.clf.P
-        # for key in kwargs.keys():
-        #     if key == "P":
-        #         P = kwargs[key]
-        #         continue
-
-        x_min, x_max = self.limits[0][0], self.limits[0][1]
-        y_min, y_max = self.limits[1][0], self.limits[1][1]
-
-        spacing = 0.1
-        spam_x = np.arange(x_min, x_max, spacing)
-        spam_y = np.arange(y_min, y_max, spacing)
-        spam_x = spam_x.reshape( len(spam_x), 1 )
-        spam_y = spam_y.reshape( len(spam_y), 1 )
-
-        # Create 4 lines representing the window boundaries
-        lines = []
-        
-        top_x = spam_x
-        top_y = y_max * np.ones(spam_x.shape)
-        lines.append({"x": top_x, "y": top_y})
-
-        bottom_x = spam_x
-        bottom_y = y_min * np.ones(spam_x.shape)
-        lines.append({"x": bottom_x, "y": bottom_y})
-
-        left_x = x_min * np.ones(spam_y.shape)
-        left_y = spam_y
-        lines.append({"x": left_x, "y": left_y})
-
-        right_x = x_max * np.ones(spam_y.shape)
-        right_y = spam_y
-        lines.append({"x": right_x, "y": right_y})
-
-        # Get initializers in window boundaries
+        # Get initializers from boundary lines
         initializers = [] 
-        for line in lines:
+        for line in self.boundary_lines:
             initializers += self.get_zero_det(line["x"], line["y"])
 
         # Find boundary equilibria
@@ -1647,15 +1644,11 @@ class KernelTriplet():
         Returns a dict containing all relevant data about the found equilibrium point, including its stability.
         '''
         init_x_def = False
-        P = self.clf.P
         for key in kwargs.keys():
             aux_key = key.lower()
             if aux_key == "init_x":
                 init_x = kwargs[key]
                 init_x_def = True
-                continue
-            if key == "P":
-                P = kwargs[key]
                 continue
 
         if not init_x_def:
@@ -1666,7 +1659,7 @@ class KernelTriplet():
             Returns the vector residues of invariant set -> is zero for x in the invariant set
             '''
             x = var[0:self.n]
-            return det_invariant(x, self.kernel, P, self.cbf.Q, self.plant.get_F(), self.params)
+            return det_invariant(x, self.kernel, self.P, self.cbf.Q, self.plant.get_F(), self.params)
 
         def boundary_constraint(var):
             '''
@@ -1703,7 +1696,7 @@ class KernelTriplet():
         sol = minimize(objective, init_var, constraints=constraints)
 
         eq_coords = sol.x[0:self.n].tolist()
-        l = self.compute_lambda(eq_coords, P)
+        l = self.compute_lambda(eq_coords, self.P)
         h = self.cbf.function(eq_coords)
         gradh = self.cbf.gradient(eq_coords)
 
@@ -1723,7 +1716,7 @@ class KernelTriplet():
         
         # Equilibrium point - compute stability
         if (sol_dict) and (np.abs(sol_dict["h"]) <= 1e-2):
-            stability, eta = self.compute_stability(eq_coords, P)
+            stability, eta = self.compute_stability(eq_coords, self.P)
             sol_dict["eta"], sol_dict["stability"] = eta, stability
             sol_dict["equilibrium"] = "stable"
             if stability > 0:
@@ -1775,7 +1768,8 @@ class KernelTriplet():
             Removes removable equilibrium points.
             '''
             # Updates boundary equilibria
-            self.fast_equilibria( P=symmetric_var(var) )
+            self.P = symmetric_var(var)
+            self.fast_equilibria()
 
             rem_constr = []
             for eq_sol in self.boundary_equilibria:
@@ -1790,6 +1784,7 @@ class KernelTriplet():
                 rem_constr = [ 0.0 ]
 
             print(rem_constr)
+
             return rem_constr
 
         def intermediate_callback(sol):
