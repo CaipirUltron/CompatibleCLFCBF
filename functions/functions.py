@@ -1364,6 +1364,7 @@ class KernelTriplet():
 
         self.boundary_segments = self.cbf.get_boundary(limits=self.limits, spacing=self.spacing)
         self.invariant_set()
+        # self.equilibria(verbose=True)
         self.fast_equilibria(verbose=True)
 
     def verify(self):
@@ -1524,44 +1525,20 @@ class KernelTriplet():
                     if np.any(eq_sol):
                         add_to(eq_sol, self.boundary_equilibria)
 
-        # Compute the branch optimizers
-        self.connections_to_min = { i:[] for i in range(0,len(self.boundary_equilibria)) }
-        self.connections_to_max = { i:[] for i in range(0,len(self.boundary_equilibria)) }
-        self.branch_minimizers = []
-        self.branch_maximizers = []
-        for num_eq in range(len(self.boundary_equilibria)):
-            eq_sol = self.boundary_equilibria[num_eq]
+        self.branch_optimizers(verbose)
 
-            branch_minimizer = self.optimize_over("min_branch", init_x=eq_sol["x"])
-            if np.any(branch_minimizer):
-                add_to(branch_minimizer, self.branch_minimizers, self.connections_to_min[num_eq])
-                
-            branch_maximizer = self.optimize_over("max_branch", init_x=eq_sol["x"])
-            if np.any(branch_maximizer):
-                add_to(branch_maximizer, self.branch_maximizers, self.connections_to_max[num_eq])
-
-        # Checks which equilibrium point is removable
-        for num_eq in range(len(self.boundary_equilibria)):
-            remover = self.is_removable(num_eq)
-            if "minimizer" in remover.keys():
-                self.boundary_equilibria[num_eq]["rem_by_minimizer"] = remover["minimizer"]
-            if "maximizer" in remover.keys():
-                self.boundary_equilibria[num_eq]["rem_by_maximizer"] = remover["maximizer"]
-
-        if verbose:
-            show_message(self.boundary_equilibria, "boundary equilibrium points")
-            show_message(self.branch_minimizers, "branch minimizers")
-            show_message(self.branch_maximizers, "branch maximizers")
-
-            print(f"Connections to minimizers = {self.connections_to_min}")
-            print(f"Connections to maximizers = {self.connections_to_max}")
-
-    def fast_equilibria(self, verbose=False):
+    def fast_equilibria(self, verbose=False, **kwargs):
         '''
         Computes all equilibrium points and local branch optimizers of the CLF-CBF pair, using the invariant set rectangular limits as initializers for the optimization algorithm.
         This method does not require the update of the complete invariant set geometry, 
         and is capable of computing the equilibrium points and local branch optimizers faster than the previous method.
         '''
+        # P = self.clf.P
+        # for key in kwargs.keys():
+        #     if key == "P":
+        #         P = kwargs[key]
+        #         continue
+
         x_min, x_max = self.limits[0][0], self.limits[0][1]
         y_min, y_max = self.limits[1][0], self.limits[1][1]
 
@@ -1599,40 +1576,10 @@ class KernelTriplet():
         self.boundary_equilibria = []
         for pt in initializers:
             eq_sol = self.optimize_over("boundary", init_x=pt)
-            if eq_sol and "equilibrium" in eq_sol.keys():
+            if np.any(eq_sol):
                 add_to(eq_sol, self.boundary_equilibria)
 
-        # Compute the branch optimizers
-        self.connections_to_min = { i:[] for i in range(0,len(self.boundary_equilibria)) }
-        self.connections_to_max = { i:[] for i in range(0,len(self.boundary_equilibria)) }
-        self.branch_minimizers = []
-        self.branch_maximizers = []
-        for num_eq in range(len(self.boundary_equilibria)):
-            eq_sol = self.boundary_equilibria[num_eq]
-
-            branch_minimizer = self.optimize_over("min_branch", init_x=eq_sol["x"])
-            if np.any(branch_minimizer):
-                add_to(branch_minimizer, self.branch_minimizers, self.connections_to_min[num_eq])
-                
-            branch_maximizer = self.optimize_over("max_branch", init_x=eq_sol["x"])
-            if np.any(branch_maximizer):
-                add_to(branch_maximizer, self.branch_maximizers, self.connections_to_max[num_eq])
-
-        # Checks which equilibrium point is removable
-        for num_eq in range(len(self.boundary_equilibria)):
-            remover = self.is_removable(num_eq)
-            if "minimizer" in remover.keys():
-                self.boundary_equilibria[num_eq]["rem_by_minimizer"] = remover["minimizer"]
-            if "maximizer" in remover.keys():
-                self.boundary_equilibria[num_eq]["rem_by_maximizer"] = remover["maximizer"]
-
-        if verbose:
-            show_message(self.boundary_equilibria, "boundary equilibrium points")
-            show_message(self.branch_minimizers, "branch minimizers")
-            show_message(self.branch_maximizers, "branch maximizers")
-
-            print(f"Connections to minimizers = {self.connections_to_min}")
-            print(f"Connections to maximizers = {self.connections_to_max}")
+        self.branch_optimizers(verbose)
 
     def is_removable(self, i):
         '''
@@ -1657,6 +1604,42 @@ class KernelTriplet():
                     break
 
         return removable
+
+    def branch_optimizers(self, verbose=False):
+        '''
+        Compute the branch optimizers
+        '''
+        self.connections_to_min = { i:[] for i in range(0,len(self.boundary_equilibria)) }
+        self.connections_to_max = { i:[] for i in range(0,len(self.boundary_equilibria)) }
+        self.branch_minimizers = []
+        self.branch_maximizers = []
+
+        for num_eq in range(len(self.boundary_equilibria)):
+            eq_sol = self.boundary_equilibria[num_eq]
+
+            branch_minimizer = self.optimize_over("min_branch", init_x=eq_sol["x"])
+            if branch_minimizer and "type" in branch_minimizer.keys():
+                add_to(branch_minimizer, self.branch_minimizers, self.connections_to_min[num_eq])
+
+            branch_maximizer = self.optimize_over("max_branch", init_x=eq_sol["x"])
+            if branch_maximizer and "type" in branch_maximizer.keys():
+                add_to(branch_maximizer, self.branch_maximizers, self.connections_to_max[num_eq])
+
+        # Checks which equilibrium point is removable
+        for num_eq in range(len(self.boundary_equilibria)):
+            remover = self.is_removable(num_eq)
+            if "minimizer" in remover.keys():
+                self.boundary_equilibria[num_eq]["rem_by_minimizer"] = remover["minimizer"]
+            if "maximizer" in remover.keys():
+                self.boundary_equilibria[num_eq]["rem_by_maximizer"] = remover["maximizer"]
+
+        if verbose:
+            show_message(self.boundary_equilibria, "boundary equilibrium points")
+            show_message(self.branch_minimizers, "branch minimizers")
+            show_message(self.branch_maximizers, "branch maximizers")
+
+            print(f"Connections to minimizers = {self.connections_to_min}")
+            print(f"Connections to maximizers = {self.connections_to_max}")
 
     def optimize_over(self, optimization=None, **kwargs):
         '''
@@ -1760,41 +1743,66 @@ class KernelTriplet():
 
         return sol_dict
 
-    def compatibize(self):
+    def compatibilize(self):
         '''
-        This function computes a new CLF geometry that is completely compatible with the CBF 
+        This function computes a new CLF geometry that is completely compatible with the CBF.
         '''
-        def list2matrix(var):
+        def symmetric_var(var):
+            '''
+            var is a n(n+1)/2 list representing a stacked symmetric matrix.
+            '''
             p = self.kernel.kernel_dim
-            P = np.array(var).reshape(p,p)
-            P = 0.5*(P + P.T)
+            P = vector2sym(var)
+            if P.shape != (p,p):
+                raise Exception("Matrix dimensions are incompatible.")
             return P
 
         def objective(var):
-            P = list2matrix(var)
-            return np.linalg.norm( P - self.clf.P )
+            '''
+            Minimizes the changes to the CLF geometry needed for compatibilization.
+            '''
+            return np.linalg.norm( symmetric_var(var) - self.clf.P )
 
         def PSD_constraint(var):
-            P = list2matrix(var)
+            '''
+            Constrains P to the positive semidefinite cone. 
+            '''
+            P = symmetric_var(var)
             return np.min(np.linalg.eigvals(P)) - np.min(np.linalg.eigvals(self.clf.P))
 
         def removability_constraint(var):
-            P = list2matrix(var)
+            '''
+            Removes removable equilibrium points.
+            '''
+            # Updates boundary equilibria
+            self.fast_equilibria( P=symmetric_var(var) )
 
-            self.clf.set_param(P=P)
-            self.invariant_set(extended=False)
-            self.equilibria()
-            pass 
-            # return h_min - self.comp_options["min_sep"]
+            rem_constr = []
+            for eq_sol in self.boundary_equilibria:
+                if "rem_by_minimizer" in eq_sol.keys():
+                    index = eq_sol["rem_by_minimizer"]
+                    rem_constr.append( self.branch_minimizers[index]["h"] - self.comp_options["min_sep"] )
+                if "rem_by_maximizer" in eq_sol.keys():
+                    index = eq_sol["rem_by_maximizer"]
+                    rem_constr.append( self.branch_maximizers[index]["h"] - self.comp_options["min_sep"] )
 
-        constraints = [ {"type": "ineq", "fun": PSD_constraint} ]
-        for eq_sol in self.boundary_equilibria:
-            if "rem_by_minimizer" in eq_sol.keys():
-                pass
-                # constraints.append({"type": "ineq", "fun": removability_constraint})
+            if len(rem_constr) == 0:
+                rem_constr = [ 0.0 ]
 
-        init_var = self.clf.P.reshape(self.kernel.kernel_dim**2).tolist()
-        sol = minimize(objective, init_var, constraints=constraints)
+            print(rem_constr)
+            return rem_constr
+
+        def intermediate_callback(sol):
+            print(f"Sol. = {sol}")
+            print(f"Constr = {removability_constraint(sol)}")
+
+        constraints = [ {"type": "ineq", "fun": PSD_constraint},
+                        {"type": "ineq", "fun": removability_constraint} ]
+        
+        init_var = sym2vector(self.clf.P).tolist()
+        sol = minimize( objective, init_var, constraints=constraints, callback=intermediate_callback )
+        
+        return symmetric_var( sol.x )
 
     def compute_lambda(self, x, P):
         '''

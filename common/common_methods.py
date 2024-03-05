@@ -803,13 +803,15 @@ def add_to(point, l, *connections):
     '''
     if len(connections) > 1: raise Exception("Add accepts only 1 optional argument.")
     pt = np.array(point["x"])
+
     if len(l) > 0:
-        for ele in l:
-            if np.linalg.norm(pt - np.array(ele["x"])) > 1e-3:  # is new
-                l.append(point)
-                pt_list_index = len(l)-1
-                break
-            else: pt_list_index = l.index(ele)
+        costs = np.linalg.norm( pt - np.array([ ele["x"] for ele in l ]), axis=1 )
+        indexes = (costs < 1e-3).nonzero()[0]
+        if len(indexes) > 0:   # pt is old
+            pt_list_index = indexes[0]
+        else:                      # pt is new
+            l.append(point)
+            pt_list_index = len(l)-1
     else: 
         l.append(point)
         pt_list_index = len(l)-1
@@ -820,7 +822,10 @@ def show_message(pts, text):
     Show message for points in the invariant set. 
     '''
     num_pts = len(pts)
-    print(f"Found {num_pts} {text} at:")
+    if num_pts > 0:
+        print(f"Found {num_pts} {text} at:")
+    else:
+        print(f"Found {num_pts} {text}.")
     for sol in pts:
         if "x" in sol.keys():
             x = sol["x"]
@@ -836,6 +841,8 @@ def show_message(pts, text):
                 output_text += ", rem_by_minimizer " + str(sol["rem_by_minimizer"])
             if "rem_by_maximizer" in sol.keys():
                 output_text += ", rem_by_maximizer " + str(sol["rem_by_maximizer"])
+            if "type" in sol.keys():
+                output_text += ", type = " + str(sol["type"])
         print(output_text)
 
 class Rect():

@@ -33,8 +33,8 @@ time_text = ax.text(limits[0][1]-5.5, limits[1][0]+0.5, str("Step = 0"), fontsiz
 def init():
     sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
 
-    sim.kerneltriplet.invariant_set(extended=False)
-    sim.kerneltriplet.equilibria()
+    # sim.kerneltriplet.invariant_set(extended=False)
+    # sim.kerneltriplet.equilibria(verbose=True)
 
     sim.kerneltriplet.plot_invariant(ax)
     sim.kerneltriplet.plot_equilibria(ax)
@@ -50,11 +50,13 @@ def update(i):
 
         # sim.kerneltriplet.invariant_set(extended=False)
         # sim.kerneltriplet.equilibria(verbose=True)
-        sim.kerneltriplet.fast_equilibria(verbose=True)
+        # sim.kerneltriplet.fast_equilibria(verbose=True)
 
-        sim.kerneltriplet.plot_invariant(ax)
-        sim.kerneltriplet.plot_equilibria(ax)
+        # sim.kerneltriplet.plot_invariant(ax)
+        # sim.kerneltriplet.plot_equilibria(ax)
 
-fps = 60
-animation = anim.FuncAnimation(fig, func=update, init_func=init, interval=1000/fps, repeat=False, cache_frame_data=False)
-plt.show()
+# fps = 60
+# animation = anim.FuncAnimation(fig, func=update, init_func=init, interval=1000/fps, repeat=False, cache_frame_data=False)
+# plt.show()
+        
+Pnew = sim.kerneltriplet.compatibilize()
