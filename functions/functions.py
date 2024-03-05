@@ -1578,30 +1578,6 @@ class KernelTriplet():
 
         self.branch_optimizers(verbose)
 
-    def is_removable(self, i):
-        '''
-        Checks if equilibrium point with index i is removable.
-        Returns the corresponding minimizer/maximizer that removes the equilibrium point.
-        '''
-        removable = {}
-        for minimizer_index in self.connections_to_min[i]:
-            for eq_index in self.connections_to_min.keys():
-                if eq_index == i:       # ignore if self
-                    continue
-                if minimizer_index in self.connections_to_min[eq_index]:
-                    removable["minimizer"] = minimizer_index
-                    break
-
-        for maximizer_index in self.connections_to_max[i]:
-            for eq_index in self.connections_to_max.keys():
-                if eq_index == i:       # ignore if self
-                    continue
-                if maximizer_index in self.connections_to_max[eq_index]:
-                    removable["maximizer"] = maximizer_index
-                    break
-
-        return removable
-
     def branch_optimizers(self, verbose=False):
         '''
         Compute the branch optimizers
@@ -1637,6 +1613,30 @@ class KernelTriplet():
 
             print(f"Connections to minimizers = {self.connections_to_min}")
             print(f"Connections to maximizers = {self.connections_to_max}")
+
+    def is_removable(self, i):
+        '''
+        Checks if equilibrium point with index i is removable.
+        Returns the corresponding minimizer/maximizer that removes the equilibrium point.
+        '''
+        removable = {}
+        for minimizer_index in self.connections_to_min[i]:
+            for eq_index in self.connections_to_min.keys():
+                if eq_index == i:       # ignore if self
+                    continue
+                if minimizer_index in self.connections_to_min[eq_index]:
+                    removable["minimizer"] = minimizer_index
+                    break
+
+        for maximizer_index in self.connections_to_max[i]:
+            for eq_index in self.connections_to_max.keys():
+                if eq_index == i:       # ignore if self
+                    continue
+                if maximizer_index in self.connections_to_max[eq_index]:
+                    removable["maximizer"] = maximizer_index
+                    break
+
+        return removable
 
     def optimize_over(self, optimization=None, **kwargs):
         '''
@@ -1771,19 +1771,22 @@ class KernelTriplet():
             self.P = symmetric_var(var)
             self.fast_equilibria()
 
+            # CHANGING THE NUMBER OF CONSTRAINTS ONLINE MAKES IT IMPOSSIBLE TO APPROXIMATE THE JACOBIAN
             rem_constr = []
-            for eq_sol in self.boundary_equilibria:
-                if "rem_by_minimizer" in eq_sol.keys():
-                    index = eq_sol["rem_by_minimizer"]
-                    rem_constr.append( self.branch_minimizers[index]["h"] - self.comp_options["min_sep"] )
-                if "rem_by_maximizer" in eq_sol.keys():
-                    index = eq_sol["rem_by_maximizer"]
-                    rem_constr.append( self.branch_maximizers[index]["h"] - self.comp_options["min_sep"] )
+            for minimizer in self.branch_minimizers:
+                if minimizer["type"] == "regular_minimizer":
+                    rem_constr.append( minimizer["h"] - self.comp_options["min_sep"] )
+            for maximizer in self.branch_maximizers:
+                if maximizer["type"] == "regular_maximizer":
+                    rem_constr.append( -self.comp_options["min_sep"] - maximizer["h"] )
 
             if len(rem_constr) == 0:
                 rem_constr = [ 0.0 ]
 
-            print(rem_constr)
+            # for branch_minimizer in self.branch_minimizers:
+            #     print(branch_minimizer)
+            # for branch_maximizer in self.branch_maximizers:
+            #     print(branch_maximizer)
 
             return rem_constr
 
