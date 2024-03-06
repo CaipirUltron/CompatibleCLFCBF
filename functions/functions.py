@@ -1353,7 +1353,7 @@ class KernelTriplet():
         self.spacing = 0.1
         self.invariant_color = mcolors.BASE_COLORS["k"]
         self.equilibria_color = mcolors.BASE_COLORS["g"]
-        self.comp_options = {"min_eig": 0.1, "min_sep": 0.1}
+        self.comp_options = {"min_sep": 0.1}
 
         self.num_branches = 0
         self.branch_lines = []
@@ -1365,6 +1365,7 @@ class KernelTriplet():
         self.create_boundary_lines()
         self.boundary_segments = self.cbf.get_boundary(limits=self.limits, spacing=self.spacing)
         self.invariant_set()
+        # self.equilibria(verbose=True)
         self.fast_equilibria(verbose=True)
 
     def create_boundary_lines(self, spacing=0.1):
@@ -1500,12 +1501,12 @@ class KernelTriplet():
         Returns the points where the determinant is zero over a 1D array with coords given by xg, yg 
         '''
         det_grid = self.det_invariant(xg, yg, extended=True)
-        index = np.where(np.sign(det_grid[:-1]) != np.sign(det_grid[1:]))[0] + 1
-        x_coords, y_coords = xg[index][0], yg[index][0]
+        indexes = np.where(np.sign(det_grid[:-1]) != np.sign(det_grid[1:]))[0] + 1
 
-        pts = [] 
-        for k in range(len(x_coords)):
-            pts.append( [x_coords[k], y_coords[k]] )
+        pts = []
+        for i in indexes:
+            pts.append( [xg[i][0], yg[i][0]] )
+
         return pts
 
     def invariant_set(self, extended=False):
@@ -1573,7 +1574,7 @@ class KernelTriplet():
         self.boundary_equilibria = []
         for pt in initializers:
             eq_sol = self.optimize_over("boundary", init_x=pt)
-            if np.any(eq_sol):
+            if (eq_sol) and "equilibrium" in eq_sol.keys():
                 add_to(eq_sol, self.boundary_equilibria)
 
         self.branch_optimizers(verbose)
@@ -1587,6 +1588,7 @@ class KernelTriplet():
         self.branch_minimizers = []
         self.branch_maximizers = []
 
+        # Create adjacency list for connections btw eq points and optimizers
         for num_eq in range(len(self.boundary_equilibria)):
             eq_sol = self.boundary_equilibria[num_eq]
 
@@ -1598,13 +1600,8 @@ class KernelTriplet():
             if branch_maximizer and "type" in branch_maximizer.keys():
                 add_to(branch_maximizer, self.branch_maximizers, self.connections_to_max[num_eq])
 
-        # Checks which equilibrium point is removable
-        for num_eq in range(len(self.boundary_equilibria)):
-            remover = self.is_removable(num_eq)
-            if "minimizer" in remover.keys():
-                self.boundary_equilibria[num_eq]["rem_by_minimizer"] = remover["minimizer"]
-            if "maximizer" in remover.keys():
-                self.boundary_equilibria[num_eq]["rem_by_maximizer"] = remover["maximizer"]
+        # Checks if there exist removable optimizers
+        self.check_removables()
 
         if verbose:
             show_message(self.boundary_equilibria, "boundary equilibrium points")
@@ -1614,29 +1611,27 @@ class KernelTriplet():
             print(f"Connections to minimizers = {self.connections_to_min}")
             print(f"Connections to maximizers = {self.connections_to_max}")
 
-    def is_removable(self, i):
+    def check_removables(self):
         '''
-        Checks if equilibrium point with index i is removable.
+        Checks if equilibrium point with index eq_index is removable.
         Returns the corresponding minimizer/maximizer that removes the equilibrium point.
         '''
-        removable = {}
-        for minimizer_index in self.connections_to_min[i]:
-            for eq_index in self.connections_to_min.keys():
-                if eq_index == i:       # ignore if self
-                    continue
-                if minimizer_index in self.connections_to_min[eq_index]:
-                    removable["minimizer"] = minimizer_index
-                    break
+        for eq_index in range(len(self.boundary_equilibria)):
+            for minimizer_index in self.connections_to_min[eq_index]:
+                for j in self.connections_to_min.keys():
+                    if j == eq_index:       # ignore if self
+                        continue
+                    if minimizer_index in self.connections_to_min[j] and np.linalg.norm( self.branch_minimizers[minimizer_index]["gradh"] ) > 1e-3:
+                        self.branch_minimizers[minimizer_index]["type"] = "remover"
+                        break
 
-        for maximizer_index in self.connections_to_max[i]:
-            for eq_index in self.connections_to_max.keys():
-                if eq_index == i:       # ignore if self
-                    continue
-                if maximizer_index in self.connections_to_max[eq_index]:
-                    removable["maximizer"] = maximizer_index
-                    break
-
-        return removable
+            for maximizer_index in self.connections_to_max[eq_index]:
+                for j in self.connections_to_max.keys():
+                    if j == eq_index:       # ignore if self
+                        continue
+                    if maximizer_index in self.connections_to_max[j] and np.linalg.norm( self.branch_maximizers[maximizer_index]["gradh"] ) > 1e-3:
+                        self.branch_maximizers[maximizer_index]["type"] = "remover"
+                        break
 
     def optimize_over(self, optimization=None, **kwargs):
         '''
@@ -1712,10 +1707,10 @@ class KernelTriplet():
             sol_dict["h"] = h
             sol_dict["gradh"] = np.linalg.norm(gradh)
             sol_dict["init_x"] = init_x
-            sol_dict["message"] = sol.message
+            # sol_dict["message"] = sol.message
         
         # Equilibrium point - compute stability
-        if (sol_dict) and (np.abs(sol_dict["h"]) <= 1e-2):
+        if (sol_dict) and (np.abs(sol_dict["h"]) <= 1e-3):
             stability, eta = self.compute_stability(eq_coords, self.P)
             sol_dict["eta"], sol_dict["stability"] = eta, stability
             sol_dict["equilibrium"] = "stable"
@@ -1726,13 +1721,13 @@ class KernelTriplet():
         if (sol_dict) and optimization == "min_branch":
             if sol_dict["gradh"] < 1e-03:
                 sol_dict["type"] = "cbf_minimum"
-            else: sol_dict["type"] = "regular_minimizer"
+            else: sol_dict["type"] = "undefined"
 
         # Maximizers
         if (sol_dict) and optimization == "max_branch":
-            if sol_dict["gradh"] > 1e+06:
+            if sol_dict["h"] > 1e+05 or sol_dict["gradh"] > 1e+06:
                 sol_dict = None                 # filters unbounded maximizers
-            else: sol_dict["type"] = "regular_maximizer"
+            else: sol_dict["type"] = "undefined"
 
         return sol_dict
 
@@ -1774,25 +1769,26 @@ class KernelTriplet():
             # CHANGING THE NUMBER OF CONSTRAINTS ONLINE MAKES IT IMPOSSIBLE TO APPROXIMATE THE JACOBIAN
             rem_constr = []
             for minimizer in self.branch_minimizers:
-                if minimizer["type"] == "regular_minimizer":
+                if minimizer["type"] == "remover":
                     rem_constr.append( minimizer["h"] - self.comp_options["min_sep"] )
             for maximizer in self.branch_maximizers:
-                if maximizer["type"] == "regular_maximizer":
+                if maximizer["type"] == "remover":
                     rem_constr.append( -self.comp_options["min_sep"] - maximizer["h"] )
 
             if len(rem_constr) == 0:
                 rem_constr = [ 0.0 ]
 
-            # for branch_minimizer in self.branch_minimizers:
-            #     print(branch_minimizer)
-            # for branch_maximizer in self.branch_maximizers:
-            #     print(branch_maximizer)
+            print(rem_constr)
+            for opt in self.branch_minimizers:
+                # if opt["type"] == "remover":
+                    print(opt)
 
             return rem_constr
 
-        def intermediate_callback(sol):
-            print(f"Sol. = {sol}")
-            print(f"Constr = {removability_constraint(sol)}")
+        def intermediate_callback(intermediate_result):
+            P = symmetric_var(intermediate_result)
+            self.P = P
+            # print( removability_constraint(intermediate_result) )
 
         constraints = [ {"type": "ineq", "fun": PSD_constraint},
                         {"type": "ineq", "fun": removability_constraint} ]

@@ -30,33 +30,31 @@ if hasattr(sim, "pts"):
 num_steps = 1000
 time_text = ax.text(limits[0][1]-5.5, limits[1][0]+0.5, str("Step = 0"), fontsize=14)
 
-def init():
-    sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
+# def init():
+#     sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
 
-    # sim.kerneltriplet.invariant_set(extended=False)
-    # sim.kerneltriplet.equilibria(verbose=True)
+#     # sim.kerneltriplet.invariant_set(extended=False)
+#     # sim.kerneltriplet.equilibria(verbose=True)
 
-    sim.kerneltriplet.plot_invariant(ax)
-    sim.kerneltriplet.plot_equilibria(ax)
+#     sim.kerneltriplet.plot_invariant(ax)
+#     sim.kerneltriplet.plot_equilibria(ax)
 
-def update(i):
-    if i <= num_steps:
+# def update(i):
+#     if i <= num_steps:
 
-        time_text.set_text("Step = " + str(i))
+#         time_text.set_text("Step = " + str(i))
 
-        deltaP = 0.02 * np.random.rand(sim.clf.kernel_dim, sim.clf.kernel_dim)
-        Pnew = sim.clf.P + deltaP.T @ deltaP
-        sim.clf.set_param(P=Pnew)
+#         deltaP = 0.02 * np.random.rand(sim.clf.kernel_dim, sim.clf.kernel_dim)
+#         sim.kerneltriplet.P = sim.kerneltriplet.P + deltaP.T @ deltaP
 
-        # sim.kerneltriplet.invariant_set(extended=False)
-        # sim.kerneltriplet.equilibria(verbose=True)
-        # sim.kerneltriplet.fast_equilibria(verbose=True)
+#         sim.kerneltriplet.invariant_set(extended=False)
+#         sim.kerneltriplet.fast_equilibria(verbose=True)
 
-        # sim.kerneltriplet.plot_invariant(ax)
-        # sim.kerneltriplet.plot_equilibria(ax)
+#         sim.kerneltriplet.plot_invariant(ax)
+#         sim.kerneltriplet.plot_equilibria(ax)
 
 # fps = 60
 # animation = anim.FuncAnimation(fig, func=update, init_func=init, interval=1000/fps, repeat=False, cache_frame_data=False)
 # plt.show()
-        
+
 Pnew = sim.kerneltriplet.compatibilize()
