@@ -1352,21 +1352,19 @@ class KernelTriplet():
         self.limits = [ [-1, +1] for _ in range(2) ]
         self.spacing = 0.1
         self.invariant_color = mcolors.BASE_COLORS["k"]
-        self.equilibria_color = mcolors.BASE_COLORS["g"]
         self.comp_options = {"min_sep": 0.1}
 
         self.num_branches = 0
         self.branch_lines = []
 
-        self.num_eq = 0
-        self.eq_pts = []
-        
+        self.plotted_attrs = {}
+
         self.set_param(**kwargs)
         self.create_boundary_lines()
         self.boundary_segments = self.cbf.get_boundary(limits=self.limits, spacing=self.spacing)
         self.invariant_set()
-        # self.equilibria(verbose=True)
-        self.fast_equilibria(verbose=True)
+        # self.equilibria_from_invariant(verbose=True)
+        self.equilibria(verbose=True)
 
     def create_boundary_lines(self, spacing=0.1):
         '''
@@ -1489,11 +1487,10 @@ class KernelTriplet():
         det_grid = np.zeros(xg.shape)
         for (i,j) in itertools.product(range( xg.shape[0] ), range( yg.shape[1] )):
             x = [xg[i,j], yg[i,j]]
-            if self.compute_lambda(x, self.P) >= 0 or extended:
+            if self.compute_lambda(x) >= 0 or extended:
                 det_grid[i,j] = det_invariant(x, self.kernel, self.P, self.cbf.Q, self.plant.get_F(), self.params)
             else:
                 det_grid[i,j] = np.inf
-
         return det_grid
 
     def get_zero_det(self, xg, yg):
@@ -1506,7 +1503,6 @@ class KernelTriplet():
         pts = []
         for i in indexes:
             pts.append( [xg[i][0], yg[i][0]] )
-
         return pts
 
     def invariant_set(self, extended=False):
@@ -1524,12 +1520,12 @@ class KernelTriplet():
         invariant_contour = ctp.contour_generator(x=xg, y=yg, z=self.det_invariant(xg, yg, extended=extended) )
         self.invariant_branches = invariant_contour.lines(0.0)
 
-    def equilibria(self, verbose=False):
+    def equilibria_from_invariant(self, verbose=False):
         '''
         Computes all equilibrium points and local branch optimizers of the CLF-CBF pair, using the invariant set intersections with the CBF boundary.
         '''
         if len(self.invariant_branches) == 0:
-            self.invariant_set(extended=False)
+            self.invariant_set(extended=True)
 
         # Finds intersections between boundary and invariant set segments (boundary equilibria)
         self.boundary_equilibria = []
@@ -1559,7 +1555,7 @@ class KernelTriplet():
 
         self.branch_optimizers(verbose)
 
-    def fast_equilibria(self, verbose=False):
+    def equilibria(self, verbose=False):
         '''
         Computes all equilibrium points and local branch optimizers of the CLF-CBF pair, using the invariant set rectangular limits as initializers for the optimization algorithm.
         This method does not require the update of the complete invariant set geometry, 
@@ -1616,6 +1612,8 @@ class KernelTriplet():
         Checks if equilibrium point with index eq_index is removable.
         Returns the corresponding minimizer/maximizer that removes the equilibrium point.
         '''
+        self.min_removers, self.max_removers = [], []
+
         for eq_index in range(len(self.boundary_equilibria)):
             for minimizer_index in self.connections_to_min[eq_index]:
                 for j in self.connections_to_min.keys():
@@ -1623,6 +1621,7 @@ class KernelTriplet():
                         continue
                     if minimizer_index in self.connections_to_min[j] and np.linalg.norm( self.branch_minimizers[minimizer_index]["gradh"] ) > 1e-3:
                         self.branch_minimizers[minimizer_index]["type"] = "remover"
+                        add_to(self.branch_minimizers[minimizer_index], self.min_removers)
                         break
 
             for maximizer_index in self.connections_to_max[eq_index]:
@@ -1631,6 +1630,7 @@ class KernelTriplet():
                         continue
                     if maximizer_index in self.connections_to_max[j] and np.linalg.norm( self.branch_maximizers[maximizer_index]["gradh"] ) > 1e-3:
                         self.branch_maximizers[maximizer_index]["type"] = "remover"
+                        add_to(self.branch_maximizers[maximizer_index], self.max_removers)
                         break
 
     def optimize_over(self, optimization=None, **kwargs):
@@ -1691,7 +1691,7 @@ class KernelTriplet():
         sol = minimize(objective, init_var, constraints=constraints)
 
         eq_coords = sol.x[0:self.n].tolist()
-        l = self.compute_lambda(eq_coords, self.P)
+        l = self.compute_lambda(eq_coords)
         h = self.cbf.function(eq_coords)
         gradh = self.cbf.gradient(eq_coords)
 
@@ -1711,7 +1711,7 @@ class KernelTriplet():
         
         # Equilibrium point - compute stability
         if (sol_dict) and (np.abs(sol_dict["h"]) <= 1e-3):
-            stability, eta = self.compute_stability(eq_coords, self.P)
+            stability, eta = self.compute_stability(eq_coords)
             sol_dict["eta"], sol_dict["stability"] = eta, stability
             sol_dict["equilibrium"] = "stable"
             if stability > 0:
@@ -1749,7 +1749,8 @@ class KernelTriplet():
             '''
             Minimizes the changes to the CLF geometry needed for compatibilization.
             '''
-            return np.linalg.norm( symmetric_var(var) - self.clf.P )
+            # return np.linalg.norm( symmetric_var(var) - self.clf.P )
+            return 1.0              # feasibility problem
 
         def PSD_constraint(var):
             '''
@@ -1764,7 +1765,7 @@ class KernelTriplet():
             '''
             # Updates boundary equilibria
             self.P = symmetric_var(var)
-            self.fast_equilibria()
+            self.equilibria()
 
             # CHANGING THE NUMBER OF CONSTRAINTS ONLINE MAKES IT IMPOSSIBLE TO APPROXIMATE THE JACOBIAN
             rem_constr = []
@@ -1798,17 +1799,17 @@ class KernelTriplet():
         
         return symmetric_var( sol.x )
 
-    def compute_lambda(self, x, P):
+    def compute_lambda(self, x):
         '''
         Given a point x in the invariant set, compute its corresponding lambda.
         '''
-        return lambda_invariant(x, self.kernel, P, self.cbf.Q, self.plant.get_F(), self.params)
+        return lambda_invariant(x, self.kernel, self.P, self.cbf.Q, self.plant.get_F(), self.params)
     
-    def compute_stability(self, x, P):
+    def compute_stability(self, x):
         '''
         Compute the stability number for a given equilibrium point.
         '''
-        S_matrix = S(x, self.kernel, P, self.cbf.Q, self.plant, self.params)
+        S_matrix = S(x, self.kernel, self.P, self.cbf.Q, self.plant, self.params)
 
         '''
         Compute stability number
@@ -1865,22 +1866,31 @@ class KernelTriplet():
         for k in range(self.num_branches):
             self.branch_lines[k].set_data( self.invariant_branches[k][:,0], self.invariant_branches[k][:,1] )
 
-    def plot_equilibria(self, ax):
+    def plot_attr(self, ax, attr_name, plot_color='k'):
         '''
-        Plots the equilibrium points and minimizers/maximizers into ax.
+        Plots general list of points into ax.
         '''
-        if len(self.boundary_equilibria) >= self.num_eq:
-            for _ in range(len(self.boundary_equilibria) - self.num_eq):
-                line2D, = ax.plot([],[], 'o', color=self.equilibria_color, alpha=0.8, linewidth=0.6 )
-                self.eq_pts.append(line2D)
-        else:
-            for _ in range(self.num_eq - len(self.boundary_equilibria)):
-                self.eq_pts[-1].remove()
-                del self.eq_pts[-1]
+        attr = getattr(self, attr_name)
+        if type(attr) != list:
+            raise Exception("Passed attribute name is not a list.")
+        
+        # If the passed attribute name was not already initialized, initialize it.
+        if attr_name not in self.plotted_attrs.keys():
+            self.plotted_attrs[attr_name] = []
 
-        self.num_eq = len(self.eq_pts)
-        for k in range(self.num_eq):
-            self.eq_pts[k].set_data( self.boundary_equilibria[k]["x"][0], self.boundary_equilibria[k]["x"][1] )
+        # Balance the number of line2D elements in the array of plotted points
+        if len(attr) >= len(self.plotted_attrs[attr_name]):
+            for _ in range(len(attr) - len(self.plotted_attrs[attr_name])):
+                line2D, = ax.plot([],[], 'o', color=plot_color, alpha=0.8, linewidth=0.6 )
+                self.plotted_attrs[attr_name].append(line2D)
+        else:
+            for _ in range(len(self.plotted_attrs[attr_name]) - len(attr)):
+                self.plotted_attrs[attr_name][-1].remove()
+                del self.plotted_attrs[attr_name][-1]
+
+        # from this point on, len(attr) = len(self.plotted_attrs[attr_name])
+        for k in range(len(attr)):
+            self.plotted_attrs[attr_name][k].set_data( attr[k]["x"][0], attr[k]["x"][1] )
 
 class ApproxFunction(Function):
     '''

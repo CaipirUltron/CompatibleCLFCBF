@@ -3,6 +3,7 @@ import importlib
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
+import matplotlib.colors as mcolors
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -30,31 +31,36 @@ if hasattr(sim, "pts"):
 num_steps = 1000
 time_text = ax.text(limits[0][1]-5.5, limits[1][0]+0.5, str("Step = 0"), fontsize=14)
 
-# def init():
-#     sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
+def init():
+    sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
 
-#     # sim.kerneltriplet.invariant_set(extended=False)
-#     # sim.kerneltriplet.equilibria(verbose=True)
+    sim.kerneltriplet.invariant_set(extended=True)
+    sim.kerneltriplet.equilibria_from_invariant(verbose=True)
 
-#     sim.kerneltriplet.plot_invariant(ax)
-#     sim.kerneltriplet.plot_equilibria(ax)
+    sim.kerneltriplet.plot_invariant(ax)
+    sim.kerneltriplet.plot_attr(ax, "boundary_equilibria", mcolors.BASE_COLORS["g"])
+    sim.kerneltriplet.plot_attr(ax, "branch_minimizers", mcolors.BASE_COLORS["b"])
+    # sim.kerneltriplet.plot_attr(ax, "max_removers", mcolors.BASE_COLORS["r"])
 
-# def update(i):
-#     if i <= num_steps:
+def update(i):
+    if i <= num_steps:
 
-#         time_text.set_text("Step = " + str(i))
+        time_text.set_text("Step = " + str(i))
 
-#         deltaP = 0.02 * np.random.rand(sim.clf.kernel_dim, sim.clf.kernel_dim)
-#         sim.kerneltriplet.P = sim.kerneltriplet.P + deltaP.T @ deltaP
+        deltaP = 0.02 * np.random.rand(sim.clf.kernel_dim, sim.clf.kernel_dim)
+        sim.kerneltriplet.P += deltaP.T @ deltaP
 
-#         sim.kerneltriplet.invariant_set(extended=False)
-#         sim.kerneltriplet.fast_equilibria(verbose=True)
+        sim.kerneltriplet.invariant_set(extended=True)
+        # sim.kerneltriplet.equilibria_from_invariant(verbose=True)
+        sim.kerneltriplet.equilibria(verbose=True)
 
-#         sim.kerneltriplet.plot_invariant(ax)
-#         sim.kerneltriplet.plot_equilibria(ax)
+        sim.kerneltriplet.plot_invariant(ax)
+        sim.kerneltriplet.plot_attr(ax, "boundary_equilibria", mcolors.BASE_COLORS["g"])
+        sim.kerneltriplet.plot_attr(ax, "branch_minimizers", mcolors.BASE_COLORS["b"])
+        # sim.kerneltriplet.plot_attr(ax, "max_removers", mcolors.BASE_COLORS["r"])
 
-# fps = 60
-# animation = anim.FuncAnimation(fig, func=update, init_func=init, interval=1000/fps, repeat=False, cache_frame_data=False)
-# plt.show()
+fps = 60
+animation = anim.FuncAnimation(fig, func=update, init_func=init, interval=1000/fps, repeat=False, cache_frame_data=False)
+plt.show()
 
-Pnew = sim.kerneltriplet.compatibilize()
+# Pnew = sim.kerneltriplet.compatibilize()
