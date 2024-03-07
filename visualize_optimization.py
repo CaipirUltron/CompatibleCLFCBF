@@ -40,7 +40,7 @@ def init():
     sim.kerneltriplet.plot_invariant(ax)
     sim.kerneltriplet.plot_attr(ax, "boundary_equilibria", mcolors.BASE_COLORS["g"])
     sim.kerneltriplet.plot_attr(ax, "branch_minimizers", mcolors.BASE_COLORS["b"])
-    # sim.kerneltriplet.plot_attr(ax, "max_removers", mcolors.BASE_COLORS["r"])
+    sim.kerneltriplet.plot_attr(ax, "branch_maximizers", mcolors.BASE_COLORS["r"])
 
 def update(i):
     if i <= num_steps:
@@ -55,9 +55,12 @@ def update(i):
         sim.kerneltriplet.equilibria(verbose=True)
 
         sim.kerneltriplet.plot_invariant(ax)
+
         sim.kerneltriplet.plot_attr(ax, "boundary_equilibria", mcolors.BASE_COLORS["g"])
+        sim.kerneltriplet.plot_attr(ax, "interior_equilibria", mcolors.BASE_COLORS["k"])
+
         sim.kerneltriplet.plot_attr(ax, "branch_minimizers", mcolors.BASE_COLORS["b"])
-        # sim.kerneltriplet.plot_attr(ax, "max_removers", mcolors.BASE_COLORS["r"])
+        sim.kerneltriplet.plot_attr(ax, "branch_maximizers", mcolors.BASE_COLORS["r"])
 
 fps = 60
 animation = anim.FuncAnimation(fig, func=update, init_func=init, interval=1000/fps, repeat=False, cache_frame_data=False)

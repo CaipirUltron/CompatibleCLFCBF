@@ -1354,15 +1354,13 @@ class KernelTriplet():
         self.invariant_color = mcolors.BASE_COLORS["k"]
         self.comp_options = {"min_sep": 0.1}
 
-        self.num_branches = 0
         self.branch_lines = []
-
         self.plotted_attrs = {}
 
         self.set_param(**kwargs)
         self.create_boundary_lines()
         self.boundary_segments = self.cbf.get_boundary(limits=self.limits, spacing=self.spacing)
-        self.invariant_set()
+        self.invariant_set(extended=True)
         # self.equilibria_from_invariant(verbose=True)
         self.equilibria(verbose=True)
 
@@ -1529,6 +1527,7 @@ class KernelTriplet():
 
         # Finds intersections between boundary and invariant set segments (boundary equilibria)
         self.boundary_equilibria = []
+        self.interior_equilibria = []
         for boundary_seg in self.boundary_segments:
             for invariant_branch in self.invariant_branches:
                 
@@ -1549,11 +1548,31 @@ class KernelTriplet():
                         new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
                 
                 for pt in new_candidates:
+
                     eq_sol = self.optimize_over("boundary", init_x=pt)
-                    if np.any(eq_sol):
+                    if (eq_sol) and "equilibrium" in eq_sol.keys():
                         add_to(eq_sol, self.boundary_equilibria)
 
-        self.branch_optimizers(verbose)
+                    eq_sol = self.optimize_over("interior", init_x=pt)
+                    if (eq_sol) and "equilibrium" in eq_sol.keys():
+                        add_to(eq_sol, self.interior_equilibria)
+
+                    branch_minimizer = self.optimize_over("min_branch", init_x=pt)
+                    if branch_minimizer and "type" in branch_minimizer.keys():
+                        add_to(branch_minimizer, self.branch_minimizers)
+
+                    branch_maximizer = self.optimize_over("max_branch", init_x=pt)
+                    if branch_maximizer and "type" in branch_maximizer.keys():
+                        add_to(branch_maximizer, self.branch_maximizers)
+
+        # self.branch_optimizers(verbose)
+
+        if verbose:
+            show_message(self.boundary_equilibria, "boundary equilibrium points")
+            show_message(self.interior_equilibria, "interior equilibrium points")
+
+            show_message(self.branch_minimizers, "branch minimizers")
+            show_message(self.branch_maximizers, "branch maximizers")
 
     def equilibria(self, verbose=False):
         '''
@@ -1562,18 +1581,41 @@ class KernelTriplet():
         and is capable of computing the equilibrium points and local branch optimizers faster than the previous method.
         '''
         # Get initializers from boundary lines
-        initializers = [] 
+        self.branch_initializers = [] 
         for line in self.boundary_lines:
-            initializers += self.get_zero_det(line["x"], line["y"])
+            self.branch_initializers += self.get_zero_det(line["x"], line["y"])
 
-        # Find boundary equilibria
+        # Find boundary, interior equilibria and branch optimizers
         self.boundary_equilibria = []
-        for pt in initializers:
+        self.interior_equilibria = []
+        self.branch_minimizers = []
+        self.branch_maximizers = []
+        for pt in self.branch_initializers:
+
             eq_sol = self.optimize_over("boundary", init_x=pt)
             if (eq_sol) and "equilibrium" in eq_sol.keys():
                 add_to(eq_sol, self.boundary_equilibria)
 
-        self.branch_optimizers(verbose)
+            eq_sol = self.optimize_over("interior", init_x=pt)
+            if (eq_sol) and "equilibrium" in eq_sol.keys():
+                add_to(eq_sol, self.interior_equilibria)
+
+            branch_minimizer = self.optimize_over("min_branch", init_x=pt)
+            if branch_minimizer and "type" in branch_minimizer.keys():
+                add_to(branch_minimizer, self.branch_minimizers)
+
+            branch_maximizer = self.optimize_over("max_branch", init_x=pt)
+            if branch_maximizer and "type" in branch_maximizer.keys():
+                add_to(branch_maximizer, self.branch_maximizers)
+
+        # self.branch_optimizers(verbose)
+
+        if verbose:
+            show_message(self.boundary_equilibria, "boundary equilibrium points")
+            show_message(self.interior_equilibria, "interior equilibrium points")
+
+            show_message(self.branch_minimizers, "branch minimizers")
+            show_message(self.branch_maximizers, "branch maximizers")
 
     def branch_optimizers(self, verbose=False):
         '''
@@ -1601,6 +1643,8 @@ class KernelTriplet():
 
         if verbose:
             show_message(self.boundary_equilibria, "boundary equilibrium points")
+            show_message(self.interior_equilibria, "interior equilibrium points")
+
             show_message(self.branch_minimizers, "branch minimizers")
             show_message(self.branch_maximizers, "branch maximizers")
 
@@ -1675,6 +1719,8 @@ class KernelTriplet():
             
             if optimization == "boundary":
                 return delta**2
+            elif optimization == "interior":
+                return self.compute_lambda(x.tolist())**2
             elif optimization == "min_branch":
                 return self.cbf.function(x)
             elif optimization == "max_branch":
@@ -1697,8 +1743,8 @@ class KernelTriplet():
 
         sol_dict = None
 
-        # Point on the invariant set
-        if l >= 0:
+        # Valid solution is a point in the invariant set with lambda >= 0
+        if l >= 0 and np.abs(invariant_set(sol.x)) < 1e-3:
             sol_dict = {}
             sol_dict["x"] = eq_coords
             sol_dict["lambda"] = l
@@ -1709,13 +1755,17 @@ class KernelTriplet():
             sol_dict["init_x"] = init_x
             # sol_dict["message"] = sol.message
         
-        # Equilibrium point - compute stability
+        # Boundary equilibrium point - compute stability
         if (sol_dict) and (np.abs(sol_dict["h"]) <= 1e-3):
             stability, eta = self.compute_stability(eq_coords)
             sol_dict["eta"], sol_dict["stability"] = eta, stability
             sol_dict["equilibrium"] = "stable"
             if stability > 0:
                 sol_dict["equilibrium"] = "unstable"
+
+        # Interior equilibrium points (for now, stability is not computed)
+        if (sol_dict) and (optimization == "interior") and (np.abs(sol_dict["lambda"]) <= 1e-5):
+            sol_dict["equilibrium"] = "interior"
 
         # Minimizers
         if (sol_dict) and optimization == "min_branch":
@@ -1852,23 +1902,22 @@ class KernelTriplet():
         Plots the invariant set segments into ax.
         '''
         # Initializes branch lines (if enough branches are still not initialized)
-        if len(self.invariant_branches) >= self.num_branches:
-            for _ in range(len(self.invariant_branches) - self.num_branches):
+        if len(self.invariant_branches) >= len(self.branch_lines):
+            for _ in range(len(self.invariant_branches) - len(self.branch_lines)):
                 line2D, = ax.plot([],[], color=self.invariant_color, linestyle='dashed', linewidth=1.0 )
                 self.branch_lines.append(line2D)
         else:
-            for _ in range(self.num_branches - len(self.invariant_branches)):
+            for _ in range(len(self.branch_lines) - len(self.invariant_branches)):
                 self.branch_lines[-1].remove()
                 del self.branch_lines[-1]
 
         # Updates branch lines
-        self.num_branches = len(self.branch_lines)
-        for k in range(self.num_branches):
+        for k in range(len(self.branch_lines)):
             self.branch_lines[k].set_data( self.invariant_branches[k][:,0], self.invariant_branches[k][:,1] )
 
     def plot_attr(self, ax, attr_name, plot_color='k'):
         '''
-        Plots general list of points into ax.
+        Plots a list attribute from the class into ax.
         '''
         attr = getattr(self, attr_name)
         if type(attr) != list:
