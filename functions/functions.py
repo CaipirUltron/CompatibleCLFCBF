@@ -5,12 +5,11 @@ import scipy as sp
 import cvxpy as cp
 import warnings
 
-import functools
 import contourpy as ctp
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
-from scipy.optimize import minimize
+from scipy.optimize import minimize, least_squares
 from shapely import geometry, intersection
 
 from common import *
@@ -1354,7 +1353,7 @@ class KernelTriplet():
         self.spacing = 0.1
         self.invariant_color = mcolors.BASE_COLORS["k"]
         self.compatibility_options = {"min_sep": 0.1}
-        self.interior_eq_lambda_min = 1e-2
+        self.interior_eq_lambda_min = 1e-4
 
         self.invariant_lines = []
         self.plotted_attrs = {}
@@ -1481,23 +1480,42 @@ class KernelTriplet():
 
         self.verify()
 
-    def det_invariant(self, xg, yg, extended=False):
+    def det_invariant(self, *args, **kwargs):
         '''
         Evaluates det([ vecQ, vecP ]) = 0 over a grid.
         Parameters: xg, yg: (x,y) coords of each point in the grid
         Returns: a grid with the same size of xg, yg with the determinant values. 
         '''
-        if xg.shape != yg.shape:
-            raise Exception("x,y grid coordinates must have the same shape!")
+        extended = False
+        for key in kwargs.keys():
+            key = key.lower()
+            if key == "extended" and type(kwargs[key] == bool):
+                extended = kwargs["extended"]
 
-        det_grid = np.zeros(xg.shape)
-        for (i,j) in itertools.product(range( xg.shape[0] ), range( yg.shape[1] )):
-            x = [xg[i,j], yg[i,j]]
-            if self.compute_lambda(x) >= 0 or extended:
-                det_grid[i,j] = det_invariant(x, self.kernel, self.P, self.cbf.Q, self.plant.get_F(), self.params)
-            else:
+        coords = list(args)
+
+        if not np.array([ type(coords[i]) == type(coords[i+1]) for i in range(len(coords)-1) ]).all():
+            raise Exception("x,y grid coordinates must have the same type")
+
+        # If args are numbers:
+        if type(coords[0]) in [int, float]:
+            x = [ coord for coord in coords ]
+            return det_invariant(x, self.kernel, self.P, self.cbf.Q, self.plant.get_F(), self.params)
+
+        if not np.array([ coords[i].shape == coords[i+1].shape for i in range(len(coords)-1) ]).all():
+            raise Exception("x,y grid coordinates must have the same shape")
+
+        # If args are meshgrids:
+        if len(coords[0].shape) == len(coords):
+            xg = coords[0]
+            yg = coords[1]
+            det_grid = np.zeros(xg.shape)
+            for (i,j) in itertools.product(range( xg.shape[0] ), range( yg.shape[1] )):
+                x = [xg[i,j], yg[i,j]]
                 det_grid[i,j] = np.inf
-        return det_grid
+                if self.compute_lambda(x) >= 0 or extended:
+                    det_grid[i,j] = det_invariant(x, self.kernel, self.P, self.cbf.Q, self.plant.get_F(), self.params)
+            return det_grid
 
     def get_zero_det(self, xg, yg):
         '''
@@ -1510,7 +1528,7 @@ class KernelTriplet():
         for i in indexes:
             pts.append( [xg[i][0], yg[i][0]] )
         return pts
-
+        
     def boundary_intersection(self, seg_data):
         '''
         Computes the intersections with boundary segments of a particular segment of the invariant set.
@@ -1537,6 +1555,47 @@ class KernelTriplet():
         
         return intersection_pts
 
+    def seg_boundary_equilibria(self, seg_data):
+        '''
+        Computes boundary equilibrium points for given segment data
+        '''
+        eqs = []
+        intersection_pts = self.boundary_intersection(seg_data)
+        for pt in intersection_pts:
+            seg_boundary_equilibrium = {"x": pt}
+            seg_boundary_equilibrium["lambda"] = self.compute_lambda(pt)
+            seg_boundary_equilibrium["h"] = self.cbf.function(pt)
+            seg_boundary_equilibrium["nablah"] = self.cbf.gradient(pt)
+            stability, eta = self.compute_stability(pt, "boundary")
+            seg_boundary_equilibrium["eta"], seg_boundary_equilibrium["stability"] = eta, stability
+            seg_boundary_equilibrium["equilibrium"] = "stable"
+            if stability > 0:
+                seg_boundary_equilibrium["equilibrium"] = "unstable"
+            eqs.append( seg_boundary_equilibrium )
+
+        return eqs
+
+    def seg_interior_equilibria(self, seg_data):
+        '''
+        Computes interior equilibrium points for given segment data
+        '''
+        eqs = []
+        first_l = self.compute_lambda(seg_data[0])
+        last_l = self.compute_lambda(seg_data[-1])
+        if first_l < self.interior_eq_lambda_min:
+            eqs.append( {"x": seg_data[0], "lambda": first_l, "h": self.cbf.function(seg_data[0]), "nablah": self.cbf.gradient(seg_data[0]).tolist() } )
+        if last_l < self.interior_eq_lambda_min:
+            eqs.append( {"x": seg_data[-1], "lambda": last_l, "h": self.cbf.function(seg_data[-1]), "nablah": self.cbf.gradient(seg_data[-1]).tolist() } )
+
+        for eq in eqs:
+            stability, eta = self.compute_stability(eq["x"], "boundary")
+            eq["eta"], eq["stability"] = eta, stability
+            eq["equilibrium"] = "stable"
+            if stability > 0:
+                eq["equilibrium"] = "unstable"
+        
+        return eqs
+
     def invariant_set(self, extended=False, verbose=False):
         '''
         Computes the invariant set for the given CLF-CBF pair.
@@ -1548,59 +1607,85 @@ class KernelTriplet():
         x = np.arange(self.limits[0][0], self.limits[0][1], self.spacing)
         y = np.arange(self.limits[1][0], self.limits[1][1], self.spacing)
         xg, yg = np.meshgrid(x,y)
-
         invariant_contour = ctp.contour_generator(x=xg, y=yg, z=self.det_invariant(xg, yg, extended=extended) )
 
         self.invariant_segs = []
         self.boundary_equilibria = []
         self.interior_equilibria = []
-        for segment in invariant_contour.lines(0.0):
+        for segment_points in invariant_contour.lines(0.0):
+            seg_dict = { "points": segment_points }
+            seg_dict["lambdas"] = [ self.compute_lambda(pt) for pt in segment_points ]
+            seg_dict["boundary_equilibria"] = self.seg_boundary_equilibria(segment_points)
+            seg_dict["interior_equilibria"] = self.seg_interior_equilibria(segment_points)
 
-            # Use the intersections with the CBF boundary to compute the boundary equilibria of each segment
-            seg_boundary_equilibria = []
-            intersection_pts = self.boundary_intersection(segment)
-            for pt in intersection_pts:
-                seg_boundary_equilibrium = {"x": pt}
-                seg_boundary_equilibrium["lambda"] = self.compute_lambda(pt)
-                seg_boundary_equilibrium["h"] = self.cbf.function(pt)
-                seg_boundary_equilibrium["nablah"] = self.cbf.gradient(pt)
-
-                stability, eta = self.compute_stability(pt, "boundary")
-                seg_boundary_equilibrium["eta"], seg_boundary_equilibrium["stability"] = eta, stability
-                seg_boundary_equilibrium["equilibrium"] = "stable"
-                if stability > 0:
-                    seg_boundary_equilibrium["equilibrium"] = "unstable"
-
-                seg_boundary_equilibria.append( seg_boundary_equilibrium )
-            
-            # Use compute_lambda() to compute the interior equilibria on each segment:
-            # interior equilibria will always be located at the segment limits 
-            seg_interior_equilibria = []
-
-            first_l = self.compute_lambda(segment[0])
-            last_l = self.compute_lambda(segment[-1])
-            if first_l < self.interior_eq_lambda_min:
-                seg_interior_equilibria.append( {"x": segment[0], "lambda": first_l, "h": self.cbf.function(segment[0]), "nablah": self.cbf.gradient(segment[0])} )
-            if last_l < self.interior_eq_lambda_min:
-                seg_interior_equilibria.append( {"x": segment[-1], "lambda": last_l, "h": self.cbf.function(segment[-1]), "nablah": self.cbf.gradient(segment[-1])} )
-
-            for eq in seg_interior_equilibria:
-                stability, eta = self.compute_stability(eq["x"], "boundary")
-                eq["eta"], eq["stability"] = eta, stability
-                eq["equilibrium"] = "stable"
-                if stability > 0:
-                    eq["equilibrium"] = "unstable"
-
-            # Collect segment point data and equilibrium points into dict
-            seg_dict = { "segment": segment, "boundary_equilibria": seg_boundary_equilibria, "interior_equilibria": seg_interior_equilibria }
             self.invariant_segs.append(seg_dict)
-
             self.boundary_equilibria += seg_dict["boundary_equilibria"]
             self.interior_equilibria += seg_dict["interior_equilibria"]
 
         if verbose:
             show_message(self.boundary_equilibria, "boundary equilibrium points")
             show_message(self.interior_equilibria, "interior equilibrium points")
+
+    def update_segment(self, segment):
+        '''
+        Updates segment. Aims to significantly improve performance on updating the invariant set. 
+        '''
+        n = self.plant.n
+        seg_points = segment["points"]
+
+        num_pts = len(seg_points)
+        line_sizes = [ np.linalg.norm(seg_points[k] - seg_points[k+1]) for k in range(len(seg_points)-1) ]
+
+        def get_deltas(var):
+            return var[0:n*num_pts].reshape(num_pts, n)
+
+        def objective(var):
+            '''
+            var is a list with coordinates [ pt1[0] pt1[1] .. pt1[n-1] pt2[0] pt2[1] ... pt2[n-1] ...  ptm[n-1] l1 l2 ... lm ]
+            n is the state dimension
+            m is the number of points in the segment
+            '''
+            deltas = get_deltas(var)
+            fun = sum( map(lambda d: np.linalg.norm(d)**2, deltas) )
+
+            new_seg_points = seg_points + deltas
+            fun += sum( [ ( np.linalg.norm(new_seg_points[k] - new_seg_points[k+1]) - line_sizes[k] )**2 for k in range(num_pts-1) ] )
+            fun += sum( [ self.det_invariant( *new_seg_points[k].tolist() )**2 for k in range(num_pts) ] )
+            return fun
+        
+        # def invariant_constr(var):
+        #     deltas = get_deltas(var)
+        #     return [ self.det_invariant( *(seg_points[k] + deltas[k]).tolist() ) for k in range(num_pts) ]
+    
+        def lambda_constr(var):
+            deltas = get_deltas(var)
+            return [ self.compute_lambda( seg_points[k] + deltas[k] ) for k in range(num_pts) ]
+
+        # constraints = [ {"type": "eq", "fun": invariant_constr} ]
+        constraints = []
+        constraints.append( {"type": "ineq", "fun": lambda_constr} )
+
+        init_var = [ 0.0 for _ in range(n*num_pts) ]
+        sol = minimize(objective, init_var, constraints=constraints, options={"disp":True})
+
+        new_seg_pts = seg_points + get_deltas(sol.x)
+
+        segment["points"] = new_seg_pts
+        segment["lambdas"] = [ self.compute_lambda(new_seg_pts[k]) for k in range(num_pts) ]
+        segment["boundary_equilibria"] = self.seg_boundary_equilibria(new_seg_pts)
+        segment["interior_equilibria"] = self.seg_interior_equilibria(new_seg_pts)
+        return segment
+
+    def update_invariant_set(self):
+        '''
+        Updates the invariant set.
+        '''
+        self.boundary_equilibria = []
+        self.interior_equilibria = []
+        for segment in self.invariant_segs:
+            self.update_segment( segment )
+            self.boundary_equilibria += segment["boundary_equilibria"]
+            self.interior_equilibria += segment["interior_equilibria"]
 
     def equilibria_from_invariant(self, verbose=False):
         '''
@@ -2020,7 +2105,7 @@ class KernelTriplet():
         # Updates segment lines with data from each invariant segment
         for k in range(num_segs_to_plot):
             seg_index = segs_to_plot[k]
-            self.invariant_lines[k].set_data( self.invariant_segs[seg_index]["segment"][:,0], self.invariant_segs[seg_index]["segment"][:,1] )
+            self.invariant_lines[k].set_data( self.invariant_segs[seg_index]["points"][:,0], self.invariant_segs[seg_index]["points"][:,1] )
 
     def plot_attr(self, ax, attr_name, plot_color='k'):
         '''

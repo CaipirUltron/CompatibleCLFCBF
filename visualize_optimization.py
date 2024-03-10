@@ -52,7 +52,8 @@ def update(i):
         deltaP = 0.02 * np.random.rand(sim.clf.kernel_dim, sim.clf.kernel_dim)
         sim.kerneltriplet.P += deltaP.T @ deltaP
 
-        sim.kerneltriplet.invariant_set(extended=False, verbose=True)
+        sim.kerneltriplet.invariant_set()
+        # sim.kerneltriplet.update_invariant_set()
         # sim.kerneltriplet.equilibria_from_invariant(verbose=True)
         # sim.kerneltriplet.equilibria(verbose=True)
 

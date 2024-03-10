@@ -729,9 +729,7 @@ def vecQ(x, kernel, Q):
     z = kernel.function(x)
     A_list = kernel.get_A_matrices()
 
-    vecQ_list = []
-    for k in range(len(A_list)):
-        vecQ_list.append( z.T @ A_list[k].T @ Q @ z )
+    vecQ_list = [ z.T @ A_list[k].T @ Q @ z for k in range(len(A_list)) ]
     return vecQ_list
 
 def vecP(x, kernel, P, F, params):
@@ -746,9 +744,7 @@ def vecP(x, kernel, P, F, params):
     A_list = kernel.get_A_matrices()
     V = clf_function(x, kernel, P)
 
-    vecP_list = []
-    for k in range(len(A_list)):
-        vecP_list.append( z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z )
+    vecP_list = [ z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z for k in range(len(A_list)) ]
     return vecP_list
 
 def det_invariant(x, kernel, P, Q, F, params):
