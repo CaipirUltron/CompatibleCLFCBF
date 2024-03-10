@@ -391,8 +391,7 @@ def sontag_formula(a, b):
 
 def compute_curvatures(H, normal):
     '''
-    This function computes the maximum/minimum curvatures of a function at a given direction,
-    using a clever algorithm based on the QR decomposition.
+    This function computes the maximum/minimum curvatures of a function at a given direction, using a clever algorithm based on the QR decomposition.
     Parameters: H is the Hessian matrix of a given function, 
                 normal is the normal vector to the subspace where the optimization is taking place ( normally the direction the function gradient at a given level set )
     Returns: the minimum and maximum curvatures found on the orthogonal subspace
@@ -805,7 +804,7 @@ def add_to(point, l, *connections):
     pt = np.array(point["x"])
 
     if len(l) > 0:
-        costs = np.linalg.norm( pt - np.array([ ele["x"] for ele in l ]), axis=1 )
+        costs = np.linalg.norm( pt - np.array([ elem["x"] for elem in l ]), axis=1 )
         indexes = (costs < 1e-3).nonzero()[0]
         if len(indexes) > 0:   # pt is old
             pt_list_index = indexes[0]
@@ -831,7 +830,7 @@ def show_message(pts, text):
             x = sol["x"]
             l = sol["lambda"]
             h = sol["h"]
-            gradh = sol["gradh"]
+            gradh = sol["nablah"]
             output_text = "x = " + str(x) + ", lambda = " + str(l) + ", h = " + str(h) + ", ||∇h|| = " + str(gradh)
             if "equilibrium" in sol.keys() and "stability" in sol.keys():
                 type_of = sol["equilibrium"]

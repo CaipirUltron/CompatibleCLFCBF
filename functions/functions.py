@@ -5,6 +5,7 @@ import scipy as sp
 import cvxpy as cp
 import warnings
 
+import functools
 import contourpy as ctp
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -1352,19 +1353,26 @@ class KernelTriplet():
         self.limits = [ [-1, +1] for _ in range(2) ]
         self.spacing = 0.1
         self.invariant_color = mcolors.BASE_COLORS["k"]
-        self.comp_options = {"min_sep": 0.1}
+        self.compatibility_options = {"min_sep": 0.1}
+        self.interior_eq_lambda_min = 1e-2
 
-        self.branch_lines = []
+        self.invariant_lines = []
         self.plotted_attrs = {}
 
         self.set_param(**kwargs)
-        self.create_boundary_lines()
-        self.boundary_segments = self.cbf.get_boundary(limits=self.limits, spacing=self.spacing)
-        self.invariant_set(extended=True)
-        # self.equilibria_from_invariant(verbose=True)
-        self.equilibria(verbose=True)
+        self.create_limit_lines()
 
-    def create_boundary_lines(self, spacing=0.1):
+        self.boundary_lines = []
+        for boundary_seg in self.cbf.get_boundary(limits=self.limits, spacing=self.spacing):
+            boundary_line = geometry.LineString(boundary_seg)
+            self.boundary_lines.append(boundary_line)
+
+        self.invariant_set(extended=False)
+
+        # self.equilibria_from_invariant(verbose=True)
+        # self.equilibria(verbose=True)
+
+    def create_limit_lines(self, spacing=0.1):
         '''
         Creates the 4 boundary lines used in fast_equilibria()
         '''
@@ -1377,23 +1385,23 @@ class KernelTriplet():
         spam_y = spam_y.reshape( len(spam_y), 1 )
 
         # Create 4 lines representing the window boundaries
-        self.boundary_lines = []
+        self.limit_lines = []
         
         top_x = spam_x
         top_y = y_max * np.ones(spam_x.shape)
-        self.boundary_lines.append({"x": top_x, "y": top_y})
+        self.limit_lines.append({"x": top_x, "y": top_y})
 
         bottom_x = spam_x
         bottom_y = y_min * np.ones(spam_x.shape)
-        self.boundary_lines.append({"x": bottom_x, "y": bottom_y})
+        self.limit_lines.append({"x": bottom_x, "y": bottom_y})
 
         left_x = x_min * np.ones(spam_y.shape)
         left_y = spam_y
-        self.boundary_lines.append({"x": left_x, "y": left_y})
+        self.limit_lines.append({"x": left_x, "y": left_y})
 
         right_x = x_max * np.ones(spam_y.shape)
         right_y = spam_y
-        self.boundary_lines.append({"x": right_x, "y": right_y})
+        self.limit_lines.append({"x": right_x, "y": right_y})
 
     def verify(self):
         '''
@@ -1503,7 +1511,33 @@ class KernelTriplet():
             pts.append( [xg[i][0], yg[i][0]] )
         return pts
 
-    def invariant_set(self, extended=False):
+    def boundary_intersection(self, seg_data):
+        '''
+        Computes the intersections with boundary segments of a particular segment of the invariant set.
+        '''
+        intersection_pts = []
+
+        for boundary_line in self.boundary_lines:
+            invariant_seg_line = geometry.LineString(seg_data)
+            intersections = intersection( boundary_line, invariant_seg_line )
+
+            new_candidates = []
+            if not intersections.is_empty:
+                if hasattr(intersections, "geoms"):
+                    for geo in intersections.geoms:
+                        x, y = geo.xy
+                        x, y = list(x), list(y)
+                        new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
+                else:
+                    x, y = intersections.xy
+                    x, y = list(x), list(y)
+                    new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
+
+            intersection_pts += new_candidates
+        
+        return intersection_pts
+
+    def invariant_set(self, extended=False, verbose=False):
         '''
         Computes the invariant set for the given CLF-CBF pair.
         '''
@@ -1516,24 +1550,74 @@ class KernelTriplet():
         xg, yg = np.meshgrid(x,y)
 
         invariant_contour = ctp.contour_generator(x=xg, y=yg, z=self.det_invariant(xg, yg, extended=extended) )
-        self.invariant_branches = invariant_contour.lines(0.0)
+
+        self.invariant_segs = []
+        self.boundary_equilibria = []
+        self.interior_equilibria = []
+        for segment in invariant_contour.lines(0.0):
+
+            # Use the intersections with the CBF boundary to compute the boundary equilibria of each segment
+            seg_boundary_equilibria = []
+            intersection_pts = self.boundary_intersection(segment)
+            for pt in intersection_pts:
+                seg_boundary_equilibrium = {"x": pt}
+                seg_boundary_equilibrium["lambda"] = self.compute_lambda(pt)
+                seg_boundary_equilibrium["h"] = self.cbf.function(pt)
+                seg_boundary_equilibrium["nablah"] = self.cbf.gradient(pt)
+
+                stability, eta = self.compute_stability(pt, "boundary")
+                seg_boundary_equilibrium["eta"], seg_boundary_equilibrium["stability"] = eta, stability
+                seg_boundary_equilibrium["equilibrium"] = "stable"
+                if stability > 0:
+                    seg_boundary_equilibrium["equilibrium"] = "unstable"
+
+                seg_boundary_equilibria.append( seg_boundary_equilibrium )
+            
+            # Use compute_lambda() to compute the interior equilibria on each segment:
+            # interior equilibria will always be located at the segment limits 
+            seg_interior_equilibria = []
+
+            first_l = self.compute_lambda(segment[0])
+            last_l = self.compute_lambda(segment[-1])
+            if first_l < self.interior_eq_lambda_min:
+                seg_interior_equilibria.append( {"x": segment[0], "lambda": first_l, "h": self.cbf.function(segment[0]), "nablah": self.cbf.gradient(segment[0])} )
+            if last_l < self.interior_eq_lambda_min:
+                seg_interior_equilibria.append( {"x": segment[-1], "lambda": last_l, "h": self.cbf.function(segment[-1]), "nablah": self.cbf.gradient(segment[-1])} )
+
+            for eq in seg_interior_equilibria:
+                stability, eta = self.compute_stability(eq["x"], "boundary")
+                eq["eta"], eq["stability"] = eta, stability
+                eq["equilibrium"] = "stable"
+                if stability > 0:
+                    eq["equilibrium"] = "unstable"
+
+            # Collect segment point data and equilibrium points into dict
+            seg_dict = { "segment": segment, "boundary_equilibria": seg_boundary_equilibria, "interior_equilibria": seg_interior_equilibria }
+            self.invariant_segs.append(seg_dict)
+
+            self.boundary_equilibria += seg_dict["boundary_equilibria"]
+            self.interior_equilibria += seg_dict["interior_equilibria"]
+
+        if verbose:
+            show_message(self.boundary_equilibria, "boundary equilibrium points")
+            show_message(self.interior_equilibria, "interior equilibrium points")
 
     def equilibria_from_invariant(self, verbose=False):
         '''
         Computes all equilibrium points and local branch optimizers of the CLF-CBF pair, using the invariant set intersections with the CBF boundary.
         '''
-        if len(self.invariant_branches) == 0:
-            self.invariant_set(extended=True)
+        if len(self.invariant_segs) == 0:
+            self.invariant_set(extended=False)
 
         # Finds intersections between boundary and invariant set segments (boundary equilibria)
         self.boundary_equilibria = []
         self.interior_equilibria = []
-        for boundary_seg in self.boundary_segments:
-            for invariant_branch in self.invariant_branches:
+        for boundary_seg in self.boundary_segs:
+            for invariant_seg in self.invariant_segs:
                 
                 boundary_curve = geometry.LineString(boundary_seg)
-                invariant_branch_curve = geometry.LineString(invariant_branch)
-                intersections = intersection( boundary_curve, invariant_branch_curve )
+                invariant_seg_curve = geometry.LineString(invariant_seg)
+                intersections = intersection( boundary_curve, invariant_seg_curve )
 
                 new_candidates = []
                 if not intersections.is_empty:
@@ -1582,7 +1666,7 @@ class KernelTriplet():
         '''
         # Get initializers from boundary lines
         self.branch_initializers = [] 
-        for line in self.boundary_lines:
+        for line in self.limit_lines:
             self.branch_initializers += self.get_zero_det(line["x"], line["y"])
 
         # Find boundary, interior equilibria and branch optimizers
@@ -1757,7 +1841,7 @@ class KernelTriplet():
         
         # Boundary equilibrium point - compute stability
         if (sol_dict) and (np.abs(sol_dict["h"]) <= 1e-3):
-            stability, eta = self.compute_stability(eq_coords)
+            stability, eta = self.compute_stability(eq_coords, "boundary")
             sol_dict["eta"], sol_dict["stability"] = eta, stability
             sol_dict["equilibrium"] = "stable"
             if stability > 0:
@@ -1765,7 +1849,11 @@ class KernelTriplet():
 
         # Interior equilibrium points (for now, stability is not computed)
         if (sol_dict) and (optimization == "interior") and (np.abs(sol_dict["lambda"]) <= 1e-5):
-            sol_dict["equilibrium"] = "interior"
+            stability, eta = self.compute_stability(eq_coords, "interior")
+            sol_dict["eta"], sol_dict["stability"] = eta, stability
+            sol_dict["equilibrium"] = "stable"
+            if stability > 0:
+                sol_dict["equilibrium"] = "unstable"
 
         # Minimizers
         if (sol_dict) and optimization == "min_branch":
@@ -1821,10 +1909,10 @@ class KernelTriplet():
             rem_constr = []
             for minimizer in self.branch_minimizers:
                 if minimizer["type"] == "remover":
-                    rem_constr.append( minimizer["h"] - self.comp_options["min_sep"] )
+                    rem_constr.append( minimizer["h"] - self.compatibility_options["min_sep"] )
             for maximizer in self.branch_maximizers:
                 if maximizer["type"] == "remover":
-                    rem_constr.append( -self.comp_options["min_sep"] - maximizer["h"] )
+                    rem_constr.append( -self.compatibility_options["min_sep"] - maximizer["h"] )
 
             if len(rem_constr) == 0:
                 rem_constr = [ 0.0 ]
@@ -1855,7 +1943,7 @@ class KernelTriplet():
         '''
         return lambda_invariant(x, self.kernel, self.P, self.cbf.Q, self.plant.get_F(), self.params)
     
-    def compute_stability(self, x):
+    def compute_stability(self, x, type_eq):
         '''
         Compute the stability number for a given equilibrium point.
         '''
@@ -1869,7 +1957,15 @@ class KernelTriplet():
         norm_nablaV = np.linalg.norm(nablaV)
         norm_nablah = np.linalg.norm(nablah)
         unit_nablah = nablah/norm_nablah
-        curvatures, basis_for_TpS = compute_curvatures( S_matrix, unit_nablah )
+
+        if type_eq == "boundary":
+            curvatures, basis_for_TpS = compute_curvatures( S_matrix, unit_nablah )
+            V = self.clf.function(x)
+            max_index = np.argmax(curvatures)
+            stability_number = curvatures[max_index] / ( self.params["slack_gain"] * self.params["clf_gain"] * V * norm_nablaV )
+
+        if type_eq == "interior":
+            stability_number = np.max( np.linalg.eigvals(S_matrix) )
 
         # Compute eta - might be relevant latter
         g = self.plant.get_g(x)
@@ -1877,11 +1973,6 @@ class KernelTriplet():
         z1 = nablah / np.linalg.norm(nablah)
         z2 = nablaV - nablaV.T @ G @ z1 * z1
         eta = 1/(1 + self.params["slack_gain"] * z2.T @ G @ z2 )
-
-        V = self.clf.function(x)
-        max_index = np.argmax(curvatures)
-        stability_number = curvatures[max_index] / ( self.params["slack_gain"] * self.params["clf_gain"] * V * norm_nablaV )
-        # principal_direction = basis_for_TpS[:,max_index]
 
         '''
         If the CLF-CBF gradients are collinear, then the stability_number is equivalent to the diff. btw CBF and CLF curvatures at the equilibrium point
@@ -1897,23 +1988,39 @@ class KernelTriplet():
 
         return stability_number, eta
 
-    def plot_invariant(self, ax):
+    def plot_invariant(self, ax, *args):
         '''
         Plots the invariant set segments into ax.
+        Optional arguments specify the indexes of each invariant segment to be plotted.
+        If no optional argument is passed, plots all invariant segments.
         '''
-        # Initializes branch lines (if enough branches are still not initialized)
-        if len(self.invariant_branches) >= len(self.branch_lines):
-            for _ in range(len(self.invariant_branches) - len(self.branch_lines)):
-                line2D, = ax.plot([],[], color=self.invariant_color, linestyle='dashed', linewidth=1.0 )
-                self.branch_lines.append(line2D)
-        else:
-            for _ in range(len(self.branch_lines) - len(self.invariant_branches)):
-                self.branch_lines[-1].remove()
-                del self.branch_lines[-1]
+        # Which segments to plot?
+        num_segs_to_plot = len(self.invariant_segs)
+        segs_to_plot = [ i for i in range(num_segs_to_plot) ]
 
-        # Updates branch lines
-        for k in range(len(self.branch_lines)):
-            self.branch_lines[k].set_data( self.invariant_branches[k][:,0], self.invariant_branches[k][:,1] )
+        if np.any( np.array(args) > len(self.invariant_segs)-1 ):
+            print("Invariant segment list index out of range. Plotting all")
+
+        elif len(args) > 0:
+            num_segs_to_plot = len(args)
+            segs_to_plot = list(args)
+
+        # Adds or removes lines according to the total number of segments to be plotted 
+        if num_segs_to_plot >= len(self.invariant_lines):
+            for _ in range(num_segs_to_plot - len(self.invariant_lines)):
+                line2D, = ax.plot([],[], color=self.invariant_color, linestyle='dashed', linewidth=1.0 )
+                self.invariant_lines.append(line2D)
+        else:
+            for _ in range(len(self.invariant_lines) - num_segs_to_plot):
+                self.invariant_lines[-1].remove()
+                del self.invariant_lines[-1]
+
+        # UP TO HERE: len(self.invariant_lines) == len(segs_to_plot)
+
+        # Updates segment lines with data from each invariant segment
+        for k in range(num_segs_to_plot):
+            seg_index = segs_to_plot[k]
+            self.invariant_lines[k].set_data( self.invariant_segs[seg_index]["segment"][:,0], self.invariant_segs[seg_index]["segment"][:,1] )
 
     def plot_attr(self, ax, attr_name, plot_color='k'):
         '''

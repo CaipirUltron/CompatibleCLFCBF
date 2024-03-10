@@ -33,8 +33,11 @@ sim.kerneltriplet.plot_invariant(ax)
 sim.kerneltriplet.plot_attr(ax, "boundary_equilibria", mcolors.BASE_COLORS["g"])
 sim.kerneltriplet.plot_attr(ax, "interior_equilibria", mcolors.BASE_COLORS["k"])
 
-sim.kerneltriplet.plot_attr(ax, "branch_minimizers", mcolors.BASE_COLORS["c"])
-sim.kerneltriplet.plot_attr(ax, "branch_maximizers", mcolors.BASE_COLORS["r"])
+# sim.kerneltriplet.plot_attr(ax, "branch_minimizers", mcolors.BASE_COLORS["c"])
+# sim.kerneltriplet.plot_attr(ax, "branch_maximizers", mcolors.BASE_COLORS["r"])
+
+for eq in sim.kerneltriplet.boundary_equilibria:
+    print(eq)
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 while True:
