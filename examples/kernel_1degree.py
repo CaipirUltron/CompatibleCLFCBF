@@ -3,7 +3,7 @@ import numpy as np
 from dynamic_systems import KernelAffineSystem
 from functions import Kernel, KernelLyapunov, KernelBarrier, KernelTriplet
 from controllers import NominalQP
-from common import create_quadratic, rot2D
+from common import create_quadratic, rot2D, load_compatible
 
 initial_state = [0.2, 5.0]
 initial_control = [0.0, 0.0]
@@ -26,11 +26,12 @@ def g(state):
 plant = KernelAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
 
 # --------------------------------------------- Define CLF (quadratic) -----------------------------------------------------
-clf_eig = 0.01*np.array([ 3.0, 1.0 ])
+clf_eig = np.array([ 3.0, 1.0 ])
 clf_angle = 12
 clf_center = [0.0, -2.0]
 Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(np.deg2rad(clf_angle)), center=clf_center, kernel_dim=kernel_dim)
-clf = KernelLyapunov(*initial_state, kernel=kernel, P=Pquadratic)
+
+clf = KernelLyapunov(*initial_state, kernel=kernel, P=load_compatible(__file__, Pquadratic))
 
 # --------------------------------------------- Define CBF (quadratic) -----------------------------------------------------
 cbf_eig = [ 0.2, 1.2 ]
@@ -47,8 +48,8 @@ kerneltriplet = KernelTriplet( plant=plant, clf=clf, cbf=cbf,
                               limits=limits.tolist(), spacing=0.2 )
 
 controller = NominalQP(kerneltriplet, dt=.002)
+T = 15
 
-T = 30
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 plot_config = {
     "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits.tolist(),

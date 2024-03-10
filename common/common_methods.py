@@ -1,4 +1,5 @@
 import math
+import json
 import itertools
 
 import numpy as np
@@ -839,6 +840,20 @@ def show_message(pts, text):
             if "type" in sol.keys():
                 output_text += ", type = " + str(sol["type"])
         print(output_text)
+
+def load_compatible(file_name, P):
+    '''
+    Loads the compatible shape represented by matrix P, if file exists.
+    '''
+    try:
+        with open("logs/" + file_name.split('/')[-1].replace(".py","") + "_compatibility.json") as file:
+            print("Loading compatible shape.")
+            compatible_dict = json.load(file)
+            P = compatible_dict["Pcompatible"]
+            return P
+    except IOError:
+        print("Couldn't locate file with compatible shape. Loading incompatible shape.")
+        return P
 
 class Rect():
     '''

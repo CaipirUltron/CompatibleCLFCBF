@@ -3,13 +3,13 @@ import numpy as np
 from dynamic_systems import KernelAffineSystem
 from functions import Kernel, KernelLyapunov, KernelBarrier, KernelTriplet
 from controllers import NominalQP
-from common import create_quadratic, rot2D, polygon
+from common import create_quadratic, rot2D, polygon, load_compatible
 
 initial_state = [0.5, 6.0]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
-limits = 11*np.array([[-1, 1],[-1, 1]])
+limits = 10*np.array([[-1, 1],[-1, 1]])
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 kernel = Kernel(*initial_state, degree=3)
@@ -40,9 +40,10 @@ points.append({ "coords": [ 0.0,  5.0], "gradient": [ 2.0,  6.0] })
 clf_eig = 1*np.array([ 6.0, 1.0 ])
 clf_angle = np.deg2rad(0)
 Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
+P = load_compatible(__file__, Pquadratic)
 
-# clf = KernelLyapunov(*initial_state, kernel=kernel, P=Pquadratic)
-clf = KernelLyapunov(*initial_state, kernel=kernel, leading={ "shape": Pquadratic, "uses": ["lower_bound", "approximation"] })
+clf = KernelLyapunov(*initial_state, kernel=kernel, P=P)
+# clf = KernelLyapunov(*initial_state, kernel=kernel, leading={ "shape": Pquadratic, "uses": ["lower_bound", "approximation"] })
 clf.is_sos_convex(verbose=True)
 
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------

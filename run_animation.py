@@ -11,7 +11,7 @@ sim = importlib.import_module("examples."+simulation_file, package=None)
 
 try:
     with open("logs/"+simulation_file + ".json") as file:
-        print("Loading graphical simulation with "+simulation_file + ".json")
+        print("Loading graphical simulation with " + simulation_file + ".json")
         logs = json.load(file)
 except IOError:
     print("Couldn't locate " + simulation_file + ".json")

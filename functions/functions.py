@@ -9,7 +9,7 @@ import contourpy as ctp
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
-from scipy.optimize import minimize, least_squares
+from scipy.optimize import minimize
 from shapely import geometry, intersection
 
 from common import *
@@ -1352,9 +1352,8 @@ class KernelTriplet():
         self.limits = [ [-1, +1] for _ in range(2) ]
         self.spacing = 0.1
         self.invariant_color = mcolors.BASE_COLORS["k"]
-        self.compatibility_options = {"min_sep": 0.1}
+        self.compatibility_options = {"barrier_sep": 0.2}
         self.interior_eq_lambda_min = 1e-4
-
         self.invariant_lines = []
         self.plotted_attrs = {}
 
@@ -1366,10 +1365,7 @@ class KernelTriplet():
             boundary_line = geometry.LineString(boundary_seg)
             self.boundary_lines.append(boundary_line)
 
-        self.invariant_set(extended=False)
-
-        # self.equilibria_from_invariant(verbose=True)
-        # self.equilibria(verbose=True)
+        self.invariant_set(extended=False, verbose=True)
 
     def create_limit_lines(self, spacing=0.1):
         '''
@@ -1477,6 +1473,11 @@ class KernelTriplet():
                 bbox = minimum_bounding_rectangle(pts)
                 self.limits = [ [np.min( bbox[:,0] ), np.max( bbox[:,0] )],
                                 [np.min( bbox[:,1] ), np.max( bbox[:,1] )] ]
+
+        if hasattr(self, "limits") and hasattr(self, "spacing"):
+            x = np.arange(self.limits[0][0], self.limits[0][1], self.spacing)
+            y = np.arange(self.limits[1][0], self.limits[1][1], self.spacing)
+            self.xg, self.yg = np.meshgrid(x,y)
 
         self.verify()
 
@@ -1596,6 +1597,20 @@ class KernelTriplet():
         
         return eqs
 
+    def is_removable(self, seg_dict):
+        '''
+        Checks if segment intersections with the boundary can be removed.
+        Parameters: barrier_values are the CBF values of each segment point
+        Returns:  0 if not removable
+                 +1 if removable from outside
+                 -1 if removable from inside
+        '''
+        seg_dict["removable"] = 0
+        if seg_dict["barrier_values"][0]*seg_dict["barrier_values"][-1] > 0:
+            if seg_dict["barrier_values"][0] > 0: return +1         # removable from outside
+            if seg_dict["barrier_values"][0] < 0: return -1         # removable from inside
+        return 0
+
     def invariant_set(self, extended=False, verbose=False):
         '''
         Computes the invariant set for the given CLF-CBF pair.
@@ -1604,10 +1619,7 @@ class KernelTriplet():
             warnings.warn("Currently, the computation of the invariant set is not available for dimensions higher than 2.")
             return
         
-        x = np.arange(self.limits[0][0], self.limits[0][1], self.spacing)
-        y = np.arange(self.limits[1][0], self.limits[1][1], self.spacing)
-        xg, yg = np.meshgrid(x,y)
-        invariant_contour = ctp.contour_generator(x=xg, y=yg, z=self.det_invariant(xg, yg, extended=extended) )
+        invariant_contour = ctp.contour_generator(x=self.xg, y=self.yg, z=self.det_invariant(self.xg, self.yg, extended=extended) )
 
         self.invariant_segs = []
         self.boundary_equilibria = []
@@ -1617,6 +1629,9 @@ class KernelTriplet():
             seg_dict["lambdas"] = [ self.compute_lambda(pt) for pt in segment_points ]
             seg_dict["boundary_equilibria"] = self.seg_boundary_equilibria(segment_points)
             seg_dict["interior_equilibria"] = self.seg_interior_equilibria(segment_points)
+
+            seg_dict["barrier_values"] = [ self.cbf.function(pt) for pt in segment_points ]
+            seg_dict["removable"] = self.is_removable( seg_dict )
 
             self.invariant_segs.append(seg_dict)
             self.boundary_equilibria += seg_dict["boundary_equilibria"]
@@ -1954,7 +1969,7 @@ class KernelTriplet():
 
         return sol_dict
 
-    def compatibilize(self):
+    def compatibilize(self, obj_type="feasibility", verbose=False):
         '''
         This function computes a new CLF geometry that is completely compatible with the CBF.
         '''
@@ -1972,53 +1987,59 @@ class KernelTriplet():
             '''
             Minimizes the changes to the CLF geometry needed for compatibilization.
             '''
-            # return np.linalg.norm( symmetric_var(var) - self.clf.P )
-            return 1.0              # feasibility problem
+            if obj_type == "closest": return np.linalg.norm( symmetric_var(var) - self.clf.P, 'fro')
+            if obj_type == "feasibility": return 1.0
 
-        def PSD_constraint(var):
+        def PSD_constr(var):
             '''
             Constrains P to the positive semidefinite cone. 
             '''
-            P = symmetric_var(var)
-            return np.min(np.linalg.eigvals(P)) - np.min(np.linalg.eigvals(self.clf.P))
+            max_eig = np.max(np.linalg.eigvals(self.clf.P))
+            min_eig = np.min(np.linalg.eigvals(self.clf.P))
+            length_spectra = max_eig - min_eig
 
-        def removability_constraint(var):
+            P = symmetric_var(var)
+            max_eig_P = np.max(np.linalg.eigvals(P))
+            min_eig_P  = np.min(np.linalg.eigvals(P))
+
+            psd_constr = [ np.min(np.linalg.eigvals(P)) - min_eig ]         # > 0
+            psd_constr.append( max_eig_P - min_eig_P - length_spectra )     # > 0
+            return psd_constr
+
+        def removability_constr(var):
             '''
             Removes removable equilibrium points.
             '''
             # Updates boundary equilibria
             self.P = symmetric_var(var)
-            self.equilibria()
+            self.invariant_set()
+            
+            rem_constr = [ 0.0, 0.0 ]
+            min_barrier_values, max_barrier_values = [], []
 
-            # CHANGING THE NUMBER OF CONSTRAINTS ONLINE MAKES IT IMPOSSIBLE TO APPROXIMATE THE JACOBIAN
-            rem_constr = []
-            for minimizer in self.branch_minimizers:
-                if minimizer["type"] == "remover":
-                    rem_constr.append( minimizer["h"] - self.compatibility_options["min_sep"] )
-            for maximizer in self.branch_maximizers:
-                if maximizer["type"] == "remover":
-                    rem_constr.append( -self.compatibility_options["min_sep"] - maximizer["h"] )
+            for seg in self.invariant_segs:
+                if seg["removable"] == +1: min_barrier_values += seg["barrier_values"]
+                if seg["removable"] == -1: max_barrier_values += seg["barrier_values"]
 
-            if len(rem_constr) == 0:
-                rem_constr = [ 0.0 ]
-
-            print(rem_constr)
-            for opt in self.branch_minimizers:
-                # if opt["type"] == "remover":
-                    print(opt)
+            if len(min_barrier_values): rem_constr[0] =  np.min( min_barrier_values ) - self.compatibility_options["barrier_sep"]
+            if len(max_barrier_values): rem_constr[1] = -np.max( max_barrier_values ) - self.compatibility_options["barrier_sep"]
 
             return rem_constr
 
-        def intermediate_callback(intermediate_result):
+        def callback(intermediate_result):
+            '''
+            Visualize intermediate results
+            '''
+            if not verbose: return
             P = symmetric_var(intermediate_result)
-            self.P = P
-            # print( removability_constraint(intermediate_result) )
+            print( f"Spectra = {np.linalg.eigvals(P)}" )
+            print( f"Removability constraint = {removability_constr(intermediate_result)}" )
 
-        constraints = [ {"type": "ineq", "fun": PSD_constraint},
-                        {"type": "ineq", "fun": removability_constraint} ]
+        constraints = [ {"type": "ineq", "fun": PSD_constr},
+                        {"type": "ineq", "fun": removability_constr} ]
         
         init_var = sym2vector(self.clf.P).tolist()
-        sol = minimize( objective, init_var, constraints=constraints, callback=intermediate_callback )
+        sol = minimize( objective, init_var, constraints=constraints, callback=callback )
         
         return symmetric_var( sol.x )
 

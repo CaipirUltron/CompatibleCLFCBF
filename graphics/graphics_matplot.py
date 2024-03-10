@@ -39,9 +39,9 @@ class Plot2DSimulation():
         # self.fig.tight_layout(pad=plot_config["pad"])
         self.animation = None
 
-        print("Equilibrium pts: ")
-        for eq in self.equilibria:
-            print(eq)
+        # print("Equilibrium pts: ")
+        # for eq in self.equilibria:
+        #     print(eq)
 
     def configure(self):
         '''

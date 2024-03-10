@@ -35,14 +35,10 @@ def init():
     sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
 
     sim.kerneltriplet.invariant_set(extended=False)
-    # sim.kerneltriplet.equilibria_from_invariant(verbose=True)
 
     sim.kerneltriplet.plot_invariant(ax)
     sim.kerneltriplet.plot_attr(ax, "boundary_equilibria", mcolors.BASE_COLORS["g"])
     sim.kerneltriplet.plot_attr(ax, "interior_equilibria", mcolors.BASE_COLORS["k"])
-
-    # sim.kerneltriplet.plot_attr(ax, "branch_minimizers", mcolors.BASE_COLORS["b"])
-    # sim.kerneltriplet.plot_attr(ax, "branch_maximizers", mcolors.BASE_COLORS["r"])
 
 def update(i):
     if i <= num_steps:
@@ -54,15 +50,10 @@ def update(i):
 
         sim.kerneltriplet.invariant_set()
         # sim.kerneltriplet.update_invariant_set()
-        # sim.kerneltriplet.equilibria_from_invariant(verbose=True)
-        # sim.kerneltriplet.equilibria(verbose=True)
 
         sim.kerneltriplet.plot_invariant(ax)
         sim.kerneltriplet.plot_attr(ax, "boundary_equilibria", mcolors.BASE_COLORS["g"])
         sim.kerneltriplet.plot_attr(ax, "interior_equilibria", mcolors.BASE_COLORS["k"])
-
-        # sim.kerneltriplet.plot_attr(ax, "branch_minimizers", mcolors.BASE_COLORS["b"])
-        # sim.kerneltriplet.plot_attr(ax, "branch_maximizers", mcolors.BASE_COLORS["r"])
 
 fps = 60
 animation = anim.FuncAnimation(fig, func=update, init_func=init, interval=1000/fps, repeat=False, cache_frame_data=False)
