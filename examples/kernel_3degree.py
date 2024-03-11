@@ -40,9 +40,8 @@ points.append({ "coords": [ 0.0,  5.0], "gradient": [ 2.0,  6.0] })
 clf_eig = 1*np.array([ 6.0, 1.0 ])
 clf_angle = np.deg2rad(0)
 Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
-P = load_compatible(__file__, Pquadratic)
 
-clf = KernelLyapunov(*initial_state, kernel=kernel, P=P)
+clf = KernelLyapunov(*initial_state, kernel=kernel, P=load_compatible(__file__, Pquadratic, load_compatible=True))
 # clf = KernelLyapunov(*initial_state, kernel=kernel, leading={ "shape": Pquadratic, "uses": ["lower_bound", "approximation"] })
 clf.is_sos_convex(verbose=True)
 

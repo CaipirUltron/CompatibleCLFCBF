@@ -841,18 +841,36 @@ def show_message(pts, text):
                 output_text += ", type = " + str(sol["type"])
         print(output_text)
 
-def load_compatible(file_name, P):
+def load_compatible(file_name, P, load_compatible=True):
     '''
-    Loads the compatible shape represented by matrix P, if file exists.
+    Loads the shapes represented by matrices P if file exists.
+    flag = True loads the compatible shape.
+    flag = False loads the original (incompatible) shape.
     '''
     try:
-        with open("logs/" + file_name.split('/')[-1].replace(".py","") + "_compatibility.json") as file:
-            print("Loading compatible shape.")
+        with open("logs/" + file_name.split('/')[-1].replace(".py","") + "_comp.json") as file:
+
+            message = "Loading compatibilization file. "
             compatible_dict = json.load(file)
-            P = compatible_dict["Pcompatible"]
-            return P
+
+            message += "Original P is "
+            if compatible_dict["is_original_compatible"]: message += "compatible. "
+            else: message += "incompatible. "
+
+            message += "Processed P is "
+            if compatible_dict["is_processed_compatible"]: message += "compatible. "
+            else: message += "incompatible. "
+
+            print(message)
+
+            if load_compatible: 
+                print("Loading processed P matrix.")
+                return np.array(compatible_dict["P_processed"])
+            print("Loading original P matrix.")
+            return np.array(compatible_dict["P_original"])
+        
     except IOError:
-        print("Couldn't locate file with compatible shape. Loading incompatible shape.")
+        print("Couldn't locate compatibilization file. Returning passed P matrix.")
         return P
 
 class Rect():

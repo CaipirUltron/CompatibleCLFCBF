@@ -1,3 +1,4 @@
+import time
 import math
 import itertools
 import numpy as np
@@ -1356,6 +1357,7 @@ class KernelTriplet():
         self.interior_eq_lambda_min = 1e-4
         self.invariant_lines = []
         self.plotted_attrs = {}
+        self.comp_timer = { "start_time": 0.0, "execution_time": 0.0 }
 
         self.set_param(**kwargs)
         self.create_limit_lines()
@@ -1619,7 +1621,7 @@ class KernelTriplet():
             warnings.warn("Currently, the computation of the invariant set is not available for dimensions higher than 2.")
             return
         
-        invariant_contour = ctp.contour_generator(x=self.xg, y=self.yg, z=self.det_invariant(self.xg, self.yg, extended=extended) )
+        invariant_contour = ctp.contour_generator( x=self.xg, y=self.yg, z=self.det_invariant(self.xg, self.yg, extended=extended) )
 
         self.invariant_segs = []
         self.boundary_equilibria = []
@@ -1969,10 +1971,29 @@ class KernelTriplet():
 
         return sol_dict
 
+    def is_compatible(self):
+        '''
+        Checks if kernel triplet is compatible.
+        '''
+        # Checks if boundary has stable equilibria
+        for boundary_eq in self.boundary_equilibria:
+            if boundary_eq["equilibrium"] == "stable":
+                return False
+            
+        # Checks if more than one stable interior equilibria exist 
+        stable_interior_counter = 0
+        for interior_eq in self.interior_equilibria:
+            if interior_eq["equilibrium"] == "stable": stable_interior_counter += 1
+        if stable_interior_counter > 1: return False
+
+        return True
+
     def compatibilize(self, obj_type="feasibility", verbose=False):
         '''
-        This function computes a new CLF geometry that is completely compatible with the CBF.
+        This function computes a new CLF geometry that is completely compatible with the original CBF.
         '''
+        is_original_compatible = self.is_compatible()
+
         def symmetric_var(var):
             '''
             var is a n(n+1)/2 list representing a stacked symmetric matrix.
@@ -2031,17 +2052,41 @@ class KernelTriplet():
             Visualize intermediate results
             '''
             if not verbose: return
-            P = symmetric_var(intermediate_result)
-            print( f"Spectra = {np.linalg.eigvals(P)}" )
+            # P = symmetric_var(intermediate_result)
+            print( f"Spectra = {np.linalg.eigvals(self.P)}" )
             print( f"Removability constraint = {removability_constr(intermediate_result)}" )
 
+            self.comp_timer["execution_time"] += time.time() - self.comp_timer["start_time"]
+            self.comp_timer["start_time"] = time.time()
+            print(self.comp_timer["execution_time"], "seconds have passed...")
+
+        if verbose: print("Starting compatibilization process. This may take a while...")
+
+        P_original = self.P
         constraints = [ {"type": "ineq", "fun": PSD_constr},
                         {"type": "ineq", "fun": removability_constr} ]
-        
         init_var = sym2vector(self.clf.P).tolist()
+
+        self.comp_timer["start_time"] = time.time()
         sol = minimize( objective, init_var, constraints=constraints, callback=callback )
-        
-        return symmetric_var( sol.x )
+
+        is_processed_compatible = self.is_compatible()
+
+        if verbose:
+            message = "Compatibilization "
+            if is_processed_compatible: message += "was successful. "
+            else: message += "failed. "
+            message += "Process took " + str(self.comp_timer["execution_time"]) + " seconds."
+            print(message)
+
+        comp_result = { "kernel_dimension": self.kernel.kernel_dim,
+                        "P_original": P_original.tolist(),
+                        "P_processed": symmetric_var( sol.x ).tolist(),
+                        "is_original_compatible": is_original_compatible,
+                        "is_processed_compatible": is_processed_compatible,
+                        "execution_time": self.comp_timer["execution_time"] }
+    
+        return comp_result
 
     def compute_lambda(self, x):
         '''

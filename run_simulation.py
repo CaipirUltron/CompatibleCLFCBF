@@ -1,5 +1,4 @@
-import platform, os, sys
-import json
+import platform, os, sys, json, time
 import importlib
 
 simulation_config = sys.argv[1].replace(".json","")
@@ -7,16 +6,19 @@ sim = importlib.import_module("examples."+simulation_config, package=None)
 
 # Simulation loop -------------------------------------------------------------------
 num_steps = int(sim.T/sim.sample_time)
-time = []
+time_list = []
+
 print('Running simulation...')
+time.sleep(1.5)
+
 for step in range(0, num_steps):
 
     # Simulation time
     t = step*sim.sample_time
     if platform.system().lower() != 'windows':
-        os.system('clear')
+        os.system('tput cup 12 0 && tput ed')           # clears just the last line of the terminal
     print("Simulating instant t = " + str(float(f'{t:.3f}')) + " s")
-    time.append( t )
+    time_list.append( t )
 
     # Control
     u_control = sim.controller.get_control()
@@ -28,7 +30,7 @@ for step in range(0, num_steps):
     sim.plant.actuate(sim.sample_time)
 
 # Collect simulation logs and save in .json file ------------------------------------
-sim.logs["time"] = time
+sim.logs["time"] = time_list
 sim.logs["state"] = sim.plant.state_log
 sim.logs["control"] = sim.plant.control_log
 sim.logs["clf_log"] = sim.controller.clf.dynamics.state_log

@@ -1,21 +1,25 @@
+'''
+Compatibilizes CLF with CBF and plant for a given KernelTriplet.
+The results are stored in a json file.
+'''
 import sys
 import json
-import time
 import importlib
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples."+simulation_file, package=None)
 
-start_time = time.time()
+if sim.kerneltriplet.is_compatible(): 
+    print("Given CLF is already compatible with CBF and plant.")
+else: 
+    print("Given CLF is not compatible with CBF and plant.")
 
-Pcompatible = sim.kerneltriplet.compatibilize(verbose=True)
+    compatibility_result = sim.kerneltriplet.compatibilize(verbose=True)
 
-end_time = time.time()
-execution_time = end_time - start_time
-print("Compatibilization took ", execution_time, "s")
-
-with open("logs/"+simulation_file+"_compatibility.json", "w") as file:
-    print("Saving compatibilization matrix...")
-    compatibility_dict = {"Pcompatible": Pcompatible.tolist()}
-    json.dump(compatibility_dict, file, indent=4)
+    try:
+        with open("logs/"+simulation_file+"_comp.json", "w") as file:
+            json.dump(compatibility_result, file, indent=4)
+            print("Compatibilization file saved successfully.")
+    except IOError:
+        print("Error saving compatibilization file.")
