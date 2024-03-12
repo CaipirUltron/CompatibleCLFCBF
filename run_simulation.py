@@ -16,7 +16,7 @@ for step in range(0, num_steps):
     # Simulation time
     t = step*sim.sample_time
     if platform.system().lower() != 'windows':
-        os.system('tput cup 12 0 && tput ed')           # clears just the last line of the terminal
+        os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
     print("Simulating instant t = " + str(float(f'{t:.3f}')) + " s")
     time_list.append( t )
 

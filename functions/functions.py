@@ -9,6 +9,7 @@ import warnings
 import contourpy as ctp
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib.animation as anim
 
 from scipy.optimize import minimize
 from shapely import geometry, intersection
@@ -1357,7 +1358,8 @@ class KernelTriplet():
         self.interior_eq_lambda_min = 1e-4
         self.invariant_lines = []
         self.plotted_attrs = {}
-        self.comp_timer = { "start_time": 0.0, "execution_time": 0.0 }
+        self.comp_process_data = { "step": 0, "start_time": 0.0, "execution_time": 0.0 }
+        self.comp_graphics = {}
 
         self.set_param(**kwargs)
         self.create_limit_lines()
@@ -1988,7 +1990,7 @@ class KernelTriplet():
 
         return True
 
-    def compatibilize(self, obj_type="feasibility", verbose=False):
+    def compatibilize(self, obj_type="feasibility", verbose=False, animate=False):
         '''
         This function computes a new CLF geometry that is completely compatible with the original CBF.
         '''
@@ -2047,27 +2049,44 @@ class KernelTriplet():
 
             return rem_constr
 
-        def callback(intermediate_result):
+        def intermediate_callback(intermediate_result, ax=None):
             '''
-            Visualize intermediate results
+            Callback for visualization of intermediate results (verbose or by animation).
             '''
-            if not verbose: return
-            # P = symmetric_var(intermediate_result)
-            print( f"Spectra = {np.linalg.eigvals(self.P)}" )
-            print( f"Removability constraint = {removability_constr(intermediate_result)}" )
+            self.comp_process_data["step"] += 1
+            self.comp_process_data["execution_time"] += time.time() - self.comp_process_data["start_time"]
+            self.comp_process_data["start_time"] = time.time()
 
-            self.comp_timer["execution_time"] += time.time() - self.comp_timer["start_time"]
-            self.comp_timer["start_time"] = time.time()
-            print(self.comp_timer["execution_time"], "seconds have passed...")
+            if verbose:
+                print( f"Spectra = {np.linalg.eigvals(self.P)}" )
+                print( f"Removability constraint = {removability_constr(intermediate_result)}" )
+                print(self.comp_process_data["execution_time"], "seconds have passed...")
 
-        if verbose: print("Starting compatibilization process. This may take a while...")
+            if ax: self.update_comp_plot(ax)
 
         P_original = self.P
         constraints = [ {"type": "ineq", "fun": PSD_constr},
                         {"type": "ineq", "fun": removability_constr} ]
         init_var = sym2vector(self.clf.P).tolist()
 
-        self.comp_timer["start_time"] = time.time()
+        callback = lambda res: intermediate_callback(res)
+        if animate:
+            fig = plt.figure(constrained_layout=True)
+            ax = fig.add_subplot(111)
+            ax.set_title("Showing compatibilization process...")
+            ax.set_aspect('equal', adjustable='box')
+            ax.set_xlim(self.limits[0][0], self.limits[0][1])
+            ax.set_ylim(self.limits[1][0], self.limits[1][1])
+
+            self.init_comp_plot(ax)
+            
+            plt.show(block=False)
+            plt.pause(0.01)
+            callback = lambda res: intermediate_callback(res, ax)
+
+        #--------------------------- Main optimization process ---------------------------
+        if verbose: print("Starting compatibilization process. This may take a while...")
+        self.comp_process_data["start_time"] = time.time()
         sol = minimize( objective, init_var, constraints=constraints, callback=callback )
 
         is_processed_compatible = self.is_compatible()
@@ -2076,7 +2095,7 @@ class KernelTriplet():
             message = "Compatibilization "
             if is_processed_compatible: message += "was successful. "
             else: message += "failed. "
-            message += "Process took " + str(self.comp_timer["execution_time"]) + " seconds."
+            message += "Process took " + str(self.comp_process_data["execution_time"]) + " seconds."
             print(message)
 
         comp_result = { "kernel_dimension": self.kernel.kernel_dim,
@@ -2084,7 +2103,8 @@ class KernelTriplet():
                         "P_processed": symmetric_var( sol.x ).tolist(),
                         "is_original_compatible": is_original_compatible,
                         "is_processed_compatible": is_processed_compatible,
-                        "execution_time": self.comp_timer["execution_time"] }
+                        "execution_time": self.comp_process_data["execution_time"],
+                        "num_steps": self.comp_process_data["step"] }
     
         return comp_result
 
@@ -2198,6 +2218,23 @@ class KernelTriplet():
         # from this point on, len(attr) = len(self.plotted_attrs[attr_name])
         for k in range(len(attr)):
             self.plotted_attrs[attr_name][k].set_data( attr[k]["x"][0], attr[k]["x"][1] )
+
+    def init_comp_plot(self, ax):
+        '''
+        Initialize compatibilization animation plot,
+        '''
+        self.comp_graphics["text"] = ax.text(self.limits[0][1]-5.5, self.limits[1][0]+0.5, str("Optimization step = 0"), fontsize=14)
+
+    def update_comp_plot(self, ax):
+        '''
+        Update compatibilization animation plot,
+        '''
+        step = self.comp_process_data["step"]
+        self.comp_graphics["text"].set_text(f"Optimization step = {step}")
+
+        self.plot_invariant(ax)
+        self.plot_attr(ax, "boundary_equilibria", mcolors.BASE_COLORS["g"])
+        self.plot_attr(ax, "interior_equilibria", mcolors.BASE_COLORS["k"])
 
 class ApproxFunction(Function):
     '''
