@@ -1767,15 +1767,18 @@ class KernelTriplet():
 
         is_processed_compatible = self.is_compatible()
 
+        print(f"Compatibilization terminated with message: {sol.message}")
+
         message = "Compatibilization "
         if is_processed_compatible: message += "was successful. "
-        else: message += "failed. "
+        else: message += "failed with message "
         message += "Process took " + str(self.comp_process_data["execution_time"]) + " seconds."
         print(message)
 
         if animate: plt.pause(2)
 
-        comp_result = { "kernel_dimension": self.kernel.kernel_dim,
+        comp_result = { "opt_message": sol.message, 
+                        "kernel_dimension": self.kernel.kernel_dim,
                         "P_original": Pnom.tolist(),
                         "P_processed": P.tolist(),
                         "is_original_compatible": is_original_compatible,

@@ -9,7 +9,7 @@ initial_state = [0.5, 6.0]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
-limits = 10*np.array([[-1, 1],[-1, 1]])
+limits = np.array([[-7, 7],[-2, 4]])
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 kernel = Kernel(*initial_state, degree=3)
