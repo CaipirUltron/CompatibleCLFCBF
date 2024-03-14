@@ -4,6 +4,7 @@ import itertools
 import numpy as np
 import scipy as sp
 import cvxpy as cp
+import logging
 import warnings
 
 import contourpy as ctp
@@ -1356,10 +1357,16 @@ class KernelTriplet():
         self.invariant_color = mcolors.BASE_COLORS["k"]
         self.compatibility_options = {"barrier_sep": 0.2}
         self.interior_eq_lambda_min = 1e-4
-        self.invariant_lines = []
+        self.invariant_lines_plot = []
         self.plotted_attrs = {}
-        self.comp_process_data = { "step": 0, "start_time": 0.0, "execution_time": 0.0 }
-        self.comp_graphics = {}
+        self.comp_process_data = { "step": 0, 
+                                  "start_time": 0.0, 
+                                  "execution_time": 0.0, 
+                                  "gui_eventloop_time": 0.05,
+                                  "invariant_segs_log": [] }
+        self.comp_graphics = { "fig": None,
+                               "text": None,
+                               "clf_artists": [] }
 
         self.set_param(**kwargs)
         self.create_limit_lines()
@@ -1369,7 +1376,7 @@ class KernelTriplet():
             boundary_line = geometry.LineString(boundary_seg)
             self.boundary_lines.append(boundary_line)
 
-        self.invariant_set(extended=False, verbose=True)
+        self.gen_invariant_set(extended=False, verbose=True)
 
     def create_limit_lines(self, spacing=0.1):
         '''
@@ -1615,20 +1622,15 @@ class KernelTriplet():
             if seg_dict["barrier_values"][0] < 0: return -1         # removable from inside
         return 0
 
-    def invariant_set(self, extended=False, verbose=False):
+    def compute_invariant_set(self, verbose=False):
         '''
-        Computes the invariant set for the given CLF-CBF pair.
+        Populates invariant segments with data and compute equilibrium points from invariant line data.
         '''
-        if self.n > 2:
-            warnings.warn("Currently, the computation of the invariant set is not available for dimensions higher than 2.")
-            return
-        
-        invariant_contour = ctp.contour_generator( x=self.xg, y=self.yg, z=self.det_invariant(self.xg, self.yg, extended=extended) )
-
         self.invariant_segs = []
         self.boundary_equilibria = []
         self.interior_equilibria = []
-        for segment_points in invariant_contour.lines(0.0):
+
+        for segment_points in self.invariant_lines:
             seg_dict = { "points": segment_points }
             seg_dict["lambdas"] = [ self.compute_lambda(pt) for pt in segment_points ]
             seg_dict["boundary_equilibria"] = self.seg_boundary_equilibria(segment_points)
@@ -1645,333 +1647,17 @@ class KernelTriplet():
             show_message(self.boundary_equilibria, "boundary equilibrium points")
             show_message(self.interior_equilibria, "interior equilibrium points")
 
-    def update_segment(self, segment):
+    def gen_invariant_set(self, extended=False, verbose=False):
         '''
-        Updates segment. Aims to significantly improve performance on updating the invariant set. 
+        Computes the invariant set for the given CLF-CBF pair.
         '''
-        n = self.plant.n
-        seg_points = segment["points"]
-
-        num_pts = len(seg_points)
-        line_sizes = [ np.linalg.norm(seg_points[k] - seg_points[k+1]) for k in range(len(seg_points)-1) ]
-
-        def get_deltas(var):
-            return var[0:n*num_pts].reshape(num_pts, n)
-
-        def objective(var):
-            '''
-            var is a list with coordinates [ pt1[0] pt1[1] .. pt1[n-1] pt2[0] pt2[1] ... pt2[n-1] ...  ptm[n-1] l1 l2 ... lm ]
-            n is the state dimension
-            m is the number of points in the segment
-            '''
-            deltas = get_deltas(var)
-            fun = sum( map(lambda d: np.linalg.norm(d)**2, deltas) )
-
-            new_seg_points = seg_points + deltas
-            fun += sum( [ ( np.linalg.norm(new_seg_points[k] - new_seg_points[k+1]) - line_sizes[k] )**2 for k in range(num_pts-1) ] )
-            fun += sum( [ self.det_invariant( *new_seg_points[k].tolist() )**2 for k in range(num_pts) ] )
-            return fun
+        if self.n > 2:
+            warnings.warn("Currently, the computation of the invariant set is not available for dimensions higher than 2.")
+            return
         
-        # def invariant_constr(var):
-        #     deltas = get_deltas(var)
-        #     return [ self.det_invariant( *(seg_points[k] + deltas[k]).tolist() ) for k in range(num_pts) ]
-    
-        def lambda_constr(var):
-            deltas = get_deltas(var)
-            return [ self.compute_lambda( seg_points[k] + deltas[k] ) for k in range(num_pts) ]
-
-        # constraints = [ {"type": "eq", "fun": invariant_constr} ]
-        constraints = []
-        constraints.append( {"type": "ineq", "fun": lambda_constr} )
-
-        init_var = [ 0.0 for _ in range(n*num_pts) ]
-        sol = minimize(objective, init_var, constraints=constraints, options={"disp":True})
-
-        new_seg_pts = seg_points + get_deltas(sol.x)
-
-        segment["points"] = new_seg_pts
-        segment["lambdas"] = [ self.compute_lambda(new_seg_pts[k]) for k in range(num_pts) ]
-        segment["boundary_equilibria"] = self.seg_boundary_equilibria(new_seg_pts)
-        segment["interior_equilibria"] = self.seg_interior_equilibria(new_seg_pts)
-        return segment
-
-    def update_invariant_set(self):
-        '''
-        Updates the invariant set.
-        '''
-        self.boundary_equilibria = []
-        self.interior_equilibria = []
-        for segment in self.invariant_segs:
-            self.update_segment( segment )
-            self.boundary_equilibria += segment["boundary_equilibria"]
-            self.interior_equilibria += segment["interior_equilibria"]
-
-    def equilibria_from_invariant(self, verbose=False):
-        '''
-        Computes all equilibrium points and local branch optimizers of the CLF-CBF pair, using the invariant set intersections with the CBF boundary.
-        '''
-        if len(self.invariant_segs) == 0:
-            self.invariant_set(extended=False)
-
-        # Finds intersections between boundary and invariant set segments (boundary equilibria)
-        self.boundary_equilibria = []
-        self.interior_equilibria = []
-        for boundary_seg in self.boundary_segs:
-            for invariant_seg in self.invariant_segs:
-                
-                boundary_curve = geometry.LineString(boundary_seg)
-                invariant_seg_curve = geometry.LineString(invariant_seg)
-                intersections = intersection( boundary_curve, invariant_seg_curve )
-
-                new_candidates = []
-                if not intersections.is_empty:
-                    if hasattr(intersections, "geoms"):
-                        for geo in intersections.geoms:
-                            x, y = geo.xy
-                            x, y = list(x), list(y)
-                            new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
-                    else:
-                        x, y = intersections.xy
-                        x, y = list(x), list(y)
-                        new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
-                
-                for pt in new_candidates:
-
-                    eq_sol = self.optimize_over("boundary", init_x=pt)
-                    if (eq_sol) and "equilibrium" in eq_sol.keys():
-                        add_to(eq_sol, self.boundary_equilibria)
-
-                    eq_sol = self.optimize_over("interior", init_x=pt)
-                    if (eq_sol) and "equilibrium" in eq_sol.keys():
-                        add_to(eq_sol, self.interior_equilibria)
-
-                    branch_minimizer = self.optimize_over("min_branch", init_x=pt)
-                    if branch_minimizer and "type" in branch_minimizer.keys():
-                        add_to(branch_minimizer, self.branch_minimizers)
-
-                    branch_maximizer = self.optimize_over("max_branch", init_x=pt)
-                    if branch_maximizer and "type" in branch_maximizer.keys():
-                        add_to(branch_maximizer, self.branch_maximizers)
-
-        # self.branch_optimizers(verbose)
-
-        if verbose:
-            show_message(self.boundary_equilibria, "boundary equilibrium points")
-            show_message(self.interior_equilibria, "interior equilibrium points")
-
-            show_message(self.branch_minimizers, "branch minimizers")
-            show_message(self.branch_maximizers, "branch maximizers")
-
-    def equilibria(self, verbose=False):
-        '''
-        Computes all equilibrium points and local branch optimizers of the CLF-CBF pair, using the invariant set rectangular limits as initializers for the optimization algorithm.
-        This method does not require the update of the complete invariant set geometry, 
-        and is capable of computing the equilibrium points and local branch optimizers faster than the previous method.
-        '''
-        # Get initializers from boundary lines
-        self.branch_initializers = [] 
-        for line in self.limit_lines:
-            self.branch_initializers += self.get_zero_det(line["x"], line["y"])
-
-        # Find boundary, interior equilibria and branch optimizers
-        self.boundary_equilibria = []
-        self.interior_equilibria = []
-        self.branch_minimizers = []
-        self.branch_maximizers = []
-        for pt in self.branch_initializers:
-
-            eq_sol = self.optimize_over("boundary", init_x=pt)
-            if (eq_sol) and "equilibrium" in eq_sol.keys():
-                add_to(eq_sol, self.boundary_equilibria)
-
-            eq_sol = self.optimize_over("interior", init_x=pt)
-            if (eq_sol) and "equilibrium" in eq_sol.keys():
-                add_to(eq_sol, self.interior_equilibria)
-
-            branch_minimizer = self.optimize_over("min_branch", init_x=pt)
-            if branch_minimizer and "type" in branch_minimizer.keys():
-                add_to(branch_minimizer, self.branch_minimizers)
-
-            branch_maximizer = self.optimize_over("max_branch", init_x=pt)
-            if branch_maximizer and "type" in branch_maximizer.keys():
-                add_to(branch_maximizer, self.branch_maximizers)
-
-        # self.branch_optimizers(verbose)
-
-        if verbose:
-            show_message(self.boundary_equilibria, "boundary equilibrium points")
-            show_message(self.interior_equilibria, "interior equilibrium points")
-
-            show_message(self.branch_minimizers, "branch minimizers")
-            show_message(self.branch_maximizers, "branch maximizers")
-
-    def branch_optimizers(self, verbose=False):
-        '''
-        Compute the branch optimizers
-        '''
-        self.connections_to_min = { i:[] for i in range(0,len(self.boundary_equilibria)) }
-        self.connections_to_max = { i:[] for i in range(0,len(self.boundary_equilibria)) }
-        self.branch_minimizers = []
-        self.branch_maximizers = []
-
-        # Create adjacency list for connections btw eq points and optimizers
-        for num_eq in range(len(self.boundary_equilibria)):
-            eq_sol = self.boundary_equilibria[num_eq]
-
-            branch_minimizer = self.optimize_over("min_branch", init_x=eq_sol["x"])
-            if branch_minimizer and "type" in branch_minimizer.keys():
-                add_to(branch_minimizer, self.branch_minimizers, self.connections_to_min[num_eq])
-
-            branch_maximizer = self.optimize_over("max_branch", init_x=eq_sol["x"])
-            if branch_maximizer and "type" in branch_maximizer.keys():
-                add_to(branch_maximizer, self.branch_maximizers, self.connections_to_max[num_eq])
-
-        # Checks if there exist removable optimizers
-        self.check_removables()
-
-        if verbose:
-            show_message(self.boundary_equilibria, "boundary equilibrium points")
-            show_message(self.interior_equilibria, "interior equilibrium points")
-
-            show_message(self.branch_minimizers, "branch minimizers")
-            show_message(self.branch_maximizers, "branch maximizers")
-
-            print(f"Connections to minimizers = {self.connections_to_min}")
-            print(f"Connections to maximizers = {self.connections_to_max}")
-
-    def check_removables(self):
-        '''
-        Checks if equilibrium point with index eq_index is removable.
-        Returns the corresponding minimizer/maximizer that removes the equilibrium point.
-        '''
-        self.min_removers, self.max_removers = [], []
-
-        for eq_index in range(len(self.boundary_equilibria)):
-            for minimizer_index in self.connections_to_min[eq_index]:
-                for j in self.connections_to_min.keys():
-                    if j == eq_index:       # ignore if self
-                        continue
-                    if minimizer_index in self.connections_to_min[j] and np.linalg.norm( self.branch_minimizers[minimizer_index]["gradh"] ) > 1e-3:
-                        self.branch_minimizers[minimizer_index]["type"] = "remover"
-                        add_to(self.branch_minimizers[minimizer_index], self.min_removers)
-                        break
-
-            for maximizer_index in self.connections_to_max[eq_index]:
-                for j in self.connections_to_max.keys():
-                    if j == eq_index:       # ignore if self
-                        continue
-                    if maximizer_index in self.connections_to_max[j] and np.linalg.norm( self.branch_maximizers[maximizer_index]["gradh"] ) > 1e-3:
-                        self.branch_maximizers[maximizer_index]["type"] = "remover"
-                        add_to(self.branch_maximizers[maximizer_index], self.max_removers)
-                        break
-
-    def optimize_over(self, optimization=None, **kwargs):
-        '''
-        Finds equilibrium points solutions using sliding mode control. If no initial point is specified, it selections a point at random from a speficied interval.
-        Returns a dict containing all relevant data about the found equilibrium point, including its stability.
-        '''
-        init_x_def = False
-        for key in kwargs.keys():
-            aux_key = key.lower()
-            if aux_key == "init_x":
-                init_x = kwargs[key]
-                init_x_def = True
-                continue
-
-        if not init_x_def:
-            init_x = [ np.random.uniform( self.limits[k][0], self.limits[k][1] ) for k in range(self.n) ]
-
-        def invariant_set(var):
-            '''
-            Returns the vector residues of invariant set -> is zero for x in the invariant set
-            '''
-            x = var[0:self.n]
-            return det_invariant(x, self.kernel, self.P, self.cbf.Q, self.plant.get_F(), self.params)
-
-        def boundary_constraint(var):
-            '''
-            Returns the diff between mQm and 1
-            '''
-            x = var[0:self.n]
-            delta = var[self.n]
-
-            h = self.cbf.function(x)
-            return delta - np.abs(h)
-
-        def objective(var):
-            '''
-            Objective function to be minimized
-            '''
-            delta = var[self.n]
-            x = var[0:self.n]
-            
-            if optimization == "boundary":
-                return delta**2
-            elif optimization == "interior":
-                return self.compute_lambda(x.tolist())**2
-            elif optimization == "min_branch":
-                return self.cbf.function(x)
-            elif optimization == "max_branch":
-                return -self.cbf.function(x)
-            else: 1.0
-
-        init_delta = 1.0
-        init_var = init_x + [init_delta]
-
-        constraints = [ {"type": "eq", "fun": invariant_set} ]
-        if optimization == "boundary":
-            constraints.append({"type": "ineq", "fun": boundary_constraint})
-
-        sol = minimize(objective, init_var, constraints=constraints)
-
-        eq_coords = sol.x[0:self.n].tolist()
-        l = self.compute_lambda(eq_coords)
-        h = self.cbf.function(eq_coords)
-        gradh = self.cbf.gradient(eq_coords)
-
-        sol_dict = None
-
-        # Valid solution is a point in the invariant set with lambda >= 0
-        if l >= 0 and np.abs(invariant_set(sol.x)) < 1e-3:
-            sol_dict = {}
-            sol_dict["x"] = eq_coords
-            sol_dict["lambda"] = l
-            sol_dict["delta"] = sol.x[self.n]
-            sol_dict["invariant_cost"] = invariant_set(sol.x)
-            sol_dict["h"] = h
-            sol_dict["gradh"] = np.linalg.norm(gradh)
-            sol_dict["init_x"] = init_x
-            # sol_dict["message"] = sol.message
-        
-        # Boundary equilibrium point - compute stability
-        if (sol_dict) and (np.abs(sol_dict["h"]) <= 1e-3):
-            stability, eta = self.compute_stability(eq_coords, "boundary")
-            sol_dict["eta"], sol_dict["stability"] = eta, stability
-            sol_dict["equilibrium"] = "stable"
-            if stability > 0:
-                sol_dict["equilibrium"] = "unstable"
-
-        # Interior equilibrium points (for now, stability is not computed)
-        if (sol_dict) and (optimization == "interior") and (np.abs(sol_dict["lambda"]) <= 1e-5):
-            stability, eta = self.compute_stability(eq_coords, "interior")
-            sol_dict["eta"], sol_dict["stability"] = eta, stability
-            sol_dict["equilibrium"] = "stable"
-            if stability > 0:
-                sol_dict["equilibrium"] = "unstable"
-
-        # Minimizers
-        if (sol_dict) and optimization == "min_branch":
-            if sol_dict["gradh"] < 1e-03:
-                sol_dict["type"] = "cbf_minimum"
-            else: sol_dict["type"] = "undefined"
-
-        # Maximizers
-        if (sol_dict) and optimization == "max_branch":
-            if sol_dict["h"] > 1e+05 or sol_dict["gradh"] > 1e+06:
-                sol_dict = None                 # filters unbounded maximizers
-            else: sol_dict["type"] = "undefined"
-
-        return sol_dict
+        invariant_contour = ctp.contour_generator( x=self.xg, y=self.yg, z=self.det_invariant(self.xg, self.yg, extended=extended) )
+        self.invariant_lines = invariant_contour.lines(0.0)
+        self.compute_invariant_set(verbose=verbose)
 
     def is_compatible(self):
         '''
@@ -1990,52 +1676,39 @@ class KernelTriplet():
 
         return True
 
-    def compatibilize(self, obj_type="feasibility", verbose=False, animate=False):
+    def compatibilize(self, obj_type="closest", verbose=False, animate=False):
         '''
         This function computes a new CLF geometry that is completely compatible with the original CBF.
         '''
         is_original_compatible = self.is_compatible()
+        Pnom = self.clf.P
 
         def symmetric_var(var):
             '''
             var is a n(n+1)/2 list representing a stacked symmetric matrix.
             '''
             p = self.kernel.kernel_dim
-            P = vector2sym(var)
-            if P.shape != (p,p):
+            P2 = vector2sym(var)
+            if P2.shape != (p,p):
                 raise Exception("Matrix dimensions are incompatible.")
-            return P
+            return P2
 
         def objective(var):
             '''
             Minimizes the changes to the CLF geometry needed for compatibilization.
             '''
-            if obj_type == "closest": return np.linalg.norm( symmetric_var(var) - self.clf.P, 'fro')
+            P2 = symmetric_var(var)
+            if obj_type == "closest": return np.linalg.norm( P2.T @ P2 - Pnom, 'fro')
             if obj_type == "feasibility": return 1.0
-
-        def PSD_constr(var):
-            '''
-            Constrains P to the positive semidefinite cone. 
-            '''
-            max_eig = np.max(np.linalg.eigvals(self.clf.P))
-            min_eig = np.min(np.linalg.eigvals(self.clf.P))
-            length_spectra = max_eig - min_eig
-
-            P = symmetric_var(var)
-            max_eig_P = np.max(np.linalg.eigvals(P))
-            min_eig_P  = np.min(np.linalg.eigvals(P))
-
-            psd_constr = [ np.min(np.linalg.eigvals(P)) - min_eig ]         # > 0
-            psd_constr.append( max_eig_P - min_eig_P - length_spectra )     # > 0
-            return psd_constr
 
         def removability_constr(var):
             '''
             Removes removable equilibrium points.
             '''
             # Updates boundary equilibria
-            self.P = symmetric_var(var)
-            self.invariant_set()
+            P2 = symmetric_var(var)
+            self.P = P2.T @ P2
+            self.gen_invariant_set()
             
             rem_constr = [ 0.0, 0.0 ]
             min_barrier_values, max_barrier_values = [], []
@@ -2049,62 +1722,67 @@ class KernelTriplet():
 
             return rem_constr
 
-        def intermediate_callback(intermediate_result, ax=None):
-            '''
-            Callback for visualization of intermediate results (verbose or by animation).
-            '''
-            self.comp_process_data["step"] += 1
-            self.comp_process_data["execution_time"] += time.time() - self.comp_process_data["start_time"]
-            self.comp_process_data["start_time"] = time.time()
-
-            if verbose:
-                print( f"Spectra = {np.linalg.eigvals(self.P)}" )
-                print( f"Removability constraint = {removability_constr(intermediate_result)}" )
-                print(self.comp_process_data["execution_time"], "seconds have passed...")
-
-            if ax: self.update_comp_plot(ax)
-
-        P_original = self.P
-        constraints = [ {"type": "ineq", "fun": PSD_constr},
-                        {"type": "ineq", "fun": removability_constr} ]
-        init_var = sym2vector(self.clf.P).tolist()
-
-        callback = lambda res: intermediate_callback(res)
         if animate:
-            fig = plt.figure(constrained_layout=True)
-            ax = fig.add_subplot(111)
+            self.comp_graphics["fig"], ax = plt.subplots(nrows=1, ncols=1)
+
             ax.set_title("Showing compatibilization process...")
             ax.set_aspect('equal', adjustable='box')
             ax.set_xlim(self.limits[0][0], self.limits[0][1])
             ax.set_ylim(self.limits[1][0], self.limits[1][1])
 
             self.init_comp_plot(ax)
+            plt.pause(self.comp_process_data["gui_eventloop_time"])
             
-            plt.show(block=False)
-            plt.pause(0.01)
-            callback = lambda res: intermediate_callback(res, ax)
+        def intermediate_callback(res):
+            '''
+            Callback for visualization of intermediate results (verbose or by animation).
+            '''
+            self.comp_process_data["execution_time"] += time.perf_counter() - self.comp_process_data["start_time"]
+            self.comp_process_data["step"] += 1
+            
+            # for later json serialization...
+            self.comp_process_data["invariant_segs_log"].append( [ seg.tolist() for seg in self.invariant_lines ] )
+
+            if verbose:
+                print( f"Spectra = {np.linalg.eigvals(self.P)}" )
+                print( f"Removability constraint = {removability_constr(res)}" )
+                print(self.comp_process_data["execution_time"], "seconds have passed...")
+
+            if animate: 
+                self.update_comp_plot(ax)
+                plt.pause(self.comp_process_data["gui_eventloop_time"])
+
+            self.comp_process_data["start_time"] = time.perf_counter()
+
+        constraints = [ {"type": "ineq", "fun": removability_constr} ]
+        init_var = sym2vector(self.clf.P).tolist()
 
         #--------------------------- Main optimization process ---------------------------
-        if verbose: print("Starting compatibilization process. This may take a while...")
-        self.comp_process_data["start_time"] = time.time()
-        sol = minimize( objective, init_var, constraints=constraints, callback=callback )
+        print("Starting compatibilization process. This may take a while...")
+
+        self.comp_process_data["start_time"] = time.perf_counter()
+        sol = minimize( objective, init_var, constraints=constraints, callback=intermediate_callback )
+        P2 = symmetric_var( sol.x )
+        P = P2.T @ P2
 
         is_processed_compatible = self.is_compatible()
 
-        if verbose:
-            message = "Compatibilization "
-            if is_processed_compatible: message += "was successful. "
-            else: message += "failed. "
-            message += "Process took " + str(self.comp_process_data["execution_time"]) + " seconds."
-            print(message)
+        message = "Compatibilization "
+        if is_processed_compatible: message += "was successful. "
+        else: message += "failed. "
+        message += "Process took " + str(self.comp_process_data["execution_time"]) + " seconds."
+        print(message)
+
+        if animate: plt.pause(2)
 
         comp_result = { "kernel_dimension": self.kernel.kernel_dim,
-                        "P_original": P_original.tolist(),
-                        "P_processed": symmetric_var( sol.x ).tolist(),
+                        "P_original": Pnom.tolist(),
+                        "P_processed": P.tolist(),
                         "is_original_compatible": is_original_compatible,
                         "is_processed_compatible": is_processed_compatible,
                         "execution_time": self.comp_process_data["execution_time"],
-                        "num_steps": self.comp_process_data["step"] }
+                        "num_steps": self.comp_process_data["step"],
+                        "invariant_set_log": self.comp_process_data["invariant_segs_log"] }
     
         return comp_result
 
@@ -2177,21 +1855,21 @@ class KernelTriplet():
             segs_to_plot = list(args)
 
         # Adds or removes lines according to the total number of segments to be plotted 
-        if num_segs_to_plot >= len(self.invariant_lines):
-            for _ in range(num_segs_to_plot - len(self.invariant_lines)):
+        if num_segs_to_plot >= len(self.invariant_lines_plot):
+            for _ in range(num_segs_to_plot - len(self.invariant_lines_plot)):
                 line2D, = ax.plot([],[], color=self.invariant_color, linestyle='dashed', linewidth=1.0 )
-                self.invariant_lines.append(line2D)
+                self.invariant_lines_plot.append(line2D)
         else:
-            for _ in range(len(self.invariant_lines) - num_segs_to_plot):
-                self.invariant_lines[-1].remove()
-                del self.invariant_lines[-1]
+            for _ in range(len(self.invariant_lines_plot) - num_segs_to_plot):
+                self.invariant_lines_plot[-1].remove()
+                del self.invariant_lines_plot[-1]
 
-        # UP TO HERE: len(self.invariant_lines) == len(segs_to_plot)
+        # UP TO HERE: len(self.invariant_lines_plot) == len(segs_to_plot)
 
         # Updates segment lines with data from each invariant segment
         for k in range(num_segs_to_plot):
             seg_index = segs_to_plot[k]
-            self.invariant_lines[k].set_data( self.invariant_segs[seg_index]["points"][:,0], self.invariant_segs[seg_index]["points"][:,1] )
+            self.invariant_lines_plot[k].set_data( self.invariant_segs[seg_index]["points"][:,0], self.invariant_segs[seg_index]["points"][:,1] )
 
     def plot_attr(self, ax, attr_name, plot_color='k'):
         '''
@@ -2221,11 +1899,13 @@ class KernelTriplet():
 
     def init_comp_plot(self, ax):
         '''
-        Initialize compatibilization animation plot,
+        Initialize compatibilization animation plot
         '''
-        self.comp_graphics["text"] = ax.text(self.limits[0][1]-5.5, self.limits[1][0]+0.5, str("Optimization step = 0"), fontsize=14)
+        self.comp_graphics["text"] = ax.text(0.01, 0.99, str("Optimization step = 0"), ha='left', va='top', transform=ax.transAxes, fontsize=10)
+        self.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=self.limits)
+        self.update_comp_plot(ax)
 
-    def update_comp_plot(self, ax):
+    def update_comp_plot(self, ax, i=0):
         '''
         Update compatibilization animation plot,
         '''
@@ -2235,6 +1915,22 @@ class KernelTriplet():
         self.plot_invariant(ax)
         self.plot_attr(ax, "boundary_equilibria", mcolors.BASE_COLORS["g"])
         self.plot_attr(ax, "interior_equilibria", mcolors.BASE_COLORS["k"])
+
+        for coll in self.comp_graphics["clf_artists"]:
+            coll.remove()
+
+        num_eqs = len(self.boundary_equilibria)
+        if num_eqs:
+            self.clf.set_param(P=self.P)
+            level = self.clf.function( self.boundary_equilibria[np.random.randint(0,num_eqs)]["x"] )
+            self.comp_graphics["clf_artists"] = self.clf.plot_levels(levels = [ level ], ax=ax, limits=self.limits)
+
+    # def run_animation(self):
+    #     '''
+    #     Returns smooth animation of the compatibilization process.
+    #     '''
+    #     self.
+    #     animation = anim.FuncAnimation(fig=self.comp_graphics["fig"], self.update_comp_plot, )
 
 class ApproxFunction(Function):
     '''
@@ -2316,3 +2012,336 @@ class CLBF(KernelQuadratic):
     def __init__(self, *args):
         super().__init__(*args)
         pass
+
+# old methods from KernelTriplet
+# class OLDKernelTripletMethops(KernelTriplet):
+#     def __init__(self, *args, **kwargs):
+#         super().__init__(*args, **kwargs)
+
+#     def update_segment(self, segment):
+#         '''
+#         Updates segment. Aims to significantly improve performance on updating the invariant set. 
+#         '''
+#         n = self.plant.n
+#         seg_points = segment["points"]
+
+#         num_pts = len(seg_points)
+#         line_sizes = [ np.linalg.norm(seg_points[k] - seg_points[k+1]) for k in range(len(seg_points)-1) ]
+
+#         def get_deltas(var):
+#             return var[0:n*num_pts].reshape(num_pts, n)
+
+#         def objective(var):
+#             '''
+#             var is a list with coordinates [ pt1[0] pt1[1] .. pt1[n-1] pt2[0] pt2[1] ... pt2[n-1] ...  ptm[n-1] l1 l2 ... lm ]
+#             n is the state dimension
+#             m is the number of points in the segment
+#             '''
+#             deltas = get_deltas(var)
+#             fun = sum( map(lambda d: np.linalg.norm(d)**2, deltas) )
+
+#             new_seg_points = seg_points + deltas
+#             fun += sum( [ ( np.linalg.norm(new_seg_points[k] - new_seg_points[k+1]) - line_sizes[k] )**2 for k in range(num_pts-1) ] )
+#             fun += sum( [ self.det_invariant( *new_seg_points[k].tolist() )**2 for k in range(num_pts) ] )
+#             return fun
+        
+#         # def invariant_constr(var):
+#         #     deltas = get_deltas(var)
+#         #     return [ self.det_invariant( *(seg_points[k] + deltas[k]).tolist() ) for k in range(num_pts) ]
+    
+#         def lambda_constr(var):
+#             deltas = get_deltas(var)
+#             return [ self.compute_lambda( seg_points[k] + deltas[k] ) for k in range(num_pts) ]
+
+#         # constraints = [ {"type": "eq", "fun": invariant_constr} ]
+#         constraints = []
+#         constraints.append( {"type": "ineq", "fun": lambda_constr} )
+
+#         init_var = [ 0.0 for _ in range(n*num_pts) ]
+#         sol = minimize(objective, init_var, constraints=constraints, options={"disp":True})
+
+#         new_seg_pts = seg_points + get_deltas(sol.x)
+
+#         segment["points"] = new_seg_pts
+#         segment["lambdas"] = [ self.compute_lambda(new_seg_pts[k]) for k in range(num_pts) ]
+#         segment["boundary_equilibria"] = self.seg_boundary_equilibria(new_seg_pts)
+#         segment["interior_equilibria"] = self.seg_interior_equilibria(new_seg_pts)
+#         return segment
+
+#     def update_invariant_set(self):
+#         '''
+#         Updates the invariant set.
+#         '''
+#         self.boundary_equilibria = []
+#         self.interior_equilibria = []
+#         for segment in self.invariant_segs:
+#             self.update_segment( segment )
+#             self.boundary_equilibria += segment["boundary_equilibria"]
+#             self.interior_equilibria += segment["interior_equilibria"]
+
+#     def equilibria_from_invariant(self, verbose=False):
+#         '''
+#         Computes all equilibrium points and local branch optimizers of the CLF-CBF pair, using the invariant set intersections with the CBF boundary.
+#         '''
+#         if len(self.invariant_segs) == 0:
+#             self.invariant_set(extended=False)
+
+#         # Finds intersections between boundary and invariant set segments (boundary equilibria)
+#         self.boundary_equilibria = []
+#         self.interior_equilibria = []
+#         for boundary_seg in self.boundary_segs:
+#             for invariant_seg in self.invariant_segs:
+                
+#                 boundary_curve = geometry.LineString(boundary_seg)
+#                 invariant_seg_curve = geometry.LineString(invariant_seg)
+#                 intersections = intersection( boundary_curve, invariant_seg_curve )
+
+#                 new_candidates = []
+#                 if not intersections.is_empty:
+#                     if hasattr(intersections, "geoms"):
+#                         for geo in intersections.geoms:
+#                             x, y = geo.xy
+#                             x, y = list(x), list(y)
+#                             new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
+#                     else:
+#                         x, y = intersections.xy
+#                         x, y = list(x), list(y)
+#                         new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
+                
+#                 for pt in new_candidates:
+
+#                     eq_sol = self.optimize_over("boundary", init_x=pt)
+#                     if (eq_sol) and "equilibrium" in eq_sol.keys():
+#                         add_to(eq_sol, self.boundary_equilibria)
+
+#                     eq_sol = self.optimize_over("interior", init_x=pt)
+#                     if (eq_sol) and "equilibrium" in eq_sol.keys():
+#                         add_to(eq_sol, self.interior_equilibria)
+
+#                     branch_minimizer = self.optimize_over("min_branch", init_x=pt)
+#                     if branch_minimizer and "type" in branch_minimizer.keys():
+#                         add_to(branch_minimizer, self.branch_minimizers)
+
+#                     branch_maximizer = self.optimize_over("max_branch", init_x=pt)
+#                     if branch_maximizer and "type" in branch_maximizer.keys():
+#                         add_to(branch_maximizer, self.branch_maximizers)
+
+#         # self.branch_optimizers(verbose)
+
+#         if verbose:
+#             show_message(self.boundary_equilibria, "boundary equilibrium points")
+#             show_message(self.interior_equilibria, "interior equilibrium points")
+
+#             show_message(self.branch_minimizers, "branch minimizers")
+#             show_message(self.branch_maximizers, "branch maximizers")
+
+#     def equilibria(self, verbose=False):
+#         '''
+#         Computes all equilibrium points and local branch optimizers of the CLF-CBF pair, using the invariant set rectangular limits as initializers for the optimization algorithm.
+#         This method does not require the update of the complete invariant set geometry, 
+#         and is capable of computing the equilibrium points and local branch optimizers faster than the previous method.
+#         '''
+#         # Get initializers from boundary lines
+#         self.branch_initializers = [] 
+#         for line in self.limit_lines:
+#             self.branch_initializers += self.get_zero_det(line["x"], line["y"])
+
+#         # Find boundary, interior equilibria and branch optimizers
+#         self.boundary_equilibria = []
+#         self.interior_equilibria = []
+#         self.branch_minimizers = []
+#         self.branch_maximizers = []
+#         for pt in self.branch_initializers:
+
+#             eq_sol = self.optimize_over("boundary", init_x=pt)
+#             if (eq_sol) and "equilibrium" in eq_sol.keys():
+#                 add_to(eq_sol, self.boundary_equilibria)
+
+#             eq_sol = self.optimize_over("interior", init_x=pt)
+#             if (eq_sol) and "equilibrium" in eq_sol.keys():
+#                 add_to(eq_sol, self.interior_equilibria)
+
+#             branch_minimizer = self.optimize_over("min_branch", init_x=pt)
+#             if branch_minimizer and "type" in branch_minimizer.keys():
+#                 add_to(branch_minimizer, self.branch_minimizers)
+
+#             branch_maximizer = self.optimize_over("max_branch", init_x=pt)
+#             if branch_maximizer and "type" in branch_maximizer.keys():
+#                 add_to(branch_maximizer, self.branch_maximizers)
+
+#         # self.branch_optimizers(verbose)
+
+#         if verbose:
+#             show_message(self.boundary_equilibria, "boundary equilibrium points")
+#             show_message(self.interior_equilibria, "interior equilibrium points")
+
+#             show_message(self.branch_minimizers, "branch minimizers")
+#             show_message(self.branch_maximizers, "branch maximizers")
+
+#     def branch_optimizers(self, verbose=False):
+#         '''
+#         Compute the branch optimizers
+#         '''
+#         self.connections_to_min = { i:[] for i in range(0,len(self.boundary_equilibria)) }
+#         self.connections_to_max = { i:[] for i in range(0,len(self.boundary_equilibria)) }
+#         self.branch_minimizers = []
+#         self.branch_maximizers = []
+
+#         # Create adjacency list for connections btw eq points and optimizers
+#         for num_eq in range(len(self.boundary_equilibria)):
+#             eq_sol = self.boundary_equilibria[num_eq]
+
+#             branch_minimizer = self.optimize_over("min_branch", init_x=eq_sol["x"])
+#             if branch_minimizer and "type" in branch_minimizer.keys():
+#                 add_to(branch_minimizer, self.branch_minimizers, self.connections_to_min[num_eq])
+
+#             branch_maximizer = self.optimize_over("max_branch", init_x=eq_sol["x"])
+#             if branch_maximizer and "type" in branch_maximizer.keys():
+#                 add_to(branch_maximizer, self.branch_maximizers, self.connections_to_max[num_eq])
+
+#         # Checks if there exist removable optimizers
+#         self.check_removables()
+
+#         if verbose:
+#             show_message(self.boundary_equilibria, "boundary equilibrium points")
+#             show_message(self.interior_equilibria, "interior equilibrium points")
+
+#             show_message(self.branch_minimizers, "branch minimizers")
+#             show_message(self.branch_maximizers, "branch maximizers")
+
+#             print(f"Connections to minimizers = {self.connections_to_min}")
+#             print(f"Connections to maximizers = {self.connections_to_max}")
+
+#     def check_removables(self):
+#         '''
+#         Checks if equilibrium point with index eq_index is removable.
+#         Returns the corresponding minimizer/maximizer that removes the equilibrium point.
+#         '''
+#         self.min_removers, self.max_removers = [], []
+
+#         for eq_index in range(len(self.boundary_equilibria)):
+#             for minimizer_index in self.connections_to_min[eq_index]:
+#                 for j in self.connections_to_min.keys():
+#                     if j == eq_index:       # ignore if self
+#                         continue
+#                     if minimizer_index in self.connections_to_min[j] and np.linalg.norm( self.branch_minimizers[minimizer_index]["gradh"] ) > 1e-3:
+#                         self.branch_minimizers[minimizer_index]["type"] = "remover"
+#                         add_to(self.branch_minimizers[minimizer_index], self.min_removers)
+#                         break
+
+#             for maximizer_index in self.connections_to_max[eq_index]:
+#                 for j in self.connections_to_max.keys():
+#                     if j == eq_index:       # ignore if self
+#                         continue
+#                     if maximizer_index in self.connections_to_max[j] and np.linalg.norm( self.branch_maximizers[maximizer_index]["gradh"] ) > 1e-3:
+#                         self.branch_maximizers[maximizer_index]["type"] = "remover"
+#                         add_to(self.branch_maximizers[maximizer_index], self.max_removers)
+#                         break
+
+#     def optimize_over(self, optimization=None, **kwargs):
+#         '''
+#         Finds equilibrium points solutions using sliding mode control. If no initial point is specified, it selections a point at random from a speficied interval.
+#         Returns a dict containing all relevant data about the found equilibrium point, including its stability.
+#         '''
+#         init_x_def = False
+#         for key in kwargs.keys():
+#             aux_key = key.lower()
+#             if aux_key == "init_x":
+#                 init_x = kwargs[key]
+#                 init_x_def = True
+#                 continue
+
+#         if not init_x_def:
+#             init_x = [ np.random.uniform( self.limits[k][0], self.limits[k][1] ) for k in range(self.n) ]
+
+#         def invariant_set(var):
+#             '''
+#             Returns the vector residues of invariant set -> is zero for x in the invariant set
+#             '''
+#             x = var[0:self.n]
+#             return det_invariant(x, self.kernel, self.P, self.cbf.Q, self.plant.get_F(), self.params)
+
+#         def boundary_constraint(var):
+#             '''
+#             Returns the diff between mQm and 1
+#             '''
+#             x = var[0:self.n]
+#             delta = var[self.n]
+
+#             h = self.cbf.function(x)
+#             return delta - np.abs(h)
+
+#         def objective(var):
+#             '''
+#             Objective function to be minimized
+#             '''
+#             delta = var[self.n]
+#             x = var[0:self.n]
+            
+#             if optimization == "boundary":
+#                 return delta**2
+#             elif optimization == "interior":
+#                 return self.compute_lambda(x.tolist())**2
+#             elif optimization == "min_branch":
+#                 return self.cbf.function(x)
+#             elif optimization == "max_branch":
+#                 return -self.cbf.function(x)
+#             else: 1.0
+
+#         init_delta = 1.0
+#         init_var = init_x + [init_delta]
+
+#         constraints = [ {"type": "eq", "fun": invariant_set} ]
+#         if optimization == "boundary":
+#             constraints.append({"type": "ineq", "fun": boundary_constraint})
+
+#         sol = minimize(objective, init_var, constraints=constraints)
+
+#         eq_coords = sol.x[0:self.n].tolist()
+#         l = self.compute_lambda(eq_coords)
+#         h = self.cbf.function(eq_coords)
+#         gradh = self.cbf.gradient(eq_coords)
+
+#         sol_dict = None
+
+#         # Valid solution is a point in the invariant set with lambda >= 0
+#         if l >= 0 and np.abs(invariant_set(sol.x)) < 1e-3:
+#             sol_dict = {}
+#             sol_dict["x"] = eq_coords
+#             sol_dict["lambda"] = l
+#             sol_dict["delta"] = sol.x[self.n]
+#             sol_dict["invariant_cost"] = invariant_set(sol.x)
+#             sol_dict["h"] = h
+#             sol_dict["gradh"] = np.linalg.norm(gradh)
+#             sol_dict["init_x"] = init_x
+#             # sol_dict["message"] = sol.message
+        
+#         # Boundary equilibrium point - compute stability
+#         if (sol_dict) and (np.abs(sol_dict["h"]) <= 1e-3):
+#             stability, eta = self.compute_stability(eq_coords, "boundary")
+#             sol_dict["eta"], sol_dict["stability"] = eta, stability
+#             sol_dict["equilibrium"] = "stable"
+#             if stability > 0:
+#                 sol_dict["equilibrium"] = "unstable"
+
+#         # Interior equilibrium points (for now, stability is not computed)
+#         if (sol_dict) and (optimization == "interior") and (np.abs(sol_dict["lambda"]) <= 1e-5):
+#             stability, eta = self.compute_stability(eq_coords, "interior")
+#             sol_dict["eta"], sol_dict["stability"] = eta, stability
+#             sol_dict["equilibrium"] = "stable"
+#             if stability > 0:
+#                 sol_dict["equilibrium"] = "unstable"
+
+#         # Minimizers
+#         if (sol_dict) and optimization == "min_branch":
+#             if sol_dict["gradh"] < 1e-03:
+#                 sol_dict["type"] = "cbf_minimum"
+#             else: sol_dict["type"] = "undefined"
+
+#         # Maximizers
+#         if (sol_dict) and optimization == "max_branch":
+#             if sol_dict["h"] > 1e+05 or sol_dict["gradh"] > 1e+06:
+#                 sol_dict = None                 # filters unbounded maximizers
+#             else: sol_dict["type"] = "undefined"
+
+#         return sol_dict

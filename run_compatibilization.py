@@ -10,12 +10,12 @@ import importlib
 simulation_file = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples."+simulation_file, package=None)
 
-if sim.kerneltriplet.is_compatible(): 
+if sim.kerneltriplet.is_compatible():
     print("Given CLF is already compatible with CBF and plant.")
 else: 
     print("Given CLF is not compatible with CBF and plant.")
 
-    compatibility_result = sim.kerneltriplet.compatibilize(verbose=True, animate=False)
+    compatibility_result = sim.kerneltriplet.compatibilize(verbose=True, animate=True)
 
     try:
         with open("logs/"+simulation_file+"_comp.json", "w") as file:
