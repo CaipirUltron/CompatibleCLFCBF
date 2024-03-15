@@ -9,7 +9,7 @@ initial_state = [0.5, 6.0]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
-limits = 9*np.array([[-1, 1],[-1, 1]])
+limits = 12*np.array([[-1, 1],[-1, 1]])
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 kernel = Kernel(*initial_state, degree=2)
@@ -47,7 +47,7 @@ clf.is_sos_convex(verbose=True)
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
 # Fits CBF to a box-shaped obstacle
 center = [ 0.0, 2.0 ]
-pts = box( center=center, height=5, width=5, angle=10, spacing=0.4, gradients=1, at_edge=True )
+pts = box( center=center, height=5, width=5, angle=30, spacing=0.4, gradients=1, at_edge=True )
 cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=[center])
 cbf.is_sos_convex(verbose=True)
 

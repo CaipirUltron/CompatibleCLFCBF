@@ -729,9 +729,13 @@ def vecQ(x, kernel, Q):
     
     z = kernel.function(x)
     A_list = kernel.get_A_matrices()
+    n = len(A_list)
 
-    vecQ_list = [ z.T @ A_list[k].T @ Q @ z for k in range(len(A_list)) ]
-    return vecQ_list
+    vecQ = np.empty((n,), dtype=float)
+    for k in range(n): vecQ[k] = z.T @ A_list[k].T @ Q @ z
+
+    # vecQ_list = [ z.T @ A_list[k].T @ Q @ z for k in range(len(A_list)) ]
+    return vecQ
 
 def vecP(x, kernel, P, F, params):
     '''
@@ -743,19 +747,27 @@ def vecP(x, kernel, P, F, params):
     
     z = kernel.function(x)
     A_list = kernel.get_A_matrices()
+    n = len(A_list)
+
     V = clf_function(x, kernel, P)
 
-    vecP_list = [ z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z for k in range(len(A_list)) ]
-    return vecP_list
+    vecP = np.empty((n,), dtype=float)
+    for k in range(n): vecP[k] = z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z
+
+    # vecP_list = [ z.T @ A_list[k].T @ ( params["slack_gain"] * params["clf_gain"] * V * P - F ) @ z for k in range(len(A_list)) ]
+    return vecP
 
 def det_invariant(x, kernel, P, Q, F, params):
     '''
     Returns the determinant det([ vecQ, vecP ]) for a given point x and CLF-CBF pair.
     '''
     n = len(x)
-    vecQ_a = np.array( vecQ(x, kernel, Q) )
-    vecP_a = np.array( vecP(x, kernel, P, F, params) )
-    W = np.hstack([vecQ_a.reshape(n,1), vecP_a.reshape(n,1)])
+    # vecQ_a = np.array( vecQ(x, kernel, Q) )
+    # vecP_a = np.array( vecP(x, kernel, P, F, params) )
+    # W = np.hstack([vecQ_a.reshape(n,1), vecP_a.reshape(n,1)])
+
+    W = np.hstack([ vecQ(x, kernel, Q).reshape(n,1), vecP(x, kernel, P, F, params).reshape(n,1) ])
+
     return np.linalg.det(W)
     # return np.sqrt( np.linalg.det( W.T @ W ) ) # does not work
 
@@ -763,8 +775,8 @@ def lambda_invariant(x, kernel, P, Q, F, params):
     '''
     Returns the lambda corresponding to a point on the invariant set det([ vecQ, vecP ]) = 0.
     '''
-    vecQ_a = np.array( vecQ(x, kernel, Q) )
-    vecP_a = np.array( vecP(x, kernel, P, F, params) )
+    vecQ_a = vecQ(x, kernel, Q)
+    vecP_a = vecP(x, kernel, P, F, params)
     return (vecQ_a.T @ vecP_a) / np.linalg.norm(vecQ_a)**2
 
 def L(x, kernel, P, Q, F, params):

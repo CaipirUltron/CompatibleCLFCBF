@@ -7,7 +7,7 @@ from common import ret_basis, generate_monomial_list, kernel_constraints
 num_tests = 100                     # Number of numerical tests
 
 n = 2
-max_degree = 2
+max_degree = 3
 alpha, terms_by_degree = generate_monomial_list(n,max_degree)
 
 initial_state = [ np.random.rand() for _ in range(n) ]

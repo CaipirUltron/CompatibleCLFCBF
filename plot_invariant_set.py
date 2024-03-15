@@ -45,9 +45,11 @@ while True:
             coll.remove()
         del clf_contour
 
-    print(f"lambda = {sim.kerneltriplet.compute_lambda(init_x)}")
+    print(f"lambda = {sim.kerneltriplet.lambda_fun(init_x)}")
 
     V = sim.clf.function(init_x)
     clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits, spacing=0.5)
+
+    print("here")
 
 plt.show()

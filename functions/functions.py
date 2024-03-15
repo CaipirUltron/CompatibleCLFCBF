@@ -644,6 +644,9 @@ class Kernel(Function):
         self._lambda_jacobian_monomials = sp.lambdify( list(self._symbols), self._sym_jacobian_monomials )
         self._lambda_hessian_monomials = sp.lambdify( list(self._symbols), self._hessian_monomials )
 
+        self.func = np.empty((self._num_monomials, ), dtype=float)
+        self.jac = np.empty((self._num_monomials, self._dim), dtype=float)
+
     def set_param(self, **kwargs):
         '''
         Sets the function parameters.
@@ -707,16 +710,16 @@ class Kernel(Function):
     def function(self, point):
         '''
         Compute polynomial function numerically.
-        '''
-        m = np.array(self._lambda_monomials(*point))
-        return m
+        '''              
+        for k, m in enumerate( self._lambda_monomials(*point) ): self.func[k] = m
+        return self.func
 
     def jacobian(self, point):
         '''
         Compute kernel Jacobian.
         '''
-        Jac_m = np.array(self._lambda_jacobian_monomials(*point))
-        return Jac_m
+        for k, line in enumerate( self._lambda_jacobian_monomials(*point) ): self.jac[k,:] = line
+        return self.jac
 
     def get_A_matrices(self):
         '''
@@ -1001,8 +1004,7 @@ class KernelQuadratic(Function):
                         self.constraints += [ 0.5 * m.T @ self.SHAPE @ m - self.constant == level_value ]
                     else:
                         self.cost += ( 0.5 * m.T @ self.SHAPE @ m - self.constant - level_value )**2
-                else:
-                    continue
+                else: continue
 
             # Define gradient constraints
             if "gradient" in keys:
@@ -1042,6 +1044,7 @@ class KernelQuadratic(Function):
                 print("Barrier fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
             else:
                 print("Function fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
+
             self.set_param( coefficients = self.SHAPE.value )
             return fit_problem
         else:
@@ -1275,41 +1278,6 @@ class KernelLyapunov(KernelQuadratic):
         if "P" in kwargs.keys(): kwargs["coefficients"] = kwargs.pop("P")
         super().set_param(**kwargs)
 
-    # def init(self):
-    #     pass
-    #             if isinstance(self, KernelLyapunov):
-    #         '''
-    #         If KernelLyapunov, make is SOS convex
-    #         '''
-    #         m_center = self.kernel.function(self.centers[0])
-    #         Pquad = create_quadratic(eigen=[0.05, 0.05], R=rot2D(0.0), center=self.centers[0], kernel_dim=self.kernel_dim)
-    #         # SOSConvexMatrix = cp.bmat([[ Aj.T @ ( Ai.T @ self.SHAPE + self.SHAPE @ Ai ) + ( Ai.T @ self.SHAPE + self.SHAPE @ Ai ) @ Aj for Aj in A_list ] for Ai in A_list ])
-    #         constraints = [ self.SHAPE >> 0,
-    #                         # SOSConvexMatrix >> 0,
-    #                         m_center.T @ self.SHAPE @ m_center == 0 ]
-    #         cost += cp.norm(self.SHAPE - Pquad)
-
-    #         # for center in self.centers:
-    #         #     self.point_list.append({"coords": center, "level": 0.0, "force": False})
-
-    #     Computes the enclosing quadratic and adds a center point to point_list (the center of the quadratic)
-    #     if isinstance(self, KernelBarrier):
-
-    #         # Pquad, center_quad = self.enclosing_quadratic()
-    #         # if len(self.centers) == 0:
-    #         #     self.centers.append(center_quad)
-    #         # else:
-
-    #         for center in self.centers:
-    #             self.point_list.append({"coords": center, "level":-self.constant})
-    #             m = self.kernel.function(center)
-
-    #         if self.fit_options["lower_bounded"]:
-    #             constraints = [ F_var >> Pquad ]
-
-    #         if self.fit_options["quadratic_like"]:
-    #             cost = cp.norm(F_var - Pquad, 'fro')
-
 class KernelBarrier(KernelQuadratic):
     '''
     Class for kernel-based barrier functions.
@@ -1359,16 +1327,24 @@ class KernelTriplet():
         self.interior_eq_lambda_min = 1e-4
         self.invariant_lines_plot = []
         self.plotted_attrs = {}
+
         self.comp_process_data = { "step": 0, 
                                   "start_time": 0.0, 
                                   "execution_time": 0.0, 
                                   "gui_eventloop_time": 0.05,
                                   "invariant_segs_log": [] }
+        
         self.comp_graphics = { "fig": None,
                                "text": None,
                                "clf_artists": [] }
 
         self.set_param(**kwargs)
+        
+        self.vecQ = np.empty((self.n,))
+        self.vecP = np.empty((self.n,))
+        self.W = np.empty((self.n,2))
+        self.S = np.empty((self.n,self.n))
+
         self.create_limit_lines()
 
         self.boundary_lines = []
@@ -1376,7 +1352,7 @@ class KernelTriplet():
             boundary_line = geometry.LineString(boundary_seg)
             self.boundary_lines.append(boundary_line)
 
-        self.gen_invariant_set(extended=False, verbose=True)
+        self.update_invariant_set(verbose=True)
 
     def create_limit_lines(self, spacing=0.1):
         '''
@@ -1408,37 +1384,6 @@ class KernelTriplet():
         right_x = x_max * np.ones(spam_y.shape)
         right_y = spam_y
         self.limit_lines.append({"x": right_x, "y": right_y})
-
-    def verify(self):
-        '''
-        Verifies if the kernel pair is consistent and fully defined
-        '''
-        try:
-            if not isinstance(self.plant, KernelAffineSystem) or not isinstance(self.plant.kernel, Kernel):
-                raise Exception("Plant is not kernel affine.")
-            if not isinstance(self.clf, KernelLyapunov) or not isinstance(self.clf.kernel, Kernel):
-                raise Exception("CLF is not kernel-based.")
-            if not isinstance(self.cbf, KernelBarrier) or not isinstance(self.cbf.kernel, Kernel):
-                raise Exception("CBF is not kernel-based.")
-            if not (self.plant.kernel == self.clf.kernel and self.plant.kernel == self.cbf.kernel):
-                raise Exception("Kernels are not compatible.")
-
-            self.kernel = self.plant.kernel
-
-            if (self.kernel._dim != self.plant.n) or (self.kernel._dim != self.clf._dim) or (self.kernel._dim != self.cbf._dim):
-                raise Exception("Dimensions are not compatible.")
-            
-            self.n = self.kernel._dim
-            self.p = self.kernel.kernel_dim
-            self.A_list = self.kernel.get_A_matrices()
-
-            self.F = self.plant.get_F()
-            self.P = self.clf.P
-            self.Q = self.cbf.Q
-            
-        except Exception as error:
-            print(error)
-            return False
 
     def set_param(self, **kwargs):
         '''
@@ -1485,63 +1430,227 @@ class KernelTriplet():
                 self.limits = [ [np.min( bbox[:,0] ), np.max( bbox[:,0] )],
                                 [np.min( bbox[:,1] ), np.max( bbox[:,1] )] ]
 
+        # Initialize grids used for determinant computation
         if hasattr(self, "limits") and hasattr(self, "spacing"):
             x = np.arange(self.limits[0][0], self.limits[0][1], self.spacing)
             y = np.arange(self.limits[1][0], self.limits[1][1], self.spacing)
             self.xg, self.yg = np.meshgrid(x,y)
+            grid_shape = self.xg.shape
+            self.determinant_grid = np.zeros(grid_shape)
 
-        self.verify()
+        self.verify_kernel()
 
-    def det_invariant(self, *args, **kwargs):
+    def verify_kernel(self):
+        '''
+        Verifies if the kernel pair is consistent and fully defined
+        '''
+        try:
+            if not isinstance(self.plant, KernelAffineSystem) or not isinstance(self.plant.kernel, Kernel):
+                raise Exception("Plant is not kernel affine.")
+            if not isinstance(self.clf, KernelLyapunov) or not isinstance(self.clf.kernel, Kernel):
+                raise Exception("CLF is not kernel-based.")
+            if not isinstance(self.cbf, KernelBarrier) or not isinstance(self.cbf.kernel, Kernel):
+                raise Exception("CBF is not kernel-based.")
+            if not (self.plant.kernel == self.clf.kernel and self.plant.kernel == self.cbf.kernel):
+                raise Exception("Kernels are not compatible.")
+
+            self.kernel = self.plant.kernel
+
+            if (self.kernel._dim != self.plant.n) or (self.kernel._dim != self.clf._dim) or (self.kernel._dim != self.cbf._dim):
+                raise Exception("Dimensions are not compatible.")
+            
+            self.n = self.kernel._dim
+            self.p = self.kernel.kernel_dim
+            self.A_matrices = self.kernel.get_A_matrices()
+
+            self.F = self.plant.get_F()
+            self.P = self.clf.P
+            self.Q = self.cbf.Q
+            
+        except Exception as error:
+            print(error)
+            return False
+
+    def vecQ_fun(self, x):
+        '''
+        Returns the vecQ function.
+        '''    
+        z = self.kernel.function(x)
+        for k in range(self.n): self.vecQ[k] = z.T @ self.A_matrices[k].T @ self.Q @ z
+        return self.vecQ
+
+    def vecP_fun(self, x):
+        '''
+        Returns the vecP function.
+        '''
+        z = self.kernel.function(x)
+        V = self.clf_fun(x)
+        slk_gain = self.params["slack_gain"]
+        clf_gain = self.params["clf_gain"]
+        for k in range(self.n): self.vecP[k] = z.T @ self.A_matrices[k].T @ ( slk_gain * clf_gain * V * self.P - self.F ) @ z
+        return self.vecP
+
+    def det_fun(self, x):
+        '''
+        Returns the determinant det([ vecQ, vecP ]). Only valid for 2D
+        '''
+        vQ = self.vecQ_fun(x)
+        vP = self.vecP_fun(x)
+        for k, (vQ_ele, vP_ele) in enumerate(zip(vQ, vP)): 
+            self.W[k,:] = [ vQ_ele, vP_ele ]
+        return np.linalg.det( self.W )
+
+    def clf_fun(self, x):
+        '''
+        Returns the CLF function value using custom P matrix
+        '''
+        z = self.kernel.function(x)
+        return 0.5 * z.T @ self.P @ z
+
+    def clf_gradient(self, x):
+        '''
+        Returns the CLF gradient using custom P matrix
+        '''  
+        m = self.kernel.function(x)
+        Jm = self.kernel.jacobian(x)
+        return Jm.T @ self.P @ m
+
+    def lambda_fun(self, x):
+        '''
+        Given a point x in the invariant set, compute its corresponding lambda scalar.
+        '''
+        vQ = self.vecQ_fun(x)
+        vP = self.vecP_fun(x)
+        return (vQ.T @ vP) / np.linalg.norm(vQ)**2
+
+    def L_fun(self, x):
+        '''
+        Returns L matrix: L = F + l Q - p gamma V(x,P) P
+        '''
+        slk_gain = self.params["slack_gain"]
+        clf_gain = self.params["clf_gain"]
+        V = self.clf_fun(x) 
+        return self.F + self.lambda_fun(x) * self.Q - slk_gain * clf_gain * V * self.P
+
+    def S_fun(self, x):
+        '''
+        Returns the S matrix: S = H(x,l,P) - (1/pgV^2) * fc fc.T, for stability computation of equilibrium points 
+        '''
+        V = self.clf_fun(x)
+        z = self.kernel.function(x)
+        fc = self.plant.get_fc(x)
+
+        L = self.L_fun(x)
+
+        slk_gain = self.params["slack_gain"]
+        clf_gain = self.params["clf_gain"]
+
+        for (i,j) in itertools.product(range(self.n), range(self.n)):
+            self.S[i,j] = z.T @ self.A_matrices[i].T @ ( L @ self.A_matrices[j] + self.A_matrices[j].T @ L ) @ z - fc[i]*fc[j] / ( slk_gain * clf_gain * (V**2) )
+
+        return self.S
+    
+    def stability_fun(self, x_eq, type_eq): 
+        '''
+        Compute the stability number for a given equilibrium point.
+        '''
+        V = self.clf_fun(x_eq)
+        nablaV = self.clf_gradient(x_eq)
+        nablah = self.cbf.gradient(x_eq)
+        norm_nablaV = np.linalg.norm(nablaV)
+        norm_nablah = np.linalg.norm(nablah)
+        unit_nablah = nablah/norm_nablah
+
+        S = self.S_fun(x_eq)
+        if type_eq == "boundary":
+            curvatures, basis_for_TpS = compute_curvatures( S, unit_nablah )
+            max_index = np.argmax(curvatures)
+            stability_number = curvatures[max_index] / ( self.params["slack_gain"] * self.params["clf_gain"] * V * norm_nablaV )
+
+        if type_eq == "interior":
+            stability_number = np.max( np.linalg.eigvals(S) )
+
+        '''
+        If the CLF-CBF gradients are collinear, then the stability_number is equivalent to the diff. btw CBF and CLF curvatures at the equilibrium point:
+        '''
+        eta = self.eta_fun(x_eq)
+        # if (eta - 1) < 1e-10:
+        #     curv_V = self.clf.get_curvature(x)
+        #     curv_h = self.cbf.get_curvature(x)
+        #     diff_curvatures = curv_h - curv_V
+        #     print(f"Difference of curvatures = {diff_curvatures}")
+        #     print(f"Stability = {stability_number}")
+        #     if np.abs(diff_curvatures - stability_number) > 1e-3:
+        #         raise Exception("Stability number is different then the difference of curvatures.")
+
+        return stability_number, eta
+
+    def eta_fun(self, x_eq):
+        '''
+        Returns the value of eta (between 0 and 1), depending on the collinearity between the CLF-CBF gradients.
+        '''
+        nablaV = self.clf_gradient(x_eq)
+        nablah = self.cbf.gradient(x_eq)
+
+        g = self.plant.get_g(x_eq)
+        G = g @ g.T
+        z1 = nablah / np.linalg.norm(nablah)
+        z2 = nablaV - nablaV.T @ G @ z1 * z1
+        eta = 1/(1 + self.params["slack_gain"] * z2.T @ G @ z2 )
+        return eta
+
+    def update_determinant_grid(self):
         '''
         Evaluates det([ vecQ, vecP ]) = 0 over a grid.
         Parameters: xg, yg: (x,y) coords of each point in the grid
         Returns: a grid with the same size of xg, yg with the determinant values. 
         '''
-        extended = False
-        for key in kwargs.keys():
-            key = key.lower()
-            if key == "extended" and type(kwargs[key] == bool):
-                extended = kwargs["extended"]
+        for i, (xg_line, yg_line) in enumerate(zip(self.xg, self.yg)):
+            for j, (xg_ele, yg_ele) in enumerate(zip(xg_line, yg_line)):
+                self.determinant_grid[i,j] = np.inf
+                grid_pt = [ xg_ele, yg_ele ]
+                if self.lambda_fun(grid_pt) >= 0:
+                    self.determinant_grid[i,j] = self.det_fun(grid_pt)
 
-        coords = list(args)
-
-        if not np.array([ type(coords[i]) == type(coords[i+1]) for i in range(len(coords)-1) ]).all():
-            raise Exception("x,y grid coordinates must have the same type")
-
-        # If args are numbers:
-        if type(coords[0]) in [int, float]:
-            x = [ coord for coord in coords ]
-            return det_invariant(x, self.kernel, self.P, self.cbf.Q, self.plant.get_F(), self.params)
-
-        if not np.array([ coords[i].shape == coords[i+1].shape for i in range(len(coords)-1) ]).all():
-            raise Exception("x,y grid coordinates must have the same shape")
-
-        # If args are meshgrids:
-        if len(coords[0].shape) == len(coords):
-            xg = coords[0]
-            yg = coords[1]
-            det_grid = np.zeros(xg.shape)
-            for (i,j) in itertools.product(range( xg.shape[0] ), range( yg.shape[1] )):
-                x = [xg[i,j], yg[i,j]]
-                det_grid[i,j] = np.inf
-                if self.compute_lambda(x) >= 0 or extended:
-                    det_grid[i,j] = det_invariant(x, self.kernel, self.P, self.cbf.Q, self.plant.get_F(), self.params)
-            return det_grid
-
-    def get_zero_det(self, xg, yg):
+    def update_invariant_set(self, verbose=False):
         '''
-        Returns the points where the determinant is zero over a 1D array with coords given by xg, yg 
+        Computes the invariant set for the given CLF-CBF pair.
         '''
-        det_grid = self.det_invariant(xg, yg, extended=True)
-        indexes = np.where(np.sign(det_grid[:-1]) != np.sign(det_grid[1:]))[0] + 1
-
-        pts = []
-        for i in indexes:
-            pts.append( [xg[i][0], yg[i][0]] )
-        return pts
+        if self.n > 2:
+            warnings.warn("Currently, the computation of the invariant set is not available for dimensions higher than 2.")
+            return
         
-    def boundary_intersection(self, seg_data):
+        self.update_determinant_grid()                                                              # updates the grid with new determinant values
+        invariant_contour = ctp.contour_generator( x=self.xg, y=self.yg, z=self.determinant_grid )  # creates new contour_generator object
+        self.invariant_lines = invariant_contour.lines(0.0)                                         # returns the 0-valued contour lines 
+        self.invariant_set_analysis(verbose=verbose)                                                # run through each branch of the invariant set
+
+    def invariant_set_analysis(self, verbose=False):
+        '''
+        Populates invariant segments with data and compute equilibrium points from invariant line data.
+        '''
+        self.invariant_segs = []
+        self.boundary_equilibria = []
+        self.interior_equilibria = []
+
+        for segment_points in self.invariant_lines:
+            seg_dict = { "points": segment_points }
+            seg_dict["lambdas"] = [ self.lambda_fun(pt) for pt in segment_points ]
+            seg_dict["boundary_equilibria"] = self.seg_boundary_equilibria(segment_points)
+            seg_dict["interior_equilibria"] = self.seg_interior_equilibria(segment_points)
+
+            seg_dict["barrier_values"] = [ self.cbf.function(pt) for pt in segment_points ]
+            seg_dict["removable"] = self.is_removable( seg_dict )
+
+            self.invariant_segs.append(seg_dict)
+            self.boundary_equilibria += seg_dict["boundary_equilibria"]
+            self.interior_equilibria += seg_dict["interior_equilibria"]
+
+        if verbose:
+            show_message(self.boundary_equilibria, "boundary equilibrium points")
+            show_message(self.interior_equilibria, "interior equilibrium points")
+
+    def get_boundary_intersections(self, seg_data):
         '''
         Computes the intersections with boundary segments of a particular segment of the invariant set.
         '''
@@ -1569,16 +1678,16 @@ class KernelTriplet():
 
     def seg_boundary_equilibria(self, seg_data):
         '''
-        Computes boundary equilibrium points for given segment data
+        Computes boundary equilibrium points for given segment data.
         '''
         eqs = []
-        intersection_pts = self.boundary_intersection(seg_data)
+        intersection_pts = self.get_boundary_intersections(seg_data)
         for pt in intersection_pts:
             seg_boundary_equilibrium = {"x": pt}
-            seg_boundary_equilibrium["lambda"] = self.compute_lambda(pt)
+            seg_boundary_equilibrium["lambda"] = self.lambda_fun(pt)
             seg_boundary_equilibrium["h"] = self.cbf.function(pt)
             seg_boundary_equilibrium["nablah"] = self.cbf.gradient(pt)
-            stability, eta = self.compute_stability(pt, "boundary")
+            stability, eta = self.stability_fun(pt, "boundary")
             seg_boundary_equilibrium["eta"], seg_boundary_equilibrium["stability"] = eta, stability
             seg_boundary_equilibrium["equilibrium"] = "stable"
             if stability > 0:
@@ -1592,15 +1701,15 @@ class KernelTriplet():
         Computes interior equilibrium points for given segment data
         '''
         eqs = []
-        first_l = self.compute_lambda(seg_data[0])
-        last_l = self.compute_lambda(seg_data[-1])
+        first_l = self.lambda_fun(seg_data[0])
+        last_l = self.lambda_fun(seg_data[-1])
         if first_l < self.interior_eq_lambda_min:
             eqs.append( {"x": seg_data[0], "lambda": first_l, "h": self.cbf.function(seg_data[0]), "nablah": self.cbf.gradient(seg_data[0]).tolist() } )
         if last_l < self.interior_eq_lambda_min:
             eqs.append( {"x": seg_data[-1], "lambda": last_l, "h": self.cbf.function(seg_data[-1]), "nablah": self.cbf.gradient(seg_data[-1]).tolist() } )
 
         for eq in eqs:
-            stability, eta = self.compute_stability(eq["x"], "boundary")
+            stability, eta = self.stability_fun(eq["x"], "boundary")
             eq["eta"], eq["stability"] = eta, stability
             eq["equilibrium"] = "stable"
             if stability > 0:
@@ -1621,43 +1730,6 @@ class KernelTriplet():
             if seg_dict["barrier_values"][0] > 0: return +1         # removable from outside
             if seg_dict["barrier_values"][0] < 0: return -1         # removable from inside
         return 0
-
-    def compute_invariant_set(self, verbose=False):
-        '''
-        Populates invariant segments with data and compute equilibrium points from invariant line data.
-        '''
-        self.invariant_segs = []
-        self.boundary_equilibria = []
-        self.interior_equilibria = []
-
-        for segment_points in self.invariant_lines:
-            seg_dict = { "points": segment_points }
-            seg_dict["lambdas"] = [ self.compute_lambda(pt) for pt in segment_points ]
-            seg_dict["boundary_equilibria"] = self.seg_boundary_equilibria(segment_points)
-            seg_dict["interior_equilibria"] = self.seg_interior_equilibria(segment_points)
-
-            seg_dict["barrier_values"] = [ self.cbf.function(pt) for pt in segment_points ]
-            seg_dict["removable"] = self.is_removable( seg_dict )
-
-            self.invariant_segs.append(seg_dict)
-            self.boundary_equilibria += seg_dict["boundary_equilibria"]
-            self.interior_equilibria += seg_dict["interior_equilibria"]
-
-        if verbose:
-            show_message(self.boundary_equilibria, "boundary equilibrium points")
-            show_message(self.interior_equilibria, "interior equilibrium points")
-
-    def gen_invariant_set(self, extended=False, verbose=False):
-        '''
-        Computes the invariant set for the given CLF-CBF pair.
-        '''
-        if self.n > 2:
-            warnings.warn("Currently, the computation of the invariant set is not available for dimensions higher than 2.")
-            return
-        
-        invariant_contour = ctp.contour_generator( x=self.xg, y=self.yg, z=self.det_invariant(self.xg, self.yg, extended=extended) )
-        self.invariant_lines = invariant_contour.lines(0.0)
-        self.compute_invariant_set(verbose=verbose)
 
     def is_compatible(self):
         '''
@@ -1708,7 +1780,7 @@ class KernelTriplet():
             # Updates boundary equilibria
             P2 = symmetric_var(var)
             self.P = P2.T @ P2
-            self.gen_invariant_set()
+            self.update_invariant_set()
             
             rem_constr = [ 0.0, 0.0 ]
             min_barrier_values, max_barrier_values = [], []
@@ -1755,7 +1827,7 @@ class KernelTriplet():
             self.comp_process_data["start_time"] = time.perf_counter()
 
         constraints = [ {"type": "ineq", "fun": removability_constr} ]
-        init_var = sym2vector(self.clf.P).tolist()
+        init_var = sym2vector(Pnom).tolist()
 
         #--------------------------- Main optimization process ---------------------------
         print("Starting compatibilization process. This may take a while...")
@@ -1788,57 +1860,6 @@ class KernelTriplet():
                         "invariant_set_log": self.comp_process_data["invariant_segs_log"] }
     
         return comp_result
-
-    def compute_lambda(self, x):
-        '''
-        Given a point x in the invariant set, compute its corresponding lambda.
-        '''
-        return lambda_invariant(x, self.kernel, self.P, self.cbf.Q, self.plant.get_F(), self.params)
-    
-    def compute_stability(self, x, type_eq):
-        '''
-        Compute the stability number for a given equilibrium point.
-        '''
-        S_matrix = S(x, self.kernel, self.P, self.cbf.Q, self.plant, self.params)
-
-        '''
-        Compute stability number
-        '''
-        nablaV = self.clf.gradient(x)
-        nablah = self.cbf.gradient(x)
-        norm_nablaV = np.linalg.norm(nablaV)
-        norm_nablah = np.linalg.norm(nablah)
-        unit_nablah = nablah/norm_nablah
-
-        if type_eq == "boundary":
-            curvatures, basis_for_TpS = compute_curvatures( S_matrix, unit_nablah )
-            V = self.clf.function(x)
-            max_index = np.argmax(curvatures)
-            stability_number = curvatures[max_index] / ( self.params["slack_gain"] * self.params["clf_gain"] * V * norm_nablaV )
-
-        if type_eq == "interior":
-            stability_number = np.max( np.linalg.eigvals(S_matrix) )
-
-        # Compute eta - might be relevant latter
-        g = self.plant.get_g(x)
-        G = g @ g.T
-        z1 = nablah / np.linalg.norm(nablah)
-        z2 = nablaV - nablaV.T @ G @ z1 * z1
-        eta = 1/(1 + self.params["slack_gain"] * z2.T @ G @ z2 )
-
-        '''
-        If the CLF-CBF gradients are collinear, then the stability_number is equivalent to the diff. btw CBF and CLF curvatures at the equilibrium point
-        '''
-        # if (eta - 1) < 1e-10:
-        #     curv_V = clf.get_curvature(x)
-        #     curv_h = cbf.get_curvature(x)
-        #     diff_curvatures = curv_h - curv_V
-            # print(f"Difference of curvatures = {diff_curvatures}")
-            # print(f"Stability = {stability_number}")
-            # if np.abs(diff_curvatures - stability_number) > 1e-3:
-            #     raise Exception("Stability number is different then the difference of curvatures.")
-
-        return stability_number, eta
 
     def plot_invariant(self, ax, *args):
         '''
@@ -1908,7 +1929,7 @@ class KernelTriplet():
         self.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=self.limits)
         self.update_comp_plot(ax)
 
-    def update_comp_plot(self, ax, i=0):
+    def update_comp_plot(self, ax):
         '''
         Update compatibilization animation plot,
         '''
@@ -2138,48 +2159,48 @@ class CLBF(KernelQuadratic):
 #             show_message(self.branch_minimizers, "branch minimizers")
 #             show_message(self.branch_maximizers, "branch maximizers")
 
-#     def equilibria(self, verbose=False):
-#         '''
-#         Computes all equilibrium points and local branch optimizers of the CLF-CBF pair, using the invariant set rectangular limits as initializers for the optimization algorithm.
-#         This method does not require the update of the complete invariant set geometry, 
-#         and is capable of computing the equilibrium points and local branch optimizers faster than the previous method.
-#         '''
-#         # Get initializers from boundary lines
-#         self.branch_initializers = [] 
-#         for line in self.limit_lines:
-#             self.branch_initializers += self.get_zero_det(line["x"], line["y"])
+    # def equilibria(self, verbose=False):
+    #     '''
+    #     Computes all equilibrium points and local branch optimizers of the CLF-CBF pair, using the invariant set rectangular limits as initializers for the optimization algorithm.
+    #     This method does not require the update of the complete invariant set geometry, 
+    #     and is capable of computing the equilibrium points and local branch optimizers faster than the previous method.
+    #     '''
+    #     # Get initializers from boundary lines
+    #     self.branch_initializers = [] 
+    #     for line in self.limit_lines:
+    #         self.branch_initializers += self.get_zero_det(line["x"], line["y"])
 
-#         # Find boundary, interior equilibria and branch optimizers
-#         self.boundary_equilibria = []
-#         self.interior_equilibria = []
-#         self.branch_minimizers = []
-#         self.branch_maximizers = []
-#         for pt in self.branch_initializers:
+    #     # Find boundary, interior equilibria and branch optimizers
+    #     self.boundary_equilibria = []
+    #     self.interior_equilibria = []
+    #     self.branch_minimizers = []
+    #     self.branch_maximizers = []
+    #     for pt in self.branch_initializers:
 
-#             eq_sol = self.optimize_over("boundary", init_x=pt)
-#             if (eq_sol) and "equilibrium" in eq_sol.keys():
-#                 add_to(eq_sol, self.boundary_equilibria)
+    #         eq_sol = self.optimize_over("boundary", init_x=pt)
+    #         if (eq_sol) and "equilibrium" in eq_sol.keys():
+    #             add_to(eq_sol, self.boundary_equilibria)
 
-#             eq_sol = self.optimize_over("interior", init_x=pt)
-#             if (eq_sol) and "equilibrium" in eq_sol.keys():
-#                 add_to(eq_sol, self.interior_equilibria)
+    #         eq_sol = self.optimize_over("interior", init_x=pt)
+    #         if (eq_sol) and "equilibrium" in eq_sol.keys():
+    #             add_to(eq_sol, self.interior_equilibria)
 
-#             branch_minimizer = self.optimize_over("min_branch", init_x=pt)
-#             if branch_minimizer and "type" in branch_minimizer.keys():
-#                 add_to(branch_minimizer, self.branch_minimizers)
+    #         branch_minimizer = self.optimize_over("min_branch", init_x=pt)
+    #         if branch_minimizer and "type" in branch_minimizer.keys():
+    #             add_to(branch_minimizer, self.branch_minimizers)
 
-#             branch_maximizer = self.optimize_over("max_branch", init_x=pt)
-#             if branch_maximizer and "type" in branch_maximizer.keys():
-#                 add_to(branch_maximizer, self.branch_maximizers)
+    #         branch_maximizer = self.optimize_over("max_branch", init_x=pt)
+    #         if branch_maximizer and "type" in branch_maximizer.keys():
+    #             add_to(branch_maximizer, self.branch_maximizers)
 
-#         # self.branch_optimizers(verbose)
+    #     # self.branch_optimizers(verbose)
 
-#         if verbose:
-#             show_message(self.boundary_equilibria, "boundary equilibrium points")
-#             show_message(self.interior_equilibria, "interior equilibrium points")
+    #     if verbose:
+    #         show_message(self.boundary_equilibria, "boundary equilibrium points")
+    #         show_message(self.interior_equilibria, "interior equilibrium points")
 
-#             show_message(self.branch_minimizers, "branch minimizers")
-#             show_message(self.branch_maximizers, "branch maximizers")
+    #         show_message(self.branch_minimizers, "branch minimizers")
+    #         show_message(self.branch_maximizers, "branch maximizers")
 
 #     def branch_optimizers(self, verbose=False):
 #         '''
@@ -2348,3 +2369,16 @@ class CLBF(KernelQuadratic):
 #             else: sol_dict["type"] = "undefined"
 
 #         return sol_dict
+
+    # def get_zero_det(self, xg, yg):
+    #     '''
+    #     Returns the points where the determinant is zero over a 1D array with coords given by xg, yg 
+    #     '''
+    #     det_grid = self.det_invariant(xg, yg, extended=True)
+    #     indexes = np.where(np.sign(det_grid[:-1]) != np.sign(det_grid[1:]))[0] + 1
+
+    #     pts = []
+    #     for i in indexes:
+    #         pts.append( [xg[i][0], yg[i][0]] )
+    #     return pts
+    

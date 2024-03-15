@@ -20,7 +20,7 @@ class NominalQP():
         self.cbf = kernel_triplet.cbf
 
         self.kernel = kernel_triplet.kernel
-        self.A_list = kernel_triplet.A_list
+        self.A_list = kernel_triplet.A_matrices
 
         if self.cbf != None:
             if self.clf.kernel != self.cbf.kernel:

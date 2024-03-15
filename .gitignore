@@ -140,3 +140,6 @@ numpy_tests.py
 *.json
 !/graphics/splines/**
 **/__pycache__/
+
+#Profiles
+*.prof
