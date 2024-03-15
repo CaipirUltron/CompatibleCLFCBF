@@ -534,9 +534,9 @@ def polygon(vertices, spacing=0.1, closed=False, gradients=0, at_edge=False ):
                                             +-1 means gradient pointing 90° in the counter/clockwise 
                                             direction to the polygonal sequence.
                 closed (bool) - if the polygon is open (False) or closed (True)
+                at_edge (bool) - if the gradients are on the edges (True) or on the middle of each side (False)
     Returns: list of dicts containing the point coordinates along the polygon edges and (possibly) gradients 
     '''
-
     # Compute segments and normals - for N vertices, polygon will have N - 1 segments if it's open, or N segments if it's closed
     vertices = np.array(vertices)
     segments = np.zeros(vertices.shape)
@@ -615,7 +615,7 @@ def box(center, height, width, angle=0, spacing=0.1, gradients=0, at_edge=False)
     bottom_right = center + br @ rot2D( np.deg2rad(angle) )
 
     box_pts = polygon( vertices=np.vstack([ bottom_left, bottom_right, top_right, top_left ]), 
-                       spacing=spacing, closed=True, gradients=gradients, at_edge=False )
+                       spacing=spacing, closed=True, gradients=gradients, at_edge=at_edge )
     
     return box_pts
 

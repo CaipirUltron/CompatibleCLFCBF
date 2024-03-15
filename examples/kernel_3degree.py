@@ -9,7 +9,8 @@ initial_state = [0.5, 6.0]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
-limits = np.array([[-7, 7],[-2, 4]])
+# limits = np.array([[-7, 7],[-2, 4]])
+limits = 10*np.array([[-1, 1],[-1, 1]])
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 kernel = Kernel(*initial_state, degree=3)
@@ -37,7 +38,7 @@ points.append({ "coords": [ 0.0,  5.0], "gradient": [ 2.0,  6.0] })
 # points.append({ "coords": [ 0.0,  -8.0], "gradient": [ 0.0,  -1.0] })
 # clf = KernelLyapunov(*initial_state, kernel=kernel, points=points, centers=[clf_center])
 
-clf_eig = 1*np.array([ 6.0, 1.0 ])
+clf_eig = np.array([ 6.0, 1.0 ])
 clf_angle = np.deg2rad(0)
 Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
 

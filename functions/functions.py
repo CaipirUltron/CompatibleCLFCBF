@@ -11,6 +11,7 @@ import contourpy as ctp
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.animation as anim
+from copy import copy
 
 from scipy.optimize import minimize
 from shapely import geometry, intersection
@@ -644,9 +645,6 @@ class Kernel(Function):
         self._lambda_jacobian_monomials = sp.lambdify( list(self._symbols), self._sym_jacobian_monomials )
         self._lambda_hessian_monomials = sp.lambdify( list(self._symbols), self._hessian_monomials )
 
-        self.func = np.empty((self._num_monomials, ), dtype=float)
-        self.jac = np.empty((self._num_monomials, self._dim), dtype=float)
-
     def set_param(self, **kwargs):
         '''
         Sets the function parameters.
@@ -710,16 +708,17 @@ class Kernel(Function):
     def function(self, point):
         '''
         Compute polynomial function numerically.
-        '''              
-        for k, m in enumerate( self._lambda_monomials(*point) ): self.func[k] = m
-        return self.func
+        '''
+        # for k, m in enumerate( list_m ): self.func[k] = m
+        return np.array(self._lambda_monomials(*point))
 
     def jacobian(self, point):
         '''
         Compute kernel Jacobian.
         '''
-        for k, line in enumerate( self._lambda_jacobian_monomials(*point) ): self.jac[k,:] = line
-        return self.jac
+        # for k, line in enumerate( self._lambda_jacobian_monomials(*point) ): self.jac[k,:] = line
+        # return self.jac
+        return np.array(self._lambda_jacobian_monomials(*point))
 
     def get_A_matrices(self):
         '''
@@ -797,7 +796,7 @@ class KernelQuadratic(Function):
         # Initialization
         super().__init__(*args)
 
-        self.default_fit_options = {"force_coords": False, "force_gradients": False }
+        self.default_fit_options = { "force_coords": False, "force_gradients": False }
         self.fit_options = self.default_fit_options
 
         default_color = mcolors.BASE_COLORS['k']
@@ -808,6 +807,8 @@ class KernelQuadratic(Function):
         self.plot_config["color"] = default_color
         self.plot_config["figsize"] = (5,5)
         self.plot_config["axeslim"] = (-6,6,-6,6)
+
+        self.constant = 0.0
 
         self.set_param(**kwargs)
         self.evaluate()
@@ -838,19 +839,21 @@ class KernelQuadratic(Function):
         '''
         Sets the function parameters.
         '''
-        if "constant" in kwargs.keys():
+        keys = [ key.lower() for key in kwargs.keys() ] 
+
+        if "constant" in keys:
             self.constant = kwargs["constant"]
 
-        if not hasattr(self, "constant"):
-            self.constant = 0.0
+        # if not hasattr(self, "constant"):
+        #     self.constant = 0.0
 
-        if "kernel" in kwargs.keys():
+        if "kernel" in keys:
             if type(kwargs["kernel"]) != Kernel:
                 raise Exception("Argument must be a valid Kernel function.")
             self.kernel = kwargs["kernel"]
             self.init_kernel()
 
-        if "degree" in kwargs.keys():
+        if "degree" in keys:
             self.kernel = Kernel(*self._args, degree=kwargs["degree"])
             self.init_kernel()
 
@@ -859,7 +862,7 @@ class KernelQuadratic(Function):
             self.kernel = Kernel(*self._args, degree=1)
             self.init_kernel()
 
-        for key in kwargs.keys():
+        for key in keys:
 
             if key in ["constant", "kernel", "degree"]: # Already dealt with
                 continue
@@ -974,7 +977,6 @@ class KernelQuadratic(Function):
         Returns: the optimization results.
         '''
         n = self._dim
-        p = self.kernel_dim
         A_list = self.kernel.get_A_matrices()
 
         # Iterate over the input list to get problem requirements
@@ -990,8 +992,6 @@ class KernelQuadratic(Function):
                 pt["force_gradient"] = False
 
             coords = pt["coords"]
-            if type(coords) == np.ndarray:
-                coords = coords.tolist()
 
             m = self.kernel.function(coords)
             Jm = self.kernel.jacobian(coords)
@@ -1035,7 +1035,7 @@ class KernelQuadratic(Function):
                 self.cost += ( curvature_var - curvature )**2
 
         fit_problem = cp.Problem( cp.Minimize( self.cost ), self.constraints )
-        fit_problem.solve()
+        fit_problem.solve(verbose=False)
 
         if "optimal" in fit_problem.status:
             if isinstance(self, KernelLyapunov):
@@ -1149,16 +1149,16 @@ class KernelQuadratic(Function):
         '''
         Compute polynomial function numerically.
         '''
-        m = self.kernel.function(point)
-        return 0.5 * m.T @ self.matrix_coefs @ m - self.constant
+        z = self.kernel.function(point)
+        return 0.5 * z.T @ self.matrix_coefs @ z - self.constant
 
     def gradient(self, point):
         '''
         Compute gradient of polynomial function numerically.
         '''
-        m = self.kernel.function(point)
+        z = self.kernel.function(point)
         Jac_m = self.kernel.jacobian(point)
-        return Jac_m.T @ self.matrix_coefs @ m
+        return Jac_m.T @ self.matrix_coefs @ z
 
     def hessian(self, point):
         '''
