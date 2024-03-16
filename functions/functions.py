@@ -717,7 +717,6 @@ class Kernel(Function):
         Compute kernel Jacobian.
         '''
         # for k, line in enumerate( self._lambda_jacobian_monomials(*point) ): self.jac[k,:] = line
-        # return self.jac
         return np.array(self._lambda_jacobian_monomials(*point))
 
     def get_A_matrices(self):
@@ -843,9 +842,6 @@ class KernelQuadratic(Function):
 
         if "constant" in keys:
             self.constant = kwargs["constant"]
-
-        # if not hasattr(self, "constant"):
-        #     self.constant = 0.0
 
         if "kernel" in keys:
             if type(kwargs["kernel"]) != Kernel:
@@ -1331,7 +1327,7 @@ class KernelTriplet():
         self.comp_process_data = { "step": 0, 
                                   "start_time": 0.0, 
                                   "execution_time": 0.0, 
-                                  "gui_eventloop_time": 0.05,
+                                  "gui_eventloop_time": 0.1,
                                   "invariant_segs_log": [] }
         
         self.comp_graphics = { "fig": None,
@@ -1435,8 +1431,14 @@ class KernelTriplet():
             x = np.arange(self.limits[0][0], self.limits[0][1], self.spacing)
             y = np.arange(self.limits[1][0], self.limits[1][1], self.spacing)
             self.xg, self.yg = np.meshgrid(x,y)
-            grid_shape = self.xg.shape
-            self.determinant_grid = np.zeros(grid_shape)
+
+            self.var = np.hstack([ self.xg.flatten(), self.yg.flatten() ]).T.flatten()
+            self.determinant_grid = np.zeros(self.xg.shape)
+
+        N = 10
+        x = np.random.uniform(self.limits[0][0], self.limits[0][1], N)
+        y = np.random.uniform(self.limits[1][0], self.limits[1][1], N)
+        self.pts = np.column_stack((x, y))
 
         self.verify_kernel()
 
@@ -1625,6 +1627,30 @@ class KernelTriplet():
         self.invariant_lines = invariant_contour.lines(0.0)                                         # returns the 0-valued contour lines 
         self.invariant_set_analysis(verbose=verbose)                                                # run through each branch of the invariant set
 
+    def update_invariant_set_opt(self, verbose=False):
+        '''
+        Computes the invariant set from optimization.
+        '''
+        init_var = self.pts.flatten()
+        num_pts = self.pts.shape[0]
+
+        def cost(var: list[float]) -> float:
+            pts = var.reshape(num_pts,2)
+            cost = 0.0
+            for k, pt in enumerate(pts):
+                vQ = self.vecQ_fun(pt)
+                vP = self.vecP_fun(pt)
+                W = np.vstack([vQ, vP]).T
+                cost += np.linalg.det(W.T @ W)
+                if k < num_pts-1:
+                    next_pt = pts[k+1,:]
+                    cost += ( np.linalg.norm(pt - next_pt) - 1 )**2
+
+            return cost
+
+        sol = minimize( cost, init_var, options={"disp": verbose} )
+        return sol.x.reshape(num_pts, 2)
+
     def invariant_set_analysis(self, verbose=False):
         '''
         Populates invariant segments with data and compute equilibrium points from invariant line data.
@@ -1805,10 +1831,11 @@ class KernelTriplet():
             self.init_comp_plot(ax)
             plt.pause(self.comp_process_data["gui_eventloop_time"])
             
-        def intermediate_callback(res):
+        def intermediate_callback(res, status):
             '''
             Callback for visualization of intermediate results (verbose or by animation).
             '''
+            print(f"Status = {status}")
             self.comp_process_data["execution_time"] += time.perf_counter() - self.comp_process_data["start_time"]
             self.comp_process_data["step"] += 1
             

@@ -34,6 +34,10 @@ sim.kerneltriplet.plot_invariant(ax)
 sim.kerneltriplet.plot_attr(ax, "boundary_equilibria", mcolors.BASE_COLORS["g"])
 sim.kerneltriplet.plot_attr(ax, "interior_equilibria", mcolors.BASE_COLORS["k"])
 
+pts = sim.kerneltriplet.update_invariant_set_opt(verbose=True)
+for pt in pts:
+    ax.plot(pt[0], pt[1], 'bo', alpha=0.6)
+
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 while True:
     pt = plt.ginput(1, timeout=0)
