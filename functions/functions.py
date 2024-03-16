@@ -1658,9 +1658,12 @@ class KernelTriplet():
         self.invariant_segs = []
         self.boundary_equilibria = []
         self.interior_equilibria = []
+        self.stable_equilibria = []
+        self.unstable_equilibria = []
 
         for segment_points in self.invariant_lines:
             seg_dict = { "points": segment_points }
+
             seg_dict["lambdas"] = [ self.lambda_fun(pt) for pt in segment_points ]
             seg_dict["boundary_equilibria"] = self.seg_boundary_equilibria(segment_points)
             seg_dict["interior_equilibria"] = self.seg_interior_equilibria(segment_points)
@@ -1672,11 +1675,19 @@ class KernelTriplet():
             self.boundary_equilibria += seg_dict["boundary_equilibria"]
             self.interior_equilibria += seg_dict["interior_equilibria"]
 
+        for b_eq in self.boundary_equilibria:
+            if b_eq["equilibrium"] == "stable": self.stable_equilibria.append(b_eq)
+            if b_eq["equilibrium"] == "unstable": self.unstable_equilibria.append(b_eq)
+
+        for i_eq in self.interior_equilibria:
+            if i_eq["equilibrium"] == "stable": self.stable_equilibria.append(i_eq)
+            if i_eq["equilibrium"] == "unstable": self.unstable_equilibria.append(i_eq)
+
         if verbose:
             show_message(self.boundary_equilibria, "boundary equilibrium points")
             show_message(self.interior_equilibria, "interior equilibrium points")
 
-    def get_boundary_intersections(self, seg_data):
+    def get_boundary_intersections(self, seg_data: list[np.ndarray]):
         '''
         Computes the intersections with boundary segments of a particular segment of the invariant set.
         '''
@@ -1702,7 +1713,7 @@ class KernelTriplet():
         
         return intersection_pts
 
-    def seg_boundary_equilibria(self, seg_data):
+    def seg_boundary_equilibria(self, seg_data: list[np.ndarray]):
         '''
         Computes boundary equilibrium points for given segment data.
         '''
@@ -1722,16 +1733,17 @@ class KernelTriplet():
 
         return eqs
 
-    def seg_interior_equilibria(self, seg_data):
+    def seg_interior_equilibria(self, seg_data: list[np.ndarray]):
         '''
         Computes interior equilibrium points for given segment data
         '''
         eqs = []
         first_l = self.lambda_fun(seg_data[0])
         last_l = self.lambda_fun(seg_data[-1])
-        if first_l < self.interior_eq_lambda_min:
+        
+        if np.abs(first_l) < self.interior_eq_lambda_min:
             eqs.append( {"x": seg_data[0], "lambda": first_l, "h": self.cbf.function(seg_data[0]), "nablah": self.cbf.gradient(seg_data[0]).tolist() } )
-        if last_l < self.interior_eq_lambda_min:
+        if np.abs(last_l) < self.interior_eq_lambda_min:
             eqs.append( {"x": seg_data[-1], "lambda": last_l, "h": self.cbf.function(seg_data[-1]), "nablah": self.cbf.gradient(seg_data[-1]).tolist() } )
 
         for eq in eqs:
@@ -1742,6 +1754,16 @@ class KernelTriplet():
                 eq["equilibrium"] = "unstable"
         
         return eqs
+
+    def seg_clf_minima(self, seg_data: list[np.ndarray]):
+        '''
+        Computes CLF local minima for given segment data
+        '''
+
+    def seg_cbf_minima(self, seg_data: list[np.ndarray]):
+        '''
+        Computes CBF local minima for given segment data
+        '''
 
     def is_removable(self, seg_dict):
         '''
@@ -1827,15 +1849,14 @@ class KernelTriplet():
             ax.set_aspect('equal', adjustable='box')
             ax.set_xlim(self.limits[0][0], self.limits[0][1])
             ax.set_ylim(self.limits[1][0], self.limits[1][1])
-
             self.init_comp_plot(ax)
             plt.pause(self.comp_process_data["gui_eventloop_time"])
             
-        def intermediate_callback(res, status):
+        def intermediate_callback(res):
             '''
             Callback for visualization of intermediate results (verbose or by animation).
             '''
-            print(f"Status = {status}")
+            # print(f"Status = {status}")
             self.comp_process_data["execution_time"] += time.perf_counter() - self.comp_process_data["start_time"]
             self.comp_process_data["step"] += 1
             
@@ -1870,7 +1891,7 @@ class KernelTriplet():
 
         message = "Compatibilization "
         if is_processed_compatible: message += "was successful. "
-        else: message += "failed with message "
+        else: message += "failed. "
         message += "Process took " + str(self.comp_process_data["execution_time"]) + " seconds."
         print(message)
 
@@ -1922,7 +1943,7 @@ class KernelTriplet():
             seg_index = segs_to_plot[k]
             self.invariant_lines_plot[k].set_data( self.invariant_segs[seg_index]["points"][:,0], self.invariant_segs[seg_index]["points"][:,1] )
 
-    def plot_attr(self, ax, attr_name, plot_color='k'):
+    def plot_attr(self, ax, attr_name: str, plot_color='k', alpha=1.0):
         '''
         Plots a list attribute from the class into ax.
         '''
@@ -1937,7 +1958,7 @@ class KernelTriplet():
         # Balance the number of line2D elements in the array of plotted points
         if len(attr) >= len(self.plotted_attrs[attr_name]):
             for _ in range(len(attr) - len(self.plotted_attrs[attr_name])):
-                line2D, = ax.plot([],[], 'o', color=plot_color, alpha=0.8, linewidth=0.6 )
+                line2D, = ax.plot([],[], 'o', color=plot_color, alpha=alpha, linewidth=0.6 )
                 self.plotted_attrs[attr_name].append(line2D)
         else:
             for _ in range(len(self.plotted_attrs[attr_name]) - len(attr)):
@@ -1964,8 +1985,8 @@ class KernelTriplet():
         self.comp_graphics["text"].set_text(f"Optimization step = {step}")
 
         self.plot_invariant(ax)
-        self.plot_attr(ax, "boundary_equilibria", mcolors.BASE_COLORS["g"])
-        self.plot_attr(ax, "interior_equilibria", mcolors.BASE_COLORS["k"])
+        self.plot_attr(ax, "stable_equilibria", mcolors.BASE_COLORS["r"], 1.0)
+        self.plot_attr(ax, "unstable_equilibria", mcolors.BASE_COLORS["g"], 0.8)
 
         for coll in self.comp_graphics["clf_artists"]:
             coll.remove()

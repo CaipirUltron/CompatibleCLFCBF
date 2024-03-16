@@ -31,12 +31,8 @@ if hasattr(sim, "pts"):
 contour_unsafe = sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
 
 sim.kerneltriplet.plot_invariant(ax)
-sim.kerneltriplet.plot_attr(ax, "boundary_equilibria", mcolors.BASE_COLORS["g"])
-sim.kerneltriplet.plot_attr(ax, "interior_equilibria", mcolors.BASE_COLORS["k"])
-
-pts = sim.kerneltriplet.update_invariant_set_opt(verbose=True)
-for pt in pts:
-    ax.plot(pt[0], pt[1], 'bo', alpha=0.6)
+sim.kerneltriplet.plot_attr(ax, "stable_equilibria", mcolors.BASE_COLORS["r"], 1.0)
+sim.kerneltriplet.plot_attr(ax, "unstable_equilibria", mcolors.BASE_COLORS["g"], 0.8)
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 while True:
@@ -54,10 +50,7 @@ while True:
 
     print(f"V = {V}")
     print(f"h = {h}")
-
     print(f"lambda = {sim.kerneltriplet.lambda_fun(init_x)}")
-    print(f"V from KT = {sim.kerneltriplet.clf.function(init_x)}")
-    print(f"h from KT = {sim.kerneltriplet.cbf.function(init_x)}")
 
     clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits, spacing=0.5)
 
