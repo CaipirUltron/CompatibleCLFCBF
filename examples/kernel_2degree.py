@@ -59,7 +59,7 @@ kerneltriplet = KernelTriplet( plant=plant, clf=clf, cbf=cbf,
                               limits=limits.tolist(), spacing=0.2 )
 
 controller = NominalQP(kerneltriplet, dt=sample_time)
-T = 25
+T = 15
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 plot_config = {

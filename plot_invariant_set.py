@@ -34,6 +34,10 @@ sim.kerneltriplet.plot_invariant(ax)
 sim.kerneltriplet.plot_attr(ax, "stable_equilibria", mcolors.BASE_COLORS["r"], 1.0)
 sim.kerneltriplet.plot_attr(ax, "unstable_equilibria", mcolors.BASE_COLORS["g"], 0.8)
 
+for seg in sim.kerneltriplet.invariant_segs:
+    int = seg["integral"]
+    print(f"segment integral = {int}")
+
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 while True:
     pt = plt.ginput(1, timeout=0)

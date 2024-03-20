@@ -1441,6 +1441,7 @@ class KernelTriplet():
         self.pts = np.column_stack((x, y))
 
         self.verify_kernel()
+        self.counter = 0
 
     def verify_kernel(self):
         '''
@@ -1671,6 +1672,10 @@ class KernelTriplet():
             seg_dict["barrier_values"] = [ self.cbf.function(pt) for pt in segment_points ]
             seg_dict["removable"] = self.is_removable( seg_dict )
 
+            
+
+            # ----- Adds the segment dicts and equilibrium points to corresponding data structures
+
             self.invariant_segs.append(seg_dict)
             self.boundary_equilibria += seg_dict["boundary_equilibria"]
             self.interior_equilibria += seg_dict["interior_equilibria"]
@@ -1692,7 +1697,6 @@ class KernelTriplet():
         Computes the intersections with boundary segments of a particular segment of the invariant set.
         '''
         intersection_pts = []
-
         for boundary_line in self.boundary_lines:
             invariant_seg_line = geometry.LineString(seg_data)
             intersections = intersection( boundary_line, invariant_seg_line )
@@ -1719,11 +1723,13 @@ class KernelTriplet():
         '''
         eqs = []
         intersection_pts = self.get_boundary_intersections(seg_data)
+
         for pt in intersection_pts:
             seg_boundary_equilibrium = {"x": pt}
             seg_boundary_equilibrium["lambda"] = self.lambda_fun(pt)
             seg_boundary_equilibrium["h"] = self.cbf.function(pt)
             seg_boundary_equilibrium["nablah"] = self.cbf.gradient(pt)
+
             stability, eta = self.stability_fun(pt, "boundary")
             seg_boundary_equilibrium["eta"], seg_boundary_equilibrium["stability"] = eta, stability
             seg_boundary_equilibrium["equilibrium"] = "stable"
@@ -1765,6 +1771,20 @@ class KernelTriplet():
         Computes CBF local minima for given segment data
         '''
 
+    def get_integral(self, seg_data: list[np.ndarray], seg_type: int = -1):
+        '''Computes the segment integral'''
+
+        avg_barrier_values = np.array([ self.cbf.function(0.5*( pt + seg_data[k+1,:] )) for k, pt in enumerate(seg_data[0:-1,:]) ])
+        line_lengths = np.array([ np.linalg.norm( seg_data[k+1,:] - pt ) for k, pt in enumerate(seg_data[0:-1,:]) ])
+
+        if seg_type > 0:
+            neg_indexes = np.where(avg_barrier_values <= 0.0)
+            return sum( avg_barrier_values[neg_indexes]*line_lengths[neg_indexes] )
+        if seg_type < 0:
+            pos_indexes = np.where(avg_barrier_values >= 0.0)
+            return sum( avg_barrier_values[pos_indexes]*line_lengths[pos_indexes] )
+        return 0.0
+
     def is_removable(self, seg_dict):
         '''
         Checks if segment intersections with the boundary can be removed.
@@ -1774,9 +1794,14 @@ class KernelTriplet():
                  -1 if removable from inside
         '''
         seg_dict["removable"] = 0
-        if seg_dict["barrier_values"][0]*seg_dict["barrier_values"][-1] > 0:
-            if seg_dict["barrier_values"][0] > 0: return +1         # removable from outside
-            if seg_dict["barrier_values"][0] < 0: return -1         # removable from inside
+        if seg_dict["barrier_values"][0] * seg_dict["barrier_values"][-1] > 0:
+            if seg_dict["barrier_values"][0] > 0: # removable from outside
+                seg_dict["integral"] = self.get_integral(seg_dict["points"], +1)
+                return +1         
+            if seg_dict["barrier_values"][0] < 0: # removable from inside
+                seg_dict["integral"] = self.get_integral(seg_dict["points"], -1)
+                return -1
+        seg_dict["integral"] = self.get_integral(seg_dict["points"], -1)
         return 0
 
     def is_compatible(self):
@@ -1803,6 +1828,8 @@ class KernelTriplet():
         is_original_compatible = self.is_compatible()
         Pnom = self.clf.P
 
+        self.counter = 0
+
         def symmetric_var(var):
             '''
             var is a n(n+1)/2 list representing a stacked symmetric matrix.
@@ -1818,6 +1845,7 @@ class KernelTriplet():
             Minimizes the changes to the CLF geometry needed for compatibilization.
             '''
             P2 = symmetric_var(var)
+            self.counter += 1
             if obj_type == "closest": return np.linalg.norm( P2.T @ P2 - Pnom, 'fro')
             if obj_type == "feasibility": return 1.0
 
@@ -1856,6 +1884,8 @@ class KernelTriplet():
             '''
             Callback for visualization of intermediate results (verbose or by animation).
             '''
+            print(f"Steps = {self.counter}")
+            self.counter = 0
             # print(f"Status = {status}")
             self.comp_process_data["execution_time"] += time.perf_counter() - self.comp_process_data["start_time"]
             self.comp_process_data["step"] += 1

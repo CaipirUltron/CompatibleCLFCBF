@@ -5,11 +5,11 @@ from functions import Kernel, KernelLyapunov, KernelBarrier, KernelTriplet
 from controllers import NominalQP
 from common import create_quadratic, rot2D, polygon, load_compatible
 
-initial_state = [0.5, 6.0]
+initial_state = [4.5, 3.5]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
-# limits = np.array([[-7, 7],[-4, 5]])
+# limits = np.array([[-6, 6],[-4, 5]])
 limits = 10*np.array([[-1, 1],[-1, 1]])
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
@@ -38,7 +38,7 @@ points.append({ "coords": [ 0.0,  5.0], "gradient": [ 2.0,  6.0] })
 # points.append({ "coords": [ 0.0,  -8.0], "gradient": [ 0.0,  -1.0] })
 # clf = KernelLyapunov(*initial_state, kernel=kernel, points=points, centers=[clf_center])
 
-clf_eig = np.array([ 6.0, 1.0 ])
+clf_eig = np.array([ 8.0, 1.0 ])
 clf_angle = np.deg2rad(0)
 Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
 
@@ -66,7 +66,7 @@ sample_time = .002
 p, alpha, beta = 1.0, 1.0, 1.0
 kerneltriplet = KernelTriplet( plant=plant, clf=clf, cbf=cbf,
                               params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta},
-                              limits=limits.tolist(), spacing=0.3)
+                              limits=limits.tolist(), spacing=0.2)
 
 controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 15
