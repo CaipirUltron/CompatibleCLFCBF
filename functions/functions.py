@@ -1319,7 +1319,7 @@ class KernelTriplet():
         self.limits = [ [-1, +1] for _ in range(2) ]
         self.spacing = 0.1
         self.invariant_color = mcolors.BASE_COLORS["k"]
-        self.compatibility_options = {"barrier_sep": 0.2}
+        self.compatibility_options = {"barrier_sep": 0.1}
         self.interior_eq_lambda_min = 1e-4
         self.invariant_lines_plot = []
         self.plotted_attrs = {}
@@ -1668,11 +1668,7 @@ class KernelTriplet():
             seg_dict["lambdas"] = [ self.lambda_fun(pt) for pt in segment_points ]
             seg_dict["boundary_equilibria"] = self.seg_boundary_equilibria(segment_points)
             seg_dict["interior_equilibria"] = self.seg_interior_equilibria(segment_points)
-
-            seg_dict["barrier_values"] = [ self.cbf.function(pt) for pt in segment_points ]
-            seg_dict["removable"] = self.is_removable( seg_dict )
-
-            
+            seg_dict["segment_critical"] = self.get_seg_critical(seg_dict)
 
             # ----- Adds the segment dicts and equilibrium points to corresponding data structures
 
@@ -1771,38 +1767,37 @@ class KernelTriplet():
         Computes CBF local minima for given segment data
         '''
 
-    def get_integral(self, seg_data: list[np.ndarray], seg_type: int = -1):
-        '''Computes the segment integral'''
-
-        avg_barrier_values = np.array([ self.cbf.function(0.5*( pt + seg_data[k+1,:] )) for k, pt in enumerate(seg_data[0:-1,:]) ])
-        line_lengths = np.array([ np.linalg.norm( seg_data[k+1,:] - pt ) for k, pt in enumerate(seg_data[0:-1,:]) ])
-
-        if seg_type > 0:
-            neg_indexes = np.where(avg_barrier_values <= 0.0)
-            return sum( avg_barrier_values[neg_indexes]*line_lengths[neg_indexes] )
-        if seg_type < 0:
-            pos_indexes = np.where(avg_barrier_values >= 0.0)
-            return sum( avg_barrier_values[pos_indexes]*line_lengths[pos_indexes] )
-        return 0.0
-
-    def is_removable(self, seg_dict):
+    def get_seg_critical(self, seg_dict: list[dict]):
         '''
-        Checks if segment intersections with the boundary can be removed.
-        Parameters: barrier_values are the CBF values of each segment point
-        Returns:  0 if not removable
-                 +1 if removable from outside
-                 -1 if removable from inside
+        Computes the segment integral
         '''
+        seg_data = seg_dict["points"]
+        barrier_vals = np.array([ self.cbf.function(0.5*( pt + seg_data[k+1,:] )) for k, pt in enumerate(seg_data[0:-1,:]) ])
+
+        # segment is removable (starts AND ends completely outside/inside the unsafe set)
+        if barrier_vals[0] * barrier_vals[-1] > 0:
+
+            if barrier_vals[0] > 0:                                                 # removable from outside
+                seg_dict["removable"] = +1
+                return np.min(barrier_vals)
+            
+            if barrier_vals[0] < 0:                                                 # removable from inside
+                seg_dict["removable"] = -1
+                return np.max(barrier_vals)
+
+        # segment is not removable (starts OR ends outside/inside the unsafe set)
         seg_dict["removable"] = 0
-        if seg_dict["barrier_values"][0] * seg_dict["barrier_values"][-1] > 0:
-            if seg_dict["barrier_values"][0] > 0: # removable from outside
-                seg_dict["integral"] = self.get_integral(seg_dict["points"], +1)
-                return +1         
-            if seg_dict["barrier_values"][0] < 0: # removable from inside
-                seg_dict["integral"] = self.get_integral(seg_dict["points"], -1)
-                return -1
-        seg_dict["integral"] = self.get_integral(seg_dict["points"], -1)
-        return 0
+        pos_lines = np.where(barrier_vals >= self.compatibility_options["barrier_sep"])
+
+        if barrier_vals[0] < 0:                                                                     # starts inside (ends outside)
+            sep_index = pos_lines[0][0]
+            removable_line = barrier_vals[sep_index:]
+
+        if barrier_vals[0] > 0:                                                                     # starts outside (ends inside)
+            sep_index = pos_lines[0][-1]+1
+            removable_line = barrier_vals[0:sep_index]
+
+        return np.min(removable_line)
 
     def is_compatible(self):
         '''
@@ -1827,43 +1822,46 @@ class KernelTriplet():
         '''
         is_original_compatible = self.is_compatible()
         Pnom = self.clf.P
-
         self.counter = 0
 
-        def symmetric_var(var):
-            '''
-            var is a n(n+1)/2 list representing a stacked symmetric matrix.
-            '''
-            p = self.kernel.kernel_dim
-            P2 = vector2sym(var)
-            if P2.shape != (p,p):
-                raise Exception("Matrix dimensions are incompatible.")
-            return P2
+        def var_to_PSD(var):
+            '''Transforms an n(n+1)/2 array representing a stacked symmetric matrix into standard PSD form'''
+            sqrtP = vector2sym(var)
+            P = sqrtP.T @ sqrtP
+            return P
+
+        def PSD_to_var(P):
+            '''Transforms a standard PSD matrix P into an array of size n(n+1)/2 list representing the stacked symmetric square root matrix of P'''
+            return sym2vector(sp.linalg.sqrtm(P))
 
         def objective(var):
             '''
             Minimizes the changes to the CLF geometry needed for compatibilization.
             '''
-            P2 = symmetric_var(var)
             self.counter += 1
-            if obj_type == "closest": return np.linalg.norm( P2.T @ P2 - Pnom, 'fro')
-            if obj_type == "feasibility": return 1.0
+            self.P = var_to_PSD(var)
+            self.update_invariant_set()
+
+            cost = np.linalg.norm( self.P - Pnom, 'fro')
+            # print(f"P = {np.linalg.eigvals(self.P)}")
+            return cost
 
         def removability_constr(var):
             '''
             Removes removable equilibrium points.
             '''
-            # Updates boundary equilibria
-            P2 = symmetric_var(var)
-            self.P = P2.T @ P2
+            # Updates invariant set
+            self.P = var_to_PSD(var)
             self.update_invariant_set()
             
             rem_constr = [ 0.0, 0.0 ]
             min_barrier_values, max_barrier_values = [], []
 
             for seg in self.invariant_segs:
-                if seg["removable"] == +1: min_barrier_values += seg["barrier_values"]
-                if seg["removable"] == -1: max_barrier_values += seg["barrier_values"]
+                if seg["removable"] >= 0 :
+                    min_barrier_values.append( seg["segment_critical"] )        # if segment is not removable or removable from outside
+                if seg["removable"] == -1: 
+                    max_barrier_values.append( seg["segment_critical"] )        # if segment is removable from inside
 
             if len(min_barrier_values): rem_constr[0] =  np.min( min_barrier_values ) - self.compatibility_options["barrier_sep"]
             if len(max_barrier_values): rem_constr[1] = -np.max( max_barrier_values ) - self.compatibility_options["barrier_sep"]
@@ -1884,8 +1882,6 @@ class KernelTriplet():
             '''
             Callback for visualization of intermediate results (verbose or by animation).
             '''
-            print(f"Steps = {self.counter}")
-            self.counter = 0
             # print(f"Status = {status}")
             self.comp_process_data["execution_time"] += time.perf_counter() - self.comp_process_data["start_time"]
             self.comp_process_data["step"] += 1
@@ -1894,6 +1890,7 @@ class KernelTriplet():
             self.comp_process_data["invariant_segs_log"].append( [ seg.tolist() for seg in self.invariant_lines ] )
 
             if verbose:
+                print( f"Steps = {self.counter}" )
                 print( f"Spectra = {np.linalg.eigvals(self.P)}" )
                 print( f"Removability constraint = {removability_constr(res)}" )
                 print(self.comp_process_data["execution_time"], "seconds have passed...")
@@ -1902,18 +1899,19 @@ class KernelTriplet():
                 self.update_comp_plot(ax)
                 plt.pause(self.comp_process_data["gui_eventloop_time"])
 
+            self.counter = 0
             self.comp_process_data["start_time"] = time.perf_counter()
 
         constraints = [ {"type": "ineq", "fun": removability_constr} ]
-        init_var = sym2vector(Pnom).tolist()
 
         #--------------------------- Main optimization process ---------------------------
         print("Starting compatibilization process. This may take a while...")
 
         self.comp_process_data["start_time"] = time.perf_counter()
+
+        init_var = PSD_to_var(Pnom)
         sol = minimize( objective, init_var, constraints=constraints, callback=intermediate_callback )
-        P2 = symmetric_var( sol.x )
-        P = P2.T @ P2
+        P = var_to_PSD( sol.x )
 
         is_processed_compatible = self.is_compatible()
 

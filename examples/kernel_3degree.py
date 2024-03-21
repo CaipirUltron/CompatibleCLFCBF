@@ -9,8 +9,8 @@ initial_state = [4.5, 3.5]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
-# limits = np.array([[-6, 6],[-4, 5]])
-limits = 10*np.array([[-1, 1],[-1, 1]])
+limits = np.array([[-7, 7],[-4, 5]])
+# limits = 10*np.array([[-1, 1],[-1, 1]])
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 kernel = Kernel(*initial_state, degree=3)
@@ -66,7 +66,7 @@ sample_time = .002
 p, alpha, beta = 1.0, 1.0, 1.0
 kerneltriplet = KernelTriplet( plant=plant, clf=clf, cbf=cbf,
                               params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta},
-                              limits=limits.tolist(), spacing=0.2)
+                              limits=limits.tolist(), spacing=0.1)
 
 controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 15
