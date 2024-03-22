@@ -1321,7 +1321,7 @@ class KernelTriplet():
         self.spacing = 0.1
         self.invariant_color = mcolors.BASE_COLORS["k"]
         self.compatibility_options = { "barrier_sep": 0.1, "min_curvature": 1.0 }
-        self.interior_eq_threshold = 1e-3
+        self.interior_eq_threshold = 1e-1
         self.invariant_lines_plot = []
         self.plotted_attrs = {}
 
@@ -1776,8 +1776,10 @@ class KernelTriplet():
         # Finds separate groups of points with costs below a certain threshold... interior equilibria are computed by extracting the mean of each group
         for flag, group in itertools.groupby(zip(seg_data, costs), lambda x: x[1] <= self.interior_eq_threshold):
             if flag:
-                pts = [ ele[0] for ele in list(group) ]
-                new_eq = np.mean(pts, axis=0)
+                group = list(group)
+                group_pts = [ ele[0] for ele in group ]
+                group_costs = [ ele[1] for ele in group ]
+                new_eq = group_pts[np.argmin(group_costs)]
                 seg_dict["interior_equilibria"].append({"x":new_eq, 
                                                         "lambda": self.lambda_fun(new_eq), 
                                                         "h": self.cbf.function(new_eq), 
@@ -2123,8 +2125,6 @@ class KernelTriplet():
 
             self.clf.set_param(P=self.P)
             level = self.clf.function( self.boundary_equilibria[np.random.randint(0,num_eqs)]["x"] )
-
-            print(np.linalg.eigvals(self.P))
 
             pt = np.array([5.58003507e-14, 1.13044149e+00])
             level = self.clf.function(pt)
