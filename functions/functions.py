@@ -1303,6 +1303,7 @@ class KernelBarrier(KernelQuadratic):
         '''
         return self.get_levels(levels=[0.0], **kwargs)[0]
 
+###############################################################################
 class KernelTriplet():
     '''
     Class for kernel-based triplets of: plant, CLF and CBF.
@@ -1319,7 +1320,7 @@ class KernelTriplet():
         self.limits = [ [-1, +1] for _ in range(2) ]
         self.spacing = 0.1
         self.invariant_color = mcolors.BASE_COLORS["k"]
-        self.compatibility_options = {"barrier_sep": 0.1}
+        self.compatibility_options = { "barrier_sep": 0.1, "min_curvature": 1.0 }
         self.interior_eq_lambda_min = 1e-4
         self.invariant_lines_plot = []
         self.plotted_attrs = {}
@@ -1340,6 +1341,9 @@ class KernelTriplet():
         self.vecP = np.empty((self.n,))
         self.W = np.empty((self.n,2))
         self.S = np.empty((self.n,self.n))
+
+        self.cost = 0.0
+        self.rem_constr = [ 0.0, 0.0]
 
         self.create_limit_lines()
 
@@ -1788,6 +1792,7 @@ class KernelTriplet():
         # segment is not removable (starts OR ends outside/inside the unsafe set)
         seg_dict["removable"] = 0
         pos_lines = np.where(barrier_vals >= self.compatibility_options["barrier_sep"])
+        if len(pos_lines[0] == 0): pos_lines = np.where(barrier_vals >= 0.0)
 
         if barrier_vals[0] < 0:                                                                     # starts inside (ends outside)
             sep_index = pos_lines[0][0]
@@ -1816,12 +1821,63 @@ class KernelTriplet():
 
         return True
 
+    def fit_curvatures(self, points: list[np.ndarray]):
+        '''
+        Solves the convex optimization problem of finding a SHAPE matrix with positive curvature at every point on the input list, 
+        while minimizing the Frobenius error.
+        '''
+        if len(points) == 0: return self.P
+
+        print(np.linalg.eigvals(self.P))
+
+        SHAPE = cp.Variable( (self.p,self.p), symmetric=True )
+
+        cost = cp.norm(SHAPE - self.P)
+        constraints = [ SHAPE >> 0 ]
+        gradient_norms = []
+        for pt in points:
+            m = self.kernel.function(pt)
+            Jm = self.kernel.jacobian(pt)
+
+            # Gradient constraint
+            gradient_norms.append( cp.Variable() )
+            gradient = self.clf_gradient(pt)
+            normalized = gradient/np.linalg.norm(gradient)
+            constraints += [ Jm.T @ SHAPE @ m == gradient_norms[-1] * normalized ]
+
+            # Curvature constraint
+            v = rot2D(np.pi/2) @ normalized
+            curvature_var = 0.0
+            for i,j in itertools.product(range(self.n),range(self.n)):
+                Hij = m.T @ ( self.A_matrices[i].T @ SHAPE + SHAPE @ self.A_matrices[i] ) @ self.A_matrices[j] @ m
+                curvature_var += Hij * v[i] * v[j]
+            constraints += [ curvature_var - self.compatibility_options["min_curvature"] >= 0 ]
+
+        fit_problem = cp.Problem( cp.Minimize( cost ), constraints )
+        fit_problem.solve(verbose=False)
+
+        print(curvature_var.value)
+
+        return SHAPE.value
+
+    def non_removable_stables(self) -> list[np.ndarray]:
+        '''
+        This function returns a list with all non-removable stable equilibrium points.
+        '''
+        nonremovable_stables = []
+        for seg_dict in self.invariant_segs:
+            if seg_dict["removable"] == 0:
+                for eq in seg_dict["boundary_equilibria"]:
+                    if eq["equilibrium"] == "stable":
+                        nonremovable_stables.append( np.array(eq["x"]) )
+        return nonremovable_stables
+
     def compatibilize(self, obj_type="closest", verbose=False, animate=False):
         '''
         This function computes a new CLF geometry that is completely compatible with the original CBF.
         '''
         is_original_compatible = self.is_compatible()
-        Pnom = self.clf.P
+        self.P = self.clf.P
         self.counter = 0
 
         def var_to_PSD(var):
@@ -1842,9 +1898,10 @@ class KernelTriplet():
             self.P = var_to_PSD(var)
             self.update_invariant_set()
 
-            cost = np.linalg.norm( self.P - Pnom, 'fro')
-            # print(f"P = {np.linalg.eigvals(self.P)}")
-            return cost
+            if obj_type == "closest": self.cost = np.linalg.norm( self.P - Pnom, 'fro')
+            else: self.cost = 1.0
+
+            return self.cost
 
         def removability_constr(var):
             '''
@@ -1854,7 +1911,7 @@ class KernelTriplet():
             self.P = var_to_PSD(var)
             self.update_invariant_set()
             
-            rem_constr = [ 0.0, 0.0 ]
+            self.rem_constr = [ 0.0, 0.0 ]
             min_barrier_values, max_barrier_values = [], []
 
             for seg in self.invariant_segs:
@@ -1863,10 +1920,13 @@ class KernelTriplet():
                 if seg["removable"] == -1: 
                     max_barrier_values.append( seg["segment_critical"] )        # if segment is removable from inside
 
-            if len(min_barrier_values): rem_constr[0] =  np.min( min_barrier_values ) - self.compatibility_options["barrier_sep"]
-            if len(max_barrier_values): rem_constr[1] = -np.max( max_barrier_values ) - self.compatibility_options["barrier_sep"]
+            if len(min_barrier_values): self.rem_constr[0] =  np.min( min_barrier_values ) - self.compatibility_options["barrier_sep"]
+            if len(max_barrier_values): self.rem_constr[1] = -np.max( max_barrier_values ) - self.compatibility_options["barrier_sep"]
 
-            return rem_constr
+            return self.rem_constr
+
+        self.P = self.fit_curvatures( [ np.array([5.58003507e-14, 1.13044149e+00]) ] )
+        self.update_invariant_set()
 
         if animate:
             self.comp_graphics["fig"], ax = plt.subplots(nrows=1, ncols=1)
@@ -1892,7 +1952,8 @@ class KernelTriplet():
             if verbose:
                 print( f"Steps = {self.counter}" )
                 print( f"Spectra = {np.linalg.eigvals(self.P)}" )
-                print( f"Removability constraint = {removability_constr(res)}" )
+                print( f"Cost = {self.cost}" )
+                print( f"Removability constraint = {self.rem_constr}" )
                 print(self.comp_process_data["execution_time"], "seconds have passed...")
 
             if animate: 
@@ -1904,17 +1965,22 @@ class KernelTriplet():
 
         constraints = [ {"type": "ineq", "fun": removability_constr} ]
 
-        #--------------------------- Main optimization process ---------------------------
+        #--------------------------- Main compatibilization process ---------------------------
         print("Starting compatibilization process. This may take a while...")
-
+        is_processed_compatible = self.is_compatible()
         self.comp_process_data["start_time"] = time.perf_counter()
 
-        init_var = PSD_to_var(Pnom)
-        sol = minimize( objective, init_var, constraints=constraints, callback=intermediate_callback )
-        P = var_to_PSD( sol.x )
+        while not is_processed_compatible:
 
-        is_processed_compatible = self.is_compatible()
+            ## something to take care of the stable equilibria in non-removable invariant segments...
 
+            init_var = PSD_to_var(self.P)
+            sol = minimize( objective, init_var, constraints=constraints, callback=intermediate_callback )
+            self.P = var_to_PSD( sol.x )
+            self.update_invariant_set()
+
+            is_processed_compatible = self.is_compatible()
+        #--------------------------- Main compatibilization process ---------------------------
         print(f"Compatibilization terminated with message: {sol.message}")
 
         message = "Compatibilization "
@@ -1927,8 +1993,8 @@ class KernelTriplet():
 
         comp_result = { "opt_message": sol.message, 
                         "kernel_dimension": self.kernel.kernel_dim,
-                        "P_original": Pnom.tolist(),
-                        "P_processed": P.tolist(),
+                        "P_original": self.clf.P.tolist(),
+                        "P_processed": self.P.tolist(),
                         "is_original_compatible": is_original_compatible,
                         "is_processed_compatible": is_processed_compatible,
                         "execution_time": self.comp_process_data["execution_time"],
@@ -2021,8 +2087,15 @@ class KernelTriplet():
 
         num_eqs = len(self.boundary_equilibria)
         if num_eqs:
+
             self.clf.set_param(P=self.P)
             level = self.clf.function( self.boundary_equilibria[np.random.randint(0,num_eqs)]["x"] )
+
+            print(np.linalg.eigvals(self.P))
+
+            pt = np.array([5.58003507e-14, 1.13044149e+00])
+            level = self.clf.function(pt)
+
             self.comp_graphics["clf_artists"] = self.clf.plot_levels(levels = [ level ], ax=ax, limits=self.limits)
 
     # def run_animation(self):
