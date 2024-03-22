@@ -9,8 +9,8 @@ initial_state = [4.5, 3.5]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
-limits = np.array([[-7.5, 7.5],[-4, 5]])
-# limits = 10*np.array([[-1, 1],[-1, 1]])
+# limits = np.array([[-7.5, 7.5],[-4, 5]])
+limits = 9*np.array([[-1, 1],[-1, 1]])
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 kernel = Kernel(*initial_state, degree=3)

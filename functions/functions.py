@@ -11,8 +11,8 @@ import contourpy as ctp
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.animation as anim
-from copy import copy
 
+from copy import copy
 from scipy.optimize import minimize
 from shapely import geometry, intersection
 
@@ -1321,37 +1321,44 @@ class KernelTriplet():
         self.spacing = 0.1
         self.invariant_color = mcolors.BASE_COLORS["k"]
         self.compatibility_options = { "barrier_sep": 0.1, "min_curvature": 1.0 }
-        self.interior_eq_lambda_min = 1e-4
+        self.interior_eq_threshold = 1e-3
         self.invariant_lines_plot = []
         self.plotted_attrs = {}
 
         self.comp_process_data = { "step": 0, 
                                   "start_time": 0.0, 
                                   "execution_time": 0.0, 
-                                  "gui_eventloop_time": 0.1,
+                                  "gui_eventloop_time": 0.3,
                                   "invariant_segs_log": [] }
         
         self.comp_graphics = { "fig": None,
                                "text": None,
                                "clf_artists": [] }
 
+        # Defines main class attributes
         self.set_param(**kwargs)
         
-        self.vecQ = np.empty((self.n,))
-        self.vecP = np.empty((self.n,))
+        # Initialize matrix for determinant computation
         self.W = np.empty((self.n,2))
-        self.S = np.empty((self.n,self.n))
 
+        # Initialize cost and constraints for scipy.optimize computation
         self.cost = 0.0
-        self.rem_constr = [ 0.0, 0.0]
+        self.rem_constr = [ 0.0, 0.0 ]
 
+        # Initialize CVXPY parameters
+        self.CVXPY_P = cp.Variable( (self.p,self.p), symmetric=True )
+        self.CVXPY_Pnom = cp.Parameter( (self.p,self.p), symmetric=True )
+        self.CVXPY_lambdas = []
+        self.CVXPY_cost = cp.norm(self.CVXPY_P - self.CVXPY_Pnom)
+        self.CVXPY_constraints = [ self.CVXPY_P >> 0 ]
+
+        # Compute limit lines (obstacle should be completely contained inside the rectangle)
         self.create_limit_lines()
 
-        self.boundary_lines = []
-        for boundary_seg in self.cbf.get_boundary(limits=self.limits, spacing=self.spacing):
-            boundary_line = geometry.LineString(boundary_seg)
-            self.boundary_lines.append(boundary_line)
+        # Compute CBF boundary
+        self.compute_cbf_boundary()
 
+        # Initialize invariant set
         self.update_invariant_set(verbose=True)
 
     def create_limit_lines(self, spacing=0.1):
@@ -1384,6 +1391,13 @@ class KernelTriplet():
         right_x = x_max * np.ones(spam_y.shape)
         right_y = spam_y
         self.limit_lines.append({"x": right_x, "y": right_y})
+
+    def compute_cbf_boundary(self):
+        '''Compute CBF boundary'''
+        self.boundary_lines = []
+        for boundary_seg in self.cbf.get_boundary(limits=self.limits, spacing=self.spacing):
+            boundary_line = geometry.LineString(boundary_seg)
+            self.boundary_lines.append(boundary_line)
 
     def set_param(self, **kwargs):
         '''
@@ -1478,24 +1492,29 @@ class KernelTriplet():
             print(error)
             return False
 
-    def vecQ_fun(self, x):
+    def vecQ_fun(self, pt):
         '''
         Returns the vecQ function.
         '''    
-        z = self.kernel.function(x)
-        for k in range(self.n): self.vecQ[k] = z.T @ self.A_matrices[k].T @ self.Q @ z
-        return self.vecQ
+        m = self.kernel.function(pt)
 
-    def vecP_fun(self, x):
-        '''
-        Returns the vecP function.
-        '''
-        z = self.kernel.function(x)
-        V = self.clf_fun(x)
+        vecQ = np.array([ m.T @ A.T @ self.Q @ m for A in self.A_matrices ])
+        return vecQ
+
+    def vecP_fun_with_shape(self, pt: np.ndarray, P) -> np.ndarray:
+        '''Returns the vector vP = p gamma V(x, self.P) ∇V - fc '''
+
+        m = self.kernel.function(pt)
+        V = self.clf_fun(pt)
         slk_gain = self.params["slack_gain"]
         clf_gain = self.params["clf_gain"]
-        for k in range(self.n): self.vecP[k] = z.T @ self.A_matrices[k].T @ ( slk_gain * clf_gain * V * self.P - self.F ) @ z
-        return self.vecP
+
+        vecP = np.array([ m.T @ A.T @ ( slk_gain * clf_gain * V * P - self.F ) @ m for A in self.A_matrices ])
+        return vecP
+    
+    def vecP_fun(self, pt):
+        '''Returns the vector vP = p gamma V(x, self.P) ∇V - fc with self P matrix'''
+        return self.vecP_fun_with_shape(pt, self.P)
 
     def det_fun(self, x):
         '''
@@ -1507,60 +1526,75 @@ class KernelTriplet():
             self.W[k,:] = [ vQ_ele, vP_ele ]
         return np.linalg.det( self.W )
 
-    def clf_fun(self, x):
-        '''
-        Returns the CLF function value using custom P matrix
-        '''
-        z = self.kernel.function(x)
-        return 0.5 * z.T @ self.P @ z
+    def clf_fun_with_shape(self, pt: np.ndarray, P):
+        '''Returns the value of the CLF with shape defined by matrix P'''
+        m = self.kernel.function(pt)
+        return 0.5 * m.T @ P @ m
 
-    def clf_gradient(self, x):
-        '''
-        Returns the CLF gradient using custom P matrix
-        '''  
-        m = self.kernel.function(x)
-        Jm = self.kernel.jacobian(x)
-        return Jm.T @ self.P @ m
+    def clf_gradient_with_shape(self, pt: np.ndarray, P):
+        '''Returns the gradient of the CLF with shape defined by matrix P'''
+        m = self.kernel.function(pt)
+        Jm = self.kernel.jacobian(pt)
+        return Jm.T @ P @ m
 
-    def lambda_fun(self, x):
-        '''
-        Given a point x in the invariant set, compute its corresponding lambda scalar.
-        '''
-        vQ = self.vecQ_fun(x)
-        vP = self.vecP_fun(x)
+    def clf_fun(self, pt: np.ndarray) -> float:
+        '''Returns the CLF value using self P matrix'''
+        return self.clf_fun_with_shape(pt, self.P)
+
+    def clf_gradient(self, pt: np.ndarray) -> np.ndarray:
+        '''Returns the CLF gradient using self P matrix'''  
+        return self.clf_gradient_with_shape(pt, self.P)
+
+    def lambda_fun(self, pt):
+        '''Given a point x in the invariant set, compute its corresponding lambda scalar.'''
+        vQ = self.vecQ_fun(pt)
+        vP = self.vecP_fun(pt)
         return (vQ.T @ vP) / np.linalg.norm(vQ)**2
 
-    def L_fun(self, x):
-        '''
-        Returns L matrix: L = F + l Q - p gamma V(x,P) P
-        '''
-        slk_gain = self.params["slack_gain"]
-        clf_gain = self.params["clf_gain"]
-        V = self.clf_fun(x) 
-        return self.F + self.lambda_fun(x) * self.Q - slk_gain * clf_gain * V * self.P
-
-    def S_fun(self, x):
-        '''
-        Returns the S matrix: S = H(x,l,P) - (1/pgV^2) * fc fc.T, for stability computation of equilibrium points 
-        '''
-        V = self.clf_fun(x)
-        z = self.kernel.function(x)
-        fc = self.plant.get_fc(x)
-
-        L = self.L_fun(x)
+    def L_fun_with_lambda_and_shape(self, pt: np.ndarray, l, P):
+        '''Returns matrix L = F + l Q - p gamma V(x, self.P) P'''
 
         slk_gain = self.params["slack_gain"]
         clf_gain = self.params["clf_gain"]
+        V = self.clf_fun(pt)
 
-        for (i,j) in itertools.product(range(self.n), range(self.n)):
-            self.S[i,j] = z.T @ self.A_matrices[i].T @ ( L @ self.A_matrices[j] + self.A_matrices[j].T @ L ) @ z - fc[i]*fc[j] / ( slk_gain * clf_gain * (V**2) )
+        return self.F + l * self.Q - slk_gain * clf_gain * V * P
 
-        return self.S
-    
+    def L_fun(self, pt):
+        '''Returns matrix L = F + l(x) Q - p gamma V(x, self.P) P with l(pt) and self P matrix'''
+        return self.L_fun_with_lambda_and_shape( pt, self.lambda_fun(pt), self.P )
+
+    def invariant_equation(self, pt, l: float, P: np.ndarray):
+        '''Returns invariant equation l vQ - vP for a given pt, l and P'''
+        m = self.kernel.function(pt)
+        Jm = self.kernel.jacobian(pt)
+        return Jm.T @ self.L_fun_with_lambda_and_shape(pt, l, P) @ m
+
+    def S_fun_with_lambda_and_shape(self, pt: np.ndarray, l, P):
+        '''Returns matrix S = H - (1/p gamma V**2) * fc fc.T, for stability computation of equilibrium points'''
+
+        V = self.clf_fun(pt)
+        m = self.kernel.function(pt)
+        fc = self.plant.get_fc(pt)
+
+        L = self.L_fun_with_lambda_and_shape(pt, l, P)
+
+        slk_gain = self.params["slack_gain"]
+        clf_gain = self.params["clf_gain"]
+
+        S = []
+        for i, Ai in enumerate(self.A_matrices):
+            S.append([])
+            for j, Aj in enumerate(self.A_matrices):
+                S[-1].append( m.T @ Ai.T @ ( L @ Aj + Aj.T @ L ) @ m - fc[i]*fc[j] / ( slk_gain * clf_gain * ( V**2 ) ) )
+        return S
+
+    def S_fun(self, pt: np.ndarray) -> np.ndarray:
+        '''Returns matrix S = H - (1/p gamma V**2) * fc fc.T with l(pt) and self P matrix'''
+        return np.array(self.S_fun_with_lambda_and_shape(pt, self.lambda_fun(pt), self.P))
+
     def stability_fun(self, x_eq, type_eq): 
-        '''
-        Compute the stability number for a given equilibrium point.
-        '''
+        '''Compute the stability number for a given equilibrium point'''
         V = self.clf_fun(x_eq)
         nablaV = self.clf_gradient(x_eq)
         nablah = self.cbf.gradient(x_eq)
@@ -1632,30 +1666,6 @@ class KernelTriplet():
         self.invariant_lines = invariant_contour.lines(0.0)                                         # returns the 0-valued contour lines 
         self.invariant_set_analysis(verbose=verbose)                                                # run through each branch of the invariant set
 
-    def update_invariant_set_opt(self, verbose=False):
-        '''
-        Computes the invariant set from optimization.
-        '''
-        init_var = self.pts.flatten()
-        num_pts = self.pts.shape[0]
-
-        def cost(var: list[float]) -> float:
-            pts = var.reshape(num_pts,2)
-            cost = 0.0
-            for k, pt in enumerate(pts):
-                vQ = self.vecQ_fun(pt)
-                vP = self.vecP_fun(pt)
-                W = np.vstack([vQ, vP]).T
-                cost += np.linalg.det(W.T @ W)
-                if k < num_pts-1:
-                    next_pt = pts[k+1,:]
-                    cost += ( np.linalg.norm(pt - next_pt) - 1 )**2
-
-            return cost
-
-        sol = minimize( cost, init_var, options={"disp": verbose} )
-        return sol.x.reshape(num_pts, 2)
-
     def invariant_set_analysis(self, verbose=False):
         '''
         Populates invariant segments with data and compute equilibrium points from invariant line data.
@@ -1667,15 +1677,23 @@ class KernelTriplet():
         self.unstable_equilibria = []
 
         for segment_points in self.invariant_lines:
-            seg_dict = { "points": segment_points }
 
+            # ----- Loads segment dictionary
+            seg_dict = {"points": segment_points}
             seg_dict["lambdas"] = [ self.lambda_fun(pt) for pt in segment_points ]
-            seg_dict["boundary_equilibria"] = self.seg_boundary_equilibria(segment_points)
-            seg_dict["interior_equilibria"] = self.seg_interior_equilibria(segment_points)
-            seg_dict["segment_critical"] = self.get_seg_critical(seg_dict)
+
+            seg_dict["clf_values"] = [ self.clf_fun(pt) for pt in segment_points ]
+            seg_dict["clf_gradients"] = [ self.clf_gradient(pt) for pt in segment_points ]
+
+            seg_dict["cbf_values"] = [ self.cbf.function(pt) for pt in segment_points ]
+            seg_dict["cbf_gradients"] = [ self.cbf.gradient(pt) for pt in segment_points ]
+
+            # ----- Computes the corresponding equilibrium points and critical segment values
+            self.seg_boundary_equilibria(seg_dict)
+            self.seg_interior_equilibria(seg_dict)
+            self.seg_critical(seg_dict)
 
             # ----- Adds the segment dicts and equilibrium points to corresponding data structures
-
             self.invariant_segs.append(seg_dict)
             self.boundary_equilibria += seg_dict["boundary_equilibria"]
             self.interior_equilibria += seg_dict["interior_equilibria"]
@@ -1717,12 +1735,12 @@ class KernelTriplet():
         
         return intersection_pts
 
-    def seg_boundary_equilibria(self, seg_data: list[np.ndarray]):
+    def seg_boundary_equilibria(self, seg_dict: dict[str,]):
         '''
-        Computes boundary equilibrium points for given segment data.
+        Computes boundary equilibrium points for given segment data. 
         '''
-        eqs = []
-        intersection_pts = self.get_boundary_intersections(seg_data)
+        seg_dict["boundary_equilibria"] = []
+        intersection_pts = self.get_boundary_intersections(seg_dict["points"])
 
         for pt in intersection_pts:
             seg_boundary_equilibrium = {"x": pt}
@@ -1735,32 +1753,44 @@ class KernelTriplet():
             seg_boundary_equilibrium["equilibrium"] = "stable"
             if stability > 0:
                 seg_boundary_equilibrium["equilibrium"] = "unstable"
-            eqs.append( seg_boundary_equilibrium )
 
-        return eqs
+            seg_dict["boundary_equilibria"].append( seg_boundary_equilibrium )
 
-    def seg_interior_equilibria(self, seg_data: list[np.ndarray]):
+    def seg_interior_equilibria(self, seg_dict: dict[str,]):
         '''
         Computes interior equilibrium points for given segment data
         '''
-        eqs = []
-        first_l = self.lambda_fun(seg_data[0])
-        last_l = self.lambda_fun(seg_data[-1])
-        
-        if np.abs(first_l) < self.interior_eq_lambda_min:
-            eqs.append( {"x": seg_data[0], "lambda": first_l, "h": self.cbf.function(seg_data[0]), "nablah": self.cbf.gradient(seg_data[0]).tolist() } )
-        if np.abs(last_l) < self.interior_eq_lambda_min:
-            eqs.append( {"x": seg_data[-1], "lambda": last_l, "h": self.cbf.function(seg_data[-1]), "nablah": self.cbf.gradient(seg_data[-1]).tolist() } )
+        seg_dict["interior_equilibria"] = []
+        seg_data = seg_dict["points"]
 
-        for eq in eqs:
+        slk_gain = self.params["slack_gain"]
+        clf_gain = self.params["clf_gain"]
+
+        # Computes the costs along the whole segment
+        costs = []
+        for k, (V, nablaV) in enumerate(zip(seg_dict["clf_values"], seg_dict["clf_gradients"])):
+            pt = seg_data[k]
+            fc = self.plant.get_fc(pt)
+            costs.append( np.linalg.norm( fc - slk_gain * clf_gain * V * nablaV ) )
+
+        # Finds separate groups of points with costs below a certain threshold... interior equilibria are computed by extracting the mean of each group
+        for flag, group in itertools.groupby(zip(seg_data, costs), lambda x: x[1] <= self.interior_eq_threshold):
+            if flag:
+                pts = [ ele[0] for ele in list(group) ]
+                new_eq = np.mean(pts, axis=0)
+                seg_dict["interior_equilibria"].append({"x":new_eq, 
+                                                        "lambda": self.lambda_fun(new_eq), 
+                                                        "h": self.cbf.function(new_eq), 
+                                                        "nablah": self.cbf.gradient(new_eq)})
+
+        # Computes the equilibrium stability
+        for eq in seg_dict["interior_equilibria"]:
             stability, eta = self.stability_fun(eq["x"], "boundary")
             eq["eta"], eq["stability"] = eta, stability
             eq["equilibrium"] = "stable"
             if stability > 0:
                 eq["equilibrium"] = "unstable"
         
-        return eqs
-
     def seg_clf_minima(self, seg_data: list[np.ndarray]):
         '''
         Computes CLF local minima for given segment data
@@ -1771,7 +1801,7 @@ class KernelTriplet():
         Computes CBF local minima for given segment data
         '''
 
-    def get_seg_critical(self, seg_dict: list[dict]):
+    def seg_critical(self, seg_dict: dict[str,]) -> float:
         '''
         Computes the segment integral
         '''
@@ -1783,16 +1813,18 @@ class KernelTriplet():
 
             if barrier_vals[0] > 0:                                                 # removable from outside
                 seg_dict["removable"] = +1
-                return np.min(barrier_vals)
+                seg_dict["segment_critical"] = np.min(barrier_vals)
+                return
             
             if barrier_vals[0] < 0:                                                 # removable from inside
                 seg_dict["removable"] = -1
-                return np.max(barrier_vals)
+                seg_dict["segment_critical"] = np.max(barrier_vals)
+                return
 
         # segment is not removable (starts OR ends outside/inside the unsafe set)
         seg_dict["removable"] = 0
         pos_lines = np.where(barrier_vals >= self.compatibility_options["barrier_sep"])
-        if len(pos_lines[0] == 0): pos_lines = np.where(barrier_vals >= 0.0)
+        if len(pos_lines[0]) == 0: pos_lines = np.where(barrier_vals >= 0.0)
 
         if barrier_vals[0] < 0:                                                                     # starts inside (ends outside)
             sep_index = pos_lines[0][0]
@@ -1802,9 +1834,10 @@ class KernelTriplet():
             sep_index = pos_lines[0][-1]+1
             removable_line = barrier_vals[0:sep_index]
 
-        return np.min(removable_line)
+        seg_dict["segment_critical"] = np.min(removable_line)
+        return 
 
-    def is_compatible(self):
+    def is_compatible(self) -> bool:
         '''
         Checks if kernel triplet is compatible.
         '''
@@ -1821,46 +1854,43 @@ class KernelTriplet():
 
         return True
 
-    def fit_curvatures(self, points: list[np.ndarray]):
+    def fit_curvatures(self, points: list[np.ndarray], Pinit: np.ndarray) -> np.ndarray:
         '''
-        Solves the convex optimization problem of finding a SHAPE matrix with positive curvature at every point on the input list, 
-        while minimizing the Frobenius error.
+        Solves the convex optimization problem of finding the closest P matrix to Pinit s.t. 
+        all input points are with unstable boundary equilibria.
+
+        Parameters: points - boundary equilibrium points
+                    Pinit - initial P matrix
+
+        Returns: P - the final result of optimization. 
         '''
         if len(points) == 0: return self.P
 
-        print(np.linalg.eigvals(self.P))
-
-        SHAPE = cp.Variable( (self.p,self.p), symmetric=True )
-
-        cost = cp.norm(SHAPE - self.P)
-        constraints = [ SHAPE >> 0 ]
-        gradient_norms = []
+        self.CVXPY_Pnom.value = Pinit
         for pt in points:
-            m = self.kernel.function(pt)
-            Jm = self.kernel.jacobian(pt)
 
-            # Gradient constraint
-            gradient_norms.append( cp.Variable() )
-            gradient = self.clf_gradient(pt)
-            normalized = gradient/np.linalg.norm(gradient)
-            constraints += [ Jm.T @ SHAPE @ m == gradient_norms[-1] * normalized ]
+            # Level set constraint
+            self.CVXPY_constraints.append( self.clf_fun_with_shape(pt, self.CVXPY_P) == self.clf_fun_with_shape(pt, Pinit) )
 
-            # Curvature constraint
-            v = rot2D(np.pi/2) @ normalized
-            curvature_var = 0.0
-            for i,j in itertools.product(range(self.n),range(self.n)):
-                Hij = m.T @ ( self.A_matrices[i].T @ SHAPE + SHAPE @ self.A_matrices[i] ) @ self.A_matrices[j] @ m
-                curvature_var += Hij * v[i] * v[j]
-            constraints += [ curvature_var - self.compatibility_options["min_curvature"] >= 0 ]
+            # Equilibrium point constraint (the equilibrium point locations must be constant)
+            self.CVXPY_lambdas.append( cp.Variable(pos=True) )
+            CVXPY_lambda = self.CVXPY_lambdas[-1]
+            self.CVXPY_constraints.append( self.invariant_equation(pt, CVXPY_lambda, self.CVXPY_P) == 0 )
 
-        fit_problem = cp.Problem( cp.Minimize( cost ), constraints )
+            # Curvature constraint for equilibrium point instabilization
+            init_gradient = self.clf_gradient_with_shape(pt, Pinit)
+            norm_init_gradient = np.linalg.norm(init_gradient)
+            v = rot2D(np.pi/2) @ init_gradient/norm_init_gradient
+
+            S = self.S_fun_with_lambda_and_shape(pt, CVXPY_lambda, self.CVXPY_P)
+            self.CVXPY_constraints.append( v.T @ S @ v / norm_init_gradient - self.compatibility_options["min_curvature"] >= 0 )
+
+        fit_problem = cp.Problem( cp.Minimize( self.CVXPY_cost ), self.CVXPY_constraints )
         fit_problem.solve(verbose=False)
 
-        print(curvature_var.value)
+        return self.CVXPY_P.value
 
-        return SHAPE.value
-
-    def non_removable_stables(self) -> list[np.ndarray]:
+    def non_removable_stable_equilibria(self) -> list[np.ndarray]:
         '''
         This function returns a list with all non-removable stable equilibrium points.
         '''
@@ -1872,25 +1902,26 @@ class KernelTriplet():
                         nonremovable_stables.append( np.array(eq["x"]) )
         return nonremovable_stables
 
-    def compatibilize(self, obj_type="closest", verbose=False, animate=False):
+    def compatibilize(self, obj_type="closest", verbose=False, animate=False) -> dict:
         '''
         This function computes a new CLF geometry that is completely compatible with the original CBF.
         '''
         is_original_compatible = self.is_compatible()
         self.P = self.clf.P
+        Pnom = self.clf.P
         self.counter = 0
 
-        def var_to_PSD(var):
+        def var_to_PSD(var: np.ndarray) -> np.ndarray:
             '''Transforms an n(n+1)/2 array representing a stacked symmetric matrix into standard PSD form'''
             sqrtP = vector2sym(var)
             P = sqrtP.T @ sqrtP
             return P
 
-        def PSD_to_var(P):
+        def PSD_to_var(P: np.ndarray) -> np.ndarray:
             '''Transforms a standard PSD matrix P into an array of size n(n+1)/2 list representing the stacked symmetric square root matrix of P'''
             return sym2vector(sp.linalg.sqrtm(P))
 
-        def objective(var):
+        def objective(var: np.ndarray) -> float:
             '''
             Minimizes the changes to the CLF geometry needed for compatibilization.
             '''
@@ -1903,7 +1934,7 @@ class KernelTriplet():
 
             return self.cost
 
-        def removability_constr(var):
+        def removability_constr(var: np.ndarray) -> list[float]:
             '''
             Removes removable equilibrium points.
             '''
@@ -1925,7 +1956,7 @@ class KernelTriplet():
 
             return self.rem_constr
 
-        self.P = self.fit_curvatures( [ np.array([5.58003507e-14, 1.13044149e+00]) ] )
+        self.P = self.fit_curvatures( points = [ np.array([5.58003507e-14, 1.13044149e+00]) ], Pinit=Pnom )
         self.update_invariant_set()
 
         if animate:
@@ -1937,8 +1968,10 @@ class KernelTriplet():
             ax.set_ylim(self.limits[1][0], self.limits[1][1])
             self.init_comp_plot(ax)
             plt.pause(self.comp_process_data["gui_eventloop_time"])
-            
-        def intermediate_callback(res):
+        
+        plt.show()
+
+        def intermediate_callback(res: np.ndarray):
             '''
             Callback for visualization of intermediate results (verbose or by animation).
             '''
@@ -1972,34 +2005,34 @@ class KernelTriplet():
 
         while not is_processed_compatible:
 
-            ## something to take care of the stable equilibria in non-removable invariant segments...
-
-            init_var = PSD_to_var(self.P)
-            sol = minimize( objective, init_var, constraints=constraints, callback=intermediate_callback )
-            self.P = var_to_PSD( sol.x )
-            self.update_invariant_set()
+            # init_var = PSD_to_var(self.P)
+            # sol = minimize( objective, init_var, constraints=constraints, callback=intermediate_callback )
+            # self.P = var_to_PSD( sol.x )
+            # self.update_invariant_set()
 
             is_processed_compatible = self.is_compatible()
         #--------------------------- Main compatibilization process ---------------------------
-        print(f"Compatibilization terminated with message: {sol.message}")
+        # print(f"Compatibilization terminated with message: {sol.message}")
 
-        message = "Compatibilization "
-        if is_processed_compatible: message += "was successful. "
-        else: message += "failed. "
-        message += "Process took " + str(self.comp_process_data["execution_time"]) + " seconds."
-        print(message)
+        # message = "Compatibilization "
+        # if is_processed_compatible: message += "was successful. "
+        # else: message += "failed. "
+        # message += "Process took " + str(self.comp_process_data["execution_time"]) + " seconds."
+        # print(message)
 
         if animate: plt.pause(2)
 
-        comp_result = { "opt_message": sol.message, 
+        comp_result = { 
+                        # "opt_message": sol.message, 
                         "kernel_dimension": self.kernel.kernel_dim,
-                        "P_original": self.clf.P.tolist(),
+                        "P_original": Pnom.tolist(),
                         "P_processed": self.P.tolist(),
                         "is_original_compatible": is_original_compatible,
                         "is_processed_compatible": is_processed_compatible,
                         "execution_time": self.comp_process_data["execution_time"],
                         "num_steps": self.comp_process_data["step"],
-                        "invariant_set_log": self.comp_process_data["invariant_segs_log"] }
+                        "invariant_set_log": self.comp_process_data["invariant_segs_log"] 
+                    }
     
         return comp_result
 
@@ -2097,13 +2130,6 @@ class KernelTriplet():
             level = self.clf.function(pt)
 
             self.comp_graphics["clf_artists"] = self.clf.plot_levels(levels = [ level ], ax=ax, limits=self.limits)
-
-    # def run_animation(self):
-    #     '''
-    #     Returns smooth animation of the compatibilization process.
-    #     '''
-    #     self.
-    #     animation = anim.FuncAnimation(fig=self.comp_graphics["fig"], self.update_comp_plot, )
 
 class ApproxFunction(Function):
     '''

@@ -34,11 +34,14 @@ sim.kerneltriplet.plot_invariant(ax)
 sim.kerneltriplet.plot_attr(ax, "stable_equilibria", mcolors.BASE_COLORS["r"], 1.0)
 sim.kerneltriplet.plot_attr(ax, "unstable_equilibria", mcolors.BASE_COLORS["g"], 0.8)
 
-for seg in sim.kerneltriplet.invariant_segs:
-    rem = seg["removable"]
+for k, seg in enumerate(sim.kerneltriplet.invariant_segs):
+    message = f"Segment {k+1} is "
+    if seg["removable"] == +1: message += "removable from the outside, "
+    if seg["removable"] == -1: message += "removable from the inside, "
+    if seg["removable"] == 0: message += "not removable, "
     critical = seg["segment_critical"]
-    print(f"Removable = {rem}")
-    print(f"Critical = {critical}")
+    message += f"with critical value = {critical}."
+    print(message)
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 while True:
