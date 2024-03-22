@@ -55,12 +55,19 @@ while True:
         del clf_contour
 
     V = sim.clf.function(init_x)
-    h = sim.cbf.function(init_x)
+    gradV = sim.clf.gradient(init_x)
 
-    print(f"V = {V}")
-    print(f"h = {h}")
+    h = sim.cbf.function(init_x)
+    gradh = sim.cbf.gradient(init_x)
+
     print(f"lambda = {sim.kerneltriplet.lambda_fun(init_x)}")
 
-    clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits, spacing=0.5)
+    print(f"V = {V}")
+    print(f"||∇V|| = {np.linalg.norm(gradV)}")
+
+    print(f"h = {h}")
+    print(f"||∇h|| = {np.linalg.norm(gradh)}")
+
+    clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits, spacing=0.1)
 
 plt.show()

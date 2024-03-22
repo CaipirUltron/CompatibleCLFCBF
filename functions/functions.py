@@ -1320,8 +1320,9 @@ class KernelTriplet():
         self.limits = [ [-1, +1] for _ in range(2) ]
         self.spacing = 0.1
         self.invariant_color = mcolors.BASE_COLORS["k"]
-        self.compatibility_options = { "barrier_sep": 0.1, "min_curvature": 1.0 }
+        self.compatibility_options = { "barrier_sep": 0.1, "min_curvature": 0.1 }
         self.interior_eq_threshold = 1e-1
+        self.max_P_eig = 100.0
         self.invariant_lines_plot = []
         self.plotted_attrs = {}
 
@@ -1350,7 +1351,7 @@ class KernelTriplet():
         self.CVXPY_Pnom = cp.Parameter( (self.p,self.p), symmetric=True )
         self.CVXPY_lambdas = []
         self.CVXPY_cost = cp.norm(self.CVXPY_P - self.CVXPY_Pnom)
-        self.CVXPY_constraints = [ self.CVXPY_P >> 0 ]
+        self.CVXPY_constraints = [ self.CVXPY_P >> 0, cp.lambda_max(self.CVXPY_P) <= self.max_P_eig ]
 
         # Compute limit lines (obstacle should be completely contained inside the rectangle)
         self.create_limit_lines()
@@ -2005,14 +2006,14 @@ class KernelTriplet():
         is_processed_compatible = self.is_compatible()
         self.comp_process_data["start_time"] = time.perf_counter()
 
-        while not is_processed_compatible:
+        # while not is_processed_compatible:
 
             # init_var = PSD_to_var(self.P)
             # sol = minimize( objective, init_var, constraints=constraints, callback=intermediate_callback )
             # self.P = var_to_PSD( sol.x )
             # self.update_invariant_set()
 
-            is_processed_compatible = self.is_compatible()
+            # is_processed_compatible = self.is_compatible()
         #--------------------------- Main compatibilization process ---------------------------
         # print(f"Compatibilization terminated with message: {sol.message}")
 
@@ -2058,7 +2059,7 @@ class KernelTriplet():
         # Adds or removes lines according to the total number of segments to be plotted 
         if num_segs_to_plot >= len(self.invariant_lines_plot):
             for _ in range(num_segs_to_plot - len(self.invariant_lines_plot)):
-                line2D, = ax.plot([],[], color=self.invariant_color, linestyle='dashed', linewidth=1.0 )
+                line2D, = ax.plot([],[], color=np.random.rand(3), linestyle='dashed', linewidth=1.0 )
                 self.invariant_lines_plot.append(line2D)
         else:
             for _ in range(len(self.invariant_lines_plot) - num_segs_to_plot):

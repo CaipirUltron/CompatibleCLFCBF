@@ -5,12 +5,12 @@ from functions import Kernel, KernelLyapunov, KernelBarrier, KernelTriplet
 from controllers import NominalQP
 from common import create_quadratic, rot2D, polygon, load_compatible
 
-initial_state = [4.5, 3.5]
+initial_state = [0.2, 2.5]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
-# limits = np.array([[-7.5, 7.5],[-4, 5]])
-limits = 9*np.array([[-1, 1],[-1, 1]])
+limits = np.array([[-7.5, 7.5],[-4, 5]])
+# limits = 9*np.array([[-1, 1],[-1, 1]])
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 kernel = Kernel(*initial_state, degree=3)
@@ -62,7 +62,7 @@ cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=centers
 cbf.is_sos_convex(verbose=True)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
-sample_time = .002
+sample_time = .01
 p, alpha, beta = 1.0, 1.0, 1.0
 kerneltriplet = KernelTriplet( plant=plant, clf=clf, cbf=cbf,
                               params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta},
