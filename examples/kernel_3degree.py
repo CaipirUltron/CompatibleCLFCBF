@@ -32,18 +32,19 @@ clf_center = [0.0, -5.0]
 base_level = 25
 
 points = []
-points.append({ "coords": [-4.0,  6.0], "gradient": [-1.0,  0.5] })
-points.append({ "coords": [ 4.0,  6.0], "gradient": [ 0.0,  6.5] })
-points.append({ "coords": [ 0.0,  5.0], "gradient": [ 2.0,  6.0] })
-# points.append({ "coords": [ 0.0,  -8.0], "gradient": [ 0.0,  -1.0] })
-# clf = KernelLyapunov(*initial_state, kernel=kernel, points=points, centers=[clf_center])
+points.append({ "coords": [ 0.0,  1.0], "gradient": [ 0.0,  1.0], "curvature": -0.3 })
+points.append({ "coords": [-5.0,  3.0], "gradient": [-1.0,  1.0] })
+points.append({ "coords": [ 5.0,  3.0], "gradient": [ 1.0,  1.0] })
+points.append({ "coords": [ 5.0,  0.0], "gradient": [ 1.0,  -1.0] })
+points.append({ "coords": [-5.0,  0.0], "gradient": [-1.0,  -1.0] })
 
 clf_eig = np.array([ 8.0, 1.0 ])
 clf_angle = np.deg2rad(0)
 Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
 
-clf = KernelLyapunov(*initial_state, kernel=kernel, P=load_compatible(__file__, Pquadratic, load_compatible=True))
-# clf = KernelLyapunov(*initial_state, kernel=kernel, leading={ "shape": Pquadratic, "uses": ["lower_bound", "approximation"] })
+# clf = KernelLyapunov(*initial_state, kernel=kernel, P=load_compatible(__file__, Pquadratic, load_compatible=True))
+# clf = KernelLyapunov(*initial_state, kernel=kernel, points=points, centers=[clf_center])
+clf = KernelLyapunov(*initial_state, kernel=kernel, points=points, centers=[clf_center], leading={ "shape": Pquadratic, "uses": ["approximation"] })
 clf.is_sos_convex(verbose=True)
 
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------

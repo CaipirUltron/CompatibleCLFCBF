@@ -1331,7 +1331,7 @@ class KernelTriplet():
         self.limits = [ [-1, +1] for _ in range(2) ]
         self.spacing = 0.1
         self.invariant_color = mcolors.BASE_COLORS["k"]
-        self.compatibility_options = { "barrier_sep": 0.1, "min_curvature": 0.1 }
+        self.compatibility_options = { "barrier_sep": 0.1, "min_curvature": 1.1 }
         self.interior_eq_threshold = 1e-1
         self.max_P_eig = 100.0
         self.invariant_lines_plot = []
@@ -1564,7 +1564,7 @@ class KernelTriplet():
         '''Returns matrix L = F + l(x) Q - p gamma V(x, self.P) P with l(pt) and self P matrix'''
         return self.L_fun_with_lambda_and_shape( pt, self.lambda_fun(pt), self.P )
 
-    def invariant_equation(self, pt, l: float, P: np.ndarray):
+    def invariant_equation(self, pt: np.ndarray, l, P):
         '''Returns invariant equation l vQ - vP for a given pt, l and P'''
         m = self.kernel.function(pt)
         Jm = self.kernel.jacobian(pt)
@@ -1640,6 +1640,11 @@ class KernelTriplet():
         eta = 1/(1 + self.params["slack_gain"] * z2.T @ G @ z2 )
         return eta
 
+    def local_minimize_cost(self, cost, init_pt: np.ndarray) -> np.ndarray:
+        '''Locally minimizes a passed cost function, starting with initial guess init_pt'''
+        sol = minimize( cost, init_pt )
+        return sol.x
+
     def update_determinant_grid(self):
         '''
         Evaluates det([ vQ, vP ]) = 0 over a grid.
@@ -1656,8 +1661,11 @@ class KernelTriplet():
             self.lambda_grid.append( (vQ.T @ vP) / np.linalg.norm(vQ)**2 )
 
         determinant_list = np.linalg.det( self.W_list )
+
+        # Eliminate the negative lambda part
         for k, l in enumerate(self.lambda_grid):
             if l < 0.0: determinant_list[k] = np.inf
+
         self.determinant_grid = determinant_list.reshape(self.grid_shape)
 
     def update_invariant_set(self, verbose=False):
@@ -1668,8 +1676,8 @@ class KernelTriplet():
             warnings.warn("Currently, the computation of the invariant set is not available for dimensions higher than 2.")
             return
         
-        self.update_determinant_grid()                                                                                # updates the grid with new determinant values
-        invariant_contour = ctp.contour_generator( x=self.xg, y=self.yg, z=self.determinant_grid, quad_as_tri=True )  # creates new contour_generator object
+        self.update_determinant_grid()                                                                            # updates the grid with new determinant values
+        invariant_contour = ctp.contour_generator( x=self.xg, y=self.yg, z=self.determinant_grid )  # creates new contour_generator object
         self.invariant_lines = invariant_contour.lines(0.0)                                                           # returns the 0-valued contour lines
         self.invariant_set_analysis(verbose=verbose)                                                                  # run through each branch of the invariant set
 
@@ -1780,7 +1788,7 @@ class KernelTriplet():
             fc = self.plant.get_fc(pt)
             costs.append( np.linalg.norm( fc - slk_gain * clf_gain * V * nablaV ) )
 
-        # Finds separate groups of points with costs below a certain threshold... interior equilibria are computed by extracting the mean of each group
+        # Finds separate groups of points with costs below a certain threshold... interior equilibria are computed by extracting the argmin of the cost for each group
         for flag, group in itertools.groupby(zip(seg_data, costs), lambda x: x[1] <= self.interior_eq_threshold):
             if flag:
                 group = list(group)
@@ -1791,6 +1799,8 @@ class KernelTriplet():
                                                         "lambda": self.lambda_fun(new_eq), 
                                                         "h": self.cbf.function(new_eq), 
                                                         "nablah": self.cbf.gradient(new_eq)})
+
+
 
         # Computes the equilibrium stability
         for eq in seg_dict["interior_equilibria"]:
