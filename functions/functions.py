@@ -12,12 +12,23 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.animation as anim
 
-from copy import copy
+from functools import wraps
 from scipy.optimize import minimize
 from shapely import geometry, intersection
 
 from common import *
 from dynamic_systems import Integrator, KernelAffineSystem
+
+def timeit(func):
+    @wraps(func)
+    def timeit_wrapper(*args, **kwargs):
+        start_time = time.perf_counter()
+        result = func(*args, **kwargs)
+        end_time = time.perf_counter()
+        total_time = end_time - start_time
+        print(f'Function {func.__name__}{args} {kwargs} took {total_time:.6f} seconds.')
+        return result
+    return timeit_wrapper
 
 def commutation_matrix(n):
     '''
@@ -1326,7 +1337,7 @@ class KernelTriplet():
         self.invariant_lines_plot = []
         self.plotted_attrs = {}
 
-        self.comp_process_data = { "step": 0, 
+        self.comp_process_data = {"step": 0, 
                                   "start_time": 0.0, 
                                   "execution_time": 0.0, 
                                   "gui_eventloop_time": 0.3,
@@ -1449,10 +1460,11 @@ class KernelTriplet():
         if hasattr(self, "limits") and hasattr(self, "spacing"):
             x = np.arange(self.limits[0][0], self.limits[0][1], self.spacing)
             y = np.arange(self.limits[1][0], self.limits[1][1], self.spacing)
-            self.xg, self.yg = np.meshgrid(x,y)
 
-            self.var = np.hstack([ self.xg.flatten(), self.yg.flatten() ]).T.flatten()
-            self.determinant_grid = np.zeros(self.xg.shape)
+            self.xg, self.yg = np.meshgrid(x,y)
+            self.grid_shape = self.xg.shape
+            self.grid_pts = list( zip( self.xg.flatten(), self.yg.flatten() ) )
+            self.determinant_grid = np.empty(self.grid_shape, dtype=float)
 
         N = 10
         x = np.random.uniform(self.limits[0][0], self.limits[0][1], N)
@@ -1488,21 +1500,18 @@ class KernelTriplet():
             self.F = self.plant.get_F()
             self.P = self.clf.P
             self.Q = self.cbf.Q
+            self.ATQ_matrices = [ A.T @ self.Q for A in self.A_matrices ]
             
         except Exception as error:
             print(error)
             return False
 
-    def vecQ_fun(self, pt):
-        '''
-        Returns the vecQ function.
-        '''    
+    def vecQ_fun(self, pt: np.ndarray) -> np.ndarray:
+        '''Returns the vector vQ = ∇h'''    
         m = self.kernel.function(pt)
+        return np.array([ m.T @ ATQ @ m for ATQ in self.ATQ_matrices ])
 
-        vecQ = np.array([ m.T @ A.T @ self.Q @ m for A in self.A_matrices ])
-        return vecQ
-
-    def vecP_fun_with_shape(self, pt: np.ndarray, P) -> np.ndarray:
+    def vecP_fun_with_shape(self, pt: np.ndarray, P) -> list:
         '''Returns the vector vP = p gamma V(x, self.P) ∇V - fc '''
 
         m = self.kernel.function(pt)
@@ -1510,22 +1519,12 @@ class KernelTriplet():
         slk_gain = self.params["slack_gain"]
         clf_gain = self.params["clf_gain"]
 
-        vecP = np.array([ m.T @ A.T @ ( slk_gain * clf_gain * V * P - self.F ) @ m for A in self.A_matrices ])
+        vecP = [ m.T @ A.T @ ( slk_gain * clf_gain * V * P - self.F ) @ m for A in self.A_matrices ]
         return vecP
     
-    def vecP_fun(self, pt):
+    def vecP_fun(self, pt: np.ndarray) -> np.ndarray:
         '''Returns the vector vP = p gamma V(x, self.P) ∇V - fc with self P matrix'''
-        return self.vecP_fun_with_shape(pt, self.P)
-
-    def det_fun(self, x):
-        '''
-        Returns the determinant det([ vecQ, vecP ]). Only valid for 2D
-        '''
-        vQ = self.vecQ_fun(x)
-        vP = self.vecP_fun(x)
-        for k, (vQ_ele, vP_ele) in enumerate(zip(vQ, vP)): 
-            self.W[k,:] = [ vQ_ele, vP_ele ]
-        return np.linalg.det( self.W )
+        return np.array(self.vecP_fun_with_shape(pt, self.P))
 
     def clf_fun_with_shape(self, pt: np.ndarray, P):
         '''Returns the value of the CLF with shape defined by matrix P'''
@@ -1643,16 +1642,23 @@ class KernelTriplet():
 
     def update_determinant_grid(self):
         '''
-        Evaluates det([ vecQ, vecP ]) = 0 over a grid.
-        Parameters: xg, yg: (x,y) coords of each point in the grid
-        Returns: a grid with the same size of xg, yg with the determinant values. 
+        Evaluates det([ vQ, vP ]) = 0 over a grid.
+        Returns: a grid of shape self.grid_shape with the determinant values corresponding to each pt on the grid
         '''
-        for i, (xg_line, yg_line) in enumerate(zip(self.xg, self.yg)):
-            for j, (xg_ele, yg_ele) in enumerate(zip(xg_line, yg_line)):
-                self.determinant_grid[i,j] = np.inf
-                grid_pt = [ xg_ele, yg_ele ]
-                if self.lambda_fun(grid_pt) >= 0:
-                    self.determinant_grid[i,j] = self.det_fun(grid_pt)
+        self.W_list, self.lambda_grid = [], []
+        for pt in self.grid_pts:
+            vQ = self.vecQ_fun(pt)
+            vP = self.vecP_fun(pt)
+
+            W = np.hstack([vQ.reshape(self.n,1), vP.reshape(self.n,1)])
+            self.W_list.append(W)
+
+            self.lambda_grid.append( (vQ.T @ vP) / np.linalg.norm(vQ)**2 )
+
+        determinant_list = np.linalg.det( self.W_list )
+        for k, l in enumerate(self.lambda_grid):
+            if l < 0.0: determinant_list[k] = np.inf
+        self.determinant_grid = determinant_list.reshape(self.grid_shape)
 
     def update_invariant_set(self, verbose=False):
         '''
@@ -1662,10 +1668,10 @@ class KernelTriplet():
             warnings.warn("Currently, the computation of the invariant set is not available for dimensions higher than 2.")
             return
         
-        self.update_determinant_grid()                                                              # updates the grid with new determinant values
-        invariant_contour = ctp.contour_generator( x=self.xg, y=self.yg, z=self.determinant_grid )  # creates new contour_generator object
-        self.invariant_lines = invariant_contour.lines(0.0)                                         # returns the 0-valued contour lines 
-        self.invariant_set_analysis(verbose=verbose)                                                # run through each branch of the invariant set
+        self.update_determinant_grid()                                                                                # updates the grid with new determinant values
+        invariant_contour = ctp.contour_generator( x=self.xg, y=self.yg, z=self.determinant_grid, quad_as_tri=True )  # creates new contour_generator object
+        self.invariant_lines = invariant_contour.lines(0.0)                                                           # returns the 0-valued contour lines
+        self.invariant_set_analysis(verbose=verbose)                                                                  # run through each branch of the invariant set
 
     def invariant_set_analysis(self, verbose=False):
         '''
@@ -2059,7 +2065,7 @@ class KernelTriplet():
         # Adds or removes lines according to the total number of segments to be plotted 
         if num_segs_to_plot >= len(self.invariant_lines_plot):
             for _ in range(num_segs_to_plot - len(self.invariant_lines_plot)):
-                line2D, = ax.plot([],[], color=np.random.rand(3), linestyle='dashed', linewidth=1.0 )
+                line2D, = ax.plot([],[], color=np.random.rand(3), linestyle='dashed', linewidth=1.2 )
                 self.invariant_lines_plot.append(line2D)
         else:
             for _ in range(len(self.invariant_lines_plot) - num_segs_to_plot):
