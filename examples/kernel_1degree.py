@@ -27,10 +27,11 @@ plant = KernelAffineSystem(initial_state=initial_state, initial_control=initial_
 
 # --------------------------------------------- Define CLF (quadratic) -----------------------------------------------------
 clf_eig = np.array([ 3.0, 1.0 ])
-clf_angle = 12
+clf_angle = 0
 clf_center = [0.0, -2.0]
 Pquadratic = create_quadratic( eigen=clf_eig, R=rot2D(np.deg2rad(clf_angle)), center=clf_center, kernel_dim=kernel_dim )
-clf = KernelLyapunov( *initial_state, kernel=kernel, P=load_compatible( __file__, Pquadratic, load_compatible = True ) )
+# clf = KernelLyapunov( *initial_state, kernel=kernel, P=load_compatible( __file__, Pquadratic, load_compatible = True ) )
+clf = KernelLyapunov( *initial_state, kernel=kernel, P=Pquadratic )
 
 # --------------------------------------------- Define CBF (quadratic) -----------------------------------------------------
 cbf_eig = [ 0.2, 1.2 ]

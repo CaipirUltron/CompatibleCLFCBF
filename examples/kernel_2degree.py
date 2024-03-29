@@ -42,14 +42,14 @@ Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_cent
 
 clf = KernelLyapunov(*initial_state, kernel=kernel, P=load_compatible(__file__, Pquadratic, load_compatible=True))
 # clf = KernelLyapunov(*initial_state, kernel=kernel, leading={ "shape": Pquadratic, "uses": ["lower_bound", "approximation"] })
-clf.is_sos_convex(verbose=True)
+clf.is_SOS_convex(verbose=True)
 
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
 # Fits CBF to a box-shaped obstacle
 center = [ 0.0, 2.0 ]
 pts = box( center=center, height=5, width=5, angle=10, spacing=0.4, gradients=1, at_edge=True )
 cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=[center])
-cbf.is_sos_convex(verbose=True)
+cbf.is_SOS_convex(verbose=True)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .002

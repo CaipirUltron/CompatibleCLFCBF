@@ -955,22 +955,27 @@ class KernelQuadratic(Function):
         new_param = self.dynamics.get_state()
         self.set_param( coefficients = vector2sym(new_param) )
 
-    def is_sos_convex(self, verbose=False):
-        '''
-        Returns True if the function is SOS convex.
-        '''
-        sos_convex = False
+    def SOSconvex_matrix(self):
+        '''Returns SOS matrix for convexity tests'''
         A_list = self.kernel.get_A_matrices()
-        SOSConvexMatrix = np.block([[ Ai.T @ self.matrix_coefs @ Aj + Aj.T @ Ai.T @ self.matrix_coefs for Aj in A_list ] for Ai in A_list ])
-        eigs = np.linalg.eigvals(SOSConvexMatrix)
-        if np.all(eigs >= 0.0):
-            sos_convex = True
+        return np.block([[ Ai.T @ self.matrix_coefs @ Aj + Aj.T @ Ai.T @ self.matrix_coefs for Aj in A_list ] for Ai in A_list ])
+
+    def is_SOS_convex(self, verbose=False):
+        '''Returns True if the function is SOS convex'''
+
+        sos_convex = False
+        SOS_eigs = np.linalg.eigvals( self.SOSconvex_matrix() )
+        if np.all(SOS_eigs >= 0.0): sos_convex = True
 
         if verbose:
             if sos_convex: print(f"{self} is SOS convex.")
-            else: print(f"{self} is not SOS convex, with negative eigenvalues = {eigs[eigs < 0.0]}")
+            else: print(f"{self} is not SOS convex, with negative eigenvalues = {SOS_eigs[SOS_eigs < 0.0]}")
 
         return sos_convex
+
+    def is_SOS_pseudoconvex(self):
+        '''Returns True if the function is SOS pseudoconvex'''
+        pass
 
     def fit(self):
         '''

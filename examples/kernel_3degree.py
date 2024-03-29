@@ -45,7 +45,7 @@ Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_cent
 # clf = KernelLyapunov(*initial_state, kernel=kernel, P=load_compatible(__file__, Pquadratic, load_compatible=True))
 # clf = KernelLyapunov(*initial_state, kernel=kernel, points=points, centers=[clf_center])
 clf = KernelLyapunov(*initial_state, kernel=kernel, points=points, centers=[clf_center], leading={ "shape": Pquadratic, "uses": ["approximation"] })
-clf.is_sos_convex(verbose=True)
+clf.is_SOS_convex(verbose=True)
 
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
 # Fits CBF to a U shaped obstacle
@@ -60,7 +60,7 @@ cbf_eig = 0.02*np.array([ 1.0, 1.0 ])
 cbf_angle = np.deg2rad(0)
 Qquadratic = create_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
 cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=centers, leading={ "shape": Qquadratic, "uses": ["approximation"] })
-cbf.is_sos_convex(verbose=True)
+cbf.is_SOS_convex(verbose=True)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .01
