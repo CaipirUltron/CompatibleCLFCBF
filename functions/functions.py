@@ -3,6 +3,7 @@ import math
 import itertools
 import numpy as np
 import scipy as sp
+import sympy as sym
 import cvxpy as cp
 import logging
 import warnings
@@ -638,7 +639,8 @@ class Kernel(Function):
         self._K = commutation_matrix(self._num_monomials)       # commutation matrix to be used later
 
         # Symbolic computations
-        self._symP = sp.Matrix(sp.symarray('p',(self._num_monomials,self._num_monomials)))
+        # self._symP = sp.MatrixSymbol('P', self._num_monomials, self._num_monomials)
+        # self._symP = sp.Matrix(sp.symarray('p',(self._num_monomials,self._num_monomials)))
         self._sym_monomials = sp.Matrix(self._monomials)
         self._sym_jacobian_monomials = self._sym_monomials.jacobian(self._symbols)
 
@@ -694,6 +696,8 @@ class Kernel(Function):
                         if monom_i[0] == monom_j[0]:
                             Ak[i,j] = jacobian_column[i].as_poly().coeffs()[0]
             self.A.append( Ak )
+
+        self.Asum = sum(self.A)
 
     def compute_N(self):
         '''
@@ -815,15 +819,15 @@ class KernelQuadratic(Function):
         elif isinstance(self, KernelBarrier):
             default_color = mcolors.TABLEAU_COLORS['tab:red']
         self.plot_config["color"] = default_color
-        self.plot_config["figsize"] = (5,5)
-        self.plot_config["axeslim"] = (-6,6,-6,6)
+        self.plot_config["figsize"] = ( 5, 5 )
+        self.plot_config["axeslim"] = ( -6, 6, -6, 6 )
 
         self.constant = 0.0
 
         self.set_param(**kwargs)
         self.evaluate()
 
-        if len(self.points) > 0 or type(self.cost) != float or len(self.constraints) > 1:
+        if len(self.points) > 0 or type(self.cost) != float or len(self.constraints) > len(self.base_constraints):
             self.fit()
 
     def init_kernel(self):
@@ -835,6 +839,8 @@ class KernelQuadratic(Function):
         self.dynamics = Integrator( np.zeros(self.param_dim), np.zeros(self.param_dim) )
 
         self.SHAPE = cp.Variable( (self.kernel_dim,self.kernel_dim), symmetric=True )
+        self.symS = sym.MatrixSymbol('S', self.kernel_dim, self.kernel_dim)
+        self.compute_lowerbound_slice()
         self.clear_optimization()
 
     def clear_optimization(self):
@@ -843,7 +849,9 @@ class KernelQuadratic(Function):
         '''
         self.points = []
         self.cost = 0.0
-        self.constraints = [ self.SHAPE >> 0 ]
+        self.base_constraints = [ self.psd_constr() ]
+        # self.base_constraints = [ self.psd_constr(), self.non_nsd_Hessian_constr() ]
+        self.constraints = self.base_constraints
 
     def set_param(self, **kwargs):
         '''
@@ -960,6 +968,41 @@ class KernelQuadratic(Function):
         A_list = self.kernel.get_A_matrices()
         return np.block([[ Ai.T @ self.matrix_coefs @ Aj + Aj.T @ Ai.T @ self.matrix_coefs for Aj in A_list ] for Ai in A_list ])
 
+    def compute_lowerbound_matrix(self, Pvar):
+        '''
+        Compute the matrix for the lowerbound on the maximum eigenvalue of the Hessian matrix
+        '''
+        As = self.kernel.Asum
+        return As.T @ Pvar @ As + As.T @ As.T @ Pvar
+
+    def compute_lowerbound_slice(self):
+        '''
+        Compute the lower bound on the Hessian matrix
+        '''
+        symHbound = self.compute_lowerbound_matrix( self.symS )
+
+        # This computes the shape of the maximum non-zero upper-left block of symHbound
+        for i in range(0,self.kernel_dim):
+            half_down = symHbound[i:, :]
+            if np.all( half_down == 0 ): break
+
+        if np.all( half_down == 0 ):
+            self.lowerbound_slice = ( slice(0,i), slice(0,i) )
+        
+        self.lowerbound_slice = ( slice(0,symHbound.shape[0]), slice(0,symHbound.shape[1]) )
+
+    def psd_constr(self):
+        '''
+        Returns corresponding positive semidefinite constraint for input shape matrix
+        '''
+        return self.SHAPE >> 0
+
+    def non_nsd_Hessian_constr(self):
+        '''
+        Returns corresponding non-negative definite Hessian constraint for input shape matrix
+        '''
+        return self.compute_lowerbound_matrix(self.SHAPE)[self.lowerbound_slice] >> 0
+        
     def is_SOS_convex(self, verbose=False):
         '''Returns True if the function is SOS convex'''
 
@@ -1215,61 +1258,6 @@ class KernelQuadratic(Function):
         if isinstance(self, KernelBarrier):
             type_fun = "CBF ½ ( k(x)' Q k(x) - 1 )"
         return type_fun
-
-    # def SOS_convexity(self):
-    #         '''
-    #         Given a cvxpy P_var matrix and the function kernel, construct an efficient parametrization
-    #         for SDP.
-    #         '''
-    #         n = self._dim
-    #         p = self.kernel_dim
-    #         A_list = self.kernel.get_A_matrices()
-
-    #         y_alpha, _ = generate_monomial_list( self._dim, 1 )
-    #         y_alpha = np.delete(y_alpha, 0, axis=0)
-
-    #         augmented_alpha = np.array([ powers.tolist() + y_powers.tolist() for powers in self.kernel.alpha for y_powers in y_alpha ])
-    #         # print( augmented_alpha )
-
-    #         def add_monomial( monomials1, monomials2, current_alpha ):
-    #             '''
-    #             Adds monomial1 and/or monomial2 to monomial list, IFF 
-    #             monomials1 and monomials2 cannot be made with the current alpha. 
-    #             '''
-    #             alpha_size = len(current_alpha)
-    #             if alpha_size == 0:
-    #                 current_alpha.append( monomials1.tolist() )
-
-    #             # for i in range(alpha_size):
-    #             #     for j in range(i,alpha_size):
-    #             #         if monomials1 + monomials2 == np.array(current_alpha[i]) + np.array(current_alpha[j]):
-    #             #             continue
-
-    #             return current_alpha
-
-    #         # Builds symbolic prototype for the SOS convex matrix
-    #         current_alpha = []
-    #         Prototype = sympy.MatrixSymbol('P', self.kernel_dim, self.kernel_dim)
-    #         for i in range(n):
-    #             for j in range(i,n):
-
-    #                 # Inside each block matrix
-    #                 Ai, Aj = A_list[i], A_list[j]
-    #                 Block = Aj.T @ ( Ai.T @ Prototype + Prototype @ Ai ) + ( Ai.T @ Prototype + Prototype @ Ai ) @ Aj
-    #                 NullElements = Block == 0
-
-    #                 curr_row_alpha = augmented_alpha[augmented_alpha[:,n+i] == 1,:]
-    #                 curr_col_alpha = augmented_alpha[augmented_alpha[:,n+j] == 1,:]
-
-    #                 # print(curr_row_alpha)
-    #                 # print(curr_col_alpha)
-
-    #                 for k in range(p):
-    #                     for l in range(k,p):
-
-    #                         # Inside each element of the current block
-    #                         if not NullElements[k,l]:
-    #                             current_alpha = add_monomial( curr_row_alpha[k,:], curr_col_alpha[l,:], current_alpha )
 
 class KernelLyapunov(KernelQuadratic):
     '''
@@ -1804,8 +1792,6 @@ class KernelTriplet():
                                                         "lambda": self.lambda_fun(new_eq), 
                                                         "h": self.cbf.function(new_eq), 
                                                         "nablah": self.cbf.gradient(new_eq)})
-
-
 
         # Computes the equilibrium stability
         for eq in seg_dict["interior_equilibria"]:

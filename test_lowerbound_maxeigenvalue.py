@@ -2,11 +2,12 @@ import numpy as np
 import cvxpy as cp
 import matplotlib.pyplot as plt
 
+from sympy import MatrixSymbol
 from functions import Kernel, KernelLyapunov
 from common import symmetric_basis, create_quadratic, rot2D
 
 n = 2
-initial_state = [0.5, 6.0]
+initial_state = [ np.random.rand() for _ in range(n) ]
 
 fig = plt.figure(constrained_layout=True)
 ax = fig.add_subplot(111)
@@ -20,16 +21,35 @@ ax.set_ylim(limits[1][0], limits[1][1])
 kernel = Kernel(*initial_state, degree=2)
 p = kernel.kernel_dim
 Amatrices = kernel.get_A_matrices()
+
 Asum = sum(Amatrices)
 Asum2 = Asum @ Asum
+
+Psym = MatrixSymbol('P', p, p)
 
 def non_nsd_Hessian_constr(Pvar):
     return Asum.T @ Pvar @ Asum + Asum.T @ Asum.T @ Pvar
 
+def extract_upper_block(Hsym):
+
+    for i in range(0,Hsym.shape[0]):
+        half_down = Hsym[i:, :]
+        if np.all( half_down == 0 ): break
+
+    if np.all( half_down == 0 ):
+        return ( slice(0,i), slice(0,i) )
+    
+    return ( slice(0,Hsym.shape[0]), slice(0,Hsym.shape[1]) )
+
+print( non_nsd_Hessian_constr(Psym) )
+lowerbound_shape = extract_upper_block(non_nsd_Hessian_constr(Psym))
+
 Pnom = cp.Parameter( (p,p), symmetric=True )
 Pvar = cp.Variable( (p,p), symmetric=True )
 cost = cp.norm(Pvar - Pnom)
-constraints = [ Pvar >> 0, non_nsd_Hessian_constr(Pvar) >> 0 ]
+
+# constraints = [ Pvar >> 0, non_nsd_Hessian_constr(Pvar) >> 0 ]
+constraints = [ Pvar >> 0, non_nsd_Hessian_constr(Pvar)[lowerbound_shape] >> 0 ]
 
 problem = cp.Problem( cp.Minimize( cost ), constraints )
 
@@ -41,13 +61,8 @@ for k in range(N):
 
     # Pnom.value = sum([ np.random.randn()*B for B in symmetric_basis(p) ])
 
-    # Psqrt = np.random.randn(p,p)
-    # Pnom.value = Psqrt.T @ Psqrt
-
-    clf_center = [0.0, -3.0]
-    clf_eig = np.array([ 6.0, 1.0 ])
-    clf_angle = np.deg2rad(-45)
-    Pnom.value = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=p)
+    Psqrt = np.random.randn(p,p)
+    Pnom.value = Psqrt.T @ Psqrt
 
     problem.solve(verbose=True)
 
@@ -59,8 +74,6 @@ for k in range(N):
 
     P = Pvar.value
     P_eigs = np.linalg.eigvals(P)
-    lambda_max = np.max( P_eigs )
-    lambda_min = np.min( P_eigs )
 
     print("------------------------- P -------------------------")
     print(f"λ(P) = {P_eigs}")
