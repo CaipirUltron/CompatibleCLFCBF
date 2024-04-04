@@ -968,13 +968,6 @@ class KernelQuadratic(Function):
         A_list = self.kernel.get_A_matrices()
         return np.block([[ Ai.T @ self.matrix_coefs @ Aj + Aj.T @ Ai.T @ self.matrix_coefs for Aj in A_list ] for Ai in A_list ])
 
-    def compute_lowerbound_matrix(self, Pvar):
-        '''
-        Compute the matrix for the lowerbound on the maximum eigenvalue of the Hessian matrix
-        '''
-        As = self.kernel.Asum
-        return As.T @ Pvar @ As + As.T @ As.T @ Pvar
-
     def compute_lowerbound_slice(self):
         '''
         Compute the lower bound on the Hessian matrix
@@ -985,11 +978,24 @@ class KernelQuadratic(Function):
         for i in range(0,self.kernel_dim):
             half_down = symHbound[i:, :]
             if np.all( half_down == 0 ): break
-
+        
+        self.lowerbound_slice = ( slice(0,symHbound.shape[0]), slice(0,symHbound.shape[1]) )
         if np.all( half_down == 0 ):
             self.lowerbound_slice = ( slice(0,i), slice(0,i) )
         
-        self.lowerbound_slice = ( slice(0,symHbound.shape[0]), slice(0,symHbound.shape[1]) )
+    def compute_lowerbound_matrix(self, Pvar):
+        '''
+        Compute the matrix for the lowerbound on the maximum eigenvalue of the Hessian matrix
+        '''
+        As = self.kernel.Asum
+        return As.T @ Pvar @ As + As.T @ As.T @ Pvar
+
+    def compute_reduced_lowerbound_matrix(self, Pvar):
+        '''
+        Extract only the nonzero eigenvalues from the lowerbound matrix
+        '''
+        H = self.compute_lowerbound_matrix(Pvar)[self.lowerbound_slice]
+        return H + H.T
 
     def psd_constr(self):
         '''
@@ -1001,7 +1007,8 @@ class KernelQuadratic(Function):
         '''
         Returns corresponding non-negative definite Hessian constraint for input shape matrix
         '''
-        return self.compute_lowerbound_matrix(self.SHAPE)[self.lowerbound_slice] >> 0
+        # return cp.lambda_min( self.compute_reduced_lowerbound_matrix(self.SHAPE) ) >= 0.0
+        return self.compute_reduced_lowerbound_matrix(self.SHAPE) >> 0
         
     def is_SOS_convex(self, verbose=False):
         '''Returns True if the function is SOS convex'''
@@ -1033,7 +1040,7 @@ class KernelQuadratic(Function):
         '''
         n = self._dim
         A_list = self.kernel.get_A_matrices()
-
+        
         # Iterate over the input list to get problem requirements
         gradient_norms = []
         for pt in self.points:
@@ -1053,12 +1060,11 @@ class KernelQuadratic(Function):
 
             # Define point-level constraints
             if "level" in keys:
-                level_value = pt["level"]
-                if level_value >= -self.constant:
+                if pt["level"] >= -self.constant:
                     if self.fit_options["force_coords"] or pt["force_coord"]:
-                        self.constraints += [ 0.5 * m.T @ self.SHAPE @ m - self.constant == level_value ]
+                        self.constraints += [ 0.5 * m.T @ self.SHAPE @ m - self.constant == pt["level"] ]
                     else:
-                        self.cost += ( 0.5 * m.T @ self.SHAPE @ m - self.constant - level_value )**2
+                        self.cost += ( 0.5 * m.T @ self.SHAPE @ m - self.constant - pt["level"] )**2
                 else: continue
 
             # Define gradient constraints
@@ -1090,7 +1096,7 @@ class KernelQuadratic(Function):
                 self.cost += ( curvature_var - curvature )**2
 
         fit_problem = cp.Problem( cp.Minimize( self.cost ), self.constraints )
-        fit_problem.solve(verbose=False)
+        fit_problem.solve(verbose=False, max_iters = 100000)
 
         if "optimal" in fit_problem.status:
             if isinstance(self, KernelLyapunov):
@@ -1100,11 +1106,26 @@ class KernelQuadratic(Function):
             else:
                 print("Function fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
 
+            # Attempts regularization
             self.set_param( coefficients = self.SHAPE.value )
+            # if not np.all( np.linalg.eigvals( self.compute_reduced_lowerbound_matrix(self.SHAPE.value) ) > 0 ):
+            #     self.set_param( coefficients = self.regularize(self.SHAPE.value) )
+                
             return fit_problem
         else:
             raise Exception("Problem is " + fit_problem.status + ".")
-        
+
+    def regularize(self, Pnom):
+        '''
+        Attempts to regularize a given SHAPE to have only one global minimum
+        '''
+        reg_cost = cp.norm(self.SHAPE - Pnom)
+        reg_constraints = [ self.psd_constr(), self.non_nsd_Hessian_constr() ]
+        reg_problem = cp.Problem( cp.Minimize( reg_cost ), reg_constraints )
+        reg_problem.solve(verbose=True, max_iters = 100000)
+
+        return self.SHAPE.value
+
     def leading_function(self, Pleading, bound=0, approximate=False):
         '''
         Defines a leading function. Can be used as an lower bound, upper bound or as an approximation.

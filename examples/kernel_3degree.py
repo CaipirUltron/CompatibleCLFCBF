@@ -51,18 +51,17 @@ clf.is_SOS_convex(verbose=True)
 # Fits CBF to a U shaped obstacle
 cbf_center = [0.0, -0.0]
 
+# centers = [ [0.0, 0.0] ]
 centers = [ [-3.0, 0.0 ],[ 3.0, 0.0 ], [ -4.0, 3.0 ], [ 4.0, 3.0 ] ]
-# centers = [ [0.0, 0.0], [-3.0, 0.0 ],[ 3.0, 0.0 ], [ -4.0, 2.0 ], [ 4.0, 2.0 ] ]
-
 vertices = [ [ 5.0,-1.0 ], [ 5.0, 3.0 ], [ 3.0, 3.0 ], [ 3.0, 1.0 ],
              [-3.0, 1.0 ], [-3.0, 3.0 ], [-5.0, 3.0 ], [-5.0,-1.0 ] ]
 pts = polygon( vertices=vertices, spacing=0.5, closed=True, gradients=0, at_edge=False )
 
-cbf_eig = np.array([ 1.0, 1.0 ])
+cbf_eig = 0.01*np.array([ 1.0, 1.0 ])
 cbf_angle = np.deg2rad(0)
 Qquadratic = create_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
+# cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=centers, leading={ "shape": Qquadratic, "uses": ["approximation"] })
 cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=centers, leading={ "shape": Qquadratic, "uses": ["approximation"] })
-# cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=centers, leading={ "shape": Qquadratic, "uses": ["approximation"] } )
 cbf.is_SOS_convex(verbose=True)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------

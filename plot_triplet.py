@@ -27,7 +27,10 @@ if hasattr(sim, "pts"):
             gradient_vec = coords + np.array(pt["gradient"])
             ax.plot([ coords[0], gradient_vec[0]], [ coords[1], gradient_vec[1]], 'k-', alpha=0.6)
 
-contour_unsafe = sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
+num_levels = 12
+contour_unsafe = sim.cbf.plot_levels(levels = [ -(0.5/num_levels)*k for k in range(num_levels-1,-1,-1) ], ax=ax, limits=limits)
+
+print(f"λ(lowerbound) = {np.linalg.eigvals(sim.cbf.compute_reduced_lowerbound_matrix(sim.cbf.Q))}\n")
 
 sim.kerneltriplet.plot_invariant(ax)
 sim.kerneltriplet.plot_attr(ax, "stable_equilibria", mcolors.BASE_COLORS["r"], 1.0)

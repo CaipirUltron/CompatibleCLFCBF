@@ -18,7 +18,7 @@ limits = 10*np.array([[-1, 1],[-1, 1]])
 ax.set_xlim(limits[0][0], limits[0][1])
 ax.set_ylim(limits[1][0], limits[1][1])
 
-kernel = Kernel(*initial_state, degree=2)
+kernel = Kernel(*initial_state, degree=3)
 p = kernel.kernel_dim
 Amatrices = kernel.get_A_matrices()
 
@@ -41,8 +41,10 @@ def extract_upper_block(Hsym):
     
     return ( slice(0,Hsym.shape[0]), slice(0,Hsym.shape[1]) )
 
-print( non_nsd_Hessian_constr(Psym) )
+print( non_nsd_Hessian_constr(Psym).shape )
+
 lowerbound_shape = extract_upper_block(non_nsd_Hessian_constr(Psym))
+print( non_nsd_Hessian_constr(Psym)[lowerbound_shape].shape )
 
 Pnom = cp.Parameter( (p,p), symmetric=True )
 Pvar = cp.Variable( (p,p), symmetric=True )
