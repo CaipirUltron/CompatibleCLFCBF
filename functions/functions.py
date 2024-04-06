@@ -928,6 +928,14 @@ class KernelQuadratic(Function):
                     self.points.append({"coords": center, "level":-self.constant})
                 continue
 
+            if key == "skeleton":
+                self.base_constraints += self.skeleton_constrs( kwargs["skeleton"] )
+                continue
+
+            if key == "safe_points":
+                self.base_constraints += self.safe_point_constrs( kwargs["safe_points"] )
+                continue
+
             if key == "leading":
                 if "shape" not in kwargs["leading"].keys():
                     raise Exception("Must specify a shape matrix for the leading function.")
@@ -938,15 +946,15 @@ class KernelQuadratic(Function):
                 uses = kwargs["leading"]["uses"]
                 
                 for use in uses:
-                    if use not in ["lower_bound", "upper_bound", "approximation"]:
+                    if use not in ["lowerbound", "upperbound", "approximation"]:
                         raise Exception("Invalid use for the leading function.")
                 
                 bound = 0
-                if "lower_bound" in uses: bound = -1
-                if "upper_bound" in uses: bound = +1
+                if "lowerbound" in uses: bound = +1
+                if "upperbound" in uses: bound = -1
 
                 approx = False
-                if "approximation" in uses or ( "lower_bound" in uses and "upper_bound" in uses ):
+                if "approximation" in uses or ( "lowerbound" in uses and "upperbound" in uses ):
                     approx = True
 
                 self.leading_function(leading_shape, bound=bound, approximate=approx)
@@ -1009,7 +1017,38 @@ class KernelQuadratic(Function):
         '''
         # return cp.lambda_min( self.compute_reduced_lowerbound_matrix(self.SHAPE) ) >= 0.0
         return self.compute_reduced_lowerbound_matrix(self.SHAPE) >> 0
-        
+
+    def skeleton_constrs(self, skeleton_segments):
+        '''
+        Generates the appropriate constraints for smooth increasing of the CBF from a center point located on the skeleton curve.
+        Parameters: - skeleton_segments is an array with segments, each containing sampled points of the obstacle medial-axis.
+                    - the points on each segment are assumed to be ordered: that is, the barrier must grow from one point to the next
+        '''
+        skl_constraints = []
+        for seg in skeleton_segments:
+            for k in range(len(seg)-1):
+                curr_pt = seg[k]
+                next_pt = seg[k+1]
+
+                curr_m = self.kernel.function(curr_pt)
+                next_m = self.kernel.function(next_pt)
+                inner = sum([ curr_m.T @ Ai.T @ self.SHAPE @ curr_m * ( next_pt[i] - curr_pt[i] ) for i, Ai in enumerate(self.kernel.get_A_matrices()) ])
+                skl_constraints.append( next_m.T @ self.SHAPE @ next_m - curr_m.T @ self.SHAPE @ curr_m >= inner )
+
+                self.points.append({"coords": curr_pt, "level":-self.constant})
+
+        return skl_constraints
+
+    def safe_point_constrs(self, safe_points):
+        '''
+        Constraints for points guaranteed to be safe.
+        '''
+        safe_constrs = []
+        for pt in safe_points:
+            m = self.kernel.function(pt)
+            safe_constrs.append( m.T @ self.SHAPE @ m >= 1.0 )
+        return safe_constrs
+
     def is_SOS_convex(self, verbose=False):
         '''Returns True if the function is SOS convex'''
 
@@ -1140,9 +1179,9 @@ class KernelQuadratic(Function):
                 raise Exception("Shape matrix and kernel dimensions are incompatible.")
 
             if bound > 0:
-                self.constraints += [ self.SHAPE >> Pleading ]
+                self.constraints += [ self.SHAPE >> Pleading ]  # Pleading is a lowerbound
             elif bound < 0:
-                self.constraints += [ self.SHAPE << Pleading ]
+                self.constraints += [ self.SHAPE << Pleading ]  # Pleading is an upperbound
 
             if approximate:
                 self.cost += cp.norm( self.SHAPE - Pleading )

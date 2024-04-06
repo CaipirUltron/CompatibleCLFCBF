@@ -602,8 +602,8 @@ def box(center, height, width, angle=0, spacing=0.1, gradients=0, at_edge=False)
     '''
     t = (height/2)*np.array([  0, +1 ])
     b = (height/2)*np.array([  0, -1 ])
-    l = (width/2) *np.array([ -1,  0 ])
-    r = (width/2) *np.array([ +1,  0 ])
+    l = (width/2 )*np.array([ -1,  0 ])
+    r = (width/2 )*np.array([ +1,  0 ])
     tl = t+l
     tr = t+r
     bl = b+l

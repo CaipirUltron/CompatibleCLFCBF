@@ -9,7 +9,7 @@ initial_state = [0.2, 5.0]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
-limits = 8*np.array([[-1, 1],[-1, 1]])
+limits = 12*np.array([[-1, 1],[-1, 1]])
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 kernel = Kernel(*initial_state, degree=1)
@@ -34,9 +34,16 @@ Pquadratic = create_quadratic( eigen=clf_eig, R=rot2D(np.deg2rad(clf_angle)), ce
 clf = KernelLyapunov( *initial_state, kernel=kernel, P=Pquadratic )
 
 # --------------------------------------------- Define CBF (quadratic) -----------------------------------------------------
-cbf_eig = [ 0.2, 1.2 ]
-cbf_angle = 0.0
-cbf_center = [0.0, 3.0]
+
+# cbf_eig = [ 0.2, 1.2 ]
+# cbf_angle = 0.0
+# cbf_center = [0.0, 3.0]
+
+cbf_eig = 0.002*np.array([ 30.0, 1.0 ])
+cbf_center = [0.0, -0.0]
+cbf_angle = np.deg2rad(0)
+
+
 Qquadratic = create_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
 cbf = KernelBarrier(*initial_state, kernel=kernel, Q=Qquadratic)
 

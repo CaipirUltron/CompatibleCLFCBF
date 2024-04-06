@@ -50,6 +50,8 @@ clf.is_SOS_convex(verbose=True)
 center = [ 0.0, 2.0 ]
 pts = box( center=center, height=5, width=5, angle=10, spacing=0.4, gradients=1, at_edge=True )
 cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=[center])
+# cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, skeleton=skeleton, leading={ "shape": Qquadratic, "uses": ["upper_bound"] })
+
 cbf.is_SOS_convex(verbose=True)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------

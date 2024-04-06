@@ -9,8 +9,8 @@ initial_state = [0.2, 2.5]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
-limits = np.array([[-7.5, 7.5],[-4, 5]])
-# limits = 9*np.array([[-1, 1],[-1, 1]])
+# limits = np.array([[-7.5, 7.5],[-4, 5]])
+limits = 20*np.array([[-1, 1],[-1, 1]])
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 kernel = Kernel(*initial_state, degree=3)
@@ -49,19 +49,51 @@ clf.is_SOS_convex(verbose=True)
 
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
 # Fits CBF to a U shaped obstacle
-cbf_center = [0.0, -0.0]
 
 # centers = [ [0.0, 0.0] ]
 centers = [ [-3.0, 0.0 ],[ 3.0, 0.0 ], [ -4.0, 3.0 ], [ 4.0, 3.0 ] ]
 vertices = [ [ 5.0,-1.0 ], [ 5.0, 3.0 ], [ 3.0, 3.0 ], [ 3.0, 1.0 ],
              [-3.0, 1.0 ], [-3.0, 3.0 ], [-5.0, 3.0 ], [-5.0,-1.0 ] ]
-pts = polygon( vertices=vertices, spacing=0.5, closed=True, gradients=0, at_edge=False )
+pts = polygon( vertices=vertices, spacing=0.2, closed=True, gradients=0, at_edge=False )
 
-cbf_eig = 0.01*np.array([ 1.0, 1.0 ])
+def line(start, end, sep):
+    num_pts = round( np.linalg.norm( np.array(start) - np.array(end)) / sep )
+    x_coords = [ x for x in np.linspace(start[0], end[0], num_pts).tolist() ]
+    y_coords = [ y for y in np.linspace(start[1], end[1], num_pts).tolist() ]
+    return list(zip(x_coords,y_coords))
+
+pt_sep = 0.2
+skeleton = []
+skeleton.append( line((0,0), (4,0), pt_sep ) )
+skeleton.append( line((4,0), (5,-1), pt_sep ))
+skeleton.append( line((4,0), (4,2), pt_sep ))
+skeleton.append( line((4,2), (5,3), pt_sep ))
+skeleton.append( line((4,2), (3,3), pt_sep ))
+
+skeleton.append( line((0,0), (-4,0), pt_sep ))
+skeleton.append( line((-4,0), (-5,-1), pt_sep ))
+skeleton.append( line((-4,0), (-4,2), pt_sep ))
+skeleton.append( line((-4,2), (-5,3), pt_sep ))
+skeleton.append( line((-4,2), (-3,3), pt_sep ))
+
+pt_sep = 1.0
+min_x, max_x = limits[0,0], limits[0,1]
+min_y, max_y = limits[1,0], limits[1,1]
+
+safe_points = []
+safe_points += line((max_x, max_y), (max_x, min_y), pt_sep )
+safe_points += line((max_x, min_y), (min_x, min_y), pt_sep )
+safe_points += line((min_x, min_y), (min_x, max_y), pt_sep )
+safe_points += line((min_x, max_y), (max_x, max_y), pt_sep )
+
+cbf_center = [0.0, 1.0]
+# cbf_eig = 0.03*np.array([ 1.0, 1.0 ])
+cbf_eig = 0.04*np.array([ 1.0, 1.0 ])
+
 cbf_angle = np.deg2rad(0)
 Qquadratic = create_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
-# cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=centers, leading={ "shape": Qquadratic, "uses": ["approximation"] })
-cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=centers, leading={ "shape": Qquadratic, "uses": ["approximation"] })
+quadratic_cbf = KernelBarrier(*initial_state, kernel=kernel, Q=Qquadratic)
+cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, skeleton=skeleton, leading={ "shape": Qquadratic, "uses": ["lowerbound"] })
 cbf.is_SOS_convex(verbose=True)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
