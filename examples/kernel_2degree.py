@@ -9,12 +9,12 @@ initial_state = [0.5, 6.0]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
-limits = 12*np.array([[-1, 1],[-1, 1]])
+
+limits = 12*np.array((-1,1,-1,1))
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
-kernel = Kernel(*initial_state, degree=2)
-kernel_dim = kernel.kernel_dim
-print(kernel)
+kernel = Kernel(dim=n, degree=2)
+kernel_dim = kernel._num_monomials
 
 # -------------------------------------------------- Define system ---------------------------------------------------------
 fx, fy = 0.0, 0.0                       # constant force with fx, fy components
@@ -41,7 +41,7 @@ clf_angle = np.deg2rad(-45)
 Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
 
 # clf = KernelLyapunov(*initial_state, kernel=kernel, P=load_compatible(__file__, Pquadratic, load_compatible=True))
-clf = KernelLyapunov(*initial_state, kernel=kernel, P=Pquadratic)
+clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits, spacing=0.1)
 # clf = KernelLyapunov(*initial_state, kernel=kernel, leading={ "shape": Pquadratic, "uses": ["lower_bound", "approximation"] })
 clf.is_SOS_convex(verbose=True)
 
@@ -49,7 +49,7 @@ clf.is_SOS_convex(verbose=True)
 # Fits CBF to a box-shaped obstacle
 center = [ 0.0, 2.0 ]
 pts = box( center=center, height=5, width=5, angle=10, spacing=0.4, gradients=1, at_edge=True )
-cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, centers=[center])
+cbf = KernelBarrier(kernel=kernel, boundary=pts, centers=[center], limits=limits, spacing=0.1)
 # cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, skeleton=skeleton, leading={ "shape": Qquadratic, "uses": ["upper_bound"] })
 
 cbf.is_SOS_convex(verbose=True)
@@ -57,16 +57,14 @@ cbf.is_SOS_convex(verbose=True)
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .002
 p, alpha, beta = 1.0, 1.0, 1.0
-kerneltriplet = KernelTriplet( plant=plant, clf=clf, cbf=cbf,
-                              params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta},
-                              limits=limits.tolist(), spacing=0.2 )
+kerneltriplet = KernelTriplet( plant=plant, clf=clf, cbf=cbf, params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta}, limits=limits, spacing=0.1 )
 
 controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 15
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 plot_config = {
-    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits.tolist(),
+    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits,
     "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": True
 }
 

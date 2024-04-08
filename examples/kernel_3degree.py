@@ -10,7 +10,7 @@ initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
 # limits = np.array([[-7.5, 7.5],[-4, 5]])
-limits = 20*np.array([[-1, 1],[-1, 1]])
+limits = 20*np.array(-1,1,-1,1)
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 kernel = Kernel(*initial_state, degree=3)
@@ -65,26 +65,16 @@ def line(start, end, sep):
 pt_sep = 0.2
 skeleton = []
 skeleton.append( line((0,0), (4,0), pt_sep ) )
-skeleton.append( line((4,0), (5,-1), pt_sep ))
+# skeleton.append( line((4,0), (5,-1), pt_sep ))
 skeleton.append( line((4,0), (4,2), pt_sep ))
-skeleton.append( line((4,2), (5,3), pt_sep ))
-skeleton.append( line((4,2), (3,3), pt_sep ))
+# skeleton.append( line((4,2), (5,3), pt_sep ))
+# skeleton.append( line((4,2), (3,3), pt_sep ))
 
 skeleton.append( line((0,0), (-4,0), pt_sep ))
-skeleton.append( line((-4,0), (-5,-1), pt_sep ))
+# skeleton.append( line((-4,0), (-5,-1), pt_sep ))
 skeleton.append( line((-4,0), (-4,2), pt_sep ))
-skeleton.append( line((-4,2), (-5,3), pt_sep ))
-skeleton.append( line((-4,2), (-3,3), pt_sep ))
-
-pt_sep = 1.0
-min_x, max_x = limits[0,0], limits[0,1]
-min_y, max_y = limits[1,0], limits[1,1]
-
-safe_points = []
-safe_points += line((max_x, max_y), (max_x, min_y), pt_sep )
-safe_points += line((max_x, min_y), (min_x, min_y), pt_sep )
-safe_points += line((min_x, min_y), (min_x, max_y), pt_sep )
-safe_points += line((min_x, max_y), (max_x, max_y), pt_sep )
+# skeleton.append( line((-4,2), (-5,3), pt_sep ))
+# skeleton.append( line((-4,2), (-3,3), pt_sep ))
 
 cbf_center = [0.0, 1.0]
 # cbf_eig = 0.03*np.array([ 1.0, 1.0 ])
@@ -108,7 +98,7 @@ T = 15
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 plot_config = {
-    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits.tolist(),
+    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits,
     "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": True
 }
 logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": cbf.Q.tolist() }

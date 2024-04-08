@@ -17,7 +17,7 @@ class Plot2DSimulation():
             "gridspec": (1,1,1),
             "widthratios": [1],
             "heightratios": [1],
-            "limits": [[-6,6], [-6,6]],
+            "limits": (-6,6,-6,6),
             "drawlevel": False,
             "resolution": 50,
             "fps":50,
@@ -91,8 +91,8 @@ class Plot2DSimulation():
         '''
         Configures plot
         '''
-        self.x_lim = self.plot_config["limits"][0]
-        self.y_lim = self.plot_config["limits"][1]
+        self.x_lim = self.plot_config["limits"][0:2]
+        self.y_lim = self.plot_config["limits"][2:]
 
         self.main_ax.set_xlim(*self.x_lim)
         self.main_ax.set_ylim(*self.y_lim)
@@ -213,7 +213,7 @@ class Plot2DSimulation():
             
             if hasattr(self, 'clf_log'):
                 current_piv_state = [ self.clf_log[k][i] for k in range(self.clf_param_dim) ]
-                self.clf.set_param(current_piv_state)
+                self.clf.set_params(current_piv_state)
 
             self.time_text.set_text("Time = " + str(current_time) + "s")
 

@@ -14,9 +14,10 @@ ax = fig.add_subplot(111)
 ax.set_title("Invariant set plot for Kernel-based CLF-CBFs")
 ax.set_aspect('equal', adjustable='box')
 
-limits = sim.plot_config["limits"]
-ax.set_xlim(limits[0][0], limits[0][1])
-ax.set_ylim(limits[1][0], limits[1][1])
+limits = sim.limits
+xmin, xmax, ymin, ymax = limits
+ax.set_xlim(xmin, xmax)
+ax.set_ylim(ymin, ymax)
 
 if hasattr(sim, "pts"):
     for pt in sim.pts:
@@ -27,18 +28,18 @@ if hasattr(sim, "pts"):
             gradient_vec = coords + np.array(pt["gradient"])
             ax.plot([ coords[0], gradient_vec[0]], [ coords[1], gradient_vec[1]], 'k-', alpha=0.6)
 
-# if hasattr(sim, "skeleton"):
-#     for seg in sim.skeleton:
-#         for pt in seg:
-#             ax.plot(pt[0], pt[1], 'k*', alpha=0.6)
+if hasattr(sim, "skeleton"):
+    for seg in sim.skeleton:
+        for pt in seg:
+            ax.plot(pt[0], pt[1], 'k*', alpha=0.6)
 
 if hasattr(sim, "quadratic_cbf"):
-    sim.quadratic_cbf.plot_levels(levels = [0.0], ax=ax, limits=limits)
+    sim.quadratic_cbf.plot_levels(ax=ax, levels = [0.0])
 
 num_levels = 5
-contour_unsafe = sim.cbf.plot_levels(levels = [ -(0.5/num_levels)*k for k in range(num_levels-1,-1,-1) ], ax=ax, limits=limits)
+contour_unsafe = sim.cbf.plot_levels(ax=ax, levels = [ -(0.5/num_levels)*k for k in range(num_levels-1,-1,-1) ])
 
-print(f"λ(lowerbound) = {np.linalg.eigvals(sim.cbf.compute_reduced_lowerbound_matrix(sim.cbf.Q))}\n")
+print(f"λ(lowerbound) = {np.linalg.eigvals(sim.cbf._reduced_lowerbound_matrix(sim.cbf.Q))}\n")
 
 sim.kerneltriplet.plot_invariant(ax)
 sim.kerneltriplet.plot_attr(ax, "stable_equilibria", mcolors.BASE_COLORS["r"], 1.0)
@@ -78,6 +79,6 @@ while True:
     print(f"h = {h}")
     print(f"||∇h|| = {np.linalg.norm(gradh)}")
 
-    clf_contour = sim.clf.plot_levels(levels=[V], ax=ax, limits=limits, spacing=0.1)
+    clf_contour = sim.clf.plot_levels(ax=ax, levels=[V])
 
 plt.show()

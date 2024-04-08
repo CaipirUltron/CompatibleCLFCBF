@@ -11,8 +11,8 @@ import warnings
 import contourpy as ctp
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-import matplotlib.animation as anim
 
+from abc import ABC, abstractmethod
 from functools import wraps
 from scipy.optimize import minimize
 from shapely import geometry, intersection
@@ -307,6 +307,135 @@ class Function():
                 line2D = ax.plot( segment[:,0], segment[:,1], color=color, linestyle=linestyle )
                 collections.append(line2D[0])
 
+        return collections
+
+class Function2(ABC):
+    ''' 
+    Implementation of abstract class for scalar functions of any input dimension
+    '''
+    def __init__(self, **kwargs):
+
+        # Initialize basic parameters (mostly for plotting)
+        self._dim = 2
+        self.color = mcolors.BASE_COLORS["k"]
+        self.linestyle = "solid"
+        self.limits = (-1,1,-1,1)
+        self.spacing = 0.1
+        self.set_params(**kwargs)
+
+        self._generate_contour()
+
+    def _generate_contour(self):
+        '''
+        Create contour generator object for the given function.
+        Parameters: limits (2x2 array) - min/max limits for x,y coords
+                    spacing - grid spacing for contour generation
+        '''        
+        if self._dim != 2:
+            raise Exception("Contour plot can only be used for 2D functions.")
+
+        x_min, x_max, y_min, y_max = self.limits
+        x = np.arange(x_min, x_max, self.spacing)
+        y = np.arange(y_min, y_max, self.spacing)
+        xg, yg = np.meshgrid(x,y)
+        
+        fvalues = np.zeros(xg.shape)
+        for i,j in itertools.product(range(xg.shape[0]), range(xg.shape[1])):
+            pt = np.array([xg[i,j], yg[i,j]])
+            fvalues[i,j] = self.function(pt)
+        
+        self.contour = ctp.contour_generator(x=xg, y=yg, z=fvalues )
+
+    def _validate(self, point):
+        ''' Validates input data '''
+        if not isinstance(point, (list, np.ndarray)): raise Exception("Input data point is not a numeric array.")
+        if isinstance(point, list): point = np.array(point)
+        return point
+
+    @abstractmethod
+    def _function(self, point: np.ndarray) -> np.ndarray:
+        '''
+        Abstract implementation of function computation. 
+        Must receive point as input and return the corresponding function value.
+        Overwrite on children classes.
+        '''
+        pass
+
+    @abstractmethod
+    def _gradient(self, point: np.ndarray) -> np.ndarray:
+        '''
+        Abstract implementation of gradient computation. 
+        Must receive point as input and return the corresponding gradient value.
+        Overwrite on children classes.
+        '''
+        pass
+
+    @abstractmethod
+    def _hessian(self, point: np.ndarray) -> np.ndarray:
+        '''
+        Abstract implementation of hessian computation. Must receive point as input and return the corresponding hessian value.
+        Overwrite on children classes.
+        '''
+        pass
+
+    def function(self, point):
+        return self._function(self._validate(point))
+
+    def gradient(self, point):
+        return self._gradient(self._validate(point))    
+
+    def hessian(self, point):
+        return self._hessian(self._validate(point))
+
+    def set_params(self, **params):
+        ''' Sets function basic parameters (mostly plotting) '''
+
+        for key in params.keys():
+            key = key.lower()
+            if key == "dim":
+                self._dim = params["dim"]
+                continue
+            if key == "color":
+                self.color = params["color"]
+                continue
+            if key == "linestyle":
+                self.linestyle = params["linestyle"]
+                continue
+            if key == "limits":
+                self.limits = params["limits"]
+                continue
+            if key == "spacing":
+                self.spacing = params["spacing"]
+                continue
+
+    def get_levels(self, levels=[0.0] ) -> list:
+        ''' Generates function level sets from the contour generator object '''
+
+        level_contours = []
+        for lvl in levels:
+            line = self.contour.lines(lvl)
+            level_contours.append(line)
+        return level_contours
+
+    def plot_levels(self, ax = plt, levels=[0.0], **kwargs):
+        ''' Plots function level sets at the input axis ax. Additional args may be passed for color and linestyle '''
+        
+        color = self.color
+        linestyle = self.linestyle
+        for key in kwargs.keys():
+            key = key.lower()
+            if key == "color":
+                color = kwargs["color"]
+                continue
+            if key == "linestyle":
+                linestyle = kwargs["linestyle"]
+                continue
+
+        collections = []
+        for level in self.get_levels(levels):
+            for segment in level:
+                line2D = ax.plot( segment[:,0], segment[:,1], color=color, linestyle=linestyle )
+                collections.append(line2D[0])
         return collections
 
 class Quadratic(Function):
@@ -616,21 +745,20 @@ class Gaussian(Function):
         v = np.array(point) - self.mu
         return - self.c * np.exp( -v.T @ self.Sigma @ v ) * ( self.Sigma - np.outer( self.Sigma @ v, self.Sigma @ v ) )
 
-class Kernel(Function):
+class Kernel():
     '''
     Class for kernel functions m(x) of maximum degree 2*d, where m(x) is a vector of (n+d,d) known monomials.
     '''
-    def __init__(self, *args, **kwargs):
+    def __init__(self, dim=2, **kwargs):
 
         # Initialization
-        super().__init__(*args)
+        self._dim = 2
         self.set_param(**kwargs)
 
         # Create symbols
-        import sympy as sp
         self._symbols = []
         for dim in range(self._dim):
-            self._symbols.append( sp.Symbol('x' + str(dim+1)) )
+            self._symbols.append( sym.Symbol('x' + str(dim+1)) )
 
         # Generate monomial list and symbolic monomials
         self.alpha, self.powers_by_degree = generate_monomial_list( self._dim, self._degree )
@@ -639,29 +767,32 @@ class Kernel(Function):
         self._K = commutation_matrix(self._num_monomials)       # commutation matrix to be used later
 
         # Symbolic computations
-        # self._symP = sp.MatrixSymbol('P', self._num_monomials, self._num_monomials)
-        # self._symP = sp.Matrix(sp.symarray('p',(self._num_monomials,self._num_monomials)))
-        self._sym_monomials = sp.Matrix(self._monomials)
+        self._sym_shape_matrix = sym.MatrixSymbol('S', self._num_monomials, self._num_monomials)
+        self._sym_monomials = sym.Matrix(self._monomials)
         self._sym_jacobian_monomials = self._sym_monomials.jacobian(self._symbols)
 
         self._hessian_monomials = [ [0 for i in range(self._dim)] for j in range(self._dim) ]
         for i in range(self._dim):
             for j in range(self._dim):
-                self._hessian_monomials[i][j] = sp.diff(self._sym_jacobian_monomials[:,j], self._symbols[i])
+                self._hessian_monomials[i][j] = sym.diff(self._sym_jacobian_monomials[:,j], self._symbols[i])
 
         # Compute numeric A and N matrices
         self.compute_A()
         self.compute_N()
 
         # Lambda functions
-        self._lambda_monomials = sp.lambdify( list(self._symbols), self._monomials )
-        self._lambda_jacobian_monomials = sp.lambdify( list(self._symbols), self._sym_jacobian_monomials )
-        self._lambda_hessian_monomials = sp.lambdify( list(self._symbols), self._hessian_monomials )
+        self._lambda_monomials = sym.lambdify( list(self._symbols), self._monomials )
+        self._lambda_jacobian_monomials = sym.lambdify( list(self._symbols), self._sym_jacobian_monomials )
+        self._lambda_hessian_monomials = sym.lambdify( list(self._symbols), self._hessian_monomials )
+
+    def _validate(self, point):
+        ''' Validates input data '''
+        if not isinstance(point, (list, tuple, np.ndarray)): raise Exception("Input data point is not a numeric array.")
+        if isinstance(point, np.ndarray): point = point.tolist()
+        return point
 
     def set_param(self, **kwargs):
-        '''
-        Sets the function parameters.
-        '''
+        ''' Sets the kernel parameters '''
         self._degree = 0
         self._num_monomials = 1
         self._maxdegree = 2*self._degree
@@ -671,8 +802,6 @@ class Kernel(Function):
                 self._degree = kwargs[key]
                 self._num_monomials = num_comb(self._dim, self._degree)
                 self._coefficients = np.zeros([self._num_monomials, self._num_monomials])
-
-        self.kernel_dim = self._num_monomials
 
     def compute_A(self):
         '''
@@ -721,18 +850,12 @@ class Kernel(Function):
             self.N.append( mat( solutions[:,k] ) )
 
     def function(self, point):
-        '''
-        Compute polynomial function numerically.
-        '''
-        # for k, m in enumerate( list_m ): self.func[k] = m
-        return np.array(self._lambda_monomials(*point))
+        ''' Compute kernel function '''
+        return np.array(self._lambda_monomials(*self._validate(point)))
 
     def jacobian(self, point):
-        '''
-        Compute kernel Jacobian.
-        '''
-        # for k, line in enumerate( self._lambda_jacobian_monomials(*point) ): self.jac[k,:] = line
-        return np.array(self._lambda_jacobian_monomials(*point))
+        ''' Compute kernel Jacobian '''
+        return np.array(self._lambda_jacobian_monomials(*self._validate(point)))
 
     def get_A_matrices(self):
         '''
@@ -800,98 +923,166 @@ class Kernel(Function):
         text = "m: R^" + str(self._dim) + " --> R^" + str(self._num_monomials) + "\nKernel map on variables " + variables + "\nm(x) = " + kernel
         return text
 
-class KernelQuadratic(Function):
+class KernelQuadratic(Function2):
     '''
     Class for kernel quadratic functions of the type f(x) = m(x)' F m(x) - C for a given kernel m(x), where:
     F is a p.s.d. matrix and C is an arbitrary constant. If no constant C is specified, C = 0
     '''
-    def __init__(self, *args, **kwargs):
-
-        # Initialization
-        super().__init__(*args)
-
-        self.default_fit_options = { "force_coords": False, "force_gradients": False }
-        self.fit_options = self.default_fit_options
-
-        default_color = mcolors.BASE_COLORS['k']
-        if isinstance(self, KernelLyapunov):
-            default_color = mcolors.TABLEAU_COLORS['tab:blue']
-        elif isinstance(self, KernelBarrier):
-            default_color = mcolors.TABLEAU_COLORS['tab:red']
-        self.plot_config["color"] = default_color
-        self.plot_config["figsize"] = ( 5, 5 )
-        self.plot_config["axeslim"] = ( -6, 6, -6, 6 )
+    def __init__(self, **params):
 
         self.constant = 0.0
+        super().__init__(**params)
 
-        self.set_param(**kwargs)
-        self.evaluate()
+        self.force_coords = False
+        self.force_gradients = False
 
         if len(self.points) > 0 or type(self.cost) != float or len(self.constraints) > len(self.base_constraints):
             self.fit()
 
-    def init_kernel(self):
-        # very time the Kernel is initialized, self.matrix_coefs gets the correct dimensions and goes to zero.
-        self.kernel_dim = self.kernel.kernel_dim
+    def __str__(self):
+
+        type_fun = "Polynominal "
+        if isinstance(self, KernelLyapunov):
+            type_fun = "CLF with expression V(x) = ½ k(x)' P k(x)"
+        if isinstance(self, KernelBarrier):
+            type_fun = "CBF with expression h(x) = ½ ( k(x)' Q k(x) - 1 )"
+        return type_fun
+
+    def _initialize(self, kernel):
+        '''
+        Given a kernel, correctly initialize function.
+        '''
+        self.kernel = kernel
+        self.kernel_dim = self.kernel._num_monomials
+        self.kernel_matrices = self.kernel.get_A_matrices()
         self.matrix_coefs = np.zeros([self.kernel_dim, self.kernel_dim])
 
         self.param_dim = int(self.kernel_dim*(self.kernel_dim + 1)/2)
         self.dynamics = Integrator( np.zeros(self.param_dim), np.zeros(self.param_dim) )
 
         self.SHAPE = cp.Variable( (self.kernel_dim,self.kernel_dim), symmetric=True )
-        self.symS = sym.MatrixSymbol('S', self.kernel_dim, self.kernel_dim)
-        self.compute_lowerbound_slice()
-        self.clear_optimization()
 
-    def clear_optimization(self):
-        '''
-        Clear optimization. Initially, cost is zero and the only constraint should be self.SHAPE >> 0
-        '''
+        self._compute_lowerbound_slice()
+        self._initialize_opt()
+
+    def _initialize_opt(self):
+        ''' Clear optimization variables, parameters and constraints '''
+
         self.points = []
         self.cost = 0.0
         self.base_constraints = [ self.psd_constr() ]
-        # self.base_constraints = [ self.psd_constr(), self.non_nsd_Hessian_constr() ]
         self.constraints = self.base_constraints
 
-    def set_param(self, **kwargs):
-        '''
-        Sets the function parameters.
-        '''
-        keys = [ key.lower() for key in kwargs.keys() ] 
+    def _gradient_const_matrices(self, shape_matrix):
+        ''' Compute constant matrices composing the elements of the gradient '''
 
-        if "constant" in keys:
-            self.constant = kwargs["constant"]
+        grad_list = [ Ai.T @ shape_matrix for Ai in self.kernel_matrices ]
+        return grad_list
+
+    def _hessian_const_matrices(self, shape_matrix):
+        ''' Compute constant matrices composing the elements of the Hessian '''
+
+        H_list = [ [ ( Ai.T @ shape_matrix + shape_matrix @ Ai ) @ Aj for Aj in self.kernel_matrices ] for Ai in self.kernel_matrices ]
+        return H_list
+
+    def _fun(self, x, shape_matrix):
+        ''' Returns the function value '''
+        m = self.kernel.function(x)
+        return 0.5 * m.T @ shape_matrix @ m - self.constant
+
+    def _grad(self, x, shape_matrix):
+        ''' Gradient vector as a function of the state and shape matrix '''
+
+        m = self.kernel.function(x)
+        Jm = self.kernel.jacobian(x)
+
+        return Jm.T @ shape_matrix @ m
+
+    def _hess(self, x, shape_matrix):
+        ''' Hessian matrix as a function of the state and shape matrix '''
+
+        m = self.kernel.function(x)
+        H_list = self._hessian_const_matrices(shape_matrix)
+
+        return [ [ m.T @ H_list[i][j] @ m for j in range(self._dim) ] for i in range(self._dim) ]
+
+    def _function(self, point):
+        ''' Returns function using self configuration '''
+        return self._fun(point, self.matrix_coefs)
+
+    def _gradient(self, point):
+        ''' Returns gradient using self configuration '''
+        return self._grad(point, self.matrix_coefs)
+
+    def _hessian(self, point):
+        ''' Returns hessian using self configuration '''
+        return np.array(self._hess( point, self.matrix_coefs ))
+
+    def _hessian_quadratic_form(self, x, shape_matrix, v):
+        ''' Computes the quadratic form v' H v with hessian matrix H and vector v'''
+
+        m = self.kernel.function(x)
+        H_list = self._hessian_const_matrices(shape_matrix)
+        M = sum([ [ H_list[i][j] * v[i] * v[j] for j in range(self._dim) ] for i in range(self._dim) ])
+        return m.T @ M @ m
+
+    def _SOSconvex_matrix(self, shape_matrix):
+        ''' Returns SOS convexity matrix '''
+        return np.block([[ Ai.T @ shape_matrix @ Aj + Aj.T @ Ai.T @ shape_matrix for Aj in self.kernel_matrices ] for Ai in self.kernel_matrices ])
+
+    def _lowerbound_matrix(self, shape_matrix):
+        ''' Compute the matrix for the lowerbound on the maximum eigenvalue of the Hessian matrix '''
+        As = self.kernel.Asum
+        return As.T @ shape_matrix @ As + As.T @ As.T @ shape_matrix
+
+    def _compute_lowerbound_slice(self):
+        ''' Compute slice on the lowerbound matrix '''
+        symHbound = self._lowerbound_matrix( self.kernel._sym_shape_matrix )
+
+        # This computes the shape of the maximum non-zero upper-left block of symHbound
+        for i in range(0,self.kernel_dim):
+            half_down = symHbound[i:, :]
+            if np.all( half_down == 0 ): break
+        
+        self._lowerbound_slice = ( slice(0,symHbound.shape[0]), slice(0,symHbound.shape[1]) )
+        if np.all( half_down == 0 ):
+            self._lowerbound_slice = ( slice(0,i), slice(0,i) )
+
+    def _reduced_lowerbound_matrix(self, shape_matrix):
+        ''' Extract only the nonzero eigenvalues from the lowerbound matrix '''
+        H = self._lowerbound_matrix(shape_matrix)[self._lowerbound_slice]
+        return H + H.T
+
+    def set_params(self, **kwargs):
+        ''' Sets function parameters '''
+        super().set_params(**kwargs)
+
+        keys = [ key.lower() for key in kwargs.keys() ] 
 
         if "kernel" in keys:
             if type(kwargs["kernel"]) != Kernel:
                 raise Exception("Argument must be a valid Kernel function.")
-            self.kernel = kwargs["kernel"]
-            self.init_kernel()
+            self._initialize( kwargs["kernel"] )
 
         if "degree" in keys:
-            self.kernel = Kernel(*self._args, degree=kwargs["degree"])
-            self.init_kernel()
+            if "dim" in keys: self._dim = kwargs["dim"]
+            else: print("Kernel dimension was not specified. Initializing with new Kernel of n = 2.")
+            self._initialize( Kernel(dim=self._dim, degree=kwargs["degree"]) )
 
-        # Only initializes the standard kernel iff nothing was passed upon creation
-        if not hasattr(self, "kernel"):
-            self.kernel = Kernel(*self._args, degree=1)
-            self.init_kernel()
+        if "constant" in keys:
+            self.constant = kwargs["constant"]
 
         for key in keys:
 
             if key in ["constant", "kernel", "degree"]: # Already dealt with
                 continue
 
-            if key == "fit_options":
-                for default_key in self.default_fit_options.keys():
-                    if default_key in kwargs["fit_options"].keys():
-                        self.fit_options[default_key] = kwargs["fit_options"][default_key]
+            if key == "force_coords":
+                self.force_coords = kwargs["force_coords"]
                 continue
 
-            if key == "plot_config":
-                for default_key in self.default_plot_config.keys():
-                    if default_key in kwargs["plot_config"].keys():
-                        self.plot_config[default_key] = kwargs["plot_config"][default_key]
+            if key == "force_gradients":
+                self.force_coords = kwargs["force_gradients"]
                 continue
 
             if key == "coefficients":
@@ -932,10 +1123,6 @@ class KernelQuadratic(Function):
                 self.base_constraints += self.skeleton_constrs( kwargs["skeleton"] )
                 continue
 
-            if key == "safe_points":
-                self.base_constraints += self.safe_point_constrs( kwargs["safe_points"] )
-                continue
-
             if key == "leading":
                 if "shape" not in kwargs["leading"].keys():
                     raise Exception("Must specify a shape matrix for the leading function.")
@@ -969,54 +1156,15 @@ class KernelQuadratic(Function):
         self.dynamics.set_control(param_ctrl)
         self.dynamics.actuate(dt)
         new_param = self.dynamics.get_state()
-        self.set_param( coefficients = vector2sym(new_param) )
-
-    def SOSconvex_matrix(self):
-        '''Returns SOS matrix for convexity tests'''
-        A_list = self.kernel.get_A_matrices()
-        return np.block([[ Ai.T @ self.matrix_coefs @ Aj + Aj.T @ Ai.T @ self.matrix_coefs for Aj in A_list ] for Ai in A_list ])
-
-    def compute_lowerbound_slice(self):
-        '''
-        Compute the lower bound on the Hessian matrix
-        '''
-        symHbound = self.compute_lowerbound_matrix( self.symS )
-
-        # This computes the shape of the maximum non-zero upper-left block of symHbound
-        for i in range(0,self.kernel_dim):
-            half_down = symHbound[i:, :]
-            if np.all( half_down == 0 ): break
-        
-        self.lowerbound_slice = ( slice(0,symHbound.shape[0]), slice(0,symHbound.shape[1]) )
-        if np.all( half_down == 0 ):
-            self.lowerbound_slice = ( slice(0,i), slice(0,i) )
-        
-    def compute_lowerbound_matrix(self, Pvar):
-        '''
-        Compute the matrix for the lowerbound on the maximum eigenvalue of the Hessian matrix
-        '''
-        As = self.kernel.Asum
-        return As.T @ Pvar @ As + As.T @ As.T @ Pvar
-
-    def compute_reduced_lowerbound_matrix(self, Pvar):
-        '''
-        Extract only the nonzero eigenvalues from the lowerbound matrix
-        '''
-        H = self.compute_lowerbound_matrix(Pvar)[self.lowerbound_slice]
-        return H + H.T
+        self.set_params( coefficients = vector2sym(new_param) )
 
     def psd_constr(self):
-        '''
-        Returns corresponding positive semidefinite constraint for input shape matrix
-        '''
+        ''' Positive semi definite constraint for CVXPY optimization '''
         return self.SHAPE >> 0
 
     def non_nsd_Hessian_constr(self):
-        '''
-        Returns corresponding non-negative definite Hessian constraint for input shape matrix
-        '''
-        # return cp.lambda_min( self.compute_reduced_lowerbound_matrix(self.SHAPE) ) >= 0.0
-        return self.compute_reduced_lowerbound_matrix(self.SHAPE) >> 0
+        ''' Non-negative definite Hessian constraint for CVXPY optimization '''
+        return self._reduced_lowerbound_matrix(self.SHAPE) >> 0
 
     def skeleton_constrs(self, skeleton_segments):
         '''
@@ -1027,33 +1175,20 @@ class KernelQuadratic(Function):
         skl_constraints = []
         for seg in skeleton_segments:
             for k in range(len(seg)-1):
-                curr_pt = seg[k]
-                next_pt = seg[k+1]
+                curr_pt = np.array(seg[k])
+                next_pt = np.array(seg[k+1])
 
-                curr_m = self.kernel.function(curr_pt)
-                next_m = self.kernel.function(next_pt)
-                inner = sum([ curr_m.T @ Ai.T @ self.SHAPE @ curr_m * ( next_pt[i] - curr_pt[i] ) for i, Ai in enumerate(self.kernel.get_A_matrices()) ])
-                skl_constraints.append( next_m.T @ self.SHAPE @ next_m - curr_m.T @ self.SHAPE @ curr_m >= inner )
-
+                inner = ( next_pt - curr_pt ).T @ self._grad(curr_pt, self.SHAPE)
+                skl_constraints.append( self._fun(next_pt, self.SHAPE) - self._fun(curr_pt, self.SHAPE) >= inner )
                 self.points.append({"coords": curr_pt, "level":-self.constant})
 
         return skl_constraints
-
-    def safe_point_constrs(self, safe_points):
-        '''
-        Constraints for points guaranteed to be safe.
-        '''
-        safe_constrs = []
-        for pt in safe_points:
-            m = self.kernel.function(pt)
-            safe_constrs.append( m.T @ self.SHAPE @ m >= 1.0 )
-        return safe_constrs
 
     def is_SOS_convex(self, verbose=False):
         '''Returns True if the function is SOS convex'''
 
         sos_convex = False
-        SOS_eigs = np.linalg.eigvals( self.SOSconvex_matrix() )
+        SOS_eigs = np.linalg.eigvals( self._SOSconvex_matrix(self.matrix_coefs) )
         if np.all(SOS_eigs >= 0.0): sos_convex = True
 
         if verbose:
@@ -1062,12 +1197,8 @@ class KernelQuadratic(Function):
 
         return sos_convex
 
-    def is_SOS_pseudoconvex(self):
-        '''Returns True if the function is SOS pseudoconvex'''
-        pass
-
     def fit(self):
-        '''
+        ''' 
         Fits the coefficient matrix to a list of desired points.
         Parameters: uses the list 
         points = [ { "point"     : ArrayLike, 
@@ -1076,34 +1207,23 @@ class KernelQuadratic(Function):
                      "curvature" : float }, ... ]
         to add more constraints or terms to the cost function before trying to solve the optimization. 
         Returns: the optimization results.
-        '''
-        n = self._dim
-        A_list = self.kernel.get_A_matrices()
-        
+        '''        
         # Iterate over the input list to get problem requirements
         gradient_norms = []
         for pt in self.points:
             keys = pt.keys()
 
-            if "coords" not in keys:
-                raise Exception("The point coordinates must be specified.")
-            if "force_coord" not in keys:
-                pt["force_coord"] = False
-            if "force_gradient" not in keys:
-                pt["force_gradient"] = False
-
-            coords = pt["coords"]
-
-            m = self.kernel.function(coords)
-            Jm = self.kernel.jacobian(coords)
+            if "coords" not in keys: raise Exception("Point coordinates must be specified.")
+            if "force_coord" not in keys: pt["force_coord"] = False
+            if "force_gradient" not in keys: pt["force_gradient"] = False
 
             # Define point-level constraints
             if "level" in keys:
                 if pt["level"] >= -self.constant:
-                    if self.fit_options["force_coords"] or pt["force_coord"]:
-                        self.constraints += [ 0.5 * m.T @ self.SHAPE @ m - self.constant == pt["level"] ]
+                    if self.force_coords or pt["force_coord"]:
+                        self.constraints += [ self._fun(pt["coords"], self.SHAPE) == pt["level"] ]
                     else:
-                        self.cost += ( 0.5 * m.T @ self.SHAPE @ m - self.constant - pt["level"] )**2
+                        self.cost += ( self._fun(pt["coords"], self.SHAPE) - pt["level"] )**2
                 else: continue
 
             # Define gradient constraints
@@ -1112,58 +1232,31 @@ class KernelQuadratic(Function):
                 gradient = np.array(pt["gradient"])
                 normalized = gradient/np.linalg.norm(gradient)
 
-                if self.fit_options["force_gradients"] or pt["force_gradient"]:
-                    self.constraints += [ Jm.T @ self.SHAPE @ m == gradient_norms[-1] * normalized ]
-                else:
-                    self.cost += cp.norm( Jm.T @ self.SHAPE @ m - gradient_norms[-1] * normalized )
                 self.constraints += [ gradient_norms[-1] >= 0 ]
+                if self.force_gradients or pt["force_gradient"]:
+                    self.constraints += [ self._grad(pt["coords"], self.SHAPE) == gradient_norms[-1] * normalized ]
+                else:
+                    self.cost += cp.norm( self._grad(pt["coords"], self.SHAPE) - gradient_norms[-1] * normalized )
 
             # Define curvature constraints (2D only)
             if "curvature" in keys:
-                if n != 2:
+                if self._dim != 2:
                     raise Exception("Error: curvature fitting was not implemented for dimensions > 2. ")
                 if "gradient" not in keys:
                     raise Exception("Cannot specify a curvature without specifying the gradient.")
 
-                curvature = pt["curvature"]
                 v = rot2D(np.pi/2) @ normalized
-
-                curvature_var = 0.0
-                for i,j in itertools.product(range(n),range(n)):
-                    Hij = m.T @ ( A_list[i].T @ self.SHAPE + self.SHAPE @ A_list[i] ) @ A_list[j] @ m
-                    curvature_var += Hij * v[i] * v[j]
-                self.cost += ( curvature_var - curvature )**2
+                self.cost += ( self._hessian_quadratic_form(pt["coords"], self.SHAPE, v) - pt["curvature"] )**2
 
         fit_problem = cp.Problem( cp.Minimize( self.cost ), self.constraints )
         fit_problem.solve(verbose=False, max_iters = 100000)
 
         if "optimal" in fit_problem.status:
-            if isinstance(self, KernelLyapunov):
-                print("Lyapunov fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
-            elif isinstance(self, KernelBarrier):
-                print("Barrier fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
-            else:
-                print("Function fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
-
-            # Attempts regularization
-            self.set_param( coefficients = self.SHAPE.value )
-            # if not np.all( np.linalg.eigvals( self.compute_reduced_lowerbound_matrix(self.SHAPE.value) ) > 0 ):
-            #     self.set_param( coefficients = self.regularize(self.SHAPE.value) )
-                
+            print("Fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
+            self.set_params( coefficients = self.SHAPE.value )
             return fit_problem
         else:
             raise Exception("Problem is " + fit_problem.status + ".")
-
-    def regularize(self, Pnom):
-        '''
-        Attempts to regularize a given SHAPE to have only one global minimum
-        '''
-        reg_cost = cp.norm(self.SHAPE - Pnom)
-        reg_constraints = [ self.psd_constr(), self.non_nsd_Hessian_constr() ]
-        reg_problem = cp.Problem( cp.Minimize( reg_cost ), reg_constraints )
-        reg_problem.solve(verbose=True, max_iters = 100000)
-
-        return self.SHAPE.value
 
     def leading_function(self, Pleading, bound=0, approximate=False):
         '''
@@ -1227,97 +1320,13 @@ class KernelQuadratic(Function):
 
         return z.T @ Hessian @ z / grad_norm
 
-    def enclosing_quadratic(self):
-        '''
-        Find the P matrix of a quadratic enclosing all defined points in self.points
-        '''
-        num_pts = len(self.points)
-        points = np.zeros([num_pts, self._dim])
-        levels = []
-        for k in range(num_pts):
-            pt = self.points[k]
-            points[k,:] = np.array(pt["coords"])
-            if "level" in pt.keys():
-                levels.append(pt["level"])
-            
-        lvl_max = np.max(levels)
-
-        H = cp.Variable((self._dim, self._dim), symmetric = True)
-        b = cp.Variable((self._dim,1))
-        a = cp.Variable((1,1))
-
-        Pquad = cp.bmat([ [a, b.T], [b, H] ])
-
-        objective = cp.Maximize( cp.log_det(H) )
-        constraints = [ Pquad >> 0 ]
-        for vertex in minimum_bounding_rectangle(points):
-            constraints += [ vertex.T @ H @ vertex + 2 * b.T @ vertex + a == 2*(lvl_max+self.constant) ]
-        problem = cp.Problem(objective, constraints)
-        problem.solve()
-
-        P = sp.linalg.block_diag(Pquad.value, np.zeros([self.kernel_dim-3,self.kernel_dim-3]))
-        center = (- np.linalg.inv(H.value) @ b.value ).reshape(2)
-
-        return P, center
-
-    def function(self, point):
-        '''
-        Compute polynomial function numerically.
-        '''
-        z = self.kernel.function(point)
-        return 0.5 * z.T @ self.matrix_coefs @ z - self.constant
-
-    def gradient(self, point):
-        '''
-        Compute gradient of polynomial function numerically.
-        '''
-        z = self.kernel.function(point)
-        Jac_m = self.kernel.jacobian(point)
-        return Jac_m.T @ self.matrix_coefs @ z
-
-    def hessian(self, point):
-        '''
-        Compute hessian of polynomial function numerically.
-        '''
-        m = self.kernel.function(point)
-        Jac_m = self.kernel.jacobian(point)
-        Hessian = np.zeros([self._dim, self._dim])
-        for i in range(self._dim):
-            for j in range(self._dim):
-                Jac_m_i = Jac_m[:,i].reshape(self.kernel_dim)
-                Jac_m_j = Jac_m[:,j].reshape(self.kernel_dim)
-                hessian_m_ij = self.kernel._lambda_hessian_monomials(*point)[i][j].reshape(self.kernel_dim)
-                Hessian[i,j] = Jac_m_i @ self.matrix_coefs @ Jac_m_j + m @ self.matrix_coefs @ hessian_m_ij
-        return Hessian
-
-    def plot_levels(self, levels, **kwargs):
-        '''
-        Modifies the level plot function for plotting with CLF/CBF colors
-        '''
-        if "colors" not in kwargs.keys():
-            kwargs["colors"] = self.plot_config["color"]
-
-        return super().plot_levels(levels, **kwargs)
-
     def get_shape(self):
-        '''
-        Return the polynomial coefficients.
-        '''
+        ''' Returns the polynomial coefficients '''
         return self.matrix_coefs
 
     def get_kernel(self):
-        '''
-        Return the monomial basis vector.
-        '''
+        ''' Returns the monomial basis vector '''
         return self.kernel
-
-    def __str__(self):
-        type_fun = "Polynominal function ½ k(x)' P k(x)"
-        if isinstance(self, KernelLyapunov):
-            type_fun = "CLF ½ k(x)' P k(x)"
-        if isinstance(self, KernelBarrier):
-            type_fun = "CBF ½ ( k(x)' Q k(x) - 1 )"
-        return type_fun
 
 class KernelLyapunov(KernelQuadratic):
     '''
@@ -1325,18 +1334,19 @@ class KernelLyapunov(KernelQuadratic):
     '''
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.set_params( color = mcolors.TABLEAU_COLORS['tab:blue'] )
 
-    def set_param(self, param=None, **kwargs):
+    def set_params(self, param=None, **kwargs):
         '''
         Set the parameters of the Kernel Lyapunov function.
         Optional: pass a vector of parameters representing the vectorization of matrix P
         '''
         if param != None:
-            super().set_param(coefficients=vector2sym(param))
+            super().set_params(coefficients=vector2sym(param))
 
         kwargs["constant"] = 0.0
         if "P" in kwargs.keys(): kwargs["coefficients"] = kwargs.pop("P")
-        super().set_param(**kwargs)
+        super().set_params(**kwargs)
 
 class KernelBarrier(KernelQuadratic):
     '''
@@ -1344,28 +1354,29 @@ class KernelBarrier(KernelQuadratic):
     '''
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.set_params( color = mcolors.TABLEAU_COLORS['tab:red'] )
 
-    def set_param(self, param=None, **kwargs):
+    def set_params(self, param=None, **kwargs):
         '''
         Set the parameters of the Kernel Barrier function.
         Optional: pass a vector of parameters representing the vectorization of matrix Q
         '''
         if param != None:
-            super().set_param(coefficients=vector2sym(param), constant=0.5)
+            super().set_params( coefficients=vector2sym(param), constant=0.5 )
 
         kwargs["constant"] = 0.5
         if "Q" in kwargs.keys(): kwargs["coefficients"] = kwargs.pop("Q")
-        super().set_param(**kwargs)
+        super().set_params(**kwargs)
 
         # Defines the CBF boundary
         if "boundary" in kwargs.keys():
             self.define_level_set(points=kwargs["boundary"], level=0.0, contained=True)
     
-    def get_boundary(self, **kwargs):
+    def get_boundary(self):
         '''
         Computes the boundary level set.
         '''
-        return self.get_levels(levels=[0.0], **kwargs)[0]
+        return self.get_levels(levels=[0.0])[0]
 
 ###############################################################################
 class KernelTriplet():
@@ -1430,11 +1441,10 @@ class KernelTriplet():
         '''
         Creates the 4 boundary lines used in fast_equilibria()
         '''
-        x_min, x_max = self.limits[0][0], self.limits[0][1]
-        y_min, y_max = self.limits[1][0], self.limits[1][1]
+        xmin, xmax, ymin, ymax = self.limits
 
-        spam_x = np.arange(x_min, x_max, spacing)
-        spam_y = np.arange(y_min, y_max, spacing)
+        spam_x = np.arange(xmin, xmax, spacing)
+        spam_y = np.arange(ymin, ymax, spacing)
         spam_x = spam_x.reshape( len(spam_x), 1 )
         spam_y = spam_y.reshape( len(spam_y), 1 )
 
@@ -1442,25 +1452,25 @@ class KernelTriplet():
         self.limit_lines = []
         
         top_x = spam_x
-        top_y = y_max * np.ones(spam_x.shape)
+        top_y = ymax * np.ones(spam_x.shape)
         self.limit_lines.append({"x": top_x, "y": top_y})
 
         bottom_x = spam_x
-        bottom_y = y_min * np.ones(spam_x.shape)
+        bottom_y = ymin * np.ones(spam_x.shape)
         self.limit_lines.append({"x": bottom_x, "y": bottom_y})
 
-        left_x = x_min * np.ones(spam_y.shape)
+        left_x = xmin * np.ones(spam_y.shape)
         left_y = spam_y
         self.limit_lines.append({"x": left_x, "y": left_y})
 
-        right_x = x_max * np.ones(spam_y.shape)
+        right_x = xmax * np.ones(spam_y.shape)
         right_y = spam_y
         self.limit_lines.append({"x": right_x, "y": right_y})
 
     def compute_cbf_boundary(self):
         '''Compute CBF boundary'''
         self.boundary_lines = []
-        for boundary_seg in self.cbf.get_boundary(limits=self.limits, spacing=self.spacing):
+        for boundary_seg in self.cbf.get_boundary():
             boundary_line = geometry.LineString(boundary_seg)
             self.boundary_lines.append(boundary_line)
 
@@ -1505,14 +1515,15 @@ class KernelTriplet():
         if "limits" not in kwargs.keys():
             if len(self.cbf.points) > 0:
                 pts = np.array([ pt["coords"] for pt in self.cbf.points ])
-                bbox = minimum_bounding_rectangle(pts)
-                self.limits = [ [np.min( bbox[:,0] ), np.max( bbox[:,0] )],
-                                [np.min( bbox[:,1] ), np.max( bbox[:,1] )] ]
+                bbox = minimum_bounding_rectangle(pts)                
+                xmin, xmax, ymin, ymax = np.min(bbox[:,0]), np.max( bbox[:,0] ), np.min(bbox[:,1]), np.max(bbox[:,1])
+                self.limits = ( xmin, xmax, ymin, ymax )
 
         # Initialize grids used for determinant computation
         if hasattr(self, "limits") and hasattr(self, "spacing"):
-            x = np.arange(self.limits[0][0], self.limits[0][1], self.spacing)
-            y = np.arange(self.limits[1][0], self.limits[1][1], self.spacing)
+            xmin, xmax, ymin, ymax = self.limits
+            x = np.arange(xmin, xmax, self.spacing)
+            y = np.arange(ymin, ymax, self.spacing)
 
             self.xg, self.yg = np.meshgrid(x,y)
             self.grid_shape = self.xg.shape
@@ -1520,8 +1531,8 @@ class KernelTriplet():
             self.determinant_grid = np.empty(self.grid_shape, dtype=float)
 
         N = 10
-        x = np.random.uniform(self.limits[0][0], self.limits[0][1], N)
-        y = np.random.uniform(self.limits[1][0], self.limits[1][1], N)
+        x = np.random.uniform(xmin, xmax, N)
+        y = np.random.uniform(ymin, ymax, N)
         self.pts = np.column_stack((x, y))
 
         self.verify_kernel()
@@ -1547,7 +1558,7 @@ class KernelTriplet():
                 raise Exception("Dimensions are not compatible.")
             
             self.n = self.kernel._dim
-            self.p = self.kernel.kernel_dim
+            self.p = self.kernel._num_monomials
             self.A_matrices = self.kernel.get_A_matrices()
 
             self.F = self.plant.get_F()

@@ -30,7 +30,7 @@ class NominalQP():
 
         self.state_dim = self.clf._dim
         self.control_dim = self.plant.m
-        self.kernel_dim = self.kernel.kernel_dim
+        self.kernel_dim = self.kernel._num_monomials
 
         # QP parameters
         self.p = kernel_triplet.params["slack_gain"]
