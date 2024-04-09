@@ -315,14 +315,14 @@ class Function2(ABC):
     '''
     def __init__(self, **kwargs):
 
-        # Initialize basic parameters (mostly for plotting)
+        # Initialize basic parameters
         self._dim = 2
         self.color = mcolors.BASE_COLORS["k"]
         self.linestyle = "solid"
         self.limits = (-1,1,-1,1)
         self.spacing = 0.1
-        self.set_params(**kwargs)
 
+        self.set_params(**kwargs)
         self._generate_contour()
 
     def _generate_contour(self):
@@ -926,18 +926,16 @@ class Kernel():
 class KernelQuadratic(Function2):
     '''
     Class for kernel quadratic functions of the type f(x) = m(x)' F m(x) - C for a given kernel m(x), where:
-    F is a p.s.d. matrix and C is an arbitrary constant. If no constant C is specified, C = 0
+    F is a p.s.d. matrix and C is an arbitrary constant.
     '''
-    def __init__(self, **params):
+    def __init__(self, **kwargs):
+
+        super().__init__(**kwargs)
 
         self.constant = 0.0
-        super().__init__(**params)
-
         self.force_coords = False
         self.force_gradients = False
-
-        if len(self.points) > 0 or type(self.cost) != float or len(self.constraints) > len(self.base_constraints):
-            self.fit()
+        self.last_opt_results = None
 
     def __str__(self):
 
@@ -963,10 +961,10 @@ class KernelQuadratic(Function2):
         self.SHAPE = cp.Variable( (self.kernel_dim,self.kernel_dim), symmetric=True )
 
         self._compute_lowerbound_slice()
-        self._initialize_opt()
+        self._reset_optimization()
 
-    def _initialize_opt(self):
-        ''' Clear optimization variables, parameters and constraints '''
+    def _reset_optimization(self):
+        ''' Reset optimization variables, parameters and constraints '''
 
         self.points = []
         self.cost = 0.0
@@ -1055,6 +1053,7 @@ class KernelQuadratic(Function2):
 
     def set_params(self, **kwargs):
         ''' Sets function parameters '''
+
         super().set_params(**kwargs)
 
         keys = [ key.lower() for key in kwargs.keys() ] 
@@ -1149,6 +1148,10 @@ class KernelQuadratic(Function2):
         if self.matrix_coefs.shape != (self.kernel_dim, self.kernel_dim):
             raise Exception("P must be (p x p), where p is the kernel dimension!")
 
+        # Calls the fitting method if the correct parameters where initialized
+        if len(self.points) > 0 or type(self.cost) != float or len(self.constraints) > len(self.base_constraints):
+            self.last_opt_results = self.fitting()
+
     def update(self, param_ctrl, dt):
         '''
         Integrates the parameters.
@@ -1197,9 +1200,9 @@ class KernelQuadratic(Function2):
 
         return sos_convex
 
-    def fit(self):
+    def fitting(self):
         ''' 
-        Fits the coefficient matrix to a list of desired points.
+        Fits the coefficient matrix to a list of desired points, if needed.
         Parameters: uses the list 
         points = [ { "point"     : ArrayLike, 
                      "level"     : float >= -self.constant, 
@@ -1207,7 +1210,7 @@ class KernelQuadratic(Function2):
                      "curvature" : float }, ... ]
         to add more constraints or terms to the cost function before trying to solve the optimization. 
         Returns: the optimization results.
-        '''        
+        '''
         # Iterate over the input list to get problem requirements
         gradient_norms = []
         for pt in self.points:
@@ -1250,6 +1253,11 @@ class KernelQuadratic(Function2):
 
         fit_problem = cp.Problem( cp.Minimize( self.cost ), self.constraints )
         fit_problem.solve(verbose=False, max_iters = 100000)
+
+        print(self.cost)
+        print(self.constraints)
+
+        self._reset_optimization()
 
         if "optimal" in fit_problem.status:
             print("Fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
@@ -1332,46 +1340,53 @@ class KernelLyapunov(KernelQuadratic):
     '''
     Class for kernel-based Lyapunov functions.
     '''
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.set_params( color = mcolors.TABLEAU_COLORS['tab:blue'] )
+    def __init__(self, **kwargs):
 
-    def set_params(self, param=None, **kwargs):
+        self.color = mcolors.TABLEAU_COLORS['tab:blue'] # Standard CLF color is blue; however, this can be overwritten
+        kwargs["constant"] = 0.0                        # Standard constant for CLF is 0.0 (cannot be overwritten)
+
+        # Initialize the parameters of KernelQuadratic
+        super().__init__(**kwargs)
+
+    def set_params(self, **kwargs):
         '''
         Set the parameters of the Kernel Lyapunov function.
         Optional: pass a vector of parameters representing the vectorization of matrix P
         '''
-        if param != None:
-            super().set_params(coefficients=vector2sym(param))
+        # if param != None:
+        #     super().set_params(coefficients=vector2sym(param))
 
-        kwargs["constant"] = 0.0
-        if "P" in kwargs.keys(): kwargs["coefficients"] = kwargs.pop("P")
+        if "P" in kwargs.keys(): kwargs["coefficients"] = kwargs.pop("P") # Standard name for CLF shape matrix is P
+
+        # Set params of parent class
         super().set_params(**kwargs)
 
 class KernelBarrier(KernelQuadratic):
     '''
     Class for kernel-based barrier functions.
     '''
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.set_params( color = mcolors.TABLEAU_COLORS['tab:red'] )
+    def __init__(self, **kwargs):
 
-    def set_params(self, param=None, **kwargs):
+        self.color = mcolors.TABLEAU_COLORS['tab:red'] # Standard CBF color is red; however, this can be overwritten
+        kwargs["constant"] = 0.5                       # Standard constant for CBF is 0.5 (cannot be overwritten)
+
+        super().__init__(**kwargs)
+
+    def set_params(self, **kwargs):
         '''
         Set the parameters of the Kernel Barrier function.
         Optional: pass a vector of parameters representing the vectorization of matrix Q
         '''
-        if param != None:
-            super().set_params( coefficients=vector2sym(param), constant=0.5 )
+        # if param != None:
+        #     super().set_params( coefficients=vector2sym(param), constant=0.5 )
 
-        kwargs["constant"] = 0.5
-        if "Q" in kwargs.keys(): kwargs["coefficients"] = kwargs.pop("Q")
-        super().set_params(**kwargs)
+        if "Q" in kwargs.keys(): kwargs["coefficients"] = kwargs.pop("Q") # Standard name for CBF shape matrix is Q
 
         # Defines the CBF boundary
-        if "boundary" in kwargs.keys():
-            self.define_level_set(points=kwargs["boundary"], level=0.0, contained=True)
-    
+        if "boundary" in kwargs.keys(): self.define_level_set(points=kwargs["boundary"], level=0.0, contained=True)
+
+        super().set_params(**kwargs)
+
     def get_boundary(self):
         '''
         Computes the boundary level set.

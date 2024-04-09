@@ -1,7 +1,7 @@
 import numpy as np
 
 from dynamic_systems import KernelAffineSystem
-from functions import Kernel, KernelLyapunov, KernelBarrier, KernelTriplet
+from functions import Kernel, KernelQuadratic, KernelLyapunov, KernelBarrier, KernelTriplet
 from controllers import NominalQP
 from common import create_quadratic, rot2D, box, load_compatible
 
@@ -40,10 +40,15 @@ clf_eig = np.array([ 1.0, 1.0 ])
 clf_angle = np.deg2rad(-45)
 Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
 
+# fun = KernelQuadratic(kernel=kernel, P=Pquadratic, limits=limits, spacing=0.1)
+# print(fun.matrix_coefs)
+
 # clf = KernelLyapunov(*initial_state, kernel=kernel, P=load_compatible(__file__, Pquadratic, load_compatible=True))
 clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits, spacing=0.1)
 # clf = KernelLyapunov(*initial_state, kernel=kernel, leading={ "shape": Pquadratic, "uses": ["lower_bound", "approximation"] })
 clf.is_SOS_convex(verbose=True)
+# print(clf.matrix_coefs)
+# clf._generate_contour()
 
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
 # Fits CBF to a box-shaped obstacle
@@ -53,6 +58,7 @@ cbf = KernelBarrier(kernel=kernel, boundary=pts, centers=[center], limits=limits
 # cbf = KernelBarrier(*initial_state, kernel=kernel, boundary=pts, skeleton=skeleton, leading={ "shape": Qquadratic, "uses": ["upper_bound"] })
 
 cbf.is_SOS_convex(verbose=True)
+# print(cbf.matrix_coefs)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .002
