@@ -21,12 +21,8 @@ ax.set_ylim(ymin, ymax)
 
 if hasattr(sim, "pts"):
     for pt in sim.pts:
-        coords = np.array(pt["coords"])
+        coords = np.array(pt)
         ax.plot(coords[0], coords[1], 'k*', alpha=0.6)
-
-        if "gradient" in pt.keys():
-            gradient_vec = coords + np.array(pt["gradient"])
-            ax.plot([ coords[0], gradient_vec[0]], [ coords[1], gradient_vec[1]], 'k-', alpha=0.6)
 
 if hasattr(sim, "skeleton"):
     for seg in sim.skeleton:

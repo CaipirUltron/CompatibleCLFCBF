@@ -1,5 +1,4 @@
 import time
-import math
 import itertools
 import numpy as np
 import scipy as sp
@@ -13,6 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from functools import wraps
 from scipy.optimize import minimize
 from shapely import geometry, intersection
@@ -57,259 +57,7 @@ def mat(vec):
     n = int(n)
     return vec.reshape(n,n).T
 
-class Function():
-    '''
-    Implementation of general class for scalar functions.
-    '''
-    def __init__(self, *args, **kwargs):
-
-        self.set_value(*args)
-        self.functions = []
-        self.functions.append(self)
-
-        self._function = 0.0
-        if self._dim > 1:
-            self._gradient = np.zeros(self._dim)
-            self._hessian = np.zeros([self._dim,self._dim])
-        else:
-            self._gradient = 0.0
-            self._hessian = 0.0
-
-        limits = None
-        spacing = 0.1
-        self.plot_config = {"color": mcolors.BASE_COLORS["k"], "linestyle": 'solid'}
-        for key in kwargs.keys():
-            if key == "limits":
-                limits = kwargs["limits"]
-                continue
-            if key == "spacing":
-                spacing = kwargs["spacing"]
-                continue
-            if key == "plot_config":
-                self.plot_config = kwargs["plot_config"]
-                continue
-
-        if limits != None:
-            self.gen_contour(limits, spacing=spacing)
-
-    def set_value(self, *args):
-        '''
-        Initialize values and returns corresponding points.
-        '''
-        data_type = np.array(args).dtype
-        if data_type != np.dtype('float64') and data_type != np.dtype('int64'):
-            raise Exception("Data type not understood.")
-
-        self._args = args
-        self._dim = len(args)
-        self._var = np.array(self._args).reshape(self._dim,-1)
-        self._num_points = np.size(self._var, 1)
-
-        return self.get_value()
-
-    def get_value(self):
-        return self._var
-
-    def evaluate(self):
-        self.evaluate_function(*self._var)
-        self.evaluate_gradient(*self._var)
-        self.evaluate_hessian(*self._var)
-
-    def evaluate_function(self, *args):
-        self.set_value(*args)
-        self.function_values()
-        return self.get_function()
-
-    def evaluate_gradient(self, *args):
-        self.set_value(*args)
-        self.gradient_values()
-        return self.get_gradient()
-
-    def evaluate_hessian(self, *args):
-        self.set_value(*args)
-        self.hessian_values()
-        return self.get_hessian()
-
-    def get_function(self):
-        '''
-        Get last computed function
-        '''
-        return self._function
-
-    def get_gradient(self):
-        '''
-        Get last computed gradient
-        '''
-        return self._gradient
-
-    def get_hessian(self):
-        '''
-        Get last computed hessian
-        '''
-        return self._hessian
-
-    def function_values(self):
-        '''
-        Compute function values.
-        '''
-        self._function = np.zeros(self._num_points)
-        for k in range(self._num_points):
-            fun_val = 0.0
-            for func in self.functions:
-                fun_val += func.function(self._var[:,k])
-            self._function[k] = fun_val
-
-        return self._function
-
-    def gradient_values(self):
-        '''
-        Compute gradient values.
-        '''
-        self._gradient = []
-        for point in self._var.T:
-            grad = np.zeros(self._dim)
-            for func in self.functions:
-                grad += func.gradient(point)
-            self._gradient.append(grad)
-
-        return self._gradient
-
-    def hessian_values(self):
-        '''
-        Compute hessian values.
-        '''
-        self._hessian = []
-        for point in self._var.T:
-            hess = np.zeros([self._dim,self._dim])
-            for func in self.functions:
-                hess += func.gradient(point)
-            self._hessian.append(hess)
-
-        return self._hessian
-
-    def function(self, point):
-        '''
-        Abstract implementation of function computation. Must receive point as input and return the corresponding function value.
-        Overwrite on children classes.
-        '''
-        return 0.0
-
-    def gradient(self, point):
-        '''
-        Abstract implementation of gradient computation. Must receive point as input and return the corresponding gradient value.
-        Overwrite on children classes.
-        '''
-        return np.zeros(self._dim)
-
-    def hessian(self, point):
-        '''
-        Abstract implementation of hessian computation. Must receive point as input and return the corresponding hessian value.
-        Overwrite on children classes.
-        '''
-        return np.zeros([self._dim, self._dim])
-
-    def __add__(self, func):
-        '''
-        Add method.
-        '''
-        if not isinstance(func, Function):
-            raise Exception("Only Function objects can be summed.")
-
-        from copy import copy
-        function = copy(self)
-        function.functions.append(func)
-
-        return function
-
-    def gen_contour(self, limits, spacing=0.1):
-        '''
-        Create contour generator object for the given function.
-        Parameters: limits (2x2 array) - min/max limits for x,y coords
-                    spacing - grid spacing for contour generation
-        '''        
-        if self._dim != 2:
-            raise Exception("Contour plot can only be used for 2D functions.")
-
-        x_min, x_max = limits[0][0], limits[0][1]
-        y_min, y_max = limits[1][0], limits[1][1]
-
-        x = np.arange(x_min, x_max, spacing)
-        y = np.arange(y_min, y_max, spacing)
-        xg, yg = np.meshgrid(x,y)
-
-        mesh_fvalues = np.zeros([np.size(xg,0),np.size(xg,1)])
-        for i in range(np.size(xg,1)):
-            args = []
-            args.append(xg[:,i])
-            args.append(yg[:,i])
-            for k in range(self._dim-2):
-                args.append( [self._var[k+2,0] for _ in range(len(xg[:,i]))] )
-            # mesh_fvalues[:,i] = np.array(self.evaluate_function(xv[:,i], yv[:,i]))
-            mesh_fvalues[:,i] = np.array(self.evaluate_function(*args))
-        
-        self.contour = ctp.contour_generator(x=xg, y=yg, z=mesh_fvalues )
-        return self.contour
-
-    def get_levels(self, levels, **kwargs):
-        '''
-        Generates function level sets.
-        Parameters: levels (list of floats)
-        Returns: a list with all level segments, in the same order as levels
-        '''
-        limits = None
-        spacing = 0.1
-        for key in kwargs.keys():
-            aux_key = key.lower()
-            if aux_key == "limits":     # Must always be required if self.contours still does not exist
-                limits = kwargs[key]
-                continue
-            if aux_key == "spacing":    # Must always be required if self.contours still does not exist
-                spacing = kwargs[key]
-                continue
-
-        if not isinstance(limits, list):
-            if not hasattr(self, "contour"):
-                raise Exception("Grid limits are required to create contours.")
-        else:
-            self.gen_contour(limits, spacing=spacing)
-
-        level_contours = []
-        for lvl in levels:
-            level_contours.append( self.contour.lines(lvl) )
-
-        return level_contours
-
-    def plot_levels(self, levels, **kwargs):
-        '''
-        Plots function level sets.
-        Parameters: levels (list of floats)
-        Returns: plot collections
-        '''
-        ax = plt
-        color = self.plot_config["color"]
-        linestyle = self.plot_config["linestyle"]
-        for key in kwargs.keys():
-            aux_key = key.lower()
-            if aux_key == "ax":
-                ax = kwargs["ax"]
-                continue
-            if aux_key == "color":
-                color = kwargs["color"]
-                continue
-            if aux_key == "linestyle":
-                linestyle = kwargs["linestyle"]
-                continue
-
-        collections = []
-        level_contours = self.get_levels(levels, **kwargs)
-        for level in level_contours:
-            for segment in level:
-                line2D = ax.plot( segment[:,0], segment[:,1], color=color, linestyle=linestyle )
-                collections.append(line2D[0])
-
-        return collections
-
-class Function2(ABC):
+class Function(ABC):
     ''' 
     Implementation of abstract class for scalar functions of any input dimension
     '''
@@ -323,6 +71,7 @@ class Function2(ABC):
         self.spacing = 0.1
 
         self.set_params(**kwargs)
+
         self._generate_contour()
 
     def _generate_contour(self):
@@ -923,7 +672,13 @@ class Kernel():
         text = "m: R^" + str(self._dim) + " --> R^" + str(self._num_monomials) + "\nKernel map on variables " + variables + "\nm(x) = " + kernel
         return text
 
-class KernelQuadratic(Function2):
+@dataclass
+class LeadingShape:
+    shape: np.ndarray
+    bound: str = ''
+    approximate: bool = False
+
+class KernelQuadratic(Function):
     '''
     Class for kernel quadratic functions of the type f(x) = m(x)' F m(x) - C for a given kernel m(x), where:
     F is a p.s.d. matrix and C is an arbitrary constant.
@@ -931,13 +686,19 @@ class KernelQuadratic(Function2):
     def __init__(self, **kwargs):
 
         self.constant = 0.0
+
+        self.cost = 0.0
+        self.constraints = []
         self.force_coords = False
         self.force_gradients = False
         self.last_opt_results = None
 
         super().__init__(**kwargs)
 
+        if type(self.cost) != float or len(self.constraints) > 1:
+            self.last_opt_results = self.fitting()
 
+        super()._generate_contour() # this solution executes _generate_contour() twice - not ideal, but that's it for today
 
     def __str__(self):
 
@@ -966,12 +727,9 @@ class KernelQuadratic(Function2):
         self._reset_optimization()
 
     def _reset_optimization(self):
-        ''' Reset optimization variables, parameters and constraints '''
-
-        self.points = []
+        ''' Reset optimization problem '''
         self.cost = 0.0
-        self.base_constraints = [ self.psd_constr() ]
-        self.constraints = self.base_constraints
+        self.add_psd_constraint()
 
     def _gradient_const_matrices(self, shape_matrix):
         ''' Compute constant matrices composing the elements of the gradient '''
@@ -1123,76 +881,67 @@ class KernelQuadratic(Function2):
                 continue
 
             if key == "coefficients":
-                matrix_coefs = np.array(kwargs["coefficients"])
 
-                if matrix_coefs.ndim != 2:
-                    raise Exception("Matrix of coefficients must be a two-dimensional array.")
+                matrix_coefs = np.array(kwargs["coefficients"])
+        
+                # If a one dimensional array was passed, checks if it can be converted to symmetric matrix
+                if matrix_coefs.ndim == 1:
+                    roots = np.roots([1, 1, -2*len(matrix_coefs)])
+                    if np.any([ root.is_integer() and root > 0 for root in roots ]):
+                        matrix_coefs = vector2sym(matrix_coefs.tolist())
+                    else:
+                        raise Exception("Number of coefficients is not compatible with a symmetric matrix.")
+
                 if matrix_coefs.shape[0] != matrix_coefs.shape[1]:
                     raise Exception("Matrix of coefficients must be a square.")
-                # if not np.all(np.linalg.eigvals(matrix_coefs) >= -1e-5):
-                #     raise Exception("Matrix of coefficients must be positive semi-definite.")
+                
                 if not np.all( matrix_coefs == matrix_coefs.T ):
                     warnings.warn("Matrix of coefficients is not symmetric. The symmetric part will be used.")
+
+                # if not np.all(np.linalg.eigvals(matrix_coefs) >= -1e-5):
+                #     raise Exception("Matrix of coefficients must be positive semi-definite.")
+
                 if matrix_coefs.shape[0] != self.kernel_dim:
                     raise Exception("Matrix of coefficients doesn't match the kernel dimension.")
 
                 self.matrix_coefs = 0.5 * ( matrix_coefs + matrix_coefs.T )
-
-                if isinstance(self, KernelLyapunov):
-                    self.P = self.matrix_coefs
-                if isinstance(self, KernelBarrier):
-                    self.Q = self.matrix_coefs
 
                 self.param = sym2vector( self.matrix_coefs )
                 self.dynamics.set_state(self.param)
                 continue
 
             if key == "points":
-                self.points += kwargs["points"]
+                for point_dict in kwargs["points"]: 
+                    self.add_point_constraints(**point_dict)
                 continue
 
             if key == "centers":
-                for center in kwargs["centers"]:
-                    self.points.append({"coords": center, "level":-self.constant})
+                self.add_levelset_constraints( kwargs["centers"], -self.constant )
+                continue
+
+            if key == "boundary":
+                self.add_boundary_constraints( kwargs["boundary"] )
                 continue
 
             if key == "skeleton":
-                self.base_constraints += self.skeleton_constrs( kwargs["skeleton"] )
+                self.add_skeleton_constraints( kwargs["skeleton"] )
                 continue
 
             if key == "leading":
-                if "shape" not in kwargs["leading"].keys():
-                    raise Exception("Must specify a shape matrix for the leading function.")
-                leading_shape = kwargs["leading"]["shape"]
-
-                if "uses" not in kwargs["leading"].keys():
-                    raise Exception("Must specify a use for the leading function.")
-                uses = kwargs["leading"]["uses"]
-                
-                for use in uses:
-                    if use not in ["lowerbound", "upperbound", "approximation"]:
-                        raise Exception("Invalid use for the leading function.")
-                
-                bound = 0
-                if "lowerbound" in uses: bound = +1
-                if "upperbound" in uses: bound = -1
-
-                approx = False
-                if "approximation" in uses or ( "lowerbound" in uses and "upperbound" in uses ):
-                    approx = True
-
-                self.leading_function(leading_shape, bound=bound, approximate=approx)
+                leading = kwargs["leading"]
+                if not isinstance(leading, LeadingShape):
+                    raise Exception("leading must be of the class LeadingShape()")
+                if leading.shape.shape != (self.kernel_dim, self.kernel_dim):
+                    raise Exception("Leading shape matrix must be (p x p), where p is the kernel dimension.")
+                self.add_leading_constraints(leading)
+                continue
 
         if self.matrix_coefs.shape != (self.kernel_dim, self.kernel_dim):
-            raise Exception("P must be (p x p), where p is the kernel dimension!")
-
-        # Calls the fitting method if the correct parameters where initialized
-        if len(self.points) > 0 or type(self.cost) != float or len(self.constraints) > len(self.base_constraints):
-            self.last_opt_results = self.fitting()
+            raise Exception("Shape matrix must be (p x p), where p is the kernel dimension.")
 
     def update(self, param_ctrl, dt):
         '''
-        Integrates the parameters.
+        Integrates and updates parameters
         '''
         self.dynamics.set_control(param_ctrl)
         self.dynamics.actuate(dt)
@@ -1248,33 +997,25 @@ class KernelQuadratic(Function2):
             v = rot2D(np.pi/2) @ normalized
             self.cost += ( self._hessian_quadratic_form(point["coords"], self.SHAPE, v) - point["curvature"] )**2
 
-    def add_leading_constraints(self, Pleading, **kwargs):
+    def add_leading_constraints(self, leading: LeadingShape):
         '''
         Defines a leading function. Can be used as an lower bound, upper bound or as an approximation.
         Parameters: Pleading = (p x p) np.ndarray, where p is the kernel space dimension
                     bound = int (< 0, 0, >0): if zero, no bound occurs. If positive/negative, passed function is a lower/upper bound.
                     approximate = bool: if the function must be approximated.
         '''
-        if Pleading.shape[0] != Pleading.shape[1]:
+        if leading.shape.shape[0] != leading.shape.shape[1]:
             raise Exception("Shape matrix for the bounding function must be square.")
-        if Pleading.shape != (self.kernel_dim, self.kernel_dim):
+        if leading.shape.shape != (self.kernel_dim, self.kernel_dim):
             raise Exception("Shape matrix and kernel dimensions are incompatible.")
-
-        bound = None
-        approximate = False
-        for key in kwargs.keys():
-            key = key.lower()
-            if key == "bound":
-                bound = kwargs["bound"].lower()
-                continue
-            if key == "approximate":
-                approximate = kwargs["approximate"]
-                continue
             
-        if bound == "lower":   self.constraints += [ self.SHAPE >> Pleading ]  # Pleading is a lowerbound
-        elif bound == "upper": self.constraints += [ self.SHAPE << Pleading ]  # Pleading is an upperbound
+        if leading.bound == "lower": 
+            self.constraints += [ self.SHAPE >> leading.shape ]  # Pleading is a lowerbound
+        elif leading.bound == "upper": 
+            self.constraints += [ self.SHAPE << leading.shape ]  # Pleading is an upperbound
 
-        if approximate: self.cost += cp.norm( self.SHAPE - Pleading )          # Pleading will be used as an approximation
+        if leading.approximate: 
+            self.cost += cp.norm( self.SHAPE - leading.shape )          # Pleading will be used as an approximation
 
     def add_levelset_constraints(self, point_list, level, contained=False):
         '''
@@ -1288,30 +1029,41 @@ class KernelQuadratic(Function2):
             self.add_point_constraints(coords = pt, level=level)
             if contained: self.constraints.append( self._fun(pt, self.SHAPE) <= level )
 
+    def add_boundary_constraints(self, point_list):
+        '''
+        Adds constraints to set a list of passed points to the 0-level set. Useful for barrier fitting.
+        '''
+        self.add_levelset_constraints(point_list, 0.0, contained=True)
+
+    def add_continuity_constraints(self, points_sequence, increasing = True):
+        '''
+        Generates appropriate constraints for smooth variation of the function along a curve.
+        The points of the curve are defined by list points_sequence, which are assumed to be ordered.
+        '''
+        for k in range(len(points_sequence)-1):
+            curr_pt = np.array(points_sequence[k])
+            next_pt = np.array(points_sequence[k+1])
+
+            inner = (+1 if increasing else -1) * ( next_pt - curr_pt ).T @ self._grad(curr_pt, self.SHAPE)
+            self.constraints.append( self._fun(next_pt, self.SHAPE) - self._fun(curr_pt, self.SHAPE) >= inner )
+                
     def add_skeleton_constraints(self, skeleton_segments):
         '''
         Generates the appropriate constraints for smooth increasing of the CBF from a center point located on the skeleton curve.
         Parameters: - skeleton_segments is an array with segments, each containing sampled points of the obstacle medial-axis.
                     - the points on each segment are assumed to be ordered: that is, the barrier must grow from one point to the next
         '''
-        for seg in skeleton_segments:
-            for k in range(len(seg)-1):
-                curr_pt = np.array(seg[k])
-                next_pt = np.array(seg[k+1])
-
-                self.add_point_constraints(coords = curr_pt, level=-self.constant)
-                inner = ( next_pt - curr_pt ).T @ self._grad(curr_pt, self.SHAPE)
-                self.constraints.append( self._fun(next_pt, self.SHAPE) - self._fun(curr_pt, self.SHAPE) >= inner )
+        for segment in skeleton_segments:
+            self.add_continuity_constraints(segment, increasing=True)
+            for point in segment: self.add_point_constraints(coords = point, level = -self.constant)
 
     def fitting(self):
         ''' 
         Convex optimization problem for fitting the coefficient matrix to the current cost and constraints.
         Returns: the optimization results.
-        '''            
+        '''
         fit_problem = cp.Problem( cp.Minimize( self.cost ), self.constraints )
         fit_problem.solve(verbose=False, max_iters = 100000)
-
-        # self._reset_optimization()
 
         if "optimal" in fit_problem.status:
             print("Fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
@@ -1326,8 +1078,8 @@ class KernelLyapunov(KernelQuadratic):
     '''
     def __init__(self, **kwargs):
 
-        self.color = mcolors.TABLEAU_COLORS['tab:blue'] # Standard CLF color is blue; however, this can be overwritten
-        kwargs["constant"] = 0.0                        # Standard constant for CLF is 0.0 (cannot be overwritten)
+        kwargs["color"] = mcolors.TABLEAU_COLORS['tab:blue'] # Standard CLF color is blue; however, this can be overwritten
+        kwargs["constant"] = 0.0                             # Standard constant for CLF is 0.0 (cannot be overwritten)
 
         # Initialize the parameters of KernelQuadratic
         super().__init__(**kwargs)
@@ -1337,13 +1089,11 @@ class KernelLyapunov(KernelQuadratic):
         Set the parameters of the Kernel Lyapunov function.
         Optional: pass a vector of parameters representing the vectorization of matrix P
         '''
-        # if param != None:
-        #     super().set_params(coefficients=vector2sym(param))
+        if "P" in kwargs.keys(): 
+            kwargs["coefficients"] = kwargs.pop("P") # Standard name for CLF shape matrix is P
 
-        if "P" in kwargs.keys(): kwargs["coefficients"] = kwargs.pop("P") # Standard name for CLF shape matrix is P
-
-        # Set params of parent class
         super().set_params(**kwargs)
+        self.P = self.matrix_coefs
 
 class KernelBarrier(KernelQuadratic):
     '''
@@ -1351,9 +1101,9 @@ class KernelBarrier(KernelQuadratic):
     '''
     def __init__(self, **kwargs):
 
-        self.color = mcolors.TABLEAU_COLORS['tab:red'] # Standard CBF color is red; however, this can be overwritten
-        kwargs["constant"] = 0.5                       # Standard constant for CBF is 0.5 (cannot be overwritten)
-
+        kwargs["color"] = mcolors.TABLEAU_COLORS['tab:red'] # Standard CBF color is red; however, this can be overwritten
+        kwargs["constant"] = 0.5                            # Standard constant for CBF is 0.5 (cannot be overwritten)
+        
         super().__init__(**kwargs)
 
     def set_params(self, **kwargs):
@@ -1361,15 +1111,11 @@ class KernelBarrier(KernelQuadratic):
         Set the parameters of the Kernel Barrier function.
         Optional: pass a vector of parameters representing the vectorization of matrix Q
         '''
-        # if param != None:
-        #     super().set_params( coefficients=vector2sym(param), constant=0.5 )
-
-        if "Q" in kwargs.keys(): kwargs["coefficients"] = kwargs.pop("Q") # Standard name for CBF shape matrix is Q
-
-        # Defines the CBF boundary
-        if "boundary" in kwargs.keys(): self.define_level_set(points=kwargs["boundary"], level=0.0, contained=True)
+        if "Q" in kwargs.keys(): 
+            kwargs["coefficients"] = kwargs.pop("Q") # Standard name for CBF shape matrix is Q
 
         super().set_params(**kwargs)
+        self.Q = self.matrix_coefs
 
     def get_boundary(self):
         '''
@@ -1377,7 +1123,6 @@ class KernelBarrier(KernelQuadratic):
         '''
         return self.get_levels(levels=[0.0])[0]
 
-###############################################################################
 class KernelTriplet():
     '''
     Class for kernel-based triplets of: plant, CLF and CBF.
@@ -2209,79 +1954,6 @@ class KernelTriplet():
 
             self.comp_graphics["clf_artists"] = self.clf.plot_levels(levels = [ level ], ax=ax, limits=self.limits)
 
-class ApproxFunction(Function):
-    '''
-    Class for functions that can be approximated by a quadratic.
-    '''
-    def __init__(self, *args):
-        super().__init__(*args)
-        self.quadratic = Quadratic(*args)
-
-    def compute_approx(self, value):
-        '''
-        Compute second order approximation for function.
-        '''
-        f = self.quadratic.evaluate_function(value)
-        grad = self.quadratic.get_gradient()[0]
-        H = self.quadratic.get_hessian()[0]
-        inv_H = np.inv(H)
-
-        l = np.sqrt( (2*f+1)/(grad.T @ inv_H @ grad) )
-        v = l* inv_H @ grad
-
-        self.quadratic.set_param(height = -0.5)
-        self.quadratic.set_param(gradient = value - v)
-        self.quadratic.set_param(hessian = H)
-
-class CassiniOval(ApproxFunction):
-    '''
-    Class Cassini oval functions. Only works with 2-dimensional functions.
-    '''
-    def __init__(self, a, b, angle, *args):
-        super().__init__(*args)
-        self.a = a
-        self.b = b
-        self.e = self.a / self.b
-        self.angle = math.degrees(angle)
-        c, s = np.cos(self.angle), np.sin(self.angle)
-        self.R = np.array([[c, -s],[s, c]])
-
-    def function(self, point):
-        '''
-        2D Cassini oval function.
-        '''
-        v = self.R @ np.array(point)
-        v1, v2 = v[0], v[1]
-        return (v1**2 + v2**2)**2 - (2*self.a**2)*(v1**2 - v2**2) + self.a**4 - self.b**4
-
-    def gradient(self, point):
-        '''
-        Gradient of the 2D Cassini oval function.
-        '''
-        v = self.R @ np.array(point)
-        v1, v2 = v[0], v[1]
-
-        grad_v = np.zeros(2)
-        grad_v[0] = 4*( v1**2 + v2**2 )*v1 - (4*self.a**2)*v1
-        grad_v[1] = 4*( v1**2 + v2**2 )*v2 + (4*self.a**2)*v2
-
-        return grad_v.T @ self.R
-
-    def hessian(self, point):
-        '''
-        Hessian of the 2D Cassini oval function.
-        '''
-        v = self.R @ np.array(point)
-        v1, v2 = v[0], v[1]
-
-        hessian_v = np.zeros([2,2])
-        hessian_v[0,0] = 4*( 3*v1**2 + v2**2 ) - (4*self.a**2)
-        hessian_v[1,1] = 4*( v1**2 + 3*v2**2 ) + (4*self.a**2)
-        hessian_v[0,1] = 8*v1*v2
-        hessian_v[1,0] = 8*v1*v2
-
-        return hessian_v @ self.R
-
 class CLBF(KernelQuadratic):
     '''
     Class for kernel-based Control Lyapunov Barrier Functions.
@@ -2289,6 +1961,261 @@ class CLBF(KernelQuadratic):
     def __init__(self, *args):
         super().__init__(*args)
         pass
+
+##################### OLD CODE #############################################################################################################
+
+# class Function():
+#     '''
+#     Implementation of general class for scalar functions.
+#     '''
+#     def __init__(self, *args, **kwargs):
+
+#         self.set_value(*args)
+#         self.functions = []
+#         self.functions.append(self)
+
+#         self._function = 0.0
+#         if self._dim > 1:
+#             self._gradient = np.zeros(self._dim)
+#             self._hessian = np.zeros([self._dim,self._dim])
+#         else:
+#             self._gradient = 0.0
+#             self._hessian = 0.0
+
+#         limits = None
+#         spacing = 0.1
+#         self.plot_config = {"color": mcolors.BASE_COLORS["k"], "linestyle": 'solid'}
+#         for key in kwargs.keys():
+#             if key == "limits":
+#                 limits = kwargs["limits"]
+#                 continue
+#             if key == "spacing":
+#                 spacing = kwargs["spacing"]
+#                 continue
+#             if key == "plot_config":
+#                 self.plot_config = kwargs["plot_config"]
+#                 continue
+
+#         if limits != None:
+#             self.gen_contour(limits, spacing=spacing)
+
+#     def set_value(self, *args):
+#         '''
+#         Initialize values and returns corresponding points.
+#         '''
+#         data_type = np.array(args).dtype
+#         if data_type != np.dtype('float64') and data_type != np.dtype('int64'):
+#             raise Exception("Data type not understood.")
+
+#         self._args = args
+#         self._dim = len(args)
+#         self._var = np.array(self._args).reshape(self._dim,-1)
+#         self._num_points = np.size(self._var, 1)
+
+#         return self.get_value()
+
+#     def get_value(self):
+#         return self._var
+
+#     def evaluate(self):
+#         self.evaluate_function(*self._var)
+#         self.evaluate_gradient(*self._var)
+#         self.evaluate_hessian(*self._var)
+
+#     def evaluate_function(self, *args):
+#         self.set_value(*args)
+#         self.function_values()
+#         return self.get_function()
+
+#     def evaluate_gradient(self, *args):
+#         self.set_value(*args)
+#         self.gradient_values()
+#         return self.get_gradient()
+
+#     def evaluate_hessian(self, *args):
+#         self.set_value(*args)
+#         self.hessian_values()
+#         return self.get_hessian()
+
+#     def get_function(self):
+#         '''
+#         Get last computed function
+#         '''
+#         return self._function
+
+#     def get_gradient(self):
+#         '''
+#         Get last computed gradient
+#         '''
+#         return self._gradient
+
+#     def get_hessian(self):
+#         '''
+#         Get last computed hessian
+#         '''
+#         return self._hessian
+
+#     def function_values(self):
+#         '''
+#         Compute function values.
+#         '''
+#         self._function = np.zeros(self._num_points)
+#         for k in range(self._num_points):
+#             fun_val = 0.0
+#             for func in self.functions:
+#                 fun_val += func.function(self._var[:,k])
+#             self._function[k] = fun_val
+
+#         return self._function
+
+#     def gradient_values(self):
+#         '''
+#         Compute gradient values.
+#         '''
+#         self._gradient = []
+#         for point in self._var.T:
+#             grad = np.zeros(self._dim)
+#             for func in self.functions:
+#                 grad += func.gradient(point)
+#             self._gradient.append(grad)
+
+#         return self._gradient
+
+#     def hessian_values(self):
+#         '''
+#         Compute hessian values.
+#         '''
+#         self._hessian = []
+#         for point in self._var.T:
+#             hess = np.zeros([self._dim,self._dim])
+#             for func in self.functions:
+#                 hess += func.gradient(point)
+#             self._hessian.append(hess)
+
+#         return self._hessian
+
+#     def function(self, point):
+#         '''
+#         Abstract implementation of function computation. Must receive point as input and return the corresponding function value.
+#         Overwrite on children classes.
+#         '''
+#         return 0.0
+
+#     def gradient(self, point):
+#         '''
+#         Abstract implementation of gradient computation. Must receive point as input and return the corresponding gradient value.
+#         Overwrite on children classes.
+#         '''
+#         return np.zeros(self._dim)
+
+#     def hessian(self, point):
+#         '''
+#         Abstract implementation of hessian computation. Must receive point as input and return the corresponding hessian value.
+#         Overwrite on children classes.
+#         '''
+#         return np.zeros([self._dim, self._dim])
+
+#     def __add__(self, func):
+#         '''
+#         Add method.
+#         '''
+#         if not isinstance(func, Function):
+#             raise Exception("Only Function objects can be summed.")
+
+#         from copy import copy
+#         function = copy(self)
+#         function.functions.append(func)
+
+#         return function
+
+#     def gen_contour(self, limits, spacing=0.1):
+#         '''
+#         Create contour generator object for the given function.
+#         Parameters: limits (2x2 array) - min/max limits for x,y coords
+#                     spacing - grid spacing for contour generation
+#         '''        
+#         if self._dim != 2:
+#             raise Exception("Contour plot can only be used for 2D functions.")
+
+#         x_min, x_max = limits[0][0], limits[0][1]
+#         y_min, y_max = limits[1][0], limits[1][1]
+
+#         x = np.arange(x_min, x_max, spacing)
+#         y = np.arange(y_min, y_max, spacing)
+#         xg, yg = np.meshgrid(x,y)
+
+#         mesh_fvalues = np.zeros([np.size(xg,0),np.size(xg,1)])
+#         for i in range(np.size(xg,1)):
+#             args = []
+#             args.append(xg[:,i])
+#             args.append(yg[:,i])
+#             for k in range(self._dim-2):
+#                 args.append( [self._var[k+2,0] for _ in range(len(xg[:,i]))] )
+#             # mesh_fvalues[:,i] = np.array(self.evaluate_function(xv[:,i], yv[:,i]))
+#             mesh_fvalues[:,i] = np.array(self.evaluate_function(*args))
+        
+#         self.contour = ctp.contour_generator(x=xg, y=yg, z=mesh_fvalues )
+#         return self.contour
+
+#     def get_levels(self, levels, **kwargs):
+#         '''
+#         Generates function level sets.
+#         Parameters: levels (list of floats)
+#         Returns: a list with all level segments, in the same order as levels
+#         '''
+#         limits = None
+#         spacing = 0.1
+#         for key in kwargs.keys():
+#             aux_key = key.lower()
+#             if aux_key == "limits":     # Must always be required if self.contours still does not exist
+#                 limits = kwargs[key]
+#                 continue
+#             if aux_key == "spacing":    # Must always be required if self.contours still does not exist
+#                 spacing = kwargs[key]
+#                 continue
+
+#         if not isinstance(limits, list):
+#             if not hasattr(self, "contour"):
+#                 raise Exception("Grid limits are required to create contours.")
+#         else:
+#             self.gen_contour(limits, spacing=spacing)
+
+#         level_contours = []
+#         for lvl in levels:
+#             level_contours.append( self.contour.lines(lvl) )
+
+#         return level_contours
+
+#     def plot_levels(self, levels, **kwargs):
+#         '''
+#         Plots function level sets.
+#         Parameters: levels (list of floats)
+#         Returns: plot collections
+#         '''
+#         ax = plt
+#         color = self.plot_config["color"]
+#         linestyle = self.plot_config["linestyle"]
+#         for key in kwargs.keys():
+#             aux_key = key.lower()
+#             if aux_key == "ax":
+#                 ax = kwargs["ax"]
+#                 continue
+#             if aux_key == "color":
+#                 color = kwargs["color"]
+#                 continue
+#             if aux_key == "linestyle":
+#                 linestyle = kwargs["linestyle"]
+#                 continue
+
+#         collections = []
+#         level_contours = self.get_levels(levels, **kwargs)
+#         for level in level_contours:
+#             for segment in level:
+#                 line2D = ax.plot( segment[:,0], segment[:,1], color=color, linestyle=linestyle )
+#                 collections.append(line2D[0])
+
+#         return collections
+
 
 # old methods from KernelTriplet
 # class OLDKernelTripletMethops(KernelTriplet):

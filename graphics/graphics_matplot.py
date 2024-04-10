@@ -213,7 +213,7 @@ class Plot2DSimulation():
             
             if hasattr(self, 'clf_log'):
                 current_piv_state = [ self.clf_log[k][i] for k in range(self.clf_param_dim) ]
-                self.clf.set_params(current_piv_state)
+                self.clf.set_params( P=current_piv_state )
 
             self.time_text.set_text("Time = " + str(current_time) + "s")
 
