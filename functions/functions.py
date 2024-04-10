@@ -930,12 +930,14 @@ class KernelQuadratic(Function2):
     '''
     def __init__(self, **kwargs):
 
-        super().__init__(**kwargs)
-
         self.constant = 0.0
         self.force_coords = False
         self.force_gradients = False
         self.last_opt_results = None
+
+        super().__init__(**kwargs)
+
+
 
     def __str__(self):
 
@@ -1051,6 +1053,42 @@ class KernelQuadratic(Function2):
         H = self._lowerbound_matrix(shape_matrix)[self._lowerbound_slice]
         return H + H.T
 
+    def get_kernel(self):
+        ''' Returns the monomial basis vector '''
+        return self.kernel
+
+    def get_shape(self):
+        ''' Returns the polynomial coefficients '''
+        return self.matrix_coefs
+
+    def get_curvature(self, point):
+        '''
+        For testing only. Only works in 2D
+        '''
+        if self._dim != 2:
+            raise Exception("Not intended to work with dimensions higher than 2.")
+
+        grad = self.gradient(point)
+        grad_norm = np.linalg.norm(grad)
+        normalized_grad = grad/grad_norm
+        z = rot2D(np.pi/2) @ normalized_grad
+        Hessian = self.hessian(point)
+
+        return z.T @ Hessian @ z / grad_norm
+
+    def is_SOS_convex(self, verbose=False):
+        ''' Returns True if the function is SOS convex '''
+
+        sos_convex = False
+        SOS_eigs = np.linalg.eigvals( self._SOSconvex_matrix(self.matrix_coefs) )
+        if np.all(SOS_eigs >= 0.0): sos_convex = True
+
+        if verbose:
+            if sos_convex: print(f"{self} is SOS convex.")
+            else: print(f"{self} is not SOS convex, with negative eigenvalues = {SOS_eigs[SOS_eigs < 0.0]}")
+
+        return sos_convex
+
     def set_params(self, **kwargs):
         ''' Sets function parameters '''
 
@@ -1161,103 +1199,119 @@ class KernelQuadratic(Function2):
         new_param = self.dynamics.get_state()
         self.set_params( coefficients = vector2sym(new_param) )
 
-    def psd_constr(self):
+    def add_psd_constraint(self):
         ''' Positive semi definite constraint for CVXPY optimization '''
-        return self.SHAPE >> 0
+        self.constraints.append( self.SHAPE >> 0 )
 
-    def non_nsd_Hessian_constr(self):
+    def add_non_nsd_Hessian_constraint(self):
         ''' Non-negative definite Hessian constraint for CVXPY optimization '''
-        return self._reduced_lowerbound_matrix(self.SHAPE) >> 0
+        self.constraints.append( self._reduced_lowerbound_matrix(self.SHAPE) >> 0 )
 
-    def skeleton_constrs(self, skeleton_segments):
+    def add_point_constraints(self, **point):
+        '''
+        Adds point-like constraints to optimization problem.
+        Parameter: point = { "coords": ArrayLike, "level": float >= -self.constant, "gradient": ArrayLike, "curvature" : float }
+        '''
+        keys = point.keys()
+
+        if "coords" not in keys: raise Exception("Point coordinates must be specified.")
+        if "force_coord" not in keys: point["force_coord"] = False
+        if "force_gradient" not in keys: point["force_gradient"] = False
+
+        # Define point-level constraints
+        if "level" in keys:
+            if point["level"] >= -self.constant:
+                if self.force_coords or point["force_coord"]:
+                    self.constraints += [ self._fun(point["coords"], self.SHAPE) == point["level"] ]
+                else:
+                    self.cost += ( self._fun(point["coords"], self.SHAPE) - point["level"] )**2
+
+        # Define gradient constraints
+        if "gradient" in keys:
+            gradient_norm = cp.Variable()
+            gradient = np.array(point["gradient"])
+            normalized = gradient/np.linalg.norm(gradient)
+
+            self.constraints += [ gradient_norm >= 0 ]
+            if self.force_gradients or point["force_gradient"]:
+                self.constraints += [ self._grad(point["coords"], self.SHAPE) == gradient_norm * normalized ]
+            else:
+                self.cost += cp.norm( self._grad(point["coords"], self.SHAPE) - gradient_norm * normalized )
+
+        # Define curvature constraints (2D only)
+        if "curvature" in keys:
+            if self._dim != 2:
+                raise Exception("Error: curvature fitting was not implemented for dimensions > 2. ")
+            if "gradient" not in keys:
+                raise Exception("Cannot specify a curvature without specifying the gradient.")
+
+            v = rot2D(np.pi/2) @ normalized
+            self.cost += ( self._hessian_quadratic_form(point["coords"], self.SHAPE, v) - point["curvature"] )**2
+
+    def add_leading_constraints(self, Pleading, **kwargs):
+        '''
+        Defines a leading function. Can be used as an lower bound, upper bound or as an approximation.
+        Parameters: Pleading = (p x p) np.ndarray, where p is the kernel space dimension
+                    bound = int (< 0, 0, >0): if zero, no bound occurs. If positive/negative, passed function is a lower/upper bound.
+                    approximate = bool: if the function must be approximated.
+        '''
+        if Pleading.shape[0] != Pleading.shape[1]:
+            raise Exception("Shape matrix for the bounding function must be square.")
+        if Pleading.shape != (self.kernel_dim, self.kernel_dim):
+            raise Exception("Shape matrix and kernel dimensions are incompatible.")
+
+        bound = None
+        approximate = False
+        for key in kwargs.keys():
+            key = key.lower()
+            if key == "bound":
+                bound = kwargs["bound"].lower()
+                continue
+            if key == "approximate":
+                approximate = kwargs["approximate"]
+                continue
+            
+        if bound == "lower":   self.constraints += [ self.SHAPE >> Pleading ]  # Pleading is a lowerbound
+        elif bound == "upper": self.constraints += [ self.SHAPE << Pleading ]  # Pleading is an upperbound
+
+        if approximate: self.cost += cp.norm( self.SHAPE - Pleading )          # Pleading will be used as an approximation
+
+    def add_levelset_constraints(self, point_list, level, contained=False):
+        '''
+        Adds constraints to set a list of passed points to an specific level set. 
+        If contained = True, the points must be completely contained in the level set.
+        Parameters: point_list -> list of point coordinates 
+                        level  -> value of level set
+        Returns: the optimization error.
+        '''
+        for pt in point_list:
+            self.add_point_constraints(coords = pt, level=level)
+            if contained: self.constraints.append( self._fun(pt, self.SHAPE) <= level )
+
+    def add_skeleton_constraints(self, skeleton_segments):
         '''
         Generates the appropriate constraints for smooth increasing of the CBF from a center point located on the skeleton curve.
         Parameters: - skeleton_segments is an array with segments, each containing sampled points of the obstacle medial-axis.
                     - the points on each segment are assumed to be ordered: that is, the barrier must grow from one point to the next
         '''
-        skl_constraints = []
         for seg in skeleton_segments:
             for k in range(len(seg)-1):
                 curr_pt = np.array(seg[k])
                 next_pt = np.array(seg[k+1])
 
+                self.add_point_constraints(coords = curr_pt, level=-self.constant)
                 inner = ( next_pt - curr_pt ).T @ self._grad(curr_pt, self.SHAPE)
-                skl_constraints.append( self._fun(next_pt, self.SHAPE) - self._fun(curr_pt, self.SHAPE) >= inner )
-                self.points.append({"coords": curr_pt, "level":-self.constant})
-
-        return skl_constraints
-
-    def is_SOS_convex(self, verbose=False):
-        '''Returns True if the function is SOS convex'''
-
-        sos_convex = False
-        SOS_eigs = np.linalg.eigvals( self._SOSconvex_matrix(self.matrix_coefs) )
-        if np.all(SOS_eigs >= 0.0): sos_convex = True
-
-        if verbose:
-            if sos_convex: print(f"{self} is SOS convex.")
-            else: print(f"{self} is not SOS convex, with negative eigenvalues = {SOS_eigs[SOS_eigs < 0.0]}")
-
-        return sos_convex
+                self.constraints.append( self._fun(next_pt, self.SHAPE) - self._fun(curr_pt, self.SHAPE) >= inner )
 
     def fitting(self):
         ''' 
-        Fits the coefficient matrix to a list of desired points, if needed.
-        Parameters: uses the list 
-        points = [ { "point"     : ArrayLike, 
-                     "level"     : float >= -self.constant, 
-                     "gradient"  : ArrayLike, 
-                     "curvature" : float }, ... ]
-        to add more constraints or terms to the cost function before trying to solve the optimization. 
+        Convex optimization problem for fitting the coefficient matrix to the current cost and constraints.
         Returns: the optimization results.
-        '''
-        # Iterate over the input list to get problem requirements
-        gradient_norms = []
-        for pt in self.points:
-            keys = pt.keys()
-
-            if "coords" not in keys: raise Exception("Point coordinates must be specified.")
-            if "force_coord" not in keys: pt["force_coord"] = False
-            if "force_gradient" not in keys: pt["force_gradient"] = False
-
-            # Define point-level constraints
-            if "level" in keys:
-                if pt["level"] >= -self.constant:
-                    if self.force_coords or pt["force_coord"]:
-                        self.constraints += [ self._fun(pt["coords"], self.SHAPE) == pt["level"] ]
-                    else:
-                        self.cost += ( self._fun(pt["coords"], self.SHAPE) - pt["level"] )**2
-                else: continue
-
-            # Define gradient constraints
-            if "gradient" in keys:
-                gradient_norms.append( cp.Variable() )
-                gradient = np.array(pt["gradient"])
-                normalized = gradient/np.linalg.norm(gradient)
-
-                self.constraints += [ gradient_norms[-1] >= 0 ]
-                if self.force_gradients or pt["force_gradient"]:
-                    self.constraints += [ self._grad(pt["coords"], self.SHAPE) == gradient_norms[-1] * normalized ]
-                else:
-                    self.cost += cp.norm( self._grad(pt["coords"], self.SHAPE) - gradient_norms[-1] * normalized )
-
-            # Define curvature constraints (2D only)
-            if "curvature" in keys:
-                if self._dim != 2:
-                    raise Exception("Error: curvature fitting was not implemented for dimensions > 2. ")
-                if "gradient" not in keys:
-                    raise Exception("Cannot specify a curvature without specifying the gradient.")
-
-                v = rot2D(np.pi/2) @ normalized
-                self.cost += ( self._hessian_quadratic_form(pt["coords"], self.SHAPE, v) - pt["curvature"] )**2
-
+        '''            
         fit_problem = cp.Problem( cp.Minimize( self.cost ), self.constraints )
         fit_problem.solve(verbose=False, max_iters = 100000)
 
-        print(self.cost)
-        print(self.constraints)
-
-        self._reset_optimization()
+        # self._reset_optimization()
 
         if "optimal" in fit_problem.status:
             print("Fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
@@ -1265,76 +1319,6 @@ class KernelQuadratic(Function2):
             return fit_problem
         else:
             raise Exception("Problem is " + fit_problem.status + ".")
-
-    def leading_function(self, Pleading, bound=0, approximate=False):
-        '''
-        Defines a leading function. Can be used as an lower bound, upper bound or as an approximation.
-        Parameters: Pleading = (p x p) np.ndarray, where p is the kernel space dimension
-                    bound = int (< 0, 0, >0): if zero, no bound occurs. If negative/positive, passed function is a lower/upper bound.
-                    approximate = bool: if the function must be approximated.
-        '''
-        if bound != 0 or approximate:
-            if Pleading.shape[0] != Pleading.shape[1]:
-                raise Exception("Shape matrix for the bounding function must be square.")
-            if Pleading.shape != (self.kernel_dim, self.kernel_dim):
-                raise Exception("Shape matrix and kernel dimensions are incompatible.")
-
-            if bound > 0:
-                self.constraints += [ self.SHAPE >> Pleading ]  # Pleading is a lowerbound
-            elif bound < 0:
-                self.constraints += [ self.SHAPE << Pleading ]  # Pleading is an upperbound
-
-            if approximate:
-                self.cost += cp.norm( self.SHAPE - Pleading )
-
-    def define_level_set(self, points, level, contained=False):
-        '''
-        Adds points and constraints (if contained=True) with specific level set to self.points. 
-        Flag contained=True ensures that the passed points are completely contained in the level set.
-        Parameters: points -> list of points /
-                              dict with { "coords": list (mandatory), 
-                                          "gradient": list (optional),
-                                          "curvature": float (optional) }
-                    level  -> value of level set
-        Returns: the optimization error.
-        '''
-        for pt in points:
-
-            if isinstance(pt, list) or isinstance(pt, np.ndarray):
-                self.points.append( {"coords": pt, "level": level} )
-            elif isinstance(pt, dict):
-                pt_dict = pt
-                pt_dict["level"] = level
-                self.points.append(pt_dict)
-            else:
-                raise Exception("Must pass list of points!")
-            
-            if contained:
-                m = self.kernel.function(self.points[-1]["coords"])
-                self.constraints.append( m.T @ self.SHAPE @ m <= 1.0 )
-
-    def get_curvature(self, point):
-        '''
-        For testing only. Only works in 2D
-        '''
-        if self._dim != 2:
-            raise Exception("Not intended to work with dimensions higher than 2.")
-
-        grad = self.gradient(point)
-        grad_norm = np.linalg.norm(grad)
-        normalized_grad = grad/grad_norm
-        z = rot2D(np.pi/2) @ normalized_grad
-        Hessian = self.hessian(point)
-
-        return z.T @ Hessian @ z / grad_norm
-
-    def get_shape(self):
-        ''' Returns the polynomial coefficients '''
-        return self.matrix_coefs
-
-    def get_kernel(self):
-        ''' Returns the monomial basis vector '''
-        return self.kernel
 
 class KernelLyapunov(KernelQuadratic):
     '''
