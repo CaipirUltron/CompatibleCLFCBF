@@ -1,9 +1,11 @@
 import numpy as np
 
-from dynamic_systems import KernelAffineSystem
-from functions import LeadingShape, Kernel, KernelLyapunov, KernelBarrier, KernelTriplet
+from shapely import LineString, LinearRing, Polygon
+
 from controllers import NominalQP
-from common import create_quadratic, rot2D, polygon, load_compatible
+from dynamic_systems import KernelAffineSystem
+from common import create_quadratic, rot2D, polygon, load_compatible, discretize
+from functions import LeadingShape, Kernel, KernelLyapunov, KernelBarrier, KernelTriplet
 
 initial_state = [0.2, 2.5]
 initial_control = [0.0, 0.0]
@@ -51,40 +53,19 @@ clf.is_SOS_convex(verbose=True)
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------
 # Fits CBF to a U shaped obstacle
 
-# centers = [ [0.0, 0.0] ]
-centers = [ [-3.0, 0.0 ],[ 3.0, 0.0 ], [ -4.0, 3.0 ], [ 4.0, 3.0 ] ]
-vertices = [ [ 5.0,-1.0 ], [ 5.0, 3.0 ], [ 3.0, 3.0 ], [ 3.0, 1.0 ],
-             [-3.0, 1.0 ], [-3.0, 3.0 ], [-5.0, 3.0 ], [-5.0,-1.0 ] ]
-pts = polygon( vertices=vertices, spacing=0.2, closed=True )
+skeleton_line = LineString([(-4, 3), (-4, 0), (0, 0), (4, 0), (4, 3)])
+obstacle_poly = skeleton_line.buffer(1.0, cap_style='round')
 
-def line(start, end, sep):
-    num_pts = round( np.linalg.norm( np.array(start) - np.array(end)) / sep )
-    x_coords = [ x for x in np.linspace(start[0], end[0], num_pts).tolist() ]
-    y_coords = [ y for y in np.linspace(start[1], end[1], num_pts).tolist() ]
-    return list(zip(x_coords,y_coords))
-
-pt_sep = 0.2
-skeleton = []
-skeleton.append( line((0,0), (4,0), pt_sep ) )
-# skeleton.append( line((4,0), (5,-1), pt_sep ))
-skeleton.append( line((4,0), (4,2), pt_sep ))
-# skeleton.append( line((4,2), (5,3), pt_sep ))
-# skeleton.append( line((4,2), (3,3), pt_sep ))
-
-skeleton.append( line((0,0), (-4,0), pt_sep ))
-# skeleton.append( line((-4,0), (-5,-1), pt_sep ))
-skeleton.append( line((-4,0), (-4,2), pt_sep ))
-# skeleton.append( line((-4,2), (-5,3), pt_sep ))
-# skeleton.append( line((-4,2), (-3,3), pt_sep ))
+skeleton_pts = discretize(skeleton_line, spacing=0.4)
+boundary_pts = discretize(obstacle_poly, spacing=0.4)
 
 cbf_center = [0.0, 1.0]
-# cbf_eig = 0.03*np.array([ 1.0, 1.0 ])
-cbf_eig = 0.04*np.array([ 1.0, 1.0 ])
-
+cbf_eig = 0.02*np.array([ 1.0, 1.0 ])
 cbf_angle = np.deg2rad(0)
-Qquadratic = create_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
+shape_matrix = create_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
+leading_shape = LeadingShape(shape_matrix, bound='lower')
 
-cbf = KernelBarrier(kernel=kernel, boundary=pts, skeleton=skeleton, leading=LeadingShape(Qquadratic,bound='upper'), limits=limits)
+cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, centers=skeleton_pts, leading=leading_shape, limits=limits)
 cbf.is_SOS_convex(verbose=True)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------

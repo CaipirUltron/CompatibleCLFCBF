@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from functions import Kernel, KernelQuadratic, LeadingShape, KernelLyapunov, KernelBarrier
-from common import create_quadratic, rot2D, box, polygon_shapely
+from common import create_quadratic, rot2D, box, polygon
 
 limits = 12*np.array((-1,1,-1,1))
 
@@ -25,7 +25,7 @@ P = P.T @ P
 
 vertices = [ (0,0), (1,0), (1,1), (0,1) ]
 
-# pts = polygon_shapely(vertices, closed=True)
+# pts = polygon(vertices, closed=True)
 pts = box( center=center, height=5, width=5, angle=10, spacing=0.4 )
 
 for pt in pts:

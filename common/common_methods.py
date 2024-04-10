@@ -6,8 +6,9 @@ import numpy as np
 
 from scipy.spatial import ConvexHull
 from scipy.optimize import fsolve
-from shapely.geometry import LineString, LinearRing
+from shapely.geometry import LineString, LinearRing, Polygon
 from shapely.ops import unary_union
+from shapely import is_geometry
 
 def cofactor(A):
     """
@@ -526,13 +527,31 @@ def ellipsoid_parametrization(Q, param):
     z = main_axes @ np.array(reduced_z.tolist() + [ 0.0 for _ in range(p-rankQ)])
     return z
 
-def polygon(vertices, spacing=0.1, closed=False):
+def discretize( geom, spacing=0.1 ) -> list[tuple]:
+    ''' Returns list of equally spaced points on the lines of the passed Shapely Polygon '''
+    
+    if is_geometry(geom) and hasattr(geom, "length") and geom.length > 0.0:
+    
+        distances = np.arange(0, geom.length, spacing)
+
+        if isinstance(geom, LineString) or isinstance(geom, LinearRing):
+            points = [geom.interpolate(distance) for distance in distances]
+
+        if isinstance(geom, Polygon):
+            points = [geom.exterior.interpolate(distance) for distance in distances]
+
+        multipoint = unary_union(points)
+        return [ tuple(pt.coords[0]) for pt in multipoint.geoms ]
+    
+    raise Exception("Passed parameter is not a shapely geometry")
+
+def polygon(vertices, spacing=0.1, closed=False) -> list[tuple]:
     ''' Returns list of points forming a polygon with passed vertices and fixed distance between points '''
     
     if closed: line = LinearRing(vertices)
     else: line = LineString(vertices)
-    distances = np.arange(0, line.length, spacing)
 
+    distances = np.arange(0, line.length, spacing)
     points = [line.interpolate(distance) for distance in distances] + ([] if closed else [line.boundary.geoms[1]])
     multipoint = unary_union(points)
 

@@ -916,7 +916,7 @@ class KernelQuadratic(Function):
                 continue
 
             if key == "centers":
-                self.add_levelset_constraints( kwargs["centers"], -self.constant )
+                self.add_center_constraints( kwargs["centers"] )
                 continue
 
             if key == "boundary":
@@ -1017,7 +1017,7 @@ class KernelQuadratic(Function):
         if leading.approximate: 
             self.cost += cp.norm( self.SHAPE - leading.shape )          # Pleading will be used as an approximation
 
-    def add_levelset_constraints(self, point_list, level, contained=False):
+    def add_levelset_constraints(self, point_list: list, level: float, contained=False):
         '''
         Adds constraints to set a list of passed points to an specific level set. 
         If contained = True, the points must be completely contained in the level set.
@@ -1028,6 +1028,13 @@ class KernelQuadratic(Function):
         for pt in point_list:
             self.add_point_constraints(coords = pt, level=level)
             if contained: self.constraints.append( self._fun(pt, self.SHAPE) <= level )
+
+    def add_center_constraints(self, point_list: list):
+        '''
+        Adds constraints to set a list of passed points to the -self.constant level set.
+        For CLFs/CBFs, these points will act as minima. 
+        '''
+        self.add_levelset_constraints(point_list, level=-self.constant)
 
     def add_boundary_constraints(self, point_list):
         '''
@@ -1054,8 +1061,9 @@ class KernelQuadratic(Function):
                     - the points on each segment are assumed to be ordered: that is, the barrier must grow from one point to the next
         '''
         for segment in skeleton_segments:
+            self.add_center_constraints(point_list=segment)
+            for point in segment: self.add_point_constraints(coords=point, level=-self.constant)
             self.add_continuity_constraints(segment, increasing=True)
-            for point in segment: self.add_point_constraints(coords = point, level = -self.constant)
 
     def fitting(self):
         ''' 
