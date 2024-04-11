@@ -701,13 +701,7 @@ class KernelQuadratic(Function):
         super()._generate_contour() # this solution executes _generate_contour() twice - not ideal, but that's it for today
 
     def __str__(self):
-
-        type_fun = "Polynominal "
-        if isinstance(self, KernelLyapunov):
-            type_fun = "CLF with expression V(x) = ½ k(x)' P k(x)"
-        if isinstance(self, KernelBarrier):
-            type_fun = "CBF with expression h(x) = ½ ( k(x)' Q k(x) - 1 )"
-        return type_fun
+        return "Polynominal kernel-based function with expression h(x) = ½ ( k(x)' M k(x) - c )"
 
     def _initialize(self, kernel):
         '''
@@ -724,12 +718,7 @@ class KernelQuadratic(Function):
         self.SHAPE = cp.Variable( (self.kernel_dim,self.kernel_dim), symmetric=True )
 
         self._compute_lowerbound_slice()
-        self._reset_optimization()
-
-    def _reset_optimization(self):
-        ''' Reset optimization problem '''
-        self.cost = 0.0
-        self.add_psd_constraint()
+        self.reset_optimization()
 
     def _gradient_const_matrices(self, shape_matrix):
         ''' Compute constant matrices composing the elements of the gradient '''
@@ -810,6 +799,11 @@ class KernelQuadratic(Function):
         ''' Extract only the nonzero eigenvalues from the lowerbound matrix '''
         H = self._lowerbound_matrix(shape_matrix)[self._lowerbound_slice]
         return H + H.T
+
+    def reset_optimization(self):
+        ''' Reset optimization problem '''
+        self.cost = 0.0
+        self.add_psd_constraint()
 
     def get_kernel(self):
         ''' Returns the monomial basis vector '''
@@ -939,15 +933,6 @@ class KernelQuadratic(Function):
         if self.matrix_coefs.shape != (self.kernel_dim, self.kernel_dim):
             raise Exception("Shape matrix must be (p x p), where p is the kernel dimension.")
 
-    def update(self, param_ctrl, dt):
-        '''
-        Integrates and updates parameters
-        '''
-        self.dynamics.set_control(param_ctrl)
-        self.dynamics.actuate(dt)
-        new_param = self.dynamics.get_state()
-        self.set_params( coefficients = vector2sym(new_param) )
-
     def add_psd_constraint(self):
         ''' Positive semi definite constraint for CVXPY optimization '''
         self.constraints.append( self.SHAPE >> 0 )
@@ -1062,7 +1047,6 @@ class KernelQuadratic(Function):
         '''
         for segment in skeleton_segments:
             self.add_center_constraints(point_list=segment)
-            for point in segment: self.add_point_constraints(coords=point, level=-self.constant)
             self.add_continuity_constraints(segment, increasing=True)
 
     def fitting(self):
@@ -1079,6 +1063,14 @@ class KernelQuadratic(Function):
             return fit_problem
         else:
             raise Exception("Problem is " + fit_problem.status + ".")
+        
+    def update(self, param_ctrl, dt):
+        '''
+        Integrates and updates parameters
+        '''
+        self.dynamics.set_control(param_ctrl)
+        self.dynamics.actuate(dt)
+        self.set_params( coefficients = self.dynamics.get_state() )
 
 class KernelLyapunov(KernelQuadratic):
     '''
@@ -1091,6 +1083,9 @@ class KernelLyapunov(KernelQuadratic):
 
         # Initialize the parameters of KernelQuadratic
         super().__init__(**kwargs)
+
+    def __str__(self):
+        return "Polynominal kernel-based CLF with expression V(x) = ½ k(x)' P k(x)"
 
     def set_params(self, **kwargs):
         '''
@@ -1113,6 +1108,9 @@ class KernelBarrier(KernelQuadratic):
         kwargs["constant"] = 0.5                            # Standard constant for CBF is 0.5 (cannot be overwritten)
         
         super().__init__(**kwargs)
+
+    def __str__(self):
+        return "Polynominal kernel-based CBF with expression h(x) = ½ ( k(x)' Q k(x) - 1 )"
 
     def set_params(self, **kwargs):
         '''

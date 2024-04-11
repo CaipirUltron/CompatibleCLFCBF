@@ -384,6 +384,22 @@ def create_quadratic(eigen, R, center, kernel_dim):
 
     return std_centered_quadratic
 
+def circular_boundary_shape( radius, center, kernel_dim ):
+    ''' Returns shape matrix of (kernel_dim x kernel_dim) representing a circular obstacle with radius and center '''
+
+    c = 1/(radius**2)
+    center = np.array(center)
+    n = len(center)
+
+    circular_quadratic = np.zeros([kernel_dim, kernel_dim])
+    circular_quadratic[0,0] = c * center.T @ center
+    for k in range(n):
+        circular_quadratic[0,k+1] = - c * center[k]
+        circular_quadratic[k+1,0] = - c * center[k]
+    circular_quadratic[1:n+1,1:n+1] = c * np.eye(n)
+
+    return circular_quadratic
+
 def sontag_formula(a, b):
     '''
     General Sontag's formula for stabilization.
@@ -532,18 +548,48 @@ def discretize( geom, spacing=0.1 ) -> list[tuple]:
     
     if is_geometry(geom) and hasattr(geom, "length") and geom.length > 0.0:
     
-        distances = np.arange(0, geom.length, spacing)
+        # distances = np.arange(0, geom.length, spacing)
+        num_pts = round(geom.length/spacing)
+        distances = np.linspace(0, geom.length, num_pts)
 
         if isinstance(geom, LineString) or isinstance(geom, LinearRing):
             points = [geom.interpolate(distance) for distance in distances]
+            return [ tuple(pt.coords[0]) for pt in points ]
 
         if isinstance(geom, Polygon):
             points = [geom.exterior.interpolate(distance) for distance in distances]
-
-        multipoint = unary_union(points)
-        return [ tuple(pt.coords[0]) for pt in multipoint.geoms ]
+            multipoint = unary_union(points)
+            return [ tuple(pt.coords[0]) for pt in multipoint.geoms ]
     
     raise Exception("Passed parameter is not a shapely geometry")
+
+def segmentize( segment, pivot ):
+    ''' From a single segment of densely spaced points and a center point, split segment into two from the center point '''
+
+    if not isinstance(segment, list): segment.tolist()
+
+    pivot = np.array(pivot)
+    distances = [ np.linalg.norm(np.array(pt) - pivot) for pt in segment ]
+
+    min_index = np.argmin(distances)
+    closest = np.array(segment[min_index])
+
+    half1 = segment[0:min_index]
+    half2 = segment[min_index:]
+
+    dist_to_half1 = sum([ np.linalg.norm(closest - np.array(pt)) for pt in half1 ])
+    dist_to_half2 = sum([ np.linalg.norm(closest - np.array(pt)) for pt in half2 ])
+
+    if dist_to_half1 < dist_to_half2:
+        segment1 = [ segment[min_index] ] + half1[::-1]
+        del half2[0]
+        segment2 = [ tuple(pivot) ] + half2
+
+    if dist_to_half1 > dist_to_half2:
+        segment1 = [ tuple(pivot) ] + half1[::-1]
+        segment2 = half2
+
+    return [segment1, segment2]
 
 def polygon(vertices, spacing=0.1, closed=False) -> list[tuple]:
     ''' Returns list of points forming a polygon with passed vertices and fixed distance between points '''
@@ -647,6 +693,25 @@ def minimum_bounding_rectangle(points):
     new_bbox = centroid + factor*diffs
 
     return new_bbox
+
+def enclosing_circle( rect_limits ):
+    ''' Returns radius and center of the circle completely enclosing the passed rectangle '''
+
+    xmin, ymin, xmax, ymax = rect_limits
+    xrange = xmax - xmin
+    yrange = ymax - ymin
+    radius = np.sqrt( xrange**2 + yrange**2 )/2
+
+    vertices = np.array([[xmin, ymin],
+                         [xmin, ymax],
+                         [xmax, ymin],
+                         [xmax, ymax]])
+    
+    x_c = np.mean(vertices[:, 0])
+    y_c = np.mean(vertices[:, 1])
+    center = np.array([x_c, y_c])
+
+    return radius, center
 
 def check_kernel(plant, clf, cbf):
     '''
