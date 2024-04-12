@@ -526,8 +526,9 @@ class Kernel():
                 self._hessian_monomials[i][j] = sym.diff(self._sym_jacobian_monomials[:,j], self._symbols[i])
 
         # Compute numeric A and N matrices
-        self.compute_A()
-        self.compute_N()
+        self._compute_A()
+        self._compute_N()
+        self._compute_lowerbound_slice()
 
         # Lambda functions
         self._lambda_monomials = sym.lambdify( list(self._symbols), self._monomials )
@@ -540,19 +541,7 @@ class Kernel():
         if isinstance(point, np.ndarray): point = point.tolist()
         return point
 
-    def set_param(self, **kwargs):
-        ''' Sets the kernel parameters '''
-        self._degree = 0
-        self._num_monomials = 1
-        self._maxdegree = 2*self._degree
-
-        for key in kwargs:
-            if key == "degree":
-                self._degree = kwargs[key]
-                self._num_monomials = num_comb(self._dim, self._degree)
-                self._coefficients = np.zeros([self._num_monomials, self._num_monomials])
-
-    def compute_A(self):
+    def _compute_A(self):
         '''
         Computes numeric A matrices.
         '''
@@ -577,7 +566,7 @@ class Kernel():
 
         self.Asum = sum(self.A)
 
-    def compute_N(self):
+    def _compute_N(self):
         '''
         Compute the component matrices of the Jacobian transpose null-space.
         '''
@@ -597,6 +586,46 @@ class Kernel():
         self.N = []
         for k in range(solutions.shape[1]):
             self.N.append( mat( solutions[:,k] ) )
+
+    def _lowerbound_matrix(self, shape_matrix):
+        ''' Compute the matrix for the lowerbound on the maximum eigenvalue of the Hessian matrix '''
+        As = self.Asum
+        return As.T @ shape_matrix @ As + As.T @ As.T @ shape_matrix
+
+    def _lowerbound_matrix2(self, shape_matrix):
+        ''' Compute the matrix for the lowerbound on the maximum eigenvalue of the Hessian matrix '''
+        S = self.Asum + np.eye(self._num_monomials)
+        return S.T @ shape_matrix + shape_matrix @ S
+
+    def _compute_lowerbound_slice(self):
+        ''' Compute slice on the lowerbound matrix '''
+        symHbound = self._lowerbound_matrix( self._sym_shape_matrix )
+
+        # This computes the shape of the maximum non-zero upper-left block of symHbound
+        for i in range(0,self._num_monomials):
+            half_down = symHbound[i:, :]
+            if np.all( half_down == 0 ): break
+        
+        self._lowerbound_slice = ( slice(0,symHbound.shape[0]), slice(0,symHbound.shape[1]) )
+        if np.all( half_down == 0 ):
+            self._lowerbound_slice = ( slice(0,i), slice(0,i) )
+
+    def _reduced_lowerbound_matrix(self, shape_matrix):
+        ''' Extract only the nonzero eigenvalues from the lowerbound matrix '''
+        H = self._lowerbound_matrix(shape_matrix)[self._lowerbound_slice]
+        return H + H.T
+
+    def set_param(self, **kwargs):
+        ''' Sets the kernel parameters '''
+        self._degree = 0
+        self._num_monomials = 1
+        self._maxdegree = 2*self._degree
+
+        for key in kwargs:
+            if key == "degree":
+                self._degree = kwargs[key]
+                self._num_monomials = num_comb(self._dim, self._degree)
+                self._coefficients = np.zeros([self._num_monomials, self._num_monomials])
 
     def function(self, point):
         ''' Compute kernel function '''
@@ -698,8 +727,6 @@ class KernelQuadratic(Function):
         if type(self.cost) != float or len(self.constraints) > 1:
             self.last_opt_results = self.fitting()
 
-        super()._generate_contour() # this solution executes _generate_contour() twice - not ideal, but that's it for today
-
     def __str__(self):
         return "Polynominal kernel-based function h(x) = ½ ( k(x)' M k(x) - c )"
 
@@ -717,7 +744,6 @@ class KernelQuadratic(Function):
 
         self.SHAPE = cp.Variable( (self.kernel_dim,self.kernel_dim), symmetric=True )
 
-        self._compute_lowerbound_slice()
         self.reset_optimization()
 
     def _gradient_const_matrices(self, shape_matrix):
@@ -777,33 +803,12 @@ class KernelQuadratic(Function):
         ''' Returns SOS convexity matrix '''
         return np.block([[ Ai.T @ shape_matrix @ Aj + Aj.T @ Ai.T @ shape_matrix for Aj in self.kernel_matrices ] for Ai in self.kernel_matrices ])
 
-    def _lowerbound_matrix(self, shape_matrix):
-        ''' Compute the matrix for the lowerbound on the maximum eigenvalue of the Hessian matrix '''
-        As = self.kernel.Asum
-        return As.T @ shape_matrix @ As + As.T @ As.T @ shape_matrix
-
-    def _compute_lowerbound_slice(self):
-        ''' Compute slice on the lowerbound matrix '''
-        symHbound = self._lowerbound_matrix( self.kernel._sym_shape_matrix )
-
-        # This computes the shape of the maximum non-zero upper-left block of symHbound
-        for i in range(0,self.kernel_dim):
-            half_down = symHbound[i:, :]
-            if np.all( half_down == 0 ): break
-        
-        self._lowerbound_slice = ( slice(0,symHbound.shape[0]), slice(0,symHbound.shape[1]) )
-        if np.all( half_down == 0 ):
-            self._lowerbound_slice = ( slice(0,i), slice(0,i) )
-
-    def _reduced_lowerbound_matrix(self, shape_matrix):
-        ''' Extract only the nonzero eigenvalues from the lowerbound matrix '''
-        H = self._lowerbound_matrix(shape_matrix)[self._lowerbound_slice]
-        return H + H.T
-
     def reset_optimization(self):
         ''' Reset optimization problem '''
+        
         self.cost = 0.0
         self.add_psd_constraint()
+        # self.add_non_nsd_Hessian_constraint()
 
     def get_kernel(self):
         ''' Returns the monomial basis vector '''
@@ -934,6 +939,7 @@ class KernelQuadratic(Function):
 
                 self.param = sym2vector( self.matrix_coefs )
                 self.dynamics.set_state(self.param)
+                self._generate_contour()
                 continue
 
             if key == "points":
@@ -971,7 +977,8 @@ class KernelQuadratic(Function):
 
     def add_non_nsd_Hessian_constraint(self):
         ''' Non-negative definite Hessian constraint for CVXPY optimization '''
-        self.constraints.append( self._reduced_lowerbound_matrix(self.SHAPE) >> 0 )
+        # self.constraints.append( self.kernel._reduced_lowerbound_matrix(self.SHAPE) >> 0 )
+        self.constraints.append( self.kernel._lowerbound_matrix2(self.SHAPE) >> 0 )
 
     def add_point_constraints(self, **point):
         '''
@@ -1026,7 +1033,7 @@ class KernelQuadratic(Function):
         if leading.shape.shape != (self.kernel_dim, self.kernel_dim):
             raise Exception("Shape matrix and kernel dimensions are incompatible.")
         
-        bound_threshold = 1e-5
+        bound_threshold = 0.0
 
         if leading.bound == "lower": 
             self.constraints += [ self.SHAPE >> leading.shape + bound_threshold*np.eye(self.kernel_dim) ]  # leading is a lowerbound
@@ -1209,8 +1216,17 @@ class KernelTriplet():
         self.CVXPY_P = cp.Variable( (self.p,self.p), symmetric=True )
         self.CVXPY_Pnom = cp.Parameter( (self.p,self.p), symmetric=True )
         self.CVXPY_lambdas = []
+
         self.CVXPY_cost = cp.norm(self.CVXPY_P - self.CVXPY_Pnom)
-        self.CVXPY_constraints = [ self.CVXPY_P >> 0, cp.lambda_max(self.CVXPY_P) <= self.max_P_eig ]
+        self.CVXPY_base_constraints = [ self.CVXPY_P >> 0, cp.lambda_max(self.CVXPY_P) <= self.max_P_eig ]
+        self.CVXPY_constraints = self.CVXPY_base_constraints
+
+        self.CVXPY_family_cost = cp.norm(self.CVXPY_P - self.CVXPY_Pnom)
+        self.CVXPY_family_constraints = [ self.CVXPY_P >> 0, 
+                                          cp.lambda_max(self.CVXPY_P) <= self.max_P_eig, 
+                                          self.kernel._reduced_lowerbound_matrix(self.CVXPY_P) >> 0 ]
+        self.CVXPY_family_problem = cp.Problem( cp.Minimize( self.CVXPY_family_cost ), 
+                                                self.CVXPY_family_constraints )
 
         # Compute limit lines (obstacle should be completely contained inside the rectangle)
         self.create_limit_lines()
@@ -1493,6 +1509,13 @@ class KernelTriplet():
         sol = minimize( cost, init_pt )
         return sol.x
 
+    def find_closest_valid(self, Pnom: np.ndarray, verbose=False) -> np.ndarray:
+        ''' Find closest shape matrix to Pnom belongin to family of valid CLFs (without local minima) '''
+
+        self.CVXPY_Pnom.value = Pnom
+        self.CVXPY_family_problem.solve(verbose=verbose)
+        return self.CVXPY_P.value
+
     def update_determinant_grid(self):
         '''
         Evaluates det([ vQ, vP ]) = 0 over a grid.
@@ -1772,7 +1795,7 @@ class KernelTriplet():
         This function computes a new CLF geometry that is completely compatible with the original CBF.
         '''
         is_original_compatible = self.is_compatible()
-        self.P = self.clf.P
+        self.P = self.find_closest_valid( self.clf.P )
         Pnom = self.clf.P
         self.counter = 0
 
@@ -1791,7 +1814,7 @@ class KernelTriplet():
             Minimizes the changes to the CLF geometry needed for compatibilization.
             '''
             self.counter += 1
-            self.P = var_to_PSD(var)
+            self.P = self.find_closest_valid( var_to_PSD(var) )
             self.update_invariant_set()
 
             if obj_type == "closest": self.cost = np.linalg.norm( self.P - Pnom, 'fro')
@@ -1804,7 +1827,7 @@ class KernelTriplet():
             Removes removable equilibrium points.
             '''
             # Updates invariant set
-            self.P = var_to_PSD(var)
+            self.P = self.find_closest_valid( var_to_PSD(var) )
             self.update_invariant_set()
             
             self.rem_constr = [ 0.0, 0.0 ]
@@ -1821,8 +1844,8 @@ class KernelTriplet():
 
             return self.rem_constr
 
-        self.P = self.fit_curvatures( points = [ np.array([5.58003507e-14, 1.13044149e+00]) ], Pinit=Pnom )
-        self.update_invariant_set()
+        # self.P = self.fit_curvatures( points = [ np.array([5.58003507e-14, 1.13044149e+00]) ], Pinit=Pnom )
+        # self.update_invariant_set()
 
         if animate:
             self.comp_graphics["fig"], ax = plt.subplots(nrows=1, ncols=1)
@@ -1834,7 +1857,7 @@ class KernelTriplet():
             self.init_comp_plot(ax)
             plt.pause(self.comp_process_data["gui_eventloop_time"])
         
-        plt.show()
+        # plt.show()
 
         def intermediate_callback(res: np.ndarray):
             '''
@@ -1868,28 +1891,28 @@ class KernelTriplet():
         is_processed_compatible = self.is_compatible()
         self.comp_process_data["start_time"] = time.perf_counter()
 
-        # while not is_processed_compatible:
+        while not is_processed_compatible:
 
-            # init_var = PSD_to_var(self.P)
-            # sol = minimize( objective, init_var, constraints=constraints, callback=intermediate_callback )
-            # self.P = var_to_PSD( sol.x )
-            # self.update_invariant_set()
+            init_var = PSD_to_var(self.P)
+            sol = minimize( objective, init_var, constraints=constraints, callback=intermediate_callback )
+            self.P = self.find_closest_valid( var_to_PSD( sol.x ) )
+            self.update_invariant_set()
 
-            # is_processed_compatible = self.is_compatible()
-        #--------------------------- Main compatibilization process ---------------------------
-        # print(f"Compatibilization terminated with message: {sol.message}")
+            is_processed_compatible = self.is_compatible()
+        # --------------------------- Main compatibilization process ---------------------------
+        print(f"Compatibilization terminated with message: {sol.message}")
 
-        # message = "Compatibilization "
-        # if is_processed_compatible: message += "was successful. "
-        # else: message += "failed. "
-        # message += "Process took " + str(self.comp_process_data["execution_time"]) + " seconds."
-        # print(message)
+        message = "Compatibilization "
+        if is_processed_compatible: message += "was successful. "
+        else: message += "failed. "
+        message += "Process took " + str(self.comp_process_data["execution_time"]) + " seconds."
+        print(message)
 
         if animate: plt.pause(2)
 
         comp_result = { 
                         # "opt_message": sol.message, 
-                        "kernel_dimension": self.kernel.kernel_dim,
+                        "kernel_dimension": self.kernel._num_monomials,
                         "P_original": Pnom.tolist(),
                         "P_processed": self.P.tolist(),
                         "is_original_compatible": is_original_compatible,

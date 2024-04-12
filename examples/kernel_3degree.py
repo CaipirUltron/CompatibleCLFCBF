@@ -13,7 +13,7 @@ n = len(initial_state)
 m = len(initial_control)
 
 # limits = np.array(((-7.5, 7.5,-4, 5))
-limits = 30*np.array((-1,1,-1,1))
+limits = 25*np.array((-1,1,-1,1))
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 kernel = Kernel(dim=n, degree=3)
@@ -60,23 +60,23 @@ skeleton_segs = segmentize(skeleton_pts, center)
 obstacle_poly = skeleton_line.buffer(1.0, cap_style='flat')
 boundary_pts = discretize(obstacle_poly, spacing=0.4)
 
-shape_matrix = circular_boundary_shape( radius=6, center=center, kernel_dim=kernel_dim )
+shape_matrix = circular_boundary_shape( radius=7, center=center, kernel_dim=kernel_dim )
 leading = LeadingShape(shape_matrix, bound='lower')
 
 quadratic_cbf = KernelBarrier(kernel=kernel, Q=shape_matrix, limits=limits, spacing=0.1)
 
-cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, skeleton=skeleton_segs, 
-                    leading=leading, limits=limits, spacing=0.1)
+cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, skeleton=skeleton_segs, leading=leading, 
+                    limits=limits, spacing=0.1)
 
-cbf.is_bounded_by(leading.shape,verbose=True)
-cbf.is_SOS_convex(verbose=True)
+cbf.is_bounded_by(leading.shape, verbose=True)
+# cbf.is_SOS_convex(verbose=True)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .002
 p, alpha, beta = 1.0, 1.0, 1.0
 kerneltriplet = KernelTriplet( plant=plant, clf=clf, cbf=cbf,
                               params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta},
-                              limits=limits.tolist(), spacing=0.1)
+                              limits=limits.tolist(), spacing=0.2)
 
 controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 15

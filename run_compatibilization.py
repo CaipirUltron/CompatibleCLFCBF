@@ -15,7 +15,7 @@ if sim.kerneltriplet.is_compatible():
 else: 
     print("Given CLF is not compatible with CBF and plant.")
 
-    compatibility_result = sim.kerneltriplet.compatibilize(obj_type="fast", verbose=True, animate=True)
+    compatibility_result = sim.kerneltriplet.compatibilize(obj_type="closest", verbose=True, animate=True)
 
     try:
         with open("logs/"+simulation_file+"_comp.json", "w") as file:

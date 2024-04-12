@@ -16,12 +16,17 @@ ax.set_xlim(xmin, xmax)
 ax.set_ylim(ymin, ymax)
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
-kernel = Kernel(dim=2, degree=2)
+kernel = Kernel(dim=2, degree=3)
 kernel_dim = kernel._num_monomials
 
 center = [ 0.0, 2.0 ]
 P = 0.1*np.random.randn(kernel_dim, kernel_dim)
 P = P.T @ P
+
+S = kernel.Asum + np.eye(kernel_dim)
+Q = S.T @ P + P @ S
+
+print(F"Eigenvals of (As + I).T P + P (As + I) = {np.linalg.eigvals(Q)}")
 
 vertices = [ (0,0), (1,0), (1,1), (0,1) ]
 
