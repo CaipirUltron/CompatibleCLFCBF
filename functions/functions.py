@@ -701,7 +701,7 @@ class KernelQuadratic(Function):
         super()._generate_contour() # this solution executes _generate_contour() twice - not ideal, but that's it for today
 
     def __str__(self):
-        return "Polynominal kernel-based function with expression h(x) = ½ ( k(x)' M k(x) - c )"
+        return "Polynominal kernel-based function h(x) = ½ ( k(x)' M k(x) - c )"
 
     def _initialize(self, kernel):
         '''
@@ -828,7 +828,7 @@ class KernelQuadratic(Function):
 
         return z.T @ Hessian @ z / grad_norm
 
-    def is_SOS_convex(self, verbose=False):
+    def is_SOS_convex(self, verbose=False) -> bool:
         ''' Returns True if the function is SOS convex '''
 
         sos_convex = False
@@ -840,6 +840,38 @@ class KernelQuadratic(Function):
             else: print(f"{self} is not SOS convex, with negative eigenvalues = {SOS_eigs[SOS_eigs < 0.0]}")
 
         return sos_convex
+
+    def is_bounded_by(self, shape_bound: np.ndarray, verbose=False, threshold=1e-3) -> bool:
+        ''' Returns type of bound for shape_bound:
+            'lower' if SHAPE >> shape_bound, 
+            'upper' if SHAPE << shape_bound, 
+            None if shape_bound is not a bound
+        '''
+        bound = None
+        lowerbounded, upperbounded = False, False
+
+        lowerbound_eigs = np.linalg.eigvals( self.matrix_coefs - np.array(shape_bound) )
+        if np.all(lowerbound_eigs >= -threshold): 
+            lowerbounded = True
+            bound = 'lower'
+
+        upperbound_eigs = np.linalg.eigvals( np.array(shape_bound) - self.matrix_coefs )
+        if np.all(upperbound_eigs >= -threshold): 
+            upperbounded = True
+            bound = 'upper'
+
+        if verbose: 
+            if lowerbounded: message = f"{self} is lowerbounded by passed shape matrix,"
+            else: message = f"{self} is not lowerbounded by passed shape matrix,"
+            message += f" with negative eigenvalues = {lowerbound_eigs[lowerbound_eigs < 0.0]}"
+            print(message)
+
+            if upperbounded: message = f"{self} is upperbounded by passed shape matrix,"
+            else: message = f"{self} is not upperbounded by passed shape matrix,"
+            message += f" with negative eigenvalues = {upperbound_eigs[upperbound_eigs < 0.0]}"
+            print(message)
+
+        return bound
 
     def set_params(self, **kwargs):
         ''' Sets function parameters '''
@@ -993,11 +1025,13 @@ class KernelQuadratic(Function):
             raise Exception("Shape matrix for the bounding function must be square.")
         if leading.shape.shape != (self.kernel_dim, self.kernel_dim):
             raise Exception("Shape matrix and kernel dimensions are incompatible.")
-            
+        
+        bound_threshold = 1e-5
+
         if leading.bound == "lower": 
-            self.constraints += [ self.SHAPE >> leading.shape ]  # Pleading is a lowerbound
+            self.constraints += [ self.SHAPE >> leading.shape + bound_threshold*np.eye(self.kernel_dim) ]  # leading is a lowerbound
         elif leading.bound == "upper": 
-            self.constraints += [ self.SHAPE << leading.shape ]  # Pleading is an upperbound
+            self.constraints += [ self.SHAPE << leading.shape - bound_threshold*np.eye(self.kernel_dim) ]  # leading is an upperbound
 
         if leading.approximate: 
             self.cost += cp.norm( self.SHAPE - leading.shape )          # Pleading will be used as an approximation
@@ -1085,7 +1119,7 @@ class KernelLyapunov(KernelQuadratic):
         super().__init__(**kwargs)
 
     def __str__(self):
-        return "Polynominal kernel-based CLF with expression V(x) = ½ k(x)' P k(x)"
+        return "Polynominal kernel-based CLF V(x) = ½ k(x)' P k(x)"
 
     def set_params(self, **kwargs):
         '''
@@ -1110,7 +1144,7 @@ class KernelBarrier(KernelQuadratic):
         super().__init__(**kwargs)
 
     def __str__(self):
-        return "Polynominal kernel-based CBF with expression h(x) = ½ ( k(x)' Q k(x) - 1 )"
+        return "Polynominal kernel-based CBF h(x) = ½ ( k(x)' Q k(x) - 1 )"
 
     def set_params(self, **kwargs):
         '''

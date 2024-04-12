@@ -13,7 +13,7 @@ n = len(initial_state)
 m = len(initial_control)
 
 # limits = np.array(((-7.5, 7.5,-4, 5))
-limits = 16*np.array((-1,1,-1,1))
+limits = 30*np.array((-1,1,-1,1))
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 kernel = Kernel(dim=n, degree=3)
@@ -38,8 +38,8 @@ points = []
 points.append({ "coords": [ 0.0,  1.0], "gradient": [ 0.0,  1.0], "curvature": -0.3 })
 points.append({ "coords": [-5.0,  3.0], "gradient": [-1.0,  1.0] })
 points.append({ "coords": [ 5.0,  3.0], "gradient": [ 1.0,  1.0] })
-points.append({ "coords": [ 5.0,  0.0], "gradient": [ 1.0,  -1.0] })
-points.append({ "coords": [-5.0,  0.0], "gradient": [-1.0,  -1.0] })
+points.append({ "coords": [ 5.0,  0.0], "gradient": [ 1.0, -1.0] })
+points.append({ "coords": [-5.0,  0.0], "gradient": [-1.0, -1.0] })
 
 clf_eig = np.array([ 8.0, 1.0 ])
 clf_angle = np.deg2rad(0)
@@ -57,27 +57,18 @@ skeleton_line = LineString([(-4, 3), (-4, 0), center, (4, 0), (4, 3)])
 skeleton_pts = discretize(skeleton_line, spacing=0.4)
 skeleton_segs = segmentize(skeleton_pts, center)
 
-# print(skeleton_pts)
-# for seg in skeleton_segs: print(seg)
-
 obstacle_poly = skeleton_line.buffer(1.0, cap_style='flat')
 boundary_pts = discretize(obstacle_poly, spacing=0.4)
 
-# cbf_center = center
-# cbf_eig = 0.05*np.array([ 1.0, 1.0 ])
-# cbf_angle = np.deg2rad(0)
-# shape_matrix = create_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
-# print(shape_matrix[0:3,0:3])
-
-# radius, _ = enclosing_circle(obstacle_poly.bounds)
-
 shape_matrix = circular_boundary_shape( radius=6, center=center, kernel_dim=kernel_dim )
+leading = LeadingShape(shape_matrix, bound='lower')
 
 quadratic_cbf = KernelBarrier(kernel=kernel, Q=shape_matrix, limits=limits, spacing=0.1)
 
 cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, skeleton=skeleton_segs, 
-                    leading=LeadingShape(shape_matrix, bound='lower'), limits=limits, spacing=0.1)
+                    leading=leading, limits=limits, spacing=0.1)
 
+cbf.is_bounded_by(leading.shape,verbose=True)
 cbf.is_SOS_convex(verbose=True)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
