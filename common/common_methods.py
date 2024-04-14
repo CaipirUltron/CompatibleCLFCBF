@@ -409,6 +409,10 @@ def sontag_formula(a, b):
         kappa = - (a + np.sqrt(a**2 + b**4))/b
     return kappa
 
+def lyap(A: np.ndarray, P: np.ndarray) -> np.ndarray:
+    ''' Computes Lyapunov form A P + P A.T '''
+    return A @ P + P @ A.T
+
 def compute_curvatures(H, normal):
     '''
     This function computes the maximum/minimum curvatures of a function at a given direction, using a clever algorithm based on the QR decomposition.

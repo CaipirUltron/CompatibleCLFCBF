@@ -75,8 +75,8 @@ cbf.is_bounded_by(leading.shape, verbose=True)
 sample_time = .002
 p, alpha, beta = 1.0, 1.0, 1.0
 kerneltriplet = KernelTriplet( plant=plant, clf=clf, cbf=cbf,
-                              params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta},
-                              limits=limits.tolist(), spacing=0.2)
+                               params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta},
+                               limits=limits.tolist(), spacing=0.2)
 
 controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 15

@@ -589,13 +589,11 @@ class Kernel():
 
     def _lowerbound_matrix(self, shape_matrix):
         ''' Compute the matrix for the lowerbound on the maximum eigenvalue of the Hessian matrix '''
-        As = self.Asum
-        return As.T @ shape_matrix @ As + As.T @ As.T @ shape_matrix
+        return self.Asum.T @ shape_matrix @ self.Asum + self.Asum.T @ self.Asum.T @ shape_matrix
 
     def _lowerbound_matrix2(self, shape_matrix):
         ''' Compute the matrix for the lowerbound on the maximum eigenvalue of the Hessian matrix '''
-        S = self.Asum + np.eye(self._num_monomials)
-        return S.T @ shape_matrix + shape_matrix @ S
+        return lyap(self.Asum.T, lyap(self.Asum.T, shape_matrix))
 
     def _compute_lowerbound_slice(self):
         ''' Compute slice on the lowerbound matrix '''
