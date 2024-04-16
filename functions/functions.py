@@ -589,10 +589,6 @@ class Kernel():
 
     def _lowerbound_matrix(self, shape_matrix):
         ''' Compute the matrix for the lowerbound on the maximum eigenvalue of the Hessian matrix '''
-        return self.Asum.T @ shape_matrix @ self.Asum + self.Asum.T @ self.Asum.T @ shape_matrix
-
-    def _lowerbound_matrix2(self, shape_matrix):
-        ''' Compute the matrix for the lowerbound on the maximum eigenvalue of the Hessian matrix '''
         return lyap(self.Asum.T, lyap(self.Asum.T, shape_matrix))
 
     def _compute_lowerbound_slice(self):
@@ -601,17 +597,31 @@ class Kernel():
 
         # This computes the shape of the maximum non-zero upper-left block of symHbound
         for i in range(0,self._num_monomials):
-            half_down = symHbound[i:, :]
-            if np.all( half_down == 0 ): break
+            symHbound22 = symHbound[i:,i:]
+            if np.all( symHbound22 == 0 ): break
         
         self._lowerbound_slice = ( slice(0,symHbound.shape[0]), slice(0,symHbound.shape[1]) )
-        if np.all( half_down == 0 ):
+        if np.all( symHbound22 == 0 ):
             self._lowerbound_slice = ( slice(0,i), slice(0,i) )
 
     def _reduced_lowerbound_matrix(self, shape_matrix):
         ''' Extract only the nonzero eigenvalues from the lowerbound matrix '''
-        H = self._lowerbound_matrix(shape_matrix)[self._lowerbound_slice]
-        return H + H.T
+
+        lines = self._lowerbound_slice[0]
+        columns = self._lowerbound_slice[1]
+
+        R11 = self._lowerbound_matrix(shape_matrix)[self._lowerbound_slice]
+        # R12 = self._lowerbound_matrix(shape_matrix)[lines, columns.stop: ]
+        # R21 = self._lowerbound_matrix(shape_matrix)[lines.stop:, columns ]      # R21 = R12.T
+        # R22 = self._lowerbound_matrix(shape_matrix)[lines.stop:, columns.stop: ]
+
+        # if isinstance(shape_matrix, np.ndarray):
+        #     reduced_lowerbound = np.block([ [R11, R12 @ R21], [R12 @ R21, np.zeros((lines.stop, columns.stop))] ])
+
+        # if isinstance(shape_matrix, cp.Variable):
+        #     reduced_lowerbound = cp.bmat([ [R11, R12 @ R21], [R12 @ R21, np.zeros((lines.stop, columns.stop))] ])
+
+        return R11
 
     def set_param(self, **kwargs):
         ''' Sets the kernel parameters '''
@@ -1222,7 +1232,7 @@ class KernelTriplet():
         self.CVXPY_family_cost = cp.norm(self.CVXPY_P - self.CVXPY_Pnom)
         self.CVXPY_family_constraints = [ self.CVXPY_P >> 0, 
                                           cp.lambda_max(self.CVXPY_P) <= self.max_P_eig, 
-                                          self.kernel._reduced_lowerbound_matrix(self.CVXPY_P) >> 0 ]
+                                          self.kernel._lowerbound_matrix2(self.CVXPY_P) >> 0 ]
         self.CVXPY_family_problem = cp.Problem( cp.Minimize( self.CVXPY_family_cost ), 
                                                 self.CVXPY_family_constraints )
 
