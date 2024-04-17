@@ -72,9 +72,14 @@ Epsilon = Epsilon.T @ Epsilon
 #---- This also works (but restricts P to be partially zero) -----
 cost = cp.norm( P_var - Pnom_var )
 constraints = [ P_var >> 0 ]
-constraints += [ lyap((As@As).T, P_var) >> 0 ]
+constraints += [ lyap((As2).T, P_var) >> 0 ]
+# constraints += [ lyap(As.T, lyap(As.T, P_var)) >> 0 ]
 constraints += [ P12_var[:,:] == 0 ]
 #-----------------------------------------------------------------
+# cost = cp.norm( P_var - Pnom_var )
+# constraints = [ P_var >> 0 ]
+# constraints += [ L12_var == Zeros12 ]
+# constraints += [ lyap((As2).T, P_var) == L_var ]
 
 problem = cp.Problem( cp.Minimize(cost), constraints )
 
@@ -90,7 +95,7 @@ R = lyap(As.T, lyap(As.T, P))
 L = lyap(( As2 ).T, P)
 M = lyap(( As2 - Epsilon ).T, P)
 
-R11 = R[0:n,0:n]
+L11 = L[0:n,0:n]
 
 print(f"M = \n {M}")
 print(f"P = \n {P}")
@@ -98,16 +103,16 @@ print(f"Pfiltered = \n {Pfiltered_var.value}")
 print(f"Pnull = \n {Pnull_var.value}")
 
 print(f"R = \n {R}")
+print(f"λ(R) = \n{np.linalg.eigvals(R)}")
 
 AtPA = As.T @ P @ As
 
 print(f"As.T P A = \n{AtPA}")
 
 # print(f"L_var = \n{L_var.value}")
-print(f"As.T As.T P + P As As = \n{L}")
-print(f"λ(As.T As.T P + P As As) = \n{np.linalg.eigvals(L)}")
+print(f"L = \n{L}")
+print(f"λ(L) = \n{np.linalg.eigvals(L)}")
 
-print(f"λ(R11) = {np.linalg.eigvals(R11)}")
-print(f"λ(R) = {np.linalg.eigvals(R)}")
+print(f"λ(L11) = {np.linalg.eigvals(L11)}")
 
 print(f"λ(P) = {np.linalg.eigvals(P)}")
