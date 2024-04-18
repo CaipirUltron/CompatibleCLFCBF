@@ -516,7 +516,9 @@ class Kernel():
         self._K = commutation_matrix(self._num_monomials)       # commutation matrix to be used later
 
         # Symbolic computations
-        self._sym_shape_matrix = sym.MatrixSymbol('S', self._num_monomials, self._num_monomials)
+        P = sym.MatrixSymbol('P', self._num_monomials, self._num_monomials).as_explicit()
+        self._Psym = sym.Matrix(self._num_monomials, self._num_monomials, lambda i, j: P[min(i,j),max(i,j)])
+
         self._sym_monomials = sym.Matrix(self._monomials)
         self._sym_jacobian_monomials = self._sym_monomials.jacobian(self._symbols)
 
@@ -565,6 +567,7 @@ class Kernel():
             self.A.append( Ak )
 
         self.Asum = sum(self.A)
+        self.Asum2 = self.Asum @ self.Asum
 
     def _compute_N(self):
         '''
@@ -587,13 +590,82 @@ class Kernel():
         for k in range(solutions.shape[1]):
             self.N.append( mat( solutions[:,k] ) )
 
+    def show_structure(self, Msym):
+        '''
+        Computes the structure of the matrices:
+        (As²).T P + P As² + 2 As.T P As
+        '''
+        Lsym = lyap(self.Asum2.T, self._Psym)
+        Lsym_blksize = self._find_partition(Lsym)
+
+        Rsym = 2 * self.Asum.T @ self._Psym @ self.Asum
+        Rsym_blksize = self._find_partition(Rsym)
+
+        sl1 = slice(0,Lsym_blksize)
+        sl2 = slice(Lsym_blksize,Rsym_blksize)
+        sl3 = slice(Rsym_blksize,self._num_monomials)
+
+        M_dependencies, P_structure = self._get_block_dependencies(Msym, sl1, sl2, sl3)
+
+        return M_dependencies, P_structure
+
+    def _find_partition(self, Msym):
+        ''' 
+        Assuming a symmetric input matrix Msym with a structure of the type:
+        [ Msym_11    Msym_12
+          Msym_12.T     0    ], 
+        returns the size of the largest symmetric block (Msym_11).
+        '''
+        for i in range(self._num_monomials):
+            if Msym[i:,i:] == sym.zeros(self._num_monomials-i, self._num_monomials-i):
+                if i == 0: return self._num_monomials
+                else: return i
+
+    def _get_block_dependencies(self, Msym: sym.Matrix, *slices: list[slice]):
+        '''
+        Assume a symmetric symbolic input matrix Msym with a block structure of the type:
+        Msym = [ Msym_11    Msym_12 ... Msym_1N
+                 Msym_12.T  Msym_22 ... Msym_2N
+                     .         .           .
+                 Msym_1N.T  Msym_N2 ... Msym_NN ], 
+        where the slices list fully determine the shape of each block.
+        Assuming that Msym is a linear operator of Psym, with the same block structure 
+        Psym = [ Psym_11    Psym_12 ... Psym_1N
+                 Psym_12.T  Psym_22 ... Psym_2N
+                     .         .           .
+                 Psym_1N.T  Psym_N2 ... Psym_NN ], 
+        this method computes the dependencies of each block Msym_ij on the corresponding blocks Psym_ij.
+        '''
+        num_slices = len(slices)
+        Msym_slices_symbols = [ [ 0 for _ in range(num_slices) ] for _ in range(num_slices) ]
+        Psym_slices_symbols = [ [ 0 for _ in range(num_slices) ] for _ in range(num_slices) ]
+
+        for i, j in itertools.product(range(num_slices), range(num_slices)):
+
+            sl1_i, sl1_j = slices[i], slices[j]
+            Psym_slices_symbols[i][j] = self._Psym[sl1_i, sl1_j].atoms(sym.matrices.expressions.matexpr.MatrixElement)
+            Msym_slices_symbols[i][j] = Msym[sl1_i, sl1_j].atoms(sym.matrices.expressions.matexpr.MatrixElement)
+
+        # From here, blocks are constructed
+        M_dependencies = [ [ [] for _ in range(num_slices) ] for _ in range(num_slices) ]
+        for i, j in itertools.product(range(num_slices), range(num_slices)):
+            curr_Msym_slice = Msym_slices_symbols[i][j]
+            
+            for m, n in itertools.product(range(num_slices), range(num_slices)):
+                curr_Psym_slice = Psym_slices_symbols[m][n]
+
+                if len( curr_Psym_slice & curr_Msym_slice ) > 0 and m <= n:
+                    M_dependencies[i][j] += [(m+1,n+1)]
+
+        return M_dependencies, Psym_slices_symbols
+
     def _lowerbound_matrix(self, shape_matrix):
         ''' Compute the matrix for the lowerbound on the maximum eigenvalue of the Hessian matrix '''
         return lyap(self.Asum.T, lyap(self.Asum.T, shape_matrix))
 
     def _compute_lowerbound_slice(self):
         ''' Compute slice on the lowerbound matrix '''
-        symHbound = self._lowerbound_matrix( self._sym_shape_matrix )
+        symHbound = self._lowerbound_matrix( self._Psym )
 
         # This computes the shape of the maximum non-zero upper-left block of symHbound
         for i in range(0,self._num_monomials):
