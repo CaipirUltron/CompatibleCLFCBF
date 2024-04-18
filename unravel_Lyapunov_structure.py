@@ -8,7 +8,7 @@ from functions import Kernel
 from common import *
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
-d=2
+d=5
 kernel = Kernel(dim=2, degree=d)
 kernel_dim = kernel._num_monomials
 print(kernel)
@@ -25,37 +25,39 @@ Lsym = lyap( As2.T, Psym )
 Rsym = 2 * As.T @ Psym @ As
 Msym = lyap( As.T, lyap( As.T, Psym ) )
 
-print(f"\n R = ")
-sym.pprint(Rsym)
+# print(f"\n R(P) = ")
+# sym.pprint(Rsym)
 
-print("\nR structure = \n")
-R_dependencies, P_structure = kernel.show_structure(Rsym)
+print("\nR(P) >> 0 structure = \n")
+R_dependencies, P_structure, blk_sizes = kernel.show_structure(Rsym)
 for line in R_dependencies:
     print(line)
 
-print(f"\nP structure = ")
-for line in P_structure:
-    sym.pprint(line)
+# print(f"\nP structure = ")
+# for line in P_structure:
+#     sym.pprint(line)
 
-print(f"\n L = ")
+print(f"\n L(P) = ")
 sym.pprint(Lsym)
 
-print("\nL structure = \n")
-L_dependencies, P_structure = kernel.show_structure(Lsym)
+print("\nL(P) structure = \n")
+L_dependencies, P_structure, blk_sizes = kernel.show_structure(Lsym)
 for line in L_dependencies:
     print(line)
 
-print(f"\nP structure = ")
-for line in P_structure:
-    sym.pprint(line)
+# print(f"\nP structure = ")
+# for line in P_structure:
+#     sym.pprint(line)
 
-print(f"\n M = ")
-sym.pprint(Msym)
+# print(f"\n M(P) = ")
+# sym.pprint(Msym)
 
-print("\nM structure = \n")
-M_dependencies, P_structure = kernel.show_structure(Msym)
+print("\nM(P) structure = \n")
+M_dependencies, P_structure, blk_sizes = kernel.show_structure(Msym)
 for line in M_dependencies:
     print(line)
+
+print(f"\nBlock sizes = {blk_sizes}")
 
 print(f"\nP structure = ")
 for line in P_structure:

@@ -72,9 +72,10 @@ Epsilon = Epsilon.T @ Epsilon
 #---- This also works (but restricts P to be partially zero) -----
 cost = cp.norm( P_var - Pnom_var )
 constraints = [ P_var >> 0 ]
-constraints += [ lyap((As2).T, P_var) >> 0 ]
-# constraints += [ lyap(As.T, lyap(As.T, P_var)) >> 0 ]
+# constraints += [ lyap((As2).T, P_var) >> 0 ]
+constraints += [ lyap(As.T, lyap(As.T, P_var)) >> 0 ]
 constraints += [ P12_var[:,:] == 0 ]
+
 #-----------------------------------------------------------------
 # cost = cp.norm( P_var - Pnom_var )
 # constraints = [ P_var >> 0 ]

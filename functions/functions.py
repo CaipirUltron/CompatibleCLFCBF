@@ -607,7 +607,7 @@ class Kernel():
 
         M_dependencies, P_structure = self._get_block_dependencies(Msym, sl1, sl2, sl3)
 
-        return M_dependencies, P_structure
+        return M_dependencies, P_structure, (Lsym_blksize, Rsym_blksize - Lsym_blksize, self._num_monomials - Rsym_blksize )
 
     def _find_partition(self, Msym):
         ''' 
@@ -773,12 +773,10 @@ class Kernel():
         return np.all( self.alpha == other.alpha )
 
     def __str__(self):
-        '''
-        Prints kernel
-        '''
+        ''' Prints kernel '''
         variables = str(self._symbols)
         kernel = str(self._monomials)
-        text = "m: R^" + str(self._dim) + " --> R^" + str(self._num_monomials) + "\nKernel map on variables " + variables + "\nm(x) = " + kernel
+        text = f"m: R^{self._dim} --> R^{self._num_monomials}\nPolynomial kernel map of max. degree {self._degree} on variables " + variables + "\nm(x) = " + kernel
         return text
 
 @dataclass
