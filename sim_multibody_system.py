@@ -3,13 +3,14 @@ import numpy as np
 
 from dataclasses import dataclass
 from scipy.integrate import ode
+# from scipy.constants import G
 
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
 import matplotlib.colors as mcolors
 from matplotlib.patches import Circle
 
-G = 3       # gravitational constant
+G = 4
 
 pos_min, pos_max = -100, 100
 vel_min, vel_max = -20, 20
@@ -82,7 +83,7 @@ def get_flow(t):
     return dstate
 
 #------------------------------ Multibody simulation ----------------------------
-T = 20
+T = 30
 dt = 0.01
 
 diff_equation = ode(get_flow).set_integrator('dopri5')
@@ -116,11 +117,12 @@ fig.tight_layout()
 time_text = ax.text(xmin+5, ymax-20, str("Time = "), fontsize=10)
 time_text.text = str("Time = ")
 
-circles = []
-names = []
+names, circles, trajectories = [], [], []
 for body in bodies:
-    circle = Circle(tuple(body.position), body.radius, color=body.color)
     names.append( ax.text(0, 0, body.name, fontsize=8) )
+    circle = Circle(tuple(body.position), body.radius, color=body.color)
+    traj, = ax.plot([],[],lw=1,ls='--',color=body.color)
+    trajectories.append( traj )
 
     circles.append(circle)
     ax.add_patch(circle)
@@ -132,10 +134,13 @@ def update(step):
     time_text.set_text("Time = " + str(current_time) + "s")
     
     update_bodies(bodies, curr_multibody_state)
-    for circle, body, name in zip(circles, bodies, names):
+    for k, (circle, body, name, traj) in enumerate(zip(circles, bodies, names, trajectories)):
+
+        xdata, ydata = state_log[0:step, 4*k], state_log[0:step, 4*k+1]
+        traj.set_data( xdata, ydata )
         circle.center = tuple(body.position)
         name.set_position(tuple(body.position))
-    return circles + [time_text] + names
+    return circles + [time_text] + names + trajectories
 
 fps = 30
 animation = anim.FuncAnimation(fig, func=update, frames = num_steps, interval=1000/fps, repeat=False, blit=True, cache_frame_data=False)
