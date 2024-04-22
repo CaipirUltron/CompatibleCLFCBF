@@ -33,7 +33,7 @@ class Body():
         
 sun = Body("Sun", mass=1e5, radius=15, color="orange", position=(0, 0), fixed = True)
 
-mercury = Body("Mercury", mass=1e2, radius=2, color="grey", position=(+50, 0), velocity=(0, +60))
+mercury = Body("Mercury", mass=1e2, radius=2, color="grey", position=(+50, 0), velocity=(0, +30))
 venus = Body("Venus", mass=1e2, radius=3, color="yellow", position=(+80, 0), velocity=(0, +60))
 earth = Body("Earth", mass=1e2, radius=4, color="cyan", position=(+110, 0), velocity=(0, +60))
 mars = Body("Mars", mass=1e2, radius=3, color="red", position=(+140, 0), velocity=(0, +60))

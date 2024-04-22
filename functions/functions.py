@@ -11,6 +11,7 @@ import contourpy as ctp
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
+from math import comb
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import wraps
@@ -501,7 +502,7 @@ class Kernel():
     def __init__(self, dim=2, **kwargs):
 
         # Initialization
-        self._dim = 2
+        self._dim = dim
         self.set_param(**kwargs)
 
         # Create symbols
@@ -536,6 +537,19 @@ class Kernel():
         self._lambda_monomials = sym.lambdify( list(self._symbols), self._monomials )
         self._lambda_jacobian_monomials = sym.lambdify( list(self._symbols), self._sym_jacobian_monomials )
         self._lambda_hessian_monomials = sym.lambdify( list(self._symbols), self._hessian_monomials )
+
+        '''
+        Obtained the formula for the dimension of the inner blocks of the lowerbound matrix 
+        by studying its internal structure. Therefore, self._find_partition(), self._get_block_dependencies(), 
+        and self.show_structure() will never need to be used upon the Kernel initialization (would be SUPER costly).
+        '''
+        n = self._dim
+        d = self._degree
+        self._block_sizes = ( comb(n+d-2,n), comb(n+d-2,n-1), comb(n+d-1,n-1) )
+        '''
+        Using self._block_sizes, we can determine the optimal structure of the P matrix to efficiently solve the
+        SDP for finding a valid CLF.
+        '''
 
     def _validate(self, point):
         ''' Validates input data '''
@@ -605,9 +619,9 @@ class Kernel():
         sl2 = slice(Lsym_blksize,Rsym_blksize)
         sl3 = slice(Rsym_blksize,self._num_monomials)
 
-        M_dependencies, P_structure = self._get_block_dependencies(Msym, sl1, sl2, sl3)
+        M_deps, M_deps_summ, P_struc = self._get_block_dependencies(Msym, sl1, sl2, sl3)
 
-        return M_dependencies, P_structure, (Lsym_blksize, Rsym_blksize - Lsym_blksize, self._num_monomials - Rsym_blksize )
+        return M_deps, M_deps_summ, P_struc, (Lsym_blksize, Rsym_blksize - Lsym_blksize, self._num_monomials - Rsym_blksize )
 
     def _find_partition(self, Msym):
         ''' 
@@ -637,8 +651,8 @@ class Kernel():
         this method computes the dependencies of each block Msym_ij on the corresponding blocks Psym_ij.
         '''
         num_slices = len(slices)
-        Msym_slices_symbols = [ [ 0 for _ in range(num_slices) ] for _ in range(num_slices) ]
-        Psym_slices_symbols = [ [ 0 for _ in range(num_slices) ] for _ in range(num_slices) ]
+        Msym_slices_symbols = [ [ None for _ in range(num_slices) ] for _ in range(num_slices) ]
+        Psym_slices_symbols = [ [ None for _ in range(num_slices) ] for _ in range(num_slices) ]
 
         for i, j in itertools.product(range(num_slices), range(num_slices)):
 
@@ -647,25 +661,44 @@ class Kernel():
             Msym_slices_symbols[i][j] = Msym[sl1_i, sl1_j].atoms(sym.matrices.expressions.matexpr.MatrixElement)
 
         # From here, blocks are constructed
-        M_dependencies = [ [ [] for _ in range(num_slices) ] for _ in range(num_slices) ]
+        M_dep = [ [ set() for _ in range(num_slices) ] for _ in range(num_slices) ]
+        M_dep_summ = [ [ [] for _ in range(num_slices) ] for _ in range(num_slices) ]
         for i, j in itertools.product(range(num_slices), range(num_slices)):
             curr_Msym_slice = Msym_slices_symbols[i][j]
             
             for m, n in itertools.product(range(num_slices), range(num_slices)):
                 curr_Psym_slice = Psym_slices_symbols[m][n]
 
-                if len( curr_Psym_slice & curr_Msym_slice ) > 0 and m <= n:
-                    M_dependencies[i][j] += [(m+1,n+1)]
+                common_symbols = curr_Psym_slice & curr_Msym_slice
+                M_dep[i][j] = M_dep[i][j] | common_symbols
 
-        return M_dependencies, Psym_slices_symbols
+                if len( common_symbols ) > 0 and m <= n:
+                    M_dep_summ[i][j] += [(m+1,n+1)]
 
-    def _lowerbound_matrix(self, shape_matrix):
+        return M_dep, M_dep_summ, Psym_slices_symbols
+
+    def _get_Llowerbound(self, shape_matrix):
+        ''' Compute the left part L(P) of the mtrix lowerbound on the 
+        maximum eigenvalue of the Hessian matrix, M(P) = L(P) + R(P) '''
+        return lyap(self.Asum2.T, shape_matrix)
+
+    def _get_Rlowerbound(self, shape_matrix):
+        ''' Compute the left part L(P) of the mtrix lowerbound on the 
+        maximum eigenvalue of the Hessian matrix, M(P) = L(P) + R(P) '''
+        return 2 * self.Asum.T @ shape_matrix @ self.Asum
+
+    def _get_lowerbound(self, shape_matrix):
         ''' Compute the matrix for the lowerbound on the maximum eigenvalue of the Hessian matrix '''
-        return lyap(self.Asum.T, lyap(self.Asum.T, shape_matrix))
+        L = self._get_Llowerbound(shape_matrix)
+        R = self._get_Rlowerbound(shape_matrix)
+        M = L + R
+        if lyap(self.Asum.T, lyap(self.Asum.T, shape_matrix)) != M:
+            raise Exception("This should never happen.")
+        return M
 
     def _compute_lowerbound_slice(self):
         ''' Compute slice on the lowerbound matrix '''
-        symHbound = self._lowerbound_matrix( self._Psym )
+        symHbound = self._get_lowerbound( self._Psym )
 
         # This computes the shape of the maximum non-zero upper-left block of symHbound
         for i in range(0,self._num_monomials):
@@ -682,10 +715,10 @@ class Kernel():
         lines = self._lowerbound_slice[0]
         columns = self._lowerbound_slice[1]
 
-        R11 = self._lowerbound_matrix(shape_matrix)[self._lowerbound_slice]
-        # R12 = self._lowerbound_matrix(shape_matrix)[lines, columns.stop: ]
-        # R21 = self._lowerbound_matrix(shape_matrix)[lines.stop:, columns ]      # R21 = R12.T
-        # R22 = self._lowerbound_matrix(shape_matrix)[lines.stop:, columns.stop: ]
+        R11 = self._get_lowerbound(shape_matrix)[self._lowerbound_slice]
+        # R12 = self._get_lowerbound(shape_matrix)[lines, columns.stop: ]
+        # R21 = self._get_lowerbound(shape_matrix)[lines.stop:, columns ]      # R21 = R12.T
+        # R22 = self._get_lowerbound(shape_matrix)[lines.stop:, columns.stop: ]
 
         # if isinstance(shape_matrix, np.ndarray):
         #     reduced_lowerbound = np.block([ [R11, R12 @ R21], [R12 @ R21, np.zeros((lines.stop, columns.stop))] ])

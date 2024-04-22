@@ -8,8 +8,7 @@ from functions import Kernel
 from common import *
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
-d=5
-kernel = Kernel(dim=2, degree=d)
+kernel = Kernel(dim=2, degree=2)
 kernel_dim = kernel._num_monomials
 print(kernel)
 
@@ -29,9 +28,9 @@ Msym = lyap( As.T, lyap( As.T, Psym ) )
 # sym.pprint(Rsym)
 
 print("\nR(P) >> 0 structure = \n")
-R_dependencies, P_structure, blk_sizes = kernel.show_structure(Rsym)
+R_dependencies, R_dependencies_summ, P_structure, blk_sizes = kernel.show_structure(Rsym)
 for line in R_dependencies:
-    print(line)
+    sym.pprint(line)
 
 # print(f"\nP structure = ")
 # for line in P_structure:
@@ -41,9 +40,12 @@ print(f"\n L(P) = ")
 sym.pprint(Lsym)
 
 print("\nL(P) structure = \n")
-L_dependencies, P_structure, blk_sizes = kernel.show_structure(Lsym)
-for line in L_dependencies:
-    print(line)
+L_dependencies, L_dependencies_summ, P_structure, blk_sizes = kernel.show_structure(Lsym)
+for line in L_dependencies_summ:
+    sym.pprint(line)
+
+print("\nL11(P) = \n")
+sym.pprint(L_dependencies[0][0])
 
 # print(f"\nP structure = ")
 # for line in P_structure:
@@ -53,9 +55,12 @@ for line in L_dependencies:
 # sym.pprint(Msym)
 
 print("\nM(P) structure = \n")
-M_dependencies, P_structure, blk_sizes = kernel.show_structure(Msym)
+M_dependencies, M_dependencies_summ, P_structure, blk_sizes = kernel.show_structure(Msym)
 for line in M_dependencies:
-    print(line)
+    sym.pprint(line)
+
+print("\nM13(P) = \n")
+sym.pprint(M_dependencies[0][2])
 
 print(f"\nBlock sizes = {blk_sizes}")
 
