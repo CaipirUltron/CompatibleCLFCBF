@@ -18,8 +18,8 @@ limits = 10*np.array([[-1, 1],[-1, 1]])
 ax.set_xlim(limits[0][0], limits[0][1])
 ax.set_ylim(limits[1][0], limits[1][1])
 
-kernel = Kernel(*initial_state, degree=3)
-p = kernel.kernel_dim
+kernel = Kernel(dim=2, degree=3)
+p = kernel._num_monomials
 Amatrices = kernel.get_A_matrices()
 
 Asum = sum(Amatrices)
