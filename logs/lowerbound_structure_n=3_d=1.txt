@@ -1,0 +1,41 @@
+m: R^3 --> R^4
+Polynomial kernel map of max. degree 1 on variables [x1, x2, x3]
+m(x) = [1, x1, x2, x3]
+
+P symbols = {P₀₀, P₀₁, P₀₂, P₀₃, P₁₁, P₁₂, P₁₃, P₂₂, P₂₃, P₃₃}
+
+Block sizes = (4, -3, 3)
+
+P structure = [{P₀₀, P₀₁, P₀₂, P₀₃, P₁₁, P₁₂, P₁₃, P₂₂, P₂₃, P₃₃}, set(), {P₀₁, P₀₂, P₀₃, P₁₁, P₁₂, P₁₃, P₂₂, P₂₃, P₃₃}]
+              [set(), set(), set()]
+              [{P₀₁, P₀₂, P₀₃, P₁₁, P₁₂, P₁₃, P₂₂, P₂₃, P₃₃}, set(), {P₁₁, P₁₂, P₁₃, P₂₂, P₂₃, P₃₃}]
+
+R(P) >> 0:
+
+R(P) dependencies = [{P₁₁, P₁₂, P₁₃, P₂₂, P₂₃, P₃₃}, set(), set()]
+                    [set(), set(), set()]
+                    [set(), set(), set()]
+
+R(P) structure = [[(1, 1), (1, 3), (3, 3)], [], []]
+                 [[], [], []]
+                 [[], [], []]
+
+L(P): 
+
+L(P) dependencies = [set(), set(), set()]
+                    [set(), set(), set()]
+                    [set(), set(), set()]
+
+L(P) structure = [[], [], []]
+                 [[], [], []]
+                 [[], [], []]
+
+L(P) + R(P):
+
+L(P) + R(P) dependencies = [{P₁₁, P₁₂, P₁₃, P₂₂, P₂₃, P₃₃}, set(), set()]
+                           [set(), set(), set()]
+                           [set(), set(), set()]
+
+L(P) + R(P) structure = [[(1, 1), (1, 3), (3, 3)], [], []]
+                        [[], [], []]
+                        [[], [], []]

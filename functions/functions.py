@@ -712,8 +712,8 @@ class Kernel():
     def _reduced_lowerbound_matrix(self, shape_matrix):
         ''' Extract only the nonzero eigenvalues from the lowerbound matrix '''
 
-        lines = self._lowerbound_slice[0]
-        columns = self._lowerbound_slice[1]
+        # lines = self._lowerbound_slice[0]
+        # columns = self._lowerbound_slice[1]
 
         R11 = self._get_lowerbound(shape_matrix)[self._lowerbound_slice]
         # R12 = self._get_lowerbound(shape_matrix)[lines, columns.stop: ]

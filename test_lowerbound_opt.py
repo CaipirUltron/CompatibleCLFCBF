@@ -1,16 +1,13 @@
 import numpy as np
-import sympy as sym
-import scipy as sp
 import cvxpy as cp
-import matplotlib.pyplot as plt
 
-from functions import Kernel, KernelQuadratic, LeadingShape, KernelLyapunov, KernelBarrier
+from functions import Kernel
 from common import lyap
 
 np.set_printoptions(precision=4, suppress=True)
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
-kernel = Kernel(dim=2, degree=2)
+kernel = Kernel(dim=2, degree=3)
 print(kernel)
 kernel_dim = kernel._num_monomials
 
@@ -23,8 +20,14 @@ P_var = cp.Variable( (kernel_dim, kernel_dim), symmetric=True )
 Pnom_var = cp.Parameter( (kernel_dim, kernel_dim), symmetric=True )
 
 blk_sizes = kernel._block_sizes
-print(f"Kernel block sizes = {blk_sizes}")
-if sum(blk_sizes) != kernel_dim: raise Exception("Block sizes is not correctly defined.")
+
+n = kernel._dim
+d = kernel._degree
+
+r = max(n+1, blk_sizes[0])
+Pslice_hor = slice(0,r)
+Pslice_ver = slice(n+1, kernel_dim)
+ZerosPslice = np.zeros([r, kernel_dim-n-1])
 
 sl1 = slice(0, blk_sizes[0])
 sl2 = slice(blk_sizes[0], blk_sizes[0] + blk_sizes[1])
@@ -66,51 +69,37 @@ L_var = cp.bmat([ [L11_var  , L12_var  , L13_var ],
                   [L12_var.T, L22_var  , L23_var ],
                   [L13_var.T, L23_var.T, L33_var ] ])
 
+P = np.random.randn(kernel_dim, kernel_dim)
+Pnom_var.value = P.T @ P
+
 #------------ This works (impossible to give Pnom) ---------------
 # cost = cp.norm( kron @ cp.vec(P_var) - cp.vec(L_var) )
 # constraints = [ Pnom_var >> P_var, P_var >> 0, L_var >> 0 ]
 
-#---- This also works (but restricts P to be partially zero) -----
-cost_subprob1 = cp.norm( P_var - Pnom_var )
-constr_subprob1 = [ P_var >> 0 ]
-# constr_subprob1 += [ lyap(As.T, lyap(As.T, P_var))[sl1,sl2] == Zeros12 ]
-# constr_subprob1 += [ lyap(As.T, lyap(As.T, P_var))[sl1,sl3] == Zeros13 ]
-# constr_subprob1 += [ lyap(As.T, lyap(As.T, P_var))[sl2,sl2] == Zeros22 ]
-constr_subprob1 += [ lyap(As.T, lyap(As.T, P_var)) >> 0 ]
-# constr_subprob1 += [ lyap(As2.T, P_var) >> 0 ]
-
-subprob1 = cp.Problem( cp.Minimize(cost_subprob1), constr_subprob1 )
-
-# cost_subprob2 = cp.norm( P_var - Pnom_var )
-# constr_subprob2 = [ P_var >> 0 ]
-# constr_subprob2 += [ lyap(As.T, lyap(As.T, P_var))[sl1,sl3] == Zeros13 ]
-# constr_subprob2 += [ lyap(As.T, lyap(As.T, P_var))[0:blk_sizes[0]+blk_sizes[1],0:blk_sizes[0]+blk_sizes[1]] >> 0 ]
-# subprob2 = cp.Problem( cp.Minimize(cost_subprob2), constr_subprob2 )
-
-#-----------------------------------------------------------------
-# cost = cp.norm( P_var - Pnom_var )
-# constraints = [ P_var >> 0 ]
-# constraints += [ L12_var == Zeros12 ]
-# constraints += [ lyap((As2).T, P_var) == L_var ]
-
-P = np.random.randn(kernel_dim, kernel_dim)
-Pnom_var.value = P.T @ P
-subprob1.solve(solver="SCS",verbose=True, max_iters=100000)
-
-Lsub1 = lyap(As.T, lyap(As.T, P_var.value))
-
-print(f"L = {Lsub1}")
-
-# Pnom_var.value = P_var.value
-# subprob2.solve(verbose=True, max_iters=50000)
+#---- This also works (but restricts P to be partially zero according to block pattern) -----
+cost = cp.norm( P_var - Pnom_var )
+constraints = [ P_var >> 0 ]
+constraints += [ P_var[Pslice_hor, Pslice_ver] == ZerosPslice ]
+# constraints += [ lyap(As.T, lyap(As.T, P_var)) >> 0 ]
+constraints += [ lyap(As2.T, P_var) == 0 ]
+#---------------------------------------------------------------------------------------------
+prob = cp.Problem( cp.Minimize(cost), constraints )
+prob.solve(solver="SCS",verbose=True, max_iters=100000)
 
 P = P_var.value
-
-# L = lyap(( As2 ).T, P)
+L = lyap(As2.T, P)
+R = 2* As.T @ P @ As
 M = lyap(As.T, lyap(As.T, P))
 
+print(f"Kernel block sizes = {blk_sizes}")
+if sum(blk_sizes) != kernel_dim: raise Exception("Block sizes are not correctly defined.")
+
 print(f"P = \n {P}")
+print(f"L = {L}")
+print(f"L = {R}")
 print(f"M = \n{M}")
 
-print(f"λ(M) = \n{np.linalg.eigvals(M)}")
 print(f"λ(P) = {np.linalg.eigvals(P)}")
+print(f"λ(L) = \n{np.linalg.eigvals(L)}")
+print(f"λ(R) = \n{np.linalg.eigvals(R)}")
+print(f"λ(M) = \n{np.linalg.eigvals(M)}")
