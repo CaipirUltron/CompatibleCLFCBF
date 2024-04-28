@@ -22,10 +22,7 @@ kernel_dim = kernel._num_monomials
 
 As = kernel.Asum
 As2 = As @ As
-Ip = np.eye(kernel_dim)
-kron = np.kron(As2.T, Ip) + np.kron(Ip, As2.T)
 
-P_var = cp.Variable( (kernel_dim, kernel_dim), symmetric=True )
 Pnom_var = cp.Parameter( (kernel_dim, kernel_dim), symmetric=True )
 
 n = kernel._dim
@@ -53,7 +50,23 @@ I1 = np.eye(blk_sizes[0])
 I2 = np.eye(blk_sizes[1])
 I3 = np.eye(blk_sizes[2])
 
-P11_var = cp.Variable( (blk_sizes[0],blk_sizes[0]), symmetric=True )
+Pnn_var = cp.Variable( (n+1,n+1), symmetric=True )
+if r > n+1:
+    P1r_var = cp.Variable( (n+1,r-n-1) )
+    Prr_var = cp.Variable( (r-n-1, r-n-1), symmetric=True )
+
+    Z = np.zeros((n+1,r-n-1))
+    Znn = np.zeros((n+1,n+1))
+    Zrr = np.zeros((r-n-1,r-n-1))
+
+    P11_var = cp.bmat([ [ Pnn_var ,  Z  ], 
+                        [   Z.T   , Zrr ] ])
+    Pbar11_var = cp.bmat([ [   Znn     , P1r_var ], 
+                           [ P1r_var.T , Prr_var ] ])
+else:
+    P11_var = Pnn_var
+    Pbar11_var = np.zeros((n+1,n+1))
+
 P22_var = cp.Variable( (blk_sizes[1],blk_sizes[1]), symmetric=True )
 P33_var = cp.Variable( (blk_sizes[2],blk_sizes[2]), symmetric=True )
 
@@ -61,9 +74,15 @@ P12_var = cp.Variable( (blk_sizes[0],blk_sizes[1]) )
 P13_var = cp.Variable( (blk_sizes[0],blk_sizes[2]) )
 P23_var = cp.Variable( (blk_sizes[1],blk_sizes[2]) )
 
-P_var = cp.bmat([ [P11_var  , P12_var  , P13_var ], 
-                  [P12_var.T, P22_var  , P23_var ],
-                  [P13_var.T, P23_var.T, P33_var ] ])
+Pl_var = cp.bmat([ [P11_var  , Zeros12  , Zeros13 ], 
+                   [Zeros12.T, P22_var  , P23_var ],
+                   [Zeros13.T, P23_var.T, P33_var ] ])
+
+Pr_var = cp.bmat([ [Pbar11_var, P12_var  , P13_var ], 
+                   [P12_var.T , Zeros22  , Zeros23 ],
+                   [P13_var.T , Zeros23.T, Zeros33 ] ])
+
+P_var = Pl_var + Pr_var
 
 L11_var = cp.Variable( (blk_sizes[0],blk_sizes[0]), symmetric=True )
 L22_var = cp.Variable( (blk_sizes[1],blk_sizes[1]), symmetric=True )
@@ -85,10 +104,14 @@ clf = KernelLyapunov(kernel=kernel, P=np.zeros([kernel_dim, kernel_dim]), limits
 
 #---- This also works (but restricts P to be partially zero according to block pattern) -----
 cost = cp.norm( P_var - Pnom_var )
-constraints = [ P_var >> 0 ]
-constraints += [ P_var[Pslice_hor, Pslice_ver] == ZerosPslice ]
-# constraints += [ lyap(As.T, lyap(As.T, P_var)) >> 0 ]
+constraints = [ Pl_var >> 0 ]
 constraints += [ lyap(As2.T, P_var) == 0 ]
+# constraints += [ lyap(As2.T, Pr_var) + 2 * As.T @ P_var @ As >> 0 ]
+# constraints += [ lyap(As2.T, Pr_var) == 0 ]
+
+constraints += [ P12_var == 0, P13_var == 0 ]
+if r > n+1: constraints += [ P1r_var == 0 , Prr_var >> 0 ]
+
 constraints += [ cp.lambda_max(P_var) <= 100 ]
 #---------------------------------------------------------------------------------------------
 prob = cp.Problem( cp.Minimize(cost), constraints )
@@ -113,6 +136,9 @@ while True:
 
     prob.solve(solver="SCS",verbose=True, max_iters=50000)
 
+    Pl = Pl_var.value
+    Pr = Pr_var.value
+
     P = P_var.value
     L = lyap(As2.T, P)
     R = 2* As.T @ P @ As
@@ -122,8 +148,11 @@ while True:
     if sum(blk_sizes) != kernel_dim: raise Exception("Block sizes are not correctly defined.")
 
     print(f"P = \n {P}")
+    print(f"Pl = \n {Pl}")
+    print(f"Pr = \n {Pr}")
+
     print(f"L = {L}")
-    print(f"L = {R}")
+    print(f"R = {R}")
     print(f"M = \n{M}")
 
     print(f"λ(P) = {np.linalg.eigvals(P)}")

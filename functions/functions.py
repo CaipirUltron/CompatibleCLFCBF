@@ -82,7 +82,9 @@ class Function(ABC):
                     spacing - grid spacing for contour generation
         '''        
         if self._dim != 2:
-            raise Exception("Contour plot can only be used for 2D functions.")
+            logging.warning("Contour plot can only be used for 2D functions.")
+            self.contour = None
+            return
 
         x_min, x_max, y_min, y_max = self.limits
         x = np.arange(x_min, x_max, self.spacing)
@@ -160,6 +162,7 @@ class Function(ABC):
 
     def get_levels(self, levels=[0.0] ) -> list:
         ''' Generates function level sets from the contour generator object '''
+        if not self.contour: return []
 
         level_contours = []
         for lvl in levels:
@@ -846,6 +849,7 @@ class KernelQuadratic(Function):
         Given a kernel, correctly initialize function.
         '''
         self.kernel = kernel
+        self._dim = self.kernel._dim
         self.kernel_dim = self.kernel._num_monomials
         self.kernel_matrices = self.kernel.get_A_matrices()
         self.matrix_coefs = np.zeros([self.kernel_dim, self.kernel_dim])
