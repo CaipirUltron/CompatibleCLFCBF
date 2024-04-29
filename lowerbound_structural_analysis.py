@@ -24,8 +24,6 @@ This script was used to confirm the hypothesis that the block sizes sequences fo
 as a function of the state dimension n and the max. polynomial degree d.
 '''
 
-import sys
-import numpy as np
 import sympy as sym
 
 from contextlib import redirect_stdout
@@ -33,8 +31,9 @@ from functions import Kernel
 from common import *
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
-kernel = Kernel(dim=3, degree=4)
+kernel = Kernel(dim=2, degree=4)
 kernel_dim = kernel._num_monomials
+# --------------------------------------------------------------------------------------------------------------------------
 
 As = kernel.Asum
 As2 = As @ As
@@ -51,54 +50,63 @@ R_dependencies, R_structure, P_structure, blk_sizes = kernel.show_structure(Rsym
 L_dependencies, L_structure, P_structure, blk_sizes = kernel.show_structure(Lsym)
 M_dependencies, M_structure, P_structure, blk_sizes = kernel.show_structure(Msym)
 
-# Opens file and redirect stdout to opened file
-with open(f'logs/lowerbound_structure_n={kernel._dim}_d={kernel._degree}.txt', 'w') as f:
-    with redirect_stdout(f):
+def printing():
+    ''' Prints '''
+    print(kernel)
 
-        print(kernel)
+    print("\nP symbols = ",end='')
+    sym.pprint(Psymbols, wrap_line=False)
 
-        print("\nP symbols = ",end='')
-        sym.pprint(Psymbols, wrap_line=False)
+    print(f"\nBlock sizes = {blk_sizes}")
 
-        print(f"\nBlock sizes = {blk_sizes}")
+    print(f"\nP structure = ",end='')
+    for i, line in enumerate(P_structure):
+        if i > 0: print(f"              ",end='')
+        sym.pprint(line, wrap_line=False)
 
-        print(f"\nP structure = ",end='')
-        for i, line in enumerate(P_structure):
-            if i > 0: print(f"              ",end='')
-            sym.pprint(line, wrap_line=False)
+    print(f"\nR(P) >> 0:")
 
-        print(f"\nR(P) >> 0:")
+    print(f"\nR(P) dependencies = ",end='')
+    for i, line in enumerate(R_dependencies):
+        if i > 0: print(f"                    ",end='')
+        sym.pprint(line, wrap_line=False)
 
-        print(f"\nR(P) dependencies = ",end='')
-        for i, line in enumerate(R_dependencies):
-            if i > 0: print(f"                    ",end='')
-            sym.pprint(line, wrap_line=False)
+    print(f"\nR(P) structure = ",end='')
+    for i, line in enumerate(R_structure):
+        if i > 0: print(f"                 ",end='')
+        sym.pprint(line, wrap_line=False)
 
-        print(f"\nR(P) structure = ",end='')
-        for i, line in enumerate(R_structure):
-            if i > 0: print(f"                 ",end='')
-            sym.pprint(line, wrap_line=False)
+    print(f"\nL(P): ")
 
-        print(f"\nL(P): ")
+    print(f"\nL(P) dependencies = ",end='')
+    for i, line in enumerate(L_dependencies):
+        if i > 0: print(f"                    ",end='')
+        sym.pprint(line, wrap_line=False)
 
-        print(f"\nL(P) dependencies = ",end='')
-        for i, line in enumerate(L_dependencies):
-            if i > 0: print(f"                    ",end='')
-            sym.pprint(line, wrap_line=False)
+    print(f"\nL(P) structure = ",end='')
+    for i, line in enumerate(L_structure):
+        if i > 0: print(f"                 ",end='')
+        sym.pprint(line, wrap_line=False)
 
-        print(f"\nL(P) structure = ",end='')
-        for i, line in enumerate(L_structure):
-            if i > 0: print(f"                 ",end='')
-            sym.pprint(line, wrap_line=False)
+    print(f"\nL(P) + R(P):")
 
-        print(f"\nL(P) + R(P):")
+    print(f"\nL(P) + R(P) dependencies = ",end='')
+    for i, line in enumerate(M_dependencies):
+        if i > 0: print(f"                           ",end='')
+        sym.pprint(line, wrap_line=False)
 
-        print(f"\nL(P) + R(P) dependencies = ",end='')
-        for i, line in enumerate(M_dependencies):
-            if i > 0: print(f"                           ",end='')
-            sym.pprint(line, wrap_line=False)
+    print(f"\nL(P) + R(P) structure = ",end='')
+    for i, line in enumerate(M_structure):
+        if i > 0: print(f"                        ",end='')
+        sym.pprint(line, wrap_line=False)
 
-        print(f"\nL(P) + R(P) structure = ",end='')
-        for i, line in enumerate(M_structure):
-            if i > 0: print(f"                        ",end='')
-            sym.pprint(line, wrap_line=False)
+# redirect = True
+redirect = False
+if redirect:
+    with open(f'logs/lowerbound_structure_n={kernel._dim}_d={kernel._degree}.txt', 'w') as f:
+        with redirect_stdout(f):
+            printing()
+else:
+    printing()
+
+sym.pprint(Msym)

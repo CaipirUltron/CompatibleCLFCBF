@@ -534,7 +534,7 @@ class Kernel():
         # Compute numeric A and N matrices
         self._compute_A()
         self._compute_N()
-        self._compute_lowerbound_slice()
+        # self._compute_lowerbound_slice()
 
         # Lambda functions
         self._lambda_monomials = sym.lambdify( list(self._symbols), self._monomials )
@@ -548,7 +548,18 @@ class Kernel():
         '''
         n = self._dim
         d = self._degree
-        self._block_sizes = ( comb(n+d-2,n), comb(n+d-2,n-1), comb(n+d-1,n-1) )
+
+        r = comb(n+d-2,n)
+        s = comb(n+d-2,n-1)
+        t = comb(n+d-1,n-1)
+
+        self.blk_sizes = ( min(n+1,r), max(n+1,r)-n-1, s, t )
+        self.sl_n = slice(           0            , sum(self.blk_sizes[0:1]))
+        self.sl_r = slice(sum(self.blk_sizes[0:1]), sum(self.blk_sizes[0:2]))
+        self.sl_s = slice(sum(self.blk_sizes[0:2]), sum(self.blk_sizes[0:3]))
+        self.sl_t = slice(sum(self.blk_sizes[0:3]), sum(self.blk_sizes[0:4]))
+
+        self.max_eigen_P = 500
         '''
         Using self._block_sizes, we can determine the optimal structure of the P matrix to efficiently solve the
         SDP for finding a valid CLF.
@@ -559,6 +570,63 @@ class Kernel():
         if not isinstance(point, (list, tuple, np.ndarray)): raise Exception("Input data point is not a numeric array.")
         if isinstance(point, np.ndarray): point = point.tolist()
         return point
+
+    def _init_CLF_opt(self):
+        '''  '''
+        n = self._dim
+        blk_sizes = self._block_sizes
+        r = max(n+1, blk_sizes[0])
+
+        Zeros11 = np.zeros((blk_sizes[0],blk_sizes[0]))
+        Zeros22 = np.zeros((blk_sizes[1],blk_sizes[1]))
+        Zeros33 = np.zeros((blk_sizes[2],blk_sizes[2]))
+
+        Zeros12 = np.zeros((blk_sizes[0],blk_sizes[1]))
+        Zeros13 = np.zeros((blk_sizes[0],blk_sizes[2]))
+        Zeros23 = np.zeros((blk_sizes[1],blk_sizes[2]))
+
+        Pnom_var = cp.Parameter( (self._num_monomials, self._num_monomials), symmetric=True )
+        Pnn_var = cp.Variable( (n+1,n+1), symmetric=True )
+        if r > n+1:
+            P1r_var = cp.Variable( (n+1,r-n-1) )
+            Prr_var = cp.Variable( (r-n-1, r-n-1), symmetric=True )
+
+            Z = np.zeros((n+1,r-n-1))
+            Znn = np.zeros((n+1,n+1))
+            Zrr = np.zeros((r-n-1,r-n-1))
+
+            P11_var = cp.bmat([[ Pnn_var ,  Z  ], 
+                               [   Z.T   , Zrr ]])
+            Pbar11_var = cp.bmat([[   Znn     , P1r_var ], 
+                                  [ P1r_var.T , Prr_var ]])
+        else:
+            P11_var = Pnn_var
+            Pbar11_var = np.zeros((n+1,n+1))
+
+        P22_var = cp.Variable( (blk_sizes[1],blk_sizes[1]), symmetric=True )
+        P33_var = cp.Variable( (blk_sizes[2],blk_sizes[2]), symmetric=True )
+        P12_var = cp.Variable( (blk_sizes[0],blk_sizes[1]) )
+        P13_var = cp.Variable( (blk_sizes[0],blk_sizes[2]) )
+        P23_var = cp.Variable( (blk_sizes[1],blk_sizes[2]) )
+
+        Pl_var = cp.bmat([ [P11_var  , Zeros12  , Zeros13 ], 
+                   [Zeros12.T, P22_var  , P23_var ],
+                   [Zeros13.T, P23_var.T, P33_var ] ])
+
+        Pr_var = cp.bmat([ [Pbar11_var, P12_var  , P13_var ], 
+                        [P12_var.T , Zeros22  , Zeros23 ],
+                        [P13_var.T , Zeros23.T, Zeros33 ] ])
+        
+        P_var = Pl_var + Pr_var
+
+        cost = cp.norm( P_var - Pnom_var )
+        constraints = [ Pl_var >> 0 ]
+        constraints += [ lyap(self.Asum2.T, P_var) == 0 ]
+        constraints += [ P12_var == 0, P13_var == 0 ]
+        if r > n+1: constraints += [ P1r_var == 0 , Prr_var >> 0 ]
+        constraints += [ cp.lambda_max(P_var) <= self.max_eigen_P ]
+
+        self.clf_prob = cp.Problem( cp.Minimize(cost), constraints )
 
     def _compute_A(self):
         '''
@@ -618,9 +686,9 @@ class Kernel():
         Rsym = 2 * self.Asum.T @ self._Psym @ self.Asum
         Rsym_blksize = self._find_partition(Rsym)
 
-        sl1 = slice(0,Lsym_blksize)
-        sl2 = slice(Lsym_blksize,Rsym_blksize)
-        sl3 = slice(Rsym_blksize,self._num_monomials)
+        sl1 = slice(0, Lsym_blksize)
+        sl2 = slice(Lsym_blksize, Rsym_blksize)
+        sl3 = slice(Rsym_blksize, self._num_monomials)
 
         M_deps, M_deps_summ, P_struc = self._get_block_dependencies(Msym, sl1, sl2, sl3)
 
@@ -690,7 +758,7 @@ class Kernel():
         maximum eigenvalue of the Hessian matrix, M(P) = L(P) + R(P) '''
         return 2 * self.Asum.T @ shape_matrix @ self.Asum
 
-    def _get_lowerbound(self, shape_matrix):
+    def get_lowerbound(self, shape_matrix):
         ''' Compute the matrix for the lowerbound on the maximum eigenvalue of the Hessian matrix '''
         L = self._get_Llowerbound(shape_matrix)
         R = self._get_Rlowerbound(shape_matrix)
@@ -699,37 +767,37 @@ class Kernel():
             raise Exception("This should never happen.")
         return M
 
-    def _compute_lowerbound_slice(self):
-        ''' Compute slice on the lowerbound matrix '''
-        symHbound = self._get_lowerbound( self._Psym )
+    # def _compute_lowerbound_slice(self):
+    #     ''' Compute slice on the lowerbound matrix '''
+    #     symHbound = self.get_lowerbound( self._Psym )
 
-        # This computes the shape of the maximum non-zero upper-left block of symHbound
-        for i in range(0,self._num_monomials):
-            symHbound22 = symHbound[i:,i:]
-            if np.all( symHbound22 == 0 ): break
+    #     # This computes the shape of the maximum non-zero upper-left block of symHbound
+    #     for i in range(0,self._num_monomials):
+    #         symHbound22 = symHbound[i:,i:]
+    #         if np.all( symHbound22 == 0 ): break
         
-        self._lowerbound_slice = ( slice(0,symHbound.shape[0]), slice(0,symHbound.shape[1]) )
-        if np.all( symHbound22 == 0 ):
-            self._lowerbound_slice = ( slice(0,i), slice(0,i) )
+    #     self._lowerbound_slice = ( slice(0,symHbound.shape[0]), slice(0,symHbound.shape[1]) )
+    #     if np.all( symHbound22 == 0 ):
+    #         self._lowerbound_slice = ( slice(0,i), slice(0,i) )
 
-    def _reduced_lowerbound_matrix(self, shape_matrix):
-        ''' Extract only the nonzero eigenvalues from the lowerbound matrix '''
+    # def _reduced_lowerbound_matrix(self, shape_matrix):
+    #     ''' Extract only the nonzero eigenvalues from the lowerbound matrix '''
 
-        # lines = self._lowerbound_slice[0]
-        # columns = self._lowerbound_slice[1]
+    #     # lines = self._lowerbound_slice[0]
+    #     # columns = self._lowerbound_slice[1]
 
-        R11 = self._get_lowerbound(shape_matrix)[self._lowerbound_slice]
-        # R12 = self._get_lowerbound(shape_matrix)[lines, columns.stop: ]
-        # R21 = self._get_lowerbound(shape_matrix)[lines.stop:, columns ]      # R21 = R12.T
-        # R22 = self._get_lowerbound(shape_matrix)[lines.stop:, columns.stop: ]
+    #     R11 = self._get_lowerbound(shape_matrix)[self._lowerbound_slice]
+    #     # R12 = self._get_lowerbound(shape_matrix)[lines, columns.stop: ]
+    #     # R21 = self._get_lowerbound(shape_matrix)[lines.stop:, columns ]      # R21 = R12.T
+    #     # R22 = self._get_lowerbound(shape_matrix)[lines.stop:, columns.stop: ]
 
-        # if isinstance(shape_matrix, np.ndarray):
-        #     reduced_lowerbound = np.block([ [R11, R12 @ R21], [R12 @ R21, np.zeros((lines.stop, columns.stop))] ])
+    #     # if isinstance(shape_matrix, np.ndarray):
+    #     #     reduced_lowerbound = np.block([ [R11, R12 @ R21], [R12 @ R21, np.zeros((lines.stop, columns.stop))] ])
 
-        # if isinstance(shape_matrix, cp.Variable):
-        #     reduced_lowerbound = cp.bmat([ [R11, R12 @ R21], [R12 @ R21, np.zeros((lines.stop, columns.stop))] ])
+    #     # if isinstance(shape_matrix, cp.Variable):
+    #     #     reduced_lowerbound = cp.bmat([ [R11, R12 @ R21], [R12 @ R21, np.zeros((lines.stop, columns.stop))] ])
 
-        return R11
+    #     return R11
 
     def set_param(self, **kwargs):
         ''' Sets the kernel parameters '''
@@ -859,8 +927,35 @@ class KernelQuadratic(Function):
 
         self.SHAPE = cp.Variable( (self.kernel_dim,self.kernel_dim), symmetric=True )
 
+        self._init_constrained_shape()
         self.reset_optimization()
 
+    def _init_constrained_shape(self):
+        ''' Initialize constrained shape matrix for CLF computation '''
+
+        blk_sizes = self.kernel.blk_sizes
+        sl_n, sl_r, sl_s, sl_t = self.kernel.sl_n, self.kernel.sl_r, self.kernel.sl_s, self.kernel.sl_t
+
+        Zeros_nr = np.zeros((blk_sizes[0],blk_sizes[1]))
+        Zeros_ns = np.zeros((blk_sizes[0],blk_sizes[2]))
+        Zeros_nt = np.zeros((blk_sizes[0],blk_sizes[3]))
+
+        Zeros_rs = np.zeros((blk_sizes[1],blk_sizes[2]))
+        Zeros_rt = np.zeros((blk_sizes[1],blk_sizes[3]))
+
+        if blk_sizes[0] == 0 and blk_sizes[1] == 0:
+            self.constr_SHAPE = cp.bmat([ [ self.SHAPE[sl_s,sl_s]  , self.SHAPE[sl_s,sl_t] ],
+                                  [ self.SHAPE[sl_s,sl_t].T, self.SHAPE[sl_t,sl_t] ] ])
+        elif blk_sizes[1] == 0:
+            self.constr_SHAPE = cp.bmat([ [ self.SHAPE[sl_n,sl_n],     Zeros_ns      ,     Zeros_nt     ], 
+                                  [    Zeros_ns.T   , self.SHAPE[sl_s,sl_s]  , self.SHAPE[sl_s,sl_t] ],
+                                  [    Zeros_nt.T   , self.SHAPE[sl_s,sl_t].T, self.SHAPE[sl_t,sl_t] ] ])
+        else:
+            self.constr_SHAPE = cp.bmat([ [ self.SHAPE[sl_n,sl_n],     Zeros_nr    ,     Zeros_ns      ,     Zeros_nt     ], 
+                                  [    Zeros_nr.T   , self.SHAPE[sl_r,sl_r],     Zeros_rs      ,     Zeros_rt     ],
+                                  [    Zeros_ns.T   ,     Zeros_rs.T  , self.SHAPE[sl_s,sl_s]  , self.SHAPE[sl_s,sl_t] ],
+                                  [    Zeros_nt.T   ,     Zeros_rt.T  , self.SHAPE[sl_s,sl_t].T, self.SHAPE[sl_t,sl_t] ] ])
+            
     def _gradient_const_matrices(self, shape_matrix):
         ''' Compute constant matrices composing the elements of the gradient '''
 
@@ -923,7 +1018,6 @@ class KernelQuadratic(Function):
         
         self.cost = 0.0
         self.add_psd_constraint()
-        # self.add_non_nsd_Hessian_constraint()
 
     def get_kernel(self):
         ''' Returns the monomial basis vector '''
@@ -1092,8 +1186,8 @@ class KernelQuadratic(Function):
 
     def add_non_nsd_Hessian_constraint(self):
         ''' Non-negative definite Hessian constraint for CVXPY optimization '''
-        # self.constraints.append( self.kernel._reduced_lowerbound_matrix(self.SHAPE) >> 0 )
-        self.constraints.append( self.kernel._lowerbound_matrix2(self.SHAPE) >> 0 )
+        self.constraints += [ lyap(self.kernel.Asum2.T, self.SHAPE) == 0 ]
+        self.constraints += [ self.constr_SHAPE == self.SHAPE ]
 
     def add_point_constraints(self, **point):
         '''

@@ -25,7 +25,6 @@ As2 = As @ As
 Ip = np.eye(kernel_dim)
 kron = np.kron(As2.T, Ip) + np.kron(Ip, As2.T)
 
-P_var = cp.Variable( (kernel_dim, kernel_dim), symmetric=True )
 Pnom_var = cp.Parameter( (kernel_dim, kernel_dim), symmetric=True )
 
 n = kernel._dim
