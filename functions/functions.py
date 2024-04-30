@@ -14,23 +14,11 @@ import matplotlib.colors as mcolors
 from math import comb
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from functools import wraps
 from scipy.optimize import minimize
 from shapely import geometry, intersection
 
 from common import *
 from dynamic_systems import Integrator, KernelAffineSystem
-
-def timeit(func):
-    @wraps(func)
-    def timeit_wrapper(*args, **kwargs):
-        start_time = time.perf_counter()
-        result = func(*args, **kwargs)
-        end_time = time.perf_counter()
-        total_time = end_time - start_time
-        print(f'Function {func.__name__}{args} {kwargs} took {total_time:.6f} seconds.')
-        return result
-    return timeit_wrapper
 
 def commutation_matrix(n):
     '''
@@ -73,30 +61,7 @@ class Function(ABC):
 
         self.set_params(**kwargs)
 
-        self._generate_contour()
-
-    def _generate_contour(self):
-        '''
-        Create contour generator object for the given function.
-        Parameters: limits (2x2 array) - min/max limits for x,y coords
-                    spacing - grid spacing for contour generation
-        '''        
-        if self._dim != 2:
-            logging.warning("Contour plot can only be used for 2D functions.")
-            self.contour = None
-            return
-
-        x_min, x_max, y_min, y_max = self.limits
-        x = np.arange(x_min, x_max, self.spacing)
-        y = np.arange(y_min, y_max, self.spacing)
-        xg, yg = np.meshgrid(x,y)
-        
-        fvalues = np.zeros(xg.shape)
-        for i,j in itertools.product(range(xg.shape[0]), range(xg.shape[1])):
-            pt = np.array([xg[i,j], yg[i,j]])
-            fvalues[i,j] = self.function(pt)
-        
-        self.contour = ctp.contour_generator(x=xg, y=yg, z=fvalues )
+        self.generate_contour()
 
     def _validate(self, point):
         ''' Validates input data '''
@@ -129,6 +94,29 @@ class Function(ABC):
         Overwrite on children classes.
         '''
         pass
+
+    def generate_contour(self):
+        '''
+        Create contour generator object for the given function.
+        Parameters: limits (2x2 array) - min/max limits for x,y coords
+                    spacing - grid spacing for contour generation
+        '''        
+        if self._dim != 2:
+            logging.warning("Contour plot can only be used for 2D functions.")
+            self.contour = None
+            return
+
+        x_min, x_max, y_min, y_max = self.limits
+        x = np.arange(x_min, x_max, self.spacing)
+        y = np.arange(y_min, y_max, self.spacing)
+        xg, yg = np.meshgrid(x,y)
+        
+        fvalues = np.zeros(xg.shape)
+        for i,j in itertools.product(range(xg.shape[0]), range(xg.shape[1])):
+            pt = np.array([xg[i,j], yg[i,j]])
+            fvalues[i,j] = self.function(pt)
+        
+        self.contour = ctp.contour_generator(x=xg, y=yg, z=fvalues )
 
     def function(self, point):
         return self._function(self._validate(point))
@@ -622,7 +610,7 @@ class Kernel():
         constraints += [ lyap(self.Asum2.T, P_var) == 0 ]
         constraints += [ P12_var == 0, P13_var == 0 ]
         if r > n+1: constraints += [ P1r_var == 0 , Prr_var >> 0 ]
-        constraints += [ cp.lambda_max(P_var) <= self.max_eigen_P ]
+        # constraints += [ cp.lambda_max(P_var) <= self.max_eigen_P ]
 
         self.clf_prob = cp.Problem( cp.Minimize(cost), constraints )
 
@@ -886,16 +874,13 @@ class KernelQuadratic(Function):
 
         self.constant = 0.0
 
-        self.cost = 0.0
+        self.cost = None
         self.constraints = []
         self.force_coords = False
         self.force_gradients = False
         self.last_opt_results = None
 
         super().__init__(**kwargs)
-
-        if type(self.cost) != float or len(self.constraints) > 1:
-            self.last_opt_results = self.fitting()
 
     def __str__(self):
         return "Polynominal kernel-based function h(x) = ½ ( k(x)' M k(x) - c )"
@@ -908,7 +893,7 @@ class KernelQuadratic(Function):
         self._dim = self.kernel._dim
         self.kernel_dim = self.kernel._num_monomials
         self.kernel_matrices = self.kernel.get_A_matrices()
-        self.matrix_coefs = np.zeros([self.kernel_dim, self.kernel_dim])
+        self.shape_matrix = None
 
         self.param_dim = int(self.kernel_dim*(self.kernel_dim + 1)/2)
         self.dynamics = Integrator( np.zeros(self.param_dim), np.zeros(self.param_dim) )
@@ -952,15 +937,15 @@ class KernelQuadratic(Function):
 
     def _function(self, point):
         ''' Returns function using self configuration '''
-        return self._fun(point, self.matrix_coefs)
+        return self._fun(point, self.shape_matrix)
 
     def _gradient(self, point):
         ''' Returns gradient using self configuration '''
-        return self._grad(point, self.matrix_coefs)
+        return self._grad(point, self.shape_matrix)
 
     def _hessian(self, point):
         ''' Returns hessian using self configuration '''
-        return np.array(self._hess( point, self.matrix_coefs ))
+        return np.array(self._hess( point, self.shape_matrix ))
 
     def _hessian_quadratic_form(self, x, shape_matrix, v):
         ''' Computes the quadratic form v' H v with hessian matrix H and vector v'''
@@ -986,7 +971,7 @@ class KernelQuadratic(Function):
 
     def get_shape(self):
         ''' Returns the polynomial coefficients '''
-        return self.matrix_coefs
+        return self.shape_matrix
 
     def get_curvature(self, point):
         '''
@@ -1007,7 +992,7 @@ class KernelQuadratic(Function):
         ''' Returns True if the function is SOS convex '''
 
         sos_convex = False
-        SOS_eigs = np.linalg.eigvals( self._SOSconvex_matrix(self.matrix_coefs) )
+        SOS_eigs = np.linalg.eigvals( self._SOSconvex_matrix(self.shape_matrix) )
         if np.all(SOS_eigs >= 0.0): sos_convex = True
 
         if verbose:
@@ -1025,12 +1010,12 @@ class KernelQuadratic(Function):
         bound = None
         lowerbounded, upperbounded = False, False
 
-        lowerbound_eigs = np.linalg.eigvals( self.matrix_coefs - np.array(shape_bound) )
+        lowerbound_eigs = np.linalg.eigvals( self.shape_matrix - np.array(shape_bound) )
         if np.all(lowerbound_eigs >= -threshold): 
             lowerbounded = True
             bound = 'lower'
 
-        upperbound_eigs = np.linalg.eigvals( np.array(shape_bound) - self.matrix_coefs )
+        upperbound_eigs = np.linalg.eigvals( np.array(shape_bound) - self.shape_matrix )
         if np.all(upperbound_eigs >= -threshold): 
             upperbounded = True
             bound = 'upper'
@@ -1047,6 +1032,33 @@ class KernelQuadratic(Function):
             print(message)
 
         return bound
+
+    def set_shape(self, shape_matrix):
+        ''' Setting method for tyhe shape matrix. '''
+
+        # If a one dimensional array was passed, checks if it can be converted to symmetric matrix
+        if shape_matrix.ndim == 1:
+            roots = np.roots([1, 1, -2*len(shape_matrix)])
+            if np.any([ root.is_integer() and root > 0 for root in roots ]):
+                shape_matrix = vector2sym(shape_matrix.tolist())
+            else:
+                raise Exception("Number of coefficients is not compatible with a symmetric matrix.")
+
+        if shape_matrix.shape[0] != shape_matrix.shape[1]:
+            raise Exception("Matrix of coefficients must be a square.")
+        
+        if not np.all( shape_matrix == shape_matrix.T ):
+            warnings.warn("Matrix of coefficients is not symmetric. The symmetric part will be used.")
+
+        # if not np.all(np.linalg.eigvals(shape_matrix) >= -1e-5):
+        #     raise Exception("Matrix of coefficients must be positive semi-definite.")
+
+        if shape_matrix.shape != (self.kernel_dim, self.kernel_dim):
+            raise Exception("Matrix of coefficients doesn't match the kernel dimension.")
+        
+        self.shape_matrix = 0.5 * ( shape_matrix + shape_matrix.T )
+        self.param = sym2vector( self.shape_matrix )
+        self.dynamics.set_state(self.param)
 
     def set_params(self, **kwargs):
         ''' Sets function parameters '''
@@ -1073,47 +1085,20 @@ class KernelQuadratic(Function):
             if key in ["constant", "kernel", "degree"]: # Already dealt with
                 continue
 
+            if key == "coefficients":
+                self.set_shape( np.array(kwargs["coefficients"]) )
+                continue
+
             if key == "force_coords":
                 self.force_coords = kwargs["force_coords"]
                 continue
 
             if key == "force_gradients":
-                self.force_coords = kwargs["force_gradients"]
-                continue
-
-            if key == "coefficients":
-
-                matrix_coefs = np.array(kwargs["coefficients"])
-        
-                # If a one dimensional array was passed, checks if it can be converted to symmetric matrix
-                if matrix_coefs.ndim == 1:
-                    roots = np.roots([1, 1, -2*len(matrix_coefs)])
-                    if np.any([ root.is_integer() and root > 0 for root in roots ]):
-                        matrix_coefs = vector2sym(matrix_coefs.tolist())
-                    else:
-                        raise Exception("Number of coefficients is not compatible with a symmetric matrix.")
-
-                if matrix_coefs.shape[0] != matrix_coefs.shape[1]:
-                    raise Exception("Matrix of coefficients must be a square.")
-                
-                if not np.all( matrix_coefs == matrix_coefs.T ):
-                    warnings.warn("Matrix of coefficients is not symmetric. The symmetric part will be used.")
-
-                # if not np.all(np.linalg.eigvals(matrix_coefs) >= -1e-5):
-                #     raise Exception("Matrix of coefficients must be positive semi-definite.")
-
-                if matrix_coefs.shape[0] != self.kernel_dim:
-                    raise Exception("Matrix of coefficients doesn't match the kernel dimension.")
-
-                self.matrix_coefs = 0.5 * ( matrix_coefs + matrix_coefs.T )
-
-                self.param = sym2vector( self.matrix_coefs )
-                self.dynamics.set_state(self.param)
-                self._generate_contour()
+                self.force_gradients = kwargs["force_gradients"]
                 continue
 
             if key == "points":
-                for point_dict in kwargs["points"]: 
+                for point_dict in kwargs["points"]:
                     self.add_point_constraints(**point_dict)
                 continue
 
@@ -1138,8 +1123,10 @@ class KernelQuadratic(Function):
                 self.add_leading_constraints(leading)
                 continue
 
-        if self.matrix_coefs.shape != (self.kernel_dim, self.kernel_dim):
-            raise Exception("Shape matrix must be (p x p), where p is the kernel dimension.")
+        # If fitting conditions are satisfied, fits and sets new, fitted shape
+        if type(self.cost) != None and len(self.constraints) > 1 and self.shape_matrix == None:
+            fitted_shape = self.fitting()
+            self.set_shape(fitted_shape)
 
     def add_psd_constraint(self):
         ''' Positive semi definite constraint for CVXPY optimization '''
@@ -1147,8 +1134,8 @@ class KernelQuadratic(Function):
 
     def add_non_nsd_Hessian_constraint(self):
         ''' Non-negative definite Hessian constraint for CVXPY optimization '''
-        self.constraints += [ self.kernel.get_left_lowerbound(self.SHAPE) == 0 ]
-        self.constraints += [ self.kernel.get_constrained_shape(self.SHAPE) == self.SHAPE ]
+        Lzero_constraints = [ self.SHAPE @ col == 0 for col in self.kernel.Asum2.T if np.any(col != 0.0) ]
+        self.constraints += Lzero_constraints
 
     def add_point_constraints(self, **point):
         '''
@@ -1270,8 +1257,7 @@ class KernelQuadratic(Function):
 
         if "optimal" in fit_problem.status:
             print("Fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))
-            self.set_params( coefficients = self.SHAPE.value )
-            return fit_problem
+            return self.SHAPE.value
         else:
             raise Exception("Problem is " + fit_problem.status + ".")
         
@@ -1307,7 +1293,7 @@ class KernelLyapunov(KernelQuadratic):
             kwargs["coefficients"] = kwargs.pop("P") # Standard name for CLF shape matrix is P
 
         super().set_params(**kwargs)
-        self.P = self.matrix_coefs
+        self.P = self.shape_matrix
 
 class KernelBarrier(KernelQuadratic):
     '''
@@ -1324,20 +1310,17 @@ class KernelBarrier(KernelQuadratic):
         return "Polynominal kernel-based CBF h(x) = ½ ( k(x)' Q k(x) - 1 )"
 
     def set_params(self, **kwargs):
-        '''
-        Set the parameters of the Kernel Barrier function.
-        Optional: pass a vector of parameters representing the vectorization of matrix Q
-        '''
+        ''' Set the parameters of the Kernel Barrier function.
+        Optional: pass a vector of parameters representing the vectorization of matrix Q '''
+
         if "Q" in kwargs.keys(): 
             kwargs["coefficients"] = kwargs.pop("Q") # Standard name for CBF shape matrix is Q
 
         super().set_params(**kwargs)
-        self.Q = self.matrix_coefs
+        self.Q = self.shape_matrix
 
     def get_boundary(self):
-        '''
-        Computes the boundary level set.
-        '''
+        ''' Computes the boundary level set '''
         return self.get_levels(levels=[0.0])[0]
 
 class KernelTriplet():
@@ -1380,7 +1363,9 @@ class KernelTriplet():
 
         # Initialize cost and constraints for scipy.optimize computation
         self.cost = 0.0
+        self.lowerb_constr = [ 0.0 for col in self.kernel.Asum2.T if np.any(col != 0.0) ]
         self.rem_constr = [ 0.0, 0.0 ]
+        self.max_shape_eigenvalue = 100
 
         # Initialize CVXPY parameters
         self.CVXPY_P = cp.Variable( (self.p,self.p), symmetric=True )
@@ -1972,7 +1957,7 @@ class KernelTriplet():
         np.set_printoptions(precision=4, suppress=True)
 
         is_original_compatible = self.is_compatible()
-        # self.P = self.find_closest_valid( self.clf.P )
+        self.P = self.clf.P
         Pnom = self.clf.P
         self.counter = 0
 
@@ -1987,32 +1972,34 @@ class KernelTriplet():
             return sym2vector(sp.linalg.sqrtm(P))
 
         def objective(var: np.ndarray) -> float:
-            '''
-            Minimizes the changes to the CLF geometry needed for compatibilization.
-            '''
+            ''' Minimizes the changes to the CLF geometry needed for compatibilization '''
             self.counter += 1
-            self.P = self.find_closest_valid( var_to_PSD(var) )
-            # self.P = var_to_PSD(var)
-            print(f"λ(P) = {np.linalg.eigvals(self.P)}")
-            self.update_invariant_set()
-
-            if obj_type == "closest": self.cost = np.linalg.norm( self.P - Pnom, 'fro')
+            P = var_to_PSD(var)
+            if obj_type == "closest": self.cost = np.linalg.norm( P - Pnom, 'fro')
             else: self.cost = 1.0
 
             return self.cost
 
+        def lowerbound_constr(var: np.ndarray) -> list[float]:
+            ''' Avoids creation of undesirable interior equilibria '''
+            P = var_to_PSD(var)
+            self.lowerb_constr = [ np.linalg.norm(P @ col) for col in self.kernel.Asum2.T if np.any(col != 0.0) ]
+            return self.lowerb_constr
+
+        def lambda_max_constr(var: np.ndarray) -> list[float]:
+            ''' Avoids eigenvalues of P from exploding '''
+            P = var_to_PSD(var)
+            return self.max_shape_eigenvalue - max(np.linalg.eigvals(P))
+
         def removability_constr(var: np.ndarray) -> list[float]:
-            '''
-            Removes removable equilibrium points.
-            '''
-            # Updates invariant set
-            self.P = self.find_closest_valid( var_to_PSD(var) )
-            # self.P = var_to_PSD(var)
-            self.update_invariant_set()
+            ''' Removes removable branches '''
+            self.P = var_to_PSD(var)
             
             self.rem_constr = [ 0.0, 0.0 ]
             min_barrier_values, max_barrier_values = [], []
 
+            # The invariant set must be updated to get the 
+            self.update_invariant_set()
             for seg in self.invariant_segs:
                 if seg["removable"] >= 0 :
                     min_barrier_values.append( seg["segment_critical"] )        # if segment is not removable or removable from outside
@@ -2023,9 +2010,6 @@ class KernelTriplet():
             if len(max_barrier_values): self.rem_constr[1] = -np.max( max_barrier_values ) - self.compatibility_options["barrier_sep"]
 
             return self.rem_constr
-
-        # self.P = self.fit_curvatures( points = [ np.array([5.58003507e-14, 1.13044149e+00]) ], Pinit=Pnom )
-        # self.update_invariant_set()
 
         if animate:
             self.comp_graphics["fig"], ax = plt.subplots(nrows=1, ncols=1)
@@ -2050,9 +2034,14 @@ class KernelTriplet():
 
             if verbose:
                 print( f"Steps = {self.counter}" )
-                print( f"Spectra = {np.linalg.eigvals(self.P)}" )
+                print( f"λ(P) = {np.linalg.eigvals(self.P)}" )
+
+                lambdaM = self.kernel.get_lowerbound(self.P)
+                print( f"λ(M(P)) = {np.linalg.eigvals(lambdaM)}" )
+
                 print( f"Cost = {self.cost}" )
-                print( f"Removability constraint = {self.rem_constr}" )
+                print( f"Lowerbound constraints = {self.lowerb_constr}" )
+                print( f"Removability constraints = {self.rem_constr}" )
                 print(self.comp_process_data["execution_time"], "seconds have passed...")
 
             if animate: 
@@ -2062,21 +2051,24 @@ class KernelTriplet():
             self.counter = 0
             self.comp_process_data["start_time"] = time.perf_counter()
 
-        constraints = [ {"type": "ineq", "fun": removability_constr} ]
+        constraints = [ {"type": "eq", "fun": lowerbound_constr} ]
+        constraints += [ {"type": "ineq", "fun": lambda_max_constr} ]
+        constraints += [ {"type": "ineq", "fun": removability_constr} ]
 
         #--------------------------- Main compatibilization process ---------------------------
         print("Starting compatibilization process. This may take a while...")
         is_processed_compatible = self.is_compatible()
         self.comp_process_data["start_time"] = time.perf_counter()
 
-        while not is_processed_compatible:
+        # while not is_processed_compatible:
 
-            init_var = PSD_to_var(self.P)
-            sol = minimize( objective, init_var, constraints=constraints, callback=intermediate_callback )
-            self.P = self.find_closest_valid( var_to_PSD( sol.x ) )
-            self.update_invariant_set()
+        init_var = PSD_to_var(self.P)
+        sol = minimize( objective, init_var, constraints=constraints, callback=intermediate_callback, options={"ftol": 1e-4} )
 
-            is_processed_compatible = self.is_compatible()
+        self.P = var_to_PSD( sol.x )
+        self.update_invariant_set()
+
+        is_processed_compatible = self.is_compatible()
         # --------------------------- Main compatibilization process ---------------------------
         print(f"Compatibilization terminated with message: {sol.message}")
 
@@ -2186,13 +2178,9 @@ class KernelTriplet():
 
         num_eqs = len(self.boundary_equilibria)
         if num_eqs:
-
             self.clf.set_params(P=self.P)
+            self.clf.generate_contour()
             level = self.clf.function( self.boundary_equilibria[np.random.randint(0,num_eqs)]["x"] )
-
-            pt = np.array([5.58003507e-14, 1.13044149e+00])
-            level = self.clf.function(pt)
-
             self.comp_graphics["clf_artists"] = self.clf.plot_levels(levels = [ level ], ax=ax, limits=self.limits)
 
 class CLBF(KernelQuadratic):

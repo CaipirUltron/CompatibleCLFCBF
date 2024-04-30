@@ -1,14 +1,27 @@
+import time
 import math
 import json
 import itertools
 
 import numpy as np
 
+from functools import wraps
 from scipy.spatial import ConvexHull
 from scipy.optimize import fsolve
 from shapely.geometry import LineString, LinearRing, Polygon
 from shapely.ops import unary_union
 from shapely import is_geometry
+
+def timeit(func):
+    @wraps(func)
+    def timeit_wrapper(*args, **kwargs):
+        start_time = time.perf_counter()
+        result = func(*args, **kwargs)
+        end_time = time.perf_counter()
+        total_time = end_time - start_time
+        print(f'Function {func.__name__}{args} {kwargs} took {total_time:.6f} seconds.')
+        return result
+    return timeit_wrapper
 
 def cofactor(A):
     """

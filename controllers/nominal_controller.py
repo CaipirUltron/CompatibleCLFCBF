@@ -310,7 +310,7 @@ class NominalQP():
         For now, the controller will not modify the CLF.
         '''
         return np.zeros(len(self.clf.param))
-
+    
     def get_clf_constraint(self):
         '''
         Sets the Lyapunov constraint.
@@ -360,11 +360,9 @@ class NominalQP():
         return a_cbf, b_cbf
 
     def update_clf_dynamics(self, piv_ctrl):
-        '''
-        Integrates the dynamic system for the CLF Hessian matrix.
-        '''
+        ''' Integrates the dynamic system for the CLF Hessian matrix '''
         self.clf.update(piv_ctrl, self.ctrl_dt)
-        self.update_timer(self.update_clf_dynamics)
+        # self.update_timer(self.update_clf_dynamics)
 
     def update_timer(self, method):
         '''

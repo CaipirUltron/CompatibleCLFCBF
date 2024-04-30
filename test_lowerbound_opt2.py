@@ -54,19 +54,10 @@ M00_22 = M[ 0:sum(blk_sizes[0:3]), 0:sum(blk_sizes[0:3]) ]
 cost = cp.norm( clf.SHAPE - Pnom_var )
 
 constraints = [ clf.SHAPE >> 0 ]
-# constraints += [ kernel.get_left_lowerbound(clf.SHAPE) == 0 ]
-# constraints += [ kernel.get_constrained_shape(clf.SHAPE) == clf.SHAPE ]
-# constraints += [ L11 == 0 ]
-# constraints += [ M00_22 >> 0 ]
-# constraints += [ R12 == 0 ]
-# constraints += [ L == 0 ]
-
 for col in As2.T:
-    if np.any(col != 0.0): 
+    if np.any(col != 0.0):
         print(f"{col}")
         constraints += [ clf.SHAPE @ col == 0 ]
-
-# constraints += [ L12 == 0, L13 == 0 ]
 #---------------------------------------------------------------------------------------------
 prob = cp.Problem( cp.Minimize(cost), constraints )
 
@@ -81,7 +72,7 @@ while True:
     # clf_center = 10*np.random.randn(2) + center
     # Pnom_var.value = create_quadratic( eigen=clf_eig, R=rot2D(np.deg2rad(clf_angle)), center=clf_center, kernel_dim=kernel_dim )
     # noise = np.zeros([kernel_dim, kernel_dim])
-    # for basis in symmetric_basis(kernel_dim): noise += 0.1*np.random.randn()*basis
+    # for basis in symmetric_basis(kernel_dim): noise += 0.01*np.random.randn()*basis
     # Pnom_var.value += noise.T @ noise
 
     P = np.zeros([kernel_dim, kernel_dim])
