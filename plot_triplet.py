@@ -35,7 +35,7 @@ if hasattr(sim, "quadratic_cbf"):
 num_levels = 5
 contour_unsafe = sim.cbf.plot_levels(ax=ax, levels = [ -(0.5/num_levels)*k for k in range(num_levels-1,-1,-1) ])
 
-print(f"λ(lowerbound) = {np.linalg.eigvals(sim.kernel._reduced_lowerbound_matrix(sim.cbf.Q))}\n")
+print(f"λ(M(P)) = {np.linalg.eigvals(sim.kernel.get_lowerbound(sim.clf.P))}\n")
 
 sim.kerneltriplet.plot_invariant(ax)
 sim.kerneltriplet.plot_attr(ax, "stable_equilibria", mcolors.BASE_COLORS["r"], 1.0)

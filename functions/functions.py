@@ -559,10 +559,8 @@ class Kernel():
         self.sl_s = slice(sum(self.blk_sizes[0:2]), sum(self.blk_sizes[0:3]))
         self.sl_t = slice(sum(self.blk_sizes[0:3]), sum(self.blk_sizes[0:4]))
 
-        self.max_eigen_P = 500
         '''
-        Using self._block_sizes, we can determine the optimal structure of the P matrix to efficiently solve the
-        SDP for finding a valid CLF.
+        Using self.blk_sizes, we can determine the optimal structure of the P matrix to efficiently solve the SDP for finding a valid CLF.
         '''
 
     def _validate(self, point):
@@ -675,25 +673,6 @@ class Kernel():
         for k in range(solutions.shape[1]):
             self.N.append( mat( solutions[:,k] ) )
 
-    def show_structure(self, Msym):
-        '''
-        Computes the structure of the matrices:
-        (As²).T P + P As² + 2 As.T P As
-        '''
-        Lsym = lyap(self.Asum2.T, self._Psym)
-        Lsym_blksize = self._find_partition(Lsym)
-
-        Rsym = 2 * self.Asum.T @ self._Psym @ self.Asum
-        Rsym_blksize = self._find_partition(Rsym)
-
-        sl1 = slice(0, Lsym_blksize)
-        sl2 = slice(Lsym_blksize, Rsym_blksize)
-        sl3 = slice(Rsym_blksize, self._num_monomials)
-
-        M_deps, M_deps_summ, P_struc = self._get_block_dependencies(Msym, sl1, sl2, sl3)
-
-        return M_deps, M_deps_summ, P_struc, (Lsym_blksize, Rsym_blksize - Lsym_blksize, self._num_monomials - Rsym_blksize )
-
     def _find_partition(self, Msym):
         ''' 
         Assuming a symmetric input matrix Msym with a structure of the type:
@@ -748,56 +727,65 @@ class Kernel():
 
         return M_dep, M_dep_summ, Psym_slices_symbols
 
-    def _get_Llowerbound(self, shape_matrix):
-        ''' Compute the left part L(P) of the mtrix lowerbound on the 
-        maximum eigenvalue of the Hessian matrix, M(P) = L(P) + R(P) '''
+    def show_structure(self, Msym):
+        '''
+        Computes the structure of the matrices:
+        (As²).T P + P As² + 2 As.T P As
+        '''
+        Lsym = lyap(self.Asum2.T, self._Psym)
+        Lsym_blksize = self._find_partition(Lsym)
+
+        Rsym = 2 * self.Asum.T @ self._Psym @ self.Asum
+        Rsym_blksize = self._find_partition(Rsym)
+
+        sl1 = slice(0, Lsym_blksize)
+        sl2 = slice(Lsym_blksize, Rsym_blksize)
+        sl3 = slice(Rsym_blksize, self._num_monomials)
+
+        M_deps, M_deps_summ, P_struc = self._get_block_dependencies(Msym, sl1, sl2, sl3)
+
+        return M_deps, M_deps_summ, P_struc, (Lsym_blksize, Rsym_blksize - Lsym_blksize, self._num_monomials - Rsym_blksize )
+
+    def get_left_lowerbound(self, shape_matrix):
+        ''' Compute the left part L(P) of the matrix lowerbound on the maximum eigenvalue of the Hessian matrix, M(P) = L(P) + R(P) '''
         return lyap(self.Asum2.T, shape_matrix)
 
-    def _get_Rlowerbound(self, shape_matrix):
-        ''' Compute the left part L(P) of the mtrix lowerbound on the 
-        maximum eigenvalue of the Hessian matrix, M(P) = L(P) + R(P) '''
+    def get_right_lowerbound(self, shape_matrix):
+        ''' Compute the left part L(P) of the matrix lowerbound on the  maximum eigenvalue of the Hessian matrix, M(P) = L(P) + R(P) '''
         return 2 * self.Asum.T @ shape_matrix @ self.Asum
 
     def get_lowerbound(self, shape_matrix):
         ''' Compute the matrix for the lowerbound on the maximum eigenvalue of the Hessian matrix '''
-        L = self._get_Llowerbound(shape_matrix)
-        R = self._get_Rlowerbound(shape_matrix)
-        M = L + R
-        if lyap(self.Asum.T, lyap(self.Asum.T, shape_matrix)) != M:
-            raise Exception("This should never happen.")
-        return M
+        L = self.get_left_lowerbound(shape_matrix)
+        R = self.get_right_lowerbound(shape_matrix)
+        return L + R
 
-    # def _compute_lowerbound_slice(self):
-    #     ''' Compute slice on the lowerbound matrix '''
-    #     symHbound = self.get_lowerbound( self._Psym )
+    def get_constrained_shape(self, shape_matrix):
+        ''' Get constrained shape matrix '''
 
-    #     # This computes the shape of the maximum non-zero upper-left block of symHbound
-    #     for i in range(0,self._num_monomials):
-    #         symHbound22 = symHbound[i:,i:]
-    #         if np.all( symHbound22 == 0 ): break
-        
-    #     self._lowerbound_slice = ( slice(0,symHbound.shape[0]), slice(0,symHbound.shape[1]) )
-    #     if np.all( symHbound22 == 0 ):
-    #         self._lowerbound_slice = ( slice(0,i), slice(0,i) )
+        blk_sizes = self.blk_sizes
+        sl_n, sl_r, sl_s, sl_t = self.sl_n, self.sl_r, self.sl_s, self.sl_t
 
-    # def _reduced_lowerbound_matrix(self, shape_matrix):
-    #     ''' Extract only the nonzero eigenvalues from the lowerbound matrix '''
+        Zeros_nr = np.zeros((blk_sizes[0],blk_sizes[1]))
+        Zeros_ns = np.zeros((blk_sizes[0],blk_sizes[2]))
+        Zeros_nt = np.zeros((blk_sizes[0],blk_sizes[3]))
 
-    #     # lines = self._lowerbound_slice[0]
-    #     # columns = self._lowerbound_slice[1]
+        Zeros_rs = np.zeros((blk_sizes[1],blk_sizes[2]))
+        Zeros_rt = np.zeros((blk_sizes[1],blk_sizes[3]))
 
-    #     R11 = self._get_lowerbound(shape_matrix)[self._lowerbound_slice]
-    #     # R12 = self._get_lowerbound(shape_matrix)[lines, columns.stop: ]
-    #     # R21 = self._get_lowerbound(shape_matrix)[lines.stop:, columns ]      # R21 = R12.T
-    #     # R22 = self._get_lowerbound(shape_matrix)[lines.stop:, columns.stop: ]
-
-    #     # if isinstance(shape_matrix, np.ndarray):
-    #     #     reduced_lowerbound = np.block([ [R11, R12 @ R21], [R12 @ R21, np.zeros((lines.stop, columns.stop))] ])
-
-    #     # if isinstance(shape_matrix, cp.Variable):
-    #     #     reduced_lowerbound = cp.bmat([ [R11, R12 @ R21], [R12 @ R21, np.zeros((lines.stop, columns.stop))] ])
-
-    #     return R11
+        if blk_sizes[0] == 0 and blk_sizes[1] == 0:
+            constr_SHAPE = cp.bmat([ [ shape_matrix[sl_s,sl_s]  , shape_matrix[sl_s,sl_t] ],
+                                     [ shape_matrix[sl_s,sl_t].T, shape_matrix[sl_t,sl_t] ] ])
+        elif blk_sizes[1] == 0:
+            constr_SHAPE = cp.bmat([ [ shape_matrix[sl_n,sl_n],     Zeros_ns      ,     Zeros_nt     ], 
+                                     [    Zeros_ns.T   , shape_matrix[sl_s,sl_s]  , shape_matrix[sl_s,sl_t] ],
+                                     [    Zeros_nt.T   , shape_matrix[sl_s,sl_t].T, shape_matrix[sl_t,sl_t] ] ])
+        else:
+            constr_SHAPE = cp.bmat([ [ shape_matrix[sl_n,sl_n],     Zeros_nr    ,     Zeros_ns      ,     Zeros_nt     ], 
+                                     [    Zeros_nr.T   , shape_matrix[sl_r,sl_r],     Zeros_rs      ,     Zeros_rt     ],
+                                     [    Zeros_ns.T   ,     Zeros_rs.T  , shape_matrix[sl_s,sl_s]  , shape_matrix[sl_s,sl_t] ],
+                                     [    Zeros_nt.T   ,     Zeros_rt.T  , shape_matrix[sl_s,sl_t].T, shape_matrix[sl_t,sl_t] ] ])
+        return constr_SHAPE
 
     def set_param(self, **kwargs):
         ''' Sets the kernel parameters '''
@@ -927,34 +915,7 @@ class KernelQuadratic(Function):
 
         self.SHAPE = cp.Variable( (self.kernel_dim,self.kernel_dim), symmetric=True )
 
-        self._init_constrained_shape()
         self.reset_optimization()
-
-    def _init_constrained_shape(self):
-        ''' Initialize constrained shape matrix for CLF computation '''
-
-        blk_sizes = self.kernel.blk_sizes
-        sl_n, sl_r, sl_s, sl_t = self.kernel.sl_n, self.kernel.sl_r, self.kernel.sl_s, self.kernel.sl_t
-
-        Zeros_nr = np.zeros((blk_sizes[0],blk_sizes[1]))
-        Zeros_ns = np.zeros((blk_sizes[0],blk_sizes[2]))
-        Zeros_nt = np.zeros((blk_sizes[0],blk_sizes[3]))
-
-        Zeros_rs = np.zeros((blk_sizes[1],blk_sizes[2]))
-        Zeros_rt = np.zeros((blk_sizes[1],blk_sizes[3]))
-
-        if blk_sizes[0] == 0 and blk_sizes[1] == 0:
-            self.constr_SHAPE = cp.bmat([ [ self.SHAPE[sl_s,sl_s]  , self.SHAPE[sl_s,sl_t] ],
-                                  [ self.SHAPE[sl_s,sl_t].T, self.SHAPE[sl_t,sl_t] ] ])
-        elif blk_sizes[1] == 0:
-            self.constr_SHAPE = cp.bmat([ [ self.SHAPE[sl_n,sl_n],     Zeros_ns      ,     Zeros_nt     ], 
-                                  [    Zeros_ns.T   , self.SHAPE[sl_s,sl_s]  , self.SHAPE[sl_s,sl_t] ],
-                                  [    Zeros_nt.T   , self.SHAPE[sl_s,sl_t].T, self.SHAPE[sl_t,sl_t] ] ])
-        else:
-            self.constr_SHAPE = cp.bmat([ [ self.SHAPE[sl_n,sl_n],     Zeros_nr    ,     Zeros_ns      ,     Zeros_nt     ], 
-                                  [    Zeros_nr.T   , self.SHAPE[sl_r,sl_r],     Zeros_rs      ,     Zeros_rt     ],
-                                  [    Zeros_ns.T   ,     Zeros_rs.T  , self.SHAPE[sl_s,sl_s]  , self.SHAPE[sl_s,sl_t] ],
-                                  [    Zeros_nt.T   ,     Zeros_rt.T  , self.SHAPE[sl_s,sl_t].T, self.SHAPE[sl_t,sl_t] ] ])
             
     def _gradient_const_matrices(self, shape_matrix):
         ''' Compute constant matrices composing the elements of the gradient '''
@@ -1186,8 +1147,8 @@ class KernelQuadratic(Function):
 
     def add_non_nsd_Hessian_constraint(self):
         ''' Non-negative definite Hessian constraint for CVXPY optimization '''
-        self.constraints += [ lyap(self.kernel.Asum2.T, self.SHAPE) == 0 ]
-        self.constraints += [ self.constr_SHAPE == self.SHAPE ]
+        self.constraints += [ self.kernel.get_left_lowerbound(self.SHAPE) == 0 ]
+        self.constraints += [ self.kernel.get_constrained_shape(self.SHAPE) == self.SHAPE ]
 
     def add_point_constraints(self, **point):
         '''
@@ -1397,7 +1358,7 @@ class KernelTriplet():
         self.invariant_color = mcolors.BASE_COLORS["k"]
         self.compatibility_options = { "barrier_sep": 0.1, "min_curvature": 1.1 }
         self.interior_eq_threshold = 1e-1
-        self.max_P_eig = 100.0
+        self.max_P_eig = 100
         self.invariant_lines_plot = []
         self.plotted_attrs = {}
 
@@ -1432,10 +1393,11 @@ class KernelTriplet():
 
         self.CVXPY_family_cost = cp.norm(self.CVXPY_P - self.CVXPY_Pnom)
         self.CVXPY_family_constraints = [ self.CVXPY_P >> 0, 
-                                          cp.lambda_max(self.CVXPY_P) <= self.max_P_eig, 
-                                          self.kernel._lowerbound_matrix2(self.CVXPY_P) >> 0 ]
-        self.CVXPY_family_problem = cp.Problem( cp.Minimize( self.CVXPY_family_cost ), 
-                                                self.CVXPY_family_constraints )
+                                          self.kernel.get_left_lowerbound(self.CVXPY_P) == 0,
+                                          self.kernel.get_constrained_shape(self.CVXPY_P) == self.CVXPY_P,
+                                          cp.lambda_max(self.CVXPY_P) <= self.max_P_eig ]
+        
+        self.CVXPY_family_problem = cp.Problem( cp.Minimize( self.CVXPY_family_cost ), self.CVXPY_family_constraints )
 
         # Compute limit lines (obstacle should be completely contained inside the rectangle)
         self.create_limit_lines()
@@ -1722,8 +1684,12 @@ class KernelTriplet():
         ''' Find closest shape matrix to Pnom belongin to family of valid CLFs (without local minima) '''
 
         self.CVXPY_Pnom.value = Pnom
-        self.CVXPY_family_problem.solve(verbose=verbose)
-        return self.CVXPY_P.value
+
+        if np.any( np.linalg.eigvals(self.kernel.get_left_lowerbound(Pnom)) != 0 ):
+            self.CVXPY_family_problem.solve(verbose=verbose)
+            return self.CVXPY_P.value
+        else:
+            return self.CVXPY_Pnom.value
 
     def update_determinant_grid(self):
         '''
@@ -2003,8 +1969,10 @@ class KernelTriplet():
         '''
         This function computes a new CLF geometry that is completely compatible with the original CBF.
         '''
+        np.set_printoptions(precision=4, suppress=True)
+
         is_original_compatible = self.is_compatible()
-        self.P = self.find_closest_valid( self.clf.P )
+        # self.P = self.find_closest_valid( self.clf.P )
         Pnom = self.clf.P
         self.counter = 0
 
@@ -2024,6 +1992,8 @@ class KernelTriplet():
             '''
             self.counter += 1
             self.P = self.find_closest_valid( var_to_PSD(var) )
+            # self.P = var_to_PSD(var)
+            print(f"λ(P) = {np.linalg.eigvals(self.P)}")
             self.update_invariant_set()
 
             if obj_type == "closest": self.cost = np.linalg.norm( self.P - Pnom, 'fro')
@@ -2037,6 +2007,7 @@ class KernelTriplet():
             '''
             # Updates invariant set
             self.P = self.find_closest_valid( var_to_PSD(var) )
+            # self.P = var_to_PSD(var)
             self.update_invariant_set()
             
             self.rem_constr = [ 0.0, 0.0 ]
@@ -2061,13 +2032,11 @@ class KernelTriplet():
 
             ax.set_title("Showing compatibilization process...")
             ax.set_aspect('equal', adjustable='box')
-            ax.set_xlim(self.limits[0][0], self.limits[0][1])
-            ax.set_ylim(self.limits[1][0], self.limits[1][1])
+            ax.set_xlim(self.limits[0], self.limits[1])
+            ax.set_ylim(self.limits[2], self.limits[3])
             self.init_comp_plot(ax)
             plt.pause(self.comp_process_data["gui_eventloop_time"])
         
-        # plt.show()
-
         def intermediate_callback(res: np.ndarray):
             '''
             Callback for visualization of intermediate results (verbose or by animation).
@@ -2218,7 +2187,7 @@ class KernelTriplet():
         num_eqs = len(self.boundary_equilibria)
         if num_eqs:
 
-            self.clf.set_param(P=self.P)
+            self.clf.set_params(P=self.P)
             level = self.clf.function( self.boundary_equilibria[np.random.randint(0,num_eqs)]["x"] )
 
             pt = np.array([5.58003507e-14, 1.13044149e+00])

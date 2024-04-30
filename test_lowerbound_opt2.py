@@ -23,19 +23,50 @@ kernel_dim = kernel._num_monomials
 As = kernel.Asum
 As2 = As @ As
 
+print(f"As2 = {As2}")
+
 Pnom_var = cp.Parameter( (kernel_dim, kernel_dim), symmetric=True )
 
 n = kernel._dim
 d = kernel._degree
-blk_sizes = kernel.blk_sizes
+blk_sizes = kernel.blk_sizes 
+sl_n, sl_r, sl_s, sl_t = kernel.sl_n, kernel.sl_r, kernel.sl_s, kernel.sl_t
 
 clf = KernelLyapunov(kernel=kernel, P=np.zeros([kernel_dim, kernel_dim]), limits=limits)
 
 # ---- This works (but restricts P to be partially zero according to block pattern) -----
+L = kernel.get_left_lowerbound(clf.SHAPE)
+L11 = L[ 0:sum(blk_sizes[0:2]), 0:sum(blk_sizes[0:2]) ]
+L12 = L[sl_n, sl_s]
+if sl_r.stop > sl_r.start: L12 = cp.bmat([ [ L12 ] , [ L[sl_r, sl_s] ] ])
+L13 = L[sl_n, sl_t]
+if sl_r.stop > sl_r.start: L13 = cp.bmat([ [ L13 ] , [ L[sl_r, sl_t] ] ])
+
+R = kernel.get_right_lowerbound(clf.SHAPE)
+R11 = R[ 0:sum(blk_sizes[0:2]), 0:sum(blk_sizes[0:2]) ]
+R22 = R[sl_s,sl_s]
+R12 = R[sl_n, sl_s]
+if sl_r.stop > sl_r.start: R12 = cp.bmat([ [ R12 ] , [ R[sl_r, sl_s] ] ])
+
+M = kernel.get_lowerbound(clf.SHAPE)
+M00_22 = M[ 0:sum(blk_sizes[0:3]), 0:sum(blk_sizes[0:3]) ]
+
 cost = cp.norm( clf.SHAPE - Pnom_var )
+
 constraints = [ clf.SHAPE >> 0 ]
-constraints += [ lyap(As2.T, clf.SHAPE) == 0 ]
-constraints += [ clf.constr_SHAPE == clf.SHAPE ]
+# constraints += [ kernel.get_left_lowerbound(clf.SHAPE) == 0 ]
+# constraints += [ kernel.get_constrained_shape(clf.SHAPE) == clf.SHAPE ]
+# constraints += [ L11 == 0 ]
+# constraints += [ M00_22 >> 0 ]
+# constraints += [ R12 == 0 ]
+# constraints += [ L == 0 ]
+
+for col in As2.T:
+    if np.any(col != 0.0): 
+        print(f"{col}")
+        constraints += [ clf.SHAPE @ col == 0 ]
+
+# constraints += [ L12 == 0, L13 == 0 ]
 #---------------------------------------------------------------------------------------------
 prob = cp.Problem( cp.Minimize(cost), constraints )
 
@@ -60,7 +91,7 @@ while True:
     # P = np.random.randn(kernel_dim, kernel_dim)
     # Pnom_var.value = P.T @ P
 
-    prob.solve(solver="SCS",verbose=True, max_iters=50000)
+    prob.solve(solver="SCS",verbose=True, max_iters=10000)
 
     P = clf.SHAPE.value
     L = lyap(As2.T, P)
