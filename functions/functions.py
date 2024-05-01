@@ -874,11 +874,12 @@ class KernelQuadratic(Function):
 
         self.constant = 0.0
 
-        self.cost = None
+        self.cost = 0.0
         self.constraints = []
         self.force_coords = False
         self.force_gradients = False
         self.last_opt_results = None
+        self.max_eigenvalue = 10.0
 
         super().__init__(**kwargs)
 
@@ -1097,6 +1098,10 @@ class KernelQuadratic(Function):
                 self.force_gradients = kwargs["force_gradients"]
                 continue
 
+            if key == "no_maxima" and kwargs["no_maxima"]:
+                self.add_no_maxima_constraint()
+                continue
+
             if key == "points":
                 for point_dict in kwargs["points"]:
                     self.add_point_constraints(**point_dict)
@@ -1114,6 +1119,14 @@ class KernelQuadratic(Function):
                 self.add_skeleton_constraints( kwargs["skeleton"] )
                 continue
 
+            if key == "safe":
+                self.add_safe_constraints( kwargs["safe"] )
+                continue
+
+            if key == "unsafe":
+                self.add_unsafe_constraints( kwargs["unsafe"] )
+                continue
+
             if key == "leading":
                 leading = kwargs["leading"]
                 if not isinstance(leading, LeadingShape):
@@ -1124,18 +1137,19 @@ class KernelQuadratic(Function):
                 continue
 
         # If fitting conditions are satisfied, fits and sets new, fitted shape
-        if type(self.cost) != None and len(self.constraints) > 1 and self.shape_matrix == None:
+        if type(self.cost) != int and len(self.constraints) > 1 and not np.any(self.shape_matrix):
             fitted_shape = self.fitting()
             self.set_shape(fitted_shape)
 
     def add_psd_constraint(self):
         ''' Positive semi definite constraint for CVXPY optimization '''
-        self.constraints.append( self.SHAPE >> 0 )
+        self.constraints += [ self.SHAPE >> 0 ]
+        # self.cost -= 0.1*cp.log_det(self.SHAPE)
+        self.constraints += [ cp.lambda_max(self.SHAPE) <= self.max_eigenvalue ]
 
-    def add_non_nsd_Hessian_constraint(self):
-        ''' Non-negative definite Hessian constraint for CVXPY optimization '''
-        Lzero_constraints = [ self.SHAPE @ col == 0 for col in self.kernel.Asum2.T if np.any(col != 0.0) ]
-        self.constraints += Lzero_constraints
+    def add_no_maxima_constraint(self): 
+        ''' Non-negative definite Hessian constraint for CVXPY optimization. Prevents occurrence of local maxima '''
+        self.constraints += [ self.SHAPE @ col == 0 for col in self.kernel.Asum2.T if np.any(col != 0.0) ]
 
     def add_point_constraints(self, **point):
         '''
@@ -1218,6 +1232,16 @@ class KernelQuadratic(Function):
         For CLFs/CBFs, these points will act as minima. 
         '''
         self.add_levelset_constraints(point_list, level=-self.constant)
+
+    def add_safe_constraints(self, point_list: list):
+        ''' Adds constraints to guarantee safety of given points '''
+        for pt in point_list:
+            self.constraints += [ self._fun(pt, self.SHAPE) >= 0.0 ]
+
+    def add_unsafe_constraints(self, point_list: list):
+        ''' Adds constraints to guarantee unsafety of given points '''
+        for pt in point_list:
+            self.constraints += [ self._fun(pt, self.SHAPE) <= 0.0 ]
 
     def add_boundary_constraints(self, point_list):
         '''
