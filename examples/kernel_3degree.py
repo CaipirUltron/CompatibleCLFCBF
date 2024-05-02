@@ -35,20 +35,21 @@ clf_center = [0.0, -5.0]
 base_level = 25
 
 points = []
-points.append({ "coords": [ 0.0,  1.0], "gradient": [ 0.0,  1.0], "curvature": -0.3 })
-points.append({ "coords": [-5.0,  3.0], "gradient": [-1.0,  1.0] })
-points.append({ "coords": [ 5.0,  3.0], "gradient": [ 1.0,  1.0] })
-points.append({ "coords": [ 5.0,  0.0], "gradient": [ 1.0, -1.0] })
-points.append({ "coords": [-5.0,  0.0], "gradient": [-1.0, -1.0] })
+points.append({ "coords": [ 0.0,  1.0], "gradient": [ 0.0,  1.0], "curvature": -10.0 })
+# points.append({ "coords": [-5.0,  3.0], "gradient": [-1.0,  1.0] })
+# points.append({ "coords": [ 5.0,  3.0], "gradient": [ 1.0,  1.0] })
+# points.append({ "coords": [ 5.0,  0.0], "gradient": [ 1.0, -1.0] })
+# points.append({ "coords": [-5.0,  0.0], "gradient": [-1.0, -1.0] })
 
 clf_eig = np.array([ 8.0, 1.0 ])
 clf_angle = np.deg2rad(0)
 Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
+clf_leading = LeadingShape(Pquadratic,approximate=True)
 
 # clf = KernelLyapunov(kernel=kernel, P=load_compatible(__file__, Pquadratic, load_compatible=True), limits=limits)
-clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
+# clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
 # clf = KernelLyapunov(kernel=kernel, points=points, centers=[clf_center], limits=limits)
-# clf = KernelLyapunov(kernel=kernel, points=points, centers=[clf_center], leading=LeadingShape(Pquadratic,approximate=True), limits=limits)
+clf = KernelLyapunov(kernel=kernel, points=points, centers=[clf_center], leading=clf_leading, limits=limits)
 clf.is_SOS_convex(verbose=True)
 
 # ------------------------------------------- Define CBF for U-shaped obstacle ---------------------------------------------
@@ -66,18 +67,12 @@ obstacle_poly = skeleton_line.buffer(1.0, cap_style='flat')
 boundary_pts = discretize(obstacle_poly, spacing=0.4)
 
 shape_matrix = circular_boundary_shape( radius=7, center=center, kernel_dim=kernel_dim )
-leading = LeadingShape(shape_matrix, bound='lower')
+cbf_leading = LeadingShape(shape_matrix, bound='lower')
 
-quadratic_cbf = KernelBarrier(kernel=kernel, Q=shape_matrix, limits=limits, spacing=0.1)
+# quadratic_cbf = KernelBarrier(kernel=kernel, Q=shape_matrix, limits=limits, spacing=0.1)
 
-cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, skeleton=skeleton_segs, leading=leading, 
-                    limits=limits, spacing=0.1)
-
-# cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, centers=[center], force_coords=True,
-#                     limits=limits, spacing=0.1)
-
-cbf.is_bounded_by(leading.shape, verbose=True)
-# cbf.is_SOS_convex(verbose=True)
+cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, skeleton=skeleton_segs, leading=cbf_leading, limits=limits, spacing=0.1)
+cbf.is_bounded_by(cbf_leading.shape, verbose=True)
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .002

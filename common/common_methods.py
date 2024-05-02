@@ -298,9 +298,8 @@ def generate_monomial_list(n, max_degree):
     return alpha, powers_by_degree
 
 def generate_monomials_from_symbols(symbol_list, alpha):
-    '''
-    Returns the vector of monomial powers corresponding to alpha, with symbols given by symbol_list
-    '''
+    ''' Returns the vector of monomial powers corresponding to alpha, with symbols given by symbol_list '''
+    
     n = len(symbol_list)
     monomials = []
     for row in alpha:

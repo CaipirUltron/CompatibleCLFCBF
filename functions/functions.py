@@ -882,6 +882,7 @@ class KernelQuadratic(Function):
         self.max_eigenvalue = 10.0
 
         super().__init__(**kwargs)
+        self.reset_optimization()
 
     def __str__(self):
         return "Polynominal kernel-based function h(x) = ½ ( k(x)' M k(x) - c )"
@@ -953,7 +954,7 @@ class KernelQuadratic(Function):
 
         m = self.kernel.function(x)
         H_list = self._hessian_const_matrices(shape_matrix)
-        M = sum([ [ H_list[i][j] * v[i] * v[j] for j in range(self._dim) ] for i in range(self._dim) ])
+        M = sum([ H_list[i][j] * v[i] * v[j] for (i,j) in itertools.product(range(self._dim), range(self._dim)) ])
         return m.T @ M @ m
 
     def _SOSconvex_matrix(self, shape_matrix):
@@ -964,6 +965,7 @@ class KernelQuadratic(Function):
         ''' Reset optimization problem '''
         
         self.cost = 0.0
+        self.constraints = []
         self.add_psd_constraint()
 
     def get_kernel(self):
@@ -1137,14 +1139,13 @@ class KernelQuadratic(Function):
                 continue
 
         # If fitting conditions are satisfied, fits and sets new, fitted shape
-        if type(self.cost) != int and len(self.constraints) > 1 and not np.any(self.shape_matrix):
+        if type(self.cost) != int and len(self.constraints) > 2 and not np.any(self.shape_matrix):
             fitted_shape = self.fitting()
             self.set_shape(fitted_shape)
 
     def add_psd_constraint(self):
         ''' Positive semi definite constraint for CVXPY optimization '''
         self.constraints += [ self.SHAPE >> 0 ]
-        # self.cost -= 0.1*cp.log_det(self.SHAPE)
         self.constraints += [ cp.lambda_max(self.SHAPE) <= self.max_eigenvalue ]
 
     def add_no_maxima_constraint(self): 
@@ -1363,6 +1364,7 @@ class KernelTriplet():
         self.limits = [ [-1, +1] for _ in range(2) ]
         self.spacing = 0.1
         self.invariant_color = mcolors.BASE_COLORS["k"]
+        self.invariant_complete = True
         self.compatibility_options = { "barrier_sep": 0.1, "min_curvature": 1.1 }
         self.interior_eq_threshold = 1e-1
         self.max_P_eig = 100
@@ -1718,8 +1720,9 @@ class KernelTriplet():
         determinant_list = np.linalg.det( self.W_list )
 
         # Eliminate the negative lambda part
-        for k, l in enumerate(self.lambda_grid):
-            if l < 0.0: determinant_list[k] = np.inf
+        if not self.invariant_complete:
+            for k, l in enumerate(self.lambda_grid):
+                if l < 0.0: determinant_list[k] = np.inf
 
         self.determinant_grid = determinant_list.reshape(self.grid_shape)
 
@@ -1781,9 +1784,8 @@ class KernelTriplet():
             show_message(self.interior_equilibria, "interior equilibrium points")
 
     def get_boundary_intersections(self, seg_data: list[np.ndarray]):
-        '''
-        Computes the intersections with boundary segments of a particular segment of the invariant set.
-        '''
+        ''' Computes the intersections with boundary segments of a particular segment of the invariant set '''
+
         intersection_pts = []
         for boundary_line in self.boundary_lines:
             invariant_seg_line = geometry.LineString(seg_data)
@@ -1806,30 +1808,30 @@ class KernelTriplet():
         return intersection_pts
 
     def seg_boundary_equilibria(self, seg_dict: dict[str,]):
-        '''
-        Computes boundary equilibrium points for given segment data. 
-        '''
+        ''' Computes boundary equilibrium points for given segment data '''
+
         seg_dict["boundary_equilibria"] = []
         intersection_pts = self.get_boundary_intersections(seg_dict["points"])
 
+        # Boundary equilibrium are intersection points with positive lambda:
         for pt in intersection_pts:
-            seg_boundary_equilibrium = {"x": pt}
-            seg_boundary_equilibrium["lambda"] = self.lambda_fun(pt)
-            seg_boundary_equilibrium["h"] = self.cbf.function(pt)
-            seg_boundary_equilibrium["nablah"] = self.cbf.gradient(pt)
+            lambda_pt = self.lambda_fun(pt)
+            if lambda_pt >= 0.0:
+                seg_boundary_equilibrium = {"x": pt}
+                seg_boundary_equilibrium["lambda"] = lambda_pt
+                seg_boundary_equilibrium["h"] = self.cbf.function(pt)
+                seg_boundary_equilibrium["nablah"] = self.cbf.gradient(pt)
 
-            stability, eta = self.stability_fun(pt, "boundary")
-            seg_boundary_equilibrium["eta"], seg_boundary_equilibrium["stability"] = eta, stability
-            seg_boundary_equilibrium["equilibrium"] = "stable"
-            if stability > 0:
-                seg_boundary_equilibrium["equilibrium"] = "unstable"
+                stability, eta = self.stability_fun(pt, "boundary")
+                seg_boundary_equilibrium["eta"], seg_boundary_equilibrium["stability"] = eta, stability
+                seg_boundary_equilibrium["equilibrium"] = "stable"
+                if stability > 0: seg_boundary_equilibrium["equilibrium"] = "unstable"
 
-            seg_dict["boundary_equilibria"].append( seg_boundary_equilibrium )
+                seg_dict["boundary_equilibria"].append( seg_boundary_equilibrium )
 
     def seg_interior_equilibria(self, seg_dict: dict[str,]):
-        '''
-        Computes interior equilibrium points for given segment data
-        '''
+        ''' Computes interior equilibrium points for given segment data '''
+
         seg_dict["interior_equilibria"] = []
         seg_data = seg_dict["points"]
 
@@ -2179,17 +2181,14 @@ class KernelTriplet():
             self.plotted_attrs[attr_name][k].set_data( attr[k]["x"][0], attr[k]["x"][1] )
 
     def init_comp_plot(self, ax):
-        '''
-        Initialize compatibilization animation plot
-        '''
+        ''' Initialize compatibilization animation plot '''
         self.comp_graphics["text"] = ax.text(0.01, 0.99, str("Optimization step = 0"), ha='left', va='top', transform=ax.transAxes, fontsize=10)
         self.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=self.limits)
         self.update_comp_plot(ax)
 
     def update_comp_plot(self, ax):
-        '''
-        Update compatibilization animation plot,
-        '''
+        ''' Update compatibilization animation plot '''
+        
         step = self.comp_process_data["step"]
         self.comp_graphics["text"].set_text(f"Optimization step = {step}")
 
