@@ -16,6 +16,7 @@ limits = 12*np.array((-1,1,-1,1))
 kernel = Kernel(dim=n, degree=2)
 kernel_dim = kernel._num_monomials
 print(kernel)
+print(kernel.alpha)
 
 # -------------------------------------------------- Define system ---------------------------------------------------------
 fx, fy = 0.0, 0.0                       # constant force with fx, fy components

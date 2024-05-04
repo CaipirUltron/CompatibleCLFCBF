@@ -1,7 +1,7 @@
 import time
 import math
 import json
-import itertools
+from itertools import product
 
 import numpy as np
 
@@ -279,26 +279,50 @@ def num_comb(n, d):
     '''
     return math.comb(n+d,d)
 
-def generate_monomial_list(n, max_degree):
+def generate_monomials(n, max_degree):
     '''
     Returns the matrix of monomial powers of dimension n up to degree max_degree, with terms in increasing order of degree.
+    If max_degree is an integer, it represents the maximum monomial degree bounding the sum of degrees on each variable.
+    If max_degree is a list of integers, it represents the maximum degree on each variable. 
+    In this case, the resulting monomial list is the  Cartesian product of the set of powers on each variable.
+
+    Returns: (i) a list of monomials (as n-tuples of integers) in increasing degree order.
+            (ii) a list of lists with the same monomials, but organized in increasing degree order. 
     '''
-    powers = np.array(list(itertools.product(*[range(max_degree+1)]*n))) # all possible powers of each variable up to degree max_degree
+
+    invalid_type = not isinstance(max_degree, (int, list, tuple))
+    invalid_list = isinstance(max_degree, (list,tuple)) and ( len(max_degree) != n or np.any([ not isinstance(max_degree[i], int) for i in range(n) ]) )
+    if invalid_type or invalid_list:
+        raise Exception("Degree must be an integer or list of integers of the same size of the input dimension.")
+
+    # If degree is an integer, initialize with all possible monomials up to given degree
+    if isinstance(max_degree, int):
+        powers = list(product(*[range(max_degree+1) for _ in range(n)]))
+        to_be_del = [ power for power in powers if sum(power) > max_degree ]
+        for ele in to_be_del: powers.remove(ele)
+        max_poly_degree = max_degree
+
+    if isinstance(max_degree, list):
+        powers = list(product(*[range(max_degree[i]+1) for i in range(n)]))
+        max_poly_degree = sum(max_degree)
 
     # Stores terms by order of maximum powers, up to max_degree
-    alpha = np.array([], dtype='int64').reshape(0,n)
-    powers_by_degree = []
-    for k in range(max_degree+1):
-        k_th_degree_term = powers[np.where(np.fromiter(map(sum, powers),dtype='int64')==k)]
+    alpha, powers_by_degree = [], []
+    for k in range(max_poly_degree+1):
+        k_th_degree_terms = np.array(powers)[ np.nonzero([ poly_degree == k for poly_degree in map(sum, powers) ]) ]
         if k == 1:
-            k_th_degree_term = np.eye(n, dtype='int64')
-        powers_by_degree.append( k_th_degree_term )
-        alpha = np.vstack([alpha, k_th_degree_term])
+            k_th_degree_terms = np.eye(n, dtype='int64')
+        powers_by_degree.append( k_th_degree_terms.tolist() )
+        for term in k_th_degree_terms: 
+            alpha.append(term.tolist())
 
     return alpha, powers_by_degree
 
-def generate_monomials_from_symbols(symbol_list, alpha):
-    ''' Returns the vector of monomial powers corresponding to alpha, with symbols given by symbol_list '''
+def generate_monomial_symbols(symbol_list, alpha):
+    ''' 
+    Parameters: (i) symbol_list: the list of symbolic state variables;
+               (ii) alpha: the monomial powers, as n-tuples of integers.
+    Returns: the vector of symbolic monomial powers corresponding to alpha, with symbols given by symbol_list. '''
     
     n = len(symbol_list)
     monomials = []

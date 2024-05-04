@@ -486,6 +486,46 @@ class Gaussian(Function):
         v = np.array(point) - self.mu
         return - self.c * np.exp( -v.T @ self.Sigma @ v ) * ( self.Sigma - np.outer( self.Sigma @ v, self.Sigma @ v ) )
 
+class MultiPoly():
+    '''
+    Class for multidimensional polynomial functions of the type f(x) = ∑ c_i [x]^a_i, 
+    where the a_i = [ i_1, i_2, ... i_n ] are multidimensional exponents defining monomials of max. degree (i_1 + i_2 + i_n):
+    [x]^a_i = x_1^(i_1) x_2^(i_2) ... x_n^(i_n)
+    ''' 
+    def __init__(self, dim=2, degree=1, **kwargs):
+
+        self._state_symbol = 'x'
+        for key in kwargs.keys():
+            if key.lower() == "symbol":
+                self._state_symbol = kwargs[key]
+
+        # Create symbolic array
+        self._dim = dim
+        self._symbols = []
+        for dim in range(self._dim):
+            self._symbols.append( sym.Symbol(self._state_symbol + str(dim+1)) )
+
+        self._degree = degree
+        invalid_type = not isinstance(self._degree, (int, list, tuple))
+
+        is_list = isinstance(self._degree, (list,tuple))
+        invalid_list_size = len(self._degree) != self._dim
+        invalid_list_type = np.any([ not isinstance(self._degree[i], int) for i in range(self._dim) ])
+        invalid_list = is_list and ( invalid_list_size or invalid_list_type )
+        if invalid_type or invalid_list:
+            raise Exception("Degree must be an integer or list of integers of the same size of the input dimension.")
+        
+        # If degree is an integer, initialize with all possible monomials up to given degree
+        if isinstance(self._degree, int):
+            self._num_monomials = comb(self._dim + self._degree, self._degree)
+
+        # If degree is a list of integers, initialize with monomials up to given degree on each dimension
+        if isinstance(self._degree, int):
+            self._num_monomials = np.prod([ comb(i + self._degree[i], self._degree[i]) for i in range(self._dim) ])
+
+        self._monomials, self._monomials_by_degree = generate_monomials( self._dim, self._degree )
+        self._monomial_symbols = generate_monomial_symbols( self._symbols, self._monomials )
+
 class Kernel():
     '''
     Class for kernel functions m(x) of maximum degree 2*d, where m(x) is a vector of (n+d,d) known monomials.
@@ -502,8 +542,8 @@ class Kernel():
             self._symbols.append( sym.Symbol('x' + str(dim+1)) )
 
         # Generate monomial list and symbolic monomials
-        self.alpha, self.powers_by_degree = generate_monomial_list( self._dim, self._degree )
-        self._monomials = generate_monomials_from_symbols( self._symbols, self.alpha )
+        self.alpha, self.powers_by_degree = generate_monomials( self._dim, self._degree )
+        self._monomials = generate_monomial_symbols( self._symbols, self.alpha )
         self._num_monomials = len(self._monomials)
         self._K = commutation_matrix(self._num_monomials)       # commutation matrix to be used later
 
@@ -779,13 +819,13 @@ class Kernel():
         ''' Sets the kernel parameters '''
         self._degree = 0
         self._num_monomials = 1
-        self._maxdegree = 2*self._degree
+        # self._maxdegree = 2*self._degree
 
         for key in kwargs:
             if key == "degree":
                 self._degree = kwargs[key]
                 self._num_monomials = num_comb(self._dim, self._degree)
-                self._coefficients = np.zeros([self._num_monomials, self._num_monomials])
+                # self._coefficients = np.zeros([self._num_monomials, self._num_monomials])
 
     def function(self, point):
         ''' Compute kernel function '''
