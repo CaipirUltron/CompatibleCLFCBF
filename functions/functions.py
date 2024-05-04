@@ -54,6 +54,7 @@ class Function(ABC):
 
         # Initialize basic parameters
         self._dim = 2
+        self._output_dim = 1
         self.color = mcolors.BASE_COLORS["k"]
         self.linestyle = "solid"
         self.limits = (-1,1,-1,1)
@@ -61,7 +62,8 @@ class Function(ABC):
 
         self.set_params(**kwargs)
 
-        self.generate_contour()
+        if self._output_dim == 1:
+            self.generate_contour()
 
     def _validate(self, point):
         ''' Validates input data '''
@@ -486,64 +488,46 @@ class Gaussian(Function):
         v = np.array(point) - self.mu
         return - self.c * np.exp( -v.T @ self.Sigma @ v ) * ( self.Sigma - np.outer( self.Sigma @ v, self.Sigma @ v ) )
 
-class MultiPoly():
-    '''
-    Class for multidimensional polynomial functions of the type f(x) = ∑ c_i [x]^a_i, 
-    where the a_i = [ i_1, i_2, ... i_n ] are multidimensional exponents defining monomials of max. degree (i_1 + i_2 + i_n):
-    [x]^a_i = x_1^(i_1) x_2^(i_2) ... x_n^(i_n)
-    ''' 
-    def __init__(self, dim=2, degree=1, **kwargs):
-
-        self._state_symbol = 'x'
-        for key in kwargs.keys():
-            if key.lower() == "symbol":
-                self._state_symbol = kwargs[key]
-
-        # Create symbolic array
-        self._dim = dim
-        self._symbols = []
-        for dim in range(self._dim):
-            self._symbols.append( sym.Symbol(self._state_symbol + str(dim+1)) )
-
-        self._degree = degree
-        invalid_type = not isinstance(self._degree, (int, list, tuple))
-
-        is_list = isinstance(self._degree, (list,tuple))
-        invalid_list_size = len(self._degree) != self._dim
-        invalid_list_type = np.any([ not isinstance(self._degree[i], int) for i in range(self._dim) ])
-        invalid_list = is_list and ( invalid_list_size or invalid_list_type )
-        if invalid_type or invalid_list:
-            raise Exception("Degree must be an integer or list of integers of the same size of the input dimension.")
-        
-        # If degree is an integer, initialize with all possible monomials up to given degree
-        if isinstance(self._degree, int):
-            self._num_monomials = comb(self._dim + self._degree, self._degree)
-
-        # If degree is a list of integers, initialize with monomials up to given degree on each dimension
-        if isinstance(self._degree, int):
-            self._num_monomials = np.prod([ comb(i + self._degree[i], self._degree[i]) for i in range(self._dim) ])
-
-        self._monomials, self._monomials_by_degree = generate_monomials( self._dim, self._degree )
-        self._monomial_symbols = generate_monomial_symbols( self._symbols, self._monomials )
-
 class Kernel():
     '''
     Class for kernel functions m(x) of maximum degree 2*d, where m(x) is a vector of (n+d,d) known monomials.
     '''
     def __init__(self, dim=2, **kwargs):
 
-        # Initialization
         self._dim = dim
-        self.set_param(**kwargs)
+        self._degree = 0
+        self._state_symbol = 'x'
 
-        # Create symbols
+        for key in kwargs.keys():
+            if key.lower() == "symbol":
+                self._state_symbol = kwargs[key]
+            if key.lower() == "degree":
+                self._degree = kwargs[key]
+
         self._symbols = []
         for dim in range(self._dim):
-            self._symbols.append( sym.Symbol('x' + str(dim+1)) )
+            self._symbols.append( sym.Symbol(self._state_symbol + str(dim+1)) )
+
+        invalid_type = not isinstance(self._degree, (int, list, tuple))
+
+        is_list = isinstance(self._degree, (list,tuple))
+        invalid_list = is_list and ( len(self._degree) != self._dim or np.any([ not isinstance(self._degree[i], int) for i in range(self._dim) ]) )
+        if invalid_type or invalid_list:
+            raise Exception("Degree must be an integer or list of integers of the same size of the input dimension.")
+        
+        # If degree is an integer, initialize with all possible monomials up to given degree
+        if isinstance(self._degree, int):
+            self._max_degree = self._degree
+            self._num_monomials = comb(self._dim + self._degree, self._degree)
+
+        # If degree is a list of integers, initialize with monomials up to given degree on each dimension
+        if isinstance(self._degree, (list,tuple)):
+            self._max_degree = sum(self._degree)
+            self._num_monomials = np.prod([ comb(i + self._degree[i], self._degree[i]) for i in range(self._dim) ])
 
         # Generate monomial list and symbolic monomials
-        self.alpha, self.powers_by_degree = generate_monomials( self._dim, self._degree )
-        self._monomials = generate_monomial_symbols( self._symbols, self.alpha )
+        self._powers, self._powers_by_degree = generate_monomials( self._dim, self._degree )
+        self._monomials = generate_monomial_symbols( self._symbols, self._powers )
         self._num_monomials = len(self._monomials)
         self._K = commutation_matrix(self._num_monomials)       # commutation matrix to be used later
 
@@ -575,7 +559,7 @@ class Kernel():
         and self.show_structure() will never need to be used upon the Kernel initialization (would be SUPER costly).
         '''
         n = self._dim
-        d = self._degree
+        d = self._max_degree
 
         r = comb(n+d-2,n)
         s = comb(n+d-2,n-1)
@@ -815,18 +799,6 @@ class Kernel():
                                      [    Zeros_nt.T   ,     Zeros_rt.T  , shape_matrix[sl_s,sl_t].T, shape_matrix[sl_t,sl_t] ] ])
         return constr_SHAPE
 
-    def set_param(self, **kwargs):
-        ''' Sets the kernel parameters '''
-        self._degree = 0
-        self._num_monomials = 1
-        # self._maxdegree = 2*self._degree
-
-        for key in kwargs:
-            if key == "degree":
-                self._degree = kwargs[key]
-                self._num_monomials = num_comb(self._dim, self._degree)
-                # self._coefficients = np.zeros([self._num_monomials, self._num_monomials])
-
     def function(self, point):
         ''' Compute kernel function '''
         return np.array(self._lambda_monomials(*self._validate(point)))
@@ -852,7 +824,7 @@ class Kernel():
         Returns kernel constraints
         '''
         from common import kernel_constraints
-        F, _ = kernel_constraints( point, self.powers_by_degree )
+        F, _ = kernel_constraints( point, self._powers_by_degree )
         return F
 
     def get_matrix_constraints(self):
@@ -860,7 +832,7 @@ class Kernel():
         Returns kernel constraints
         '''
         from common import kernel_constraints
-        _, matrices = kernel_constraints( np.zeros(self.kernel_dim), self.powers_by_degree )
+        _, matrices = kernel_constraints( np.zeros(self._num_monomials), self._powers_by_degree )
         return matrices
 
     def kernel2state(self, kernel_point):
@@ -880,7 +852,7 @@ class Kernel():
             raise Exception("Point must be of the kernel dimension.")
 
         from common import kernel_constraints
-        F, _ = kernel_constraints( point, self.powers_by_degree )
+        F, _ = kernel_constraints( point, self._powers_by_degree )
         if np.linalg.norm(F) < 0.00000001:
             return True
         else:
@@ -890,7 +862,7 @@ class Kernel():
         '''
         Determines if two kernels are the same.
         '''
-        return np.all( self.alpha == other.alpha )
+        return np.all( self._powers == other._powers )
 
     def __str__(self):
         ''' Prints kernel '''
@@ -904,6 +876,132 @@ class LeadingShape:
     shape: np.ndarray
     bound: str = ''
     approximate: bool = False
+
+class KernelLinear(Function):
+    '''
+    Class for multidimensional polynomial functions of the type f(x) = ∑ c_i [x]^a_i, 
+    where the a_i = [ i_1, i_2, ... i_n ] are multidimensional exponents defining monomials of max. degree (i_1 + i_2 + i_n):
+    [x]^a_i = x_1^(i_1) x_2^(i_2) ... x_n^(i_n)
+
+    They use a given polynomial kernel and have constant coefficients c_i, which can be scalars, vectors or matrices.
+    In case of matrix coefficients, KernelLinear represents a class of polynomial matrices on the given kernel.
+    ''' 
+    def __init__(self, **kwargs):
+
+        self._dim = 2
+        super().__init__(**kwargs)
+        print(self)
+
+    def _fun(self, x, coeffs):
+        ''' Returns the function value using given coefficients '''
+        kernel_val = self.kernel.function(x)
+        return sum([ coeffs[k] * kernel_val[k] for k in range(self.kernel_dim) ])
+
+    def _function(self, x):
+        ''' Returns function using self configuration '''
+        return self._fun(x, self._coefficients)
+
+    def _gradient(self, x):
+        ''' Returns gradient using self configuration '''
+        logging.warning("Currently not implemented.")
+
+    def _hessian(self, x):
+        ''' Returns hessian matrix using self configuration '''
+        logging.warning("Currently not implemented.")
+
+    def _initialize(self, kernel):
+        '''
+        Given a kernel, correctly initialize function.
+        '''
+        self.kernel = kernel
+        self._dim = self.kernel._dim
+        self.kernel_dim = self.kernel._num_monomials
+        self.kernel_matrices = self.kernel.get_A_matrices()
+        self._coefficients = [ 0.0 for _ in range(self.kernel_dim) ]
+
+    def set_coefficients(self, coeffs):
+        ''' Setting method for coefficients '''
+
+        # If a one dimensional array was passed, checks if it can be converted to symmetric matrix
+        if not isinstance(coeffs, (list, tuple, np.ndarray)):
+            raise Exception("Coefficients must be array-like.")
+
+        if len(coeffs) != self.kernel_dim:
+            raise Exception("Number of coefficients must be the same as the kernel dimension.")
+
+        def are_all_type( element_list, set_of_types ):
+            ''' 
+            Tests if all elements of element_list are of the types on set_of_types.
+            Raises an error if it detects two or more elements of different type.
+            '''
+            elem_types_insertance = [ isinstance(elem, set_of_types) for elem in element_list ]
+
+            all_are_of_set_of_types = np.all(elem_types_insertance)
+            if (not all_are_of_set_of_types) and np.any(elem_types_insertance):
+                raise Exception("Coefficients are not all of the same type.")
+            return all_are_of_set_of_types
+
+        # Scalar-valued function
+        is_scalar = are_all_type(coeffs, (int,float))
+        if is_scalar:
+            self._func_type = "scalar"
+            self._output_dim = 1
+
+        # Vector/Matrix-valued function
+        is_multidim = are_all_type(coeffs, (list, tuple, np.ndarray))
+        if is_multidim:
+            ndims = np.array([ np.array(coeff).ndim for coeff in coeffs ])
+            
+            if not ndims.tolist().count(ndims[0]) == len(ndims):
+                raise Exception("Passed arrays have different number of dimensions.")
+            
+            if np.all(ndims == 1):
+                self._func_type = "vector"
+                self._output_dim = len(coeffs[0])
+            elif np.all(ndims == 2):
+                self._func_type = "matrix"
+                self._output_dim = coeffs[0].shape
+            else:
+                raise Exception("KernelLinear class only supports scalar, vectors or matrices as coefficients.")
+
+        self._coefficients = coeffs
+
+    def set_params(self, **kwargs):
+        ''' Sets function parameters '''
+
+        super().set_params(**kwargs)
+
+        keys = [ key.lower() for key in kwargs.keys() ] 
+
+        if "kernel" in keys:
+            if type(kwargs["kernel"]) != Kernel:
+                raise Exception("Argument must be a valid Kernel function.")
+            self._initialize( kwargs["kernel"] )
+
+        if "degree" in keys:
+            if "dim" in keys: self._dim = kwargs["dim"]
+            else: print("Kernel dimension was not specified. Initializing with new Kernel of n = 2.")
+            self._initialize( Kernel(dim=self._dim, degree=kwargs["degree"]) )
+
+        for key in keys:
+            if key in ["kernel", "degree"]: # Already dealt with
+                continue
+            if key == "coefficients":
+                self.set_coefficients( kwargs["coefficients"] )
+                continue
+
+    def get_kernel(self):
+        ''' Returns the monomial basis vector '''
+        return self.kernel
+
+    def __str__(self):
+        ''' Prints KernelLinear '''
+        if hasattr(self, "_func_type"):
+            text = f"{self._func_type.capitalize()}-valued polynomial f: R^{self._dim} --> R^{self._output_dim} created from "
+        else:
+            text = f"Polynomial f: R^{self._dim} --> R^? created from "
+        kernel_text = f"polynomial kernel map of max. degree {self.kernel._degree} on variables {self.kernel._symbols}"
+        return text + kernel_text
 
 class KernelQuadratic(Function):
     '''
@@ -1442,13 +1540,13 @@ class KernelTriplet():
         self.CVXPY_base_constraints = [ self.CVXPY_P >> 0, cp.lambda_max(self.CVXPY_P) <= self.max_P_eig ]
         self.CVXPY_constraints = self.CVXPY_base_constraints
 
-        self.CVXPY_family_cost = cp.norm(self.CVXPY_P - self.CVXPY_Pnom)
-        self.CVXPY_family_constraints = [ self.CVXPY_P >> 0, 
-                                          self.kernel.get_left_lowerbound(self.CVXPY_P) == 0,
-                                          self.kernel.get_constrained_shape(self.CVXPY_P) == self.CVXPY_P,
-                                          cp.lambda_max(self.CVXPY_P) <= self.max_P_eig ]
+        # self.CVXPY_family_cost = cp.norm(self.CVXPY_P - self.CVXPY_Pnom)
+        # self.CVXPY_family_constraints = [ self.CVXPY_P >> 0, 
+        #                                   self.kernel.get_left_lowerbound(self.CVXPY_P) == 0,
+        #                                   self.kernel.get_constrained_shape(self.CVXPY_P) == self.CVXPY_P,
+        #                                   cp.lambda_max(self.CVXPY_P) <= self.max_P_eig ]
         
-        self.CVXPY_family_problem = cp.Problem( cp.Minimize( self.CVXPY_family_cost ), self.CVXPY_family_constraints )
+        # self.CVXPY_family_problem = cp.Problem( cp.Minimize( self.CVXPY_family_cost ), self.CVXPY_family_constraints )
 
         # Compute limit lines (obstacle should be completely contained inside the rectangle)
         self.create_limit_lines()

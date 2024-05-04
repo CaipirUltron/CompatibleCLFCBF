@@ -302,19 +302,20 @@ def generate_monomials(n, max_degree):
         for ele in to_be_del: powers.remove(ele)
         max_poly_degree = max_degree
 
-    if isinstance(max_degree, list):
+    if isinstance(max_degree, (list,tuple)):
         powers = list(product(*[range(max_degree[i]+1) for i in range(n)]))
         max_poly_degree = sum(max_degree)
 
     # Stores terms by order of maximum powers, up to max_degree
-    alpha, powers_by_degree = [], []
+    alpha, powers_by_degree = [], {i:[] for i in range(max_poly_degree+1) }
     for k in range(max_poly_degree+1):
-        k_th_degree_terms = np.array(powers)[ np.nonzero([ poly_degree == k for poly_degree in map(sum, powers) ]) ]
-        if k == 1:
-            k_th_degree_terms = np.eye(n, dtype='int64')
-        powers_by_degree.append( k_th_degree_terms.tolist() )
+
+        if k == 1: k_th_degree_terms = np.eye(n, dtype='int')
+        else: k_th_degree_terms = np.array(powers)[ np.nonzero([ poly_degree == k for poly_degree in map(sum, powers) ]) ]
+        
+        powers_by_degree[k] = [ tuple(term) for term in k_th_degree_terms.tolist() ]
         for term in k_th_degree_terms: 
-            alpha.append(term.tolist())
+            alpha.append(tuple(term.tolist()))
 
     return alpha, powers_by_degree
 
@@ -338,6 +339,8 @@ def kernel_constraints( z, terms_by_degree ):
     This algorithm generates the matrices needed to implement all constraints keeping a vector z 
     inside the kernel space of a polynomial kernel represented by powers_by_degree.
     '''
+    raise Exception("DEPRECATED")
+
     max_degree = len(terms_by_degree)-1
     n, p = np.shape(terms_by_degree[0])[1], 0
     for k_th_degree_term in terms_by_degree:
