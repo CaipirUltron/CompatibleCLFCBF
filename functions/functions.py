@@ -7,6 +7,7 @@ import cvxpy as cp
 import logging
 import warnings
 
+import collections
 import contourpy as ctp
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -903,9 +904,147 @@ class Kernel():
 
 @dataclass
 class LeadingShape:
+    ''' Data class for a leading shape (to be used as an approximation tool) '''
     shape: np.ndarray
     bound: str = ''
     approximate: bool = False
+
+@dataclass
+class MultiPoly:
+    kernel: list[tuple[int]]
+    coeffs: list = None
+
+    def __post_init__(self):
+        '''  Post constructor '''
+        if self.coeffs == None:
+            self.coeffs = [ None for _ in self.kernel ]
+        self._sort_kernel()
+
+    def _sort_kernel(self):
+        ''' Reordering of passed monomials, according to: total degree/ordering of variables '''
+
+        def degree_order(zipped_item):
+            mon = zipped_item[0]
+            # coeff = zipped_item[1]
+            return sum(mon)
+
+        def pos_order(zipped_item):
+            mon = zipped_item[0]
+            # coeff = zipped_item[1]
+            return sum([ mon[dim]*(2**dim) for dim in range(len(mon)) ])
+
+        zipped = list(zip(self.kernel, self.coeffs))
+        zipped.sort(key=degree_order)
+
+        powers_by_degree = {}
+        coeffs_by_degree = {}
+        for key, zipped_group in itertools.groupby(zipped, degree_order):
+            powers_by_degree[key] = []
+            coeffs_by_degree[key] = []
+            for ele in zipped_group:
+                powers_by_degree[key].append( ele[0] )
+                coeffs_by_degree[key].append( ele[1] )
+
+            k_th_zipped = list(zip( powers_by_degree[key], coeffs_by_degree[key] ))
+            k_th_zipped.sort(key=pos_order)
+
+            powers_by_degree[key] = [ ele[0] for ele in k_th_zipped ]
+            coeffs_by_degree[key] = [ ele[1] for ele in k_th_zipped ]
+        
+        powers, coeffs = [], []
+        for key in powers_by_degree.keys():
+            powers += powers_by_degree[key]
+            coeffs += coeffs_by_degree[key]
+
+        self.kernel = powers
+        self.coeffs = coeffs
+
+    def _verify_op(self, poly):
+        ''' Checks if aritmetic operations can be executed '''
+
+        type1 = np.array(self.kernel).dtype
+        type2 = np.array(poly.kernel).dtype
+        if (type1, type2) != ('int','int'):
+            raise Exception("Monomial exponents must be integers.")
+
+        equal_coeff_types = np.array([ type(coeff1) == type(coeff2) for (coeff1, coeff2) in zip( self.coeffs, poly.coeffs ) ])
+        if not np.all(equal_coeff_types):
+            raise Exception("Coefficients are not all of the same type.")
+        
+    def _add_sub(self, poly, op=1):
+        ''' Add/subtract two instances of multipoly. Default is adding '''
+
+        self._verify_op(poly)
+        coeff_sample = self.coeffs[0]
+
+        res_kernel = list( set(self.kernel).union(set(poly.kernel)) )
+        
+        if isinstance(coeff_sample, (int, float, sym.Symbol)):
+            res_coeffs = [ 0.0 for _ in res_kernel ]
+        if isinstance(coeff_sample, np.ndarray):
+            res_coeffs = [ np.zeros(coeff_sample.shape) for _ in res_kernel ]
+
+        for k, mon in enumerate(res_kernel):
+
+            if mon in self.kernel:
+                i = self.kernel.index( mon )
+                res_coeffs[k] = self.coeffs[i]
+
+            if mon in poly.kernel:
+                i = poly.kernel.index( mon )
+                if op > 0: res_coeffs[k] += poly.coeffs[i]
+                else: res_coeffs[k] -= poly.coeffs[i]
+
+        return MultiPoly(kernel=res_kernel, coeffs=res_coeffs)
+
+    def __add__(self, poly):
+        ''' Adds two instances of multipoly '''
+        return self._add_sub(poly, 1)
+
+    def __sub__(self, poly):
+        ''' Substracts two instances of multipoly '''
+        return self._add_sub(poly, -1)
+
+    def __mul__(self, poly):
+        ''' Multiply two instances of multipoly '''
+
+        self._verify_op(poly)
+
+        multiply_as_matrix = False
+        res_kernel, res_coeffs = [], []
+
+        zipped1 = zip(self.kernel, self.coeffs)
+        zipped2 = zip(poly.kernel, poly.coeffs)
+
+        # Initialization of coefficients
+        data_sample = self.coeffs[0]
+        if isinstance(data_sample, (int, float, sym.Symbol)):
+            coeff_init = 0.0
+        if isinstance(data_sample, (np.ndarray)):
+            coeff_init = np.zeros(data_sample.shape)
+            if data_sample.ndim == 2: 
+                multiply_as_matrix = True
+
+        # Populate coefficients
+        for (z1, z2) in itertools.product( zipped1, zipped2 ):
+
+            mon1, coeff1 = z1[0], z1[1]
+            mon2, coeff2 = z2[0], z2[1]
+
+            mon = tuple(sum([np.array(mon1), np.array(mon2)]))
+            if mon not in res_kernel: 
+                res_kernel.append( mon )
+                res_coeffs.append( coeff_init )
+                index = -1
+            else:
+                index = res_kernel.index( mon )
+
+            if multiply_as_matrix:
+                res_coeffs[index] += coeff1 @ coeff2
+            else:
+                res_coeffs[index] += coeff1 * coeff2
+
+        return MultiPoly(kernel=res_kernel, coeffs=res_coeffs)
 
 class KernelLinear(Function):
     '''
@@ -929,7 +1068,7 @@ class KernelLinear(Function):
 
     def _function(self, x):
         ''' Returns function using self configuration '''
-        return self._fun(x, self._coefficients)
+        return self._fun(x, self.coeffs )
 
     def _gradient(self, x):
         ''' Returns gradient using self configuration '''
@@ -947,7 +1086,7 @@ class KernelLinear(Function):
         self._dim = self.kernel._dim
         self.kernel_dim = self.kernel._num_monomials
         self.kernel_matrices = self.kernel.get_A_matrices()
-        self._coefficients = [ 0.0 for _ in range(self.kernel_dim) ]
+        self.coeffs = [ 0.0 for _ in range(self.kernel_dim) ]
 
         self._compute_sos()
         self._compute_sos_index()
@@ -1047,11 +1186,11 @@ class KernelLinear(Function):
             else:
                 raise Exception("KernelLinear class only supports scalar, vectors or matrices as coefficients.")
 
-        self._coefficients = coeffs
+        self.coeffs = coeffs
 
         # If function is scalar, load the sos_shape_matrix corresponding to the coefficients 
         if self._func_type == "scalar":    
-            self._sos_shape_matrix = np.array( self.get_sos_shape(self._coefficients) )
+            self._sos_shape_matrix = np.array( self.get_sos_shape(self.coeffs) )
 
     def set_params(self, **kwargs):
         ''' Sets function parameters '''
@@ -1100,16 +1239,23 @@ class KernelLinear(Function):
 
         return shape_matrix
 
-    def poly_determinant(self):
-        ''' Returns: the polynomial determinant of the polynomial matrix '''
+    def __add__(self, poly):
+        pass
 
-        if self._func_type != "matrix":
-            logging.warning("Not a matrix-valued polynomial: cannot compute its determinant.")
-            return None
+    def __mul__(self, poly):
+        '''
+        Multiplication operator for polynomials.
+        '''
+        pass
+        # if self._func_type != "matrix":
+        #     logging.warning("Not a matrix-valued polynomial: cannot compute its determinant.")
+        #     return None
         
-        if self._output_dim[0] != self._output_dim[1]:
-            logging.warning("Cannot compute the determinant of a non-square matrix polynomial.")
-            return None
+        # if self._output_dim[0] != self._output_dim[1]:
+        #     logging.warning("Cannot compute the determinant of a non-square matrix polynomial.")
+        #     return None
+        
+        
 
     def get_kernel(self):
         ''' Returns the monomial basis vector '''
