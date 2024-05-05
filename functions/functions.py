@@ -20,6 +20,18 @@ from shapely import geometry, intersection
 from common import *
 from dynamic_systems import Integrator, KernelAffineSystem
 
+def are_all_type( element_list, set_of_types ):
+    ''' 
+    Tests if all elements of element_list are of the types on set_of_types.
+    Raises an error if it detects two or more elements of different type.
+    '''
+    elem_types_insertance = [ isinstance(elem, set_of_types) for elem in element_list ]
+
+    all_are_of_set_of_types = np.all(elem_types_insertance)
+    if (not all_are_of_set_of_types) and np.any(elem_types_insertance):
+        raise Exception("Coefficients are not all of the same type.")
+    return all_are_of_set_of_types
+
 def commutation_matrix(n):
     '''
     Generate commutation matrix K relating the vectorization of a matrix n x n matrix A with the vectorization of its transpose A', as
@@ -500,9 +512,22 @@ class Kernel():
 
         for key in kwargs.keys():
             if key.lower() == "symbol":
-                self._state_symbol = kwargs[key]
+                self._state_symbol = kwargs["symbol"]
             if key.lower() == "degree":
-                self._degree = kwargs[key]
+                self._degree = kwargs["degree"]
+            if key.lower() == "monomials":
+                monomials = kwargs["monomials"]
+                
+                lengths = [ len(mon) for mon in monomials ]
+                if not lengths.count(lengths[0]) == len(lengths) or lengths[0] != self._dim:
+                    raise Exception("Invalid monomials.")
+                
+                types = np.array([ isinstance(mon, (list, tuple)) for mon in monomials ])
+                exponent_types = np.array([ np.all([ isinstance(term, int) for term in mon ]) for mon in monomials ])
+                if not np.all(types) or not np.all(exponent_types):
+                    raise Exception("Monomials must be a list/tuple of integer exponents.")
+                
+                self._powers = monomials
 
         self._symbols = []
         for dim in range(self._dim):
@@ -526,7 +551,13 @@ class Kernel():
             self._num_monomials = np.prod([ comb(i + self._degree[i], self._degree[i]) for i in range(self._dim) ])
 
         # Generate monomial list and symbolic monomials
-        self._powers, self._powers_by_degree = generate_monomials( self._dim, self._degree )
+        if not hasattr(self, "_powers"):
+            self._powers, self._powers_by_degree = generate_monomials( self._dim, self._degree )
+
+        self._degree = [ 0 for k in range(self._dim) ]
+        for k in range(self._dim):
+            self._degree[k] = max([ power[k] for power in self._powers ])
+
         self._monomials = generate_monomial_symbols( self._symbols, self._powers )
         self._num_monomials = len(self._monomials)
         self._K = commutation_matrix(self._num_monomials)       # commutation matrix to be used later
@@ -546,7 +577,6 @@ class Kernel():
         # Compute numeric A and N matrices
         self._compute_A()
         self._compute_N()
-        # self._compute_lowerbound_slice()
 
         # Lambda functions
         self._lambda_monomials = sym.lambdify( list(self._symbols), self._monomials )
@@ -894,8 +924,8 @@ class KernelLinear(Function):
 
     def _fun(self, x, coeffs):
         ''' Returns the function value using given coefficients '''
-        kernel_val = self.kernel.function(x)
-        return sum([ coeffs[k] * kernel_val[k] for k in range(self.kernel_dim) ])
+        m = self.kernel.function(x)
+        return sum([ coeffs[k] * m[k] for k in range(self.kernel_dim) ])
 
     def _function(self, x):
         ''' Returns function using self configuration '''
@@ -919,27 +949,80 @@ class KernelLinear(Function):
         self.kernel_matrices = self.kernel.get_A_matrices()
         self._coefficients = [ 0.0 for _ in range(self.kernel_dim) ]
 
+        self._compute_sos()
+        self._compute_sos_index()
+
+    def _compute_sos(self):
+        '''
+        Function for computing the corresponding polynomial SOS representation.
+        Returns: (i) the needed polynomial kernel for SOS-factorization (check)
+                (ii) the rule for generating a corresponding shape matrix, from the coefficients
+        '''
+        self._sos_monomials = []
+        for mon in self.kernel._powers:
+            possible_curr_combinations = set([ tuple(np.array(mon1)+np.array(mon2)) for mon1,mon2 in itertools.combinations(self._sos_monomials, 2) ])
+
+            if mon in possible_curr_combinations: 
+                continue
+
+            if len(possible_curr_combinations) == 0: 
+                self._sos_monomials.append(mon)
+                continue
+
+            # If mon is not on possible with current combinations, check if its possible to create it from them...
+            possibilities = []
+
+            # If all exponents of mon are even, it can be created from 
+            if np.all([ exp % 2 == 0 for exp in mon ]):
+                possibilities.append( tuple([int(exp/2) for exp in mon]) )
+
+            # Checks if mon can be created from the combination of monomials already in self._sos_monomials and another
+            for sos_mon in self._sos_monomials:
+                pos = np.array(mon) - np.array(sos_mon)
+                if np.all(pos >= 0): 
+                    possibilities.append( tuple([ int(exp) for exp in pos ]) )
+
+            index = np.argmin([ np.linalg.norm(pos) for pos in possibilities ])
+            new_sos_mon = possibilities[index]
+            if new_sos_mon not in self._sos_monomials:
+                self._sos_monomials.append(new_sos_mon)
+
+    def _compute_sos_index(self):
+        '''
+        Computes the index matrix representing the rule for placing the coefficients in the correct places on the 
+        shape matrix of the SOS representation. Algorithm gives preference for putting the elements of coeffs 
+        closer to the main diagonal of the SOS matrix.
+        '''     
+        sos_kernel_dim = len(self._sos_monomials)
+        self._index_matrix = -np.ones([sos_kernel_dim, sos_kernel_dim], dtype='int')
+
+        for k in range(self.kernel_dim):
+
+            mon = self.kernel._powers[k]
+
+            # Checks the possible (i,j) locations on SOS matrix where the monomial can be put
+            possible_places = []
+            for (i,j) in itertools.product(range(sos_kernel_dim),range(sos_kernel_dim)):
+                if i > j: continue
+                sos_mon_i, sos_mon_j = np.array(self._sos_monomials[i]), np.array(self._sos_monomials[j])
+
+                if mon == tuple(sum([sos_mon_i, sos_mon_j])):
+                    possible_places.append( (i,j) )
+
+            # From these, chooses the place closest to SOS matrix diagonal
+            distances_from_diag = np.array([ np.abs(place[0] - place[1]) for place in possible_places ])
+            i,j = possible_places[np.argmin(distances_from_diag)]
+
+            self._index_matrix[i,j] = k
+
     def set_coefficients(self, coeffs):
         ''' Setting method for coefficients '''
 
-        # If a one dimensional array was passed, checks if it can be converted to symmetric matrix
         if not isinstance(coeffs, (list, tuple, np.ndarray)):
             raise Exception("Coefficients must be array-like.")
 
         if len(coeffs) != self.kernel_dim:
             raise Exception("Number of coefficients must be the same as the kernel dimension.")
-
-        def are_all_type( element_list, set_of_types ):
-            ''' 
-            Tests if all elements of element_list are of the types on set_of_types.
-            Raises an error if it detects two or more elements of different type.
-            '''
-            elem_types_insertance = [ isinstance(elem, set_of_types) for elem in element_list ]
-
-            all_are_of_set_of_types = np.all(elem_types_insertance)
-            if (not all_are_of_set_of_types) and np.any(elem_types_insertance):
-                raise Exception("Coefficients are not all of the same type.")
-            return all_are_of_set_of_types
 
         # Scalar-valued function
         is_scalar = are_all_type(coeffs, (int,float))
@@ -966,6 +1049,10 @@ class KernelLinear(Function):
 
         self._coefficients = coeffs
 
+        # If function is scalar, load the sos_shape_matrix corresponding to the coefficients 
+        if self._func_type == "scalar":    
+            self._sos_shape_matrix = np.array( self.get_sos_shape(self._coefficients) )
+
     def set_params(self, **kwargs):
         ''' Sets function parameters '''
 
@@ -989,6 +1076,40 @@ class KernelLinear(Function):
             if key == "coefficients":
                 self.set_coefficients( kwargs["coefficients"] )
                 continue
+
+    def get_sos_shape(self, coeffs):
+        '''
+        Using the index matrix, returns the SOS shape matrix correctly populated by the coefficients.
+        '''
+        if len(coeffs) != self.kernel_dim:
+            raise Exception("The number of coefficients must be equal to the kernel dimension.")
+        
+        sos_kernel_dim = len(self._sos_monomials)
+        shape_matrix = np.zeros([sos_kernel_dim, sos_kernel_dim]).tolist()
+
+        for (i,j) in itertools.product(range(sos_kernel_dim),range(sos_kernel_dim)):
+            if i > j: continue
+
+            k = self._index_matrix[i,j]
+            if k >= 0:
+                if i == j:
+                    shape_matrix[i][j] = coeffs[k]
+                else:
+                    shape_matrix[i][j] = 0.5 * coeffs[k]
+                    shape_matrix[j][i] = 0.5 * coeffs[k]
+
+        return shape_matrix
+
+    def poly_determinant(self):
+        ''' Returns: the polynomial determinant of the polynomial matrix '''
+
+        if self._func_type != "matrix":
+            logging.warning("Not a matrix-valued polynomial: cannot compute its determinant.")
+            return None
+        
+        if self._output_dim[0] != self._output_dim[1]:
+            logging.warning("Cannot compute the determinant of a non-square matrix polynomial.")
+            return None
 
     def get_kernel(self):
         ''' Returns the monomial basis vector '''
