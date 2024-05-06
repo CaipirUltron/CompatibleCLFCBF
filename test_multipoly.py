@@ -1,9 +1,7 @@
 import numpy as np
-import sympy as sym
+import operator
 
-import matplotlib.pyplot as plt
 from functions import Kernel, KernelLinear, MultiPoly
-from common import generate_monomial_symbols
 
 np.set_printoptions(precision=3, suppress=True)
 
@@ -12,38 +10,53 @@ n = 2
 d = [2,3]
 kernel = Kernel(dim=n, degree=2)
 
-# monomials=[(0,0),(1,0),(0,1),(2,0),(0,2),(2,3)]
-# kernel = Kernel(dim=n, monomials=monomials)
-
 p = kernel._num_monomials
 print(kernel)
 
-coeffs1 = [ sym.Symbol(f"u{k}") for k in range(p) ]
-coeffs2 = [ sym.Symbol(f"v{k}") for k in range(p) ]
+data_type = "scalar"
+# data_type = "vector"
+# data_type = "matrix"
 
-poly1 = MultiPoly(kernel=kernel._powers, coeffs=coeffs1)
-poly2 = MultiPoly(kernel=kernel._powers, coeffs=coeffs2)
+size = 2
+if data_type == "scalar": args = []
+elif data_type == "vector": args = [size]
+elif data_type == "matrix": args = [size, size]
 
-print(f"Coffs1 = {poly1.coeffs}")
-print(f"Coffs2 = {poly2.coeffs}")
+coeffs1 = [ np.random.randn(*args) for k in range(p) ]
+coeffs2 = [ np.random.randn(*args) for k in range(p) ]
 
-sum_poly = poly1 + poly2
-sub_poly1 = poly1 - poly2
-sub_poly2 = poly2 - poly1
-mul_poly = poly1 * poly2
+p1 = MultiPoly(kernel=kernel._powers, coeffs=coeffs1)
+p2 = MultiPoly(kernel=kernel._powers, coeffs=coeffs2)
 
-print(f"Monomials = {sum_poly.kernel}")
-print(f"Coffs1 + Coffs2 = {sum_poly.coeffs}")
-print(f"Coffs1 - Coffs2 = {sub_poly1.coeffs}")
-print(f"Coffs2 - Coffs1 = {sub_poly2.coeffs}")
+linear1 = KernelLinear.from_poly(p1)
+linear2 = KernelLinear.from_poly(p2)
 
-print(f"Mons of p1(x) p2(x) = {mul_poly.kernel}")
+def test_op(op, N):
+    ''' Performs N tests on operation op '''
 
-print(f"Coeffs of p1(x) p2(x) =")
-for coeff in mul_poly.coeffs:
-    print(coeff)
+    op_poly = op(p1, p2)
+    linear_res = KernelLinear.from_poly( op_poly )
 
-poly = MultiPoly(kernel=kernel._powers, coeffs=[ np.random.randn() for k in range(p) ])
-print(f"Data type = {poly.data_type}")
+    error = 0.0
+    for _ in range(N):
 
-KernelLinear.from_poly(poly)
+        x = np.random.rand(n)
+
+        res_p1 = linear1.function(x)
+        res_p2 = linear2.function(x)
+
+        res_p1p2 = op(res_p1, res_p2)
+        res = linear_res.function(x)
+        error += np.linalg.norm( res - res_p1p2 )
+
+    print(f"Total error in {op.__name__} operation: {error}\n")
+
+# -------------------------------- Run tests -----------------------------------
+N = 100
+
+print(f"Running {N} random tests with {data_type}-valued polynomials.\n")
+test_op(operator.add, N)
+test_op(operator.sub, N)
+test_op(operator.mul, N)
+if data_type != "scalar":
+    test_op(operator.matmul, N)
