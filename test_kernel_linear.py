@@ -19,7 +19,7 @@ p = kernel._num_monomials
 print(kernel)
 
 coeffs = [ np.random.rand() for _ in range(p) ]
-poly = KernelLinear(kernel=kernel, coefficients=coeffs)
+poly = KernelLinear(kernel=kernel, coeffs=coeffs)
 
 print(f"Kernel monomials = { kernel._monomials }" )
 sym_coeffs = [ sym.Symbol(f"c{k}") for k in range(p) ]
@@ -38,7 +38,7 @@ for i in range(num_tests):
     x = np.random.rand(n)
     coeffs = [ np.random.rand() for _ in range(p) ]
 
-    poly.set_params(coefficients = coeffs)
+    poly.set_params(coeffs = coeffs)
     f1 = poly.function(x)
 
     s = sos_kernel.function(x)

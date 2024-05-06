@@ -42,3 +42,8 @@ print(f"Mons of p1(x) p2(x) = {mul_poly.kernel}")
 print(f"Coeffs of p1(x) p2(x) =")
 for coeff in mul_poly.coeffs:
     print(coeff)
+
+poly = MultiPoly(kernel=kernel._powers, coeffs=[ np.random.randn() for k in range(p) ])
+print(f"Data type = {poly.data_type}")
+
+KernelLinear.from_poly(poly)

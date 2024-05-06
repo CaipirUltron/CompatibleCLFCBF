@@ -911,13 +911,55 @@ class LeadingShape:
 
 @dataclass
 class MultiPoly:
+    '''
+    Data class representing multivariable polynomials. 
+    To be used as a tool for the Kernel, KernelLinear and KernelQuadratic classes,
+    simply to represent polynomial data and perform operations between polynomials.
+    '''
     kernel: list[tuple[int]]
     coeffs: list = None
+    data_type: None = None
+    form: str = "linear"
 
     def __post_init__(self):
         '''  Post constructor '''
+
         if self.coeffs == None:
             self.coeffs = [ None for _ in self.kernel ]
+
+        def equal_types(l):
+            ''' Checks if all elements of list are of the same type '''
+            types = []
+            for ele in l:
+                if isinstance(ele, (sym.Symbol, sym.Add, sym.Mul)):
+                    types.append( sym.Expr )
+                else:
+                    types.append( type(ele) )
+            if types.count(types[0]) == len(types):
+                return True
+            return False
+
+        if not equal_types(self.coeffs):
+            raise Exception("Coefficient types are not equal.")
+
+        if isinstance(self.coeffs[0], list):
+            self.coeffs = [ np.array(coeff) for coeff in self.coeffs ]
+
+        if isinstance( self.coeffs[0], (sym.Symbol, sym.Add, sym.Mul) ):
+            self.data_type = "symbolic"
+        if isinstance( self.coeffs[0], (int, float)):
+            self.data_type = "scalar"
+        if isinstance( self.coeffs[0], np.ndarray):
+            if self.coeffs[0].ndim == 1:
+                self.data_type = "vector"
+            if self.coeffs[0].ndim == 2:
+                self.data_type = "matrix"
+        if isinstance( self.coeffs[0], sym.MatrixSymbol):
+            self.data_type = "matrix"
+
+        if self.form.lower() == "quadratic" and self.data_type not in ("scalar", "symbolic"):
+            raise Exception("SOS quadratic form is only defined for scalar/symbolic polynomials.")
+
         self._sort_kernel()
 
     def _sort_kernel(self):
@@ -1189,7 +1231,7 @@ class KernelLinear(Function):
         self.coeffs = coeffs
 
         # If function is scalar, load the sos_shape_matrix corresponding to the coefficients 
-        if self._func_type == "scalar":    
+        if self._func_type == "scalar":
             self._sos_shape_matrix = np.array( self.get_sos_shape(self.coeffs) )
 
     def set_params(self, **kwargs):
@@ -1212,8 +1254,8 @@ class KernelLinear(Function):
         for key in keys:
             if key in ["kernel", "degree"]: # Already dealt with
                 continue
-            if key == "coefficients":
-                self.set_coefficients( kwargs["coefficients"] )
+            if key == "coeffs":
+                self.set_coefficients( kwargs["coeffs"] )
                 continue
 
     def get_sos_shape(self, coeffs):
@@ -1238,31 +1280,34 @@ class KernelLinear(Function):
                     shape_matrix[j][i] = 0.5 * coeffs[k]
 
         return shape_matrix
+        
+    def determinant(self):
+        ''' Compute the determinant polynomial if the coefficients are square matrices (by Laplace expansion) '''
+        
+        if self.data_type != "matrix":
+            raise Exception("Not a polynomial matrix. Cannot compute determinant.")
+        if self.coeffs[0].shape[0] != self.coeffs[0].shape[1]:
+            raise Exception("Cannot compute determinant of a non-square matrix.")
 
-    def __add__(self, poly):
-        pass
-
-    def __mul__(self, poly):
-        '''
-        Multiplication operator for polynomials.
-        '''
-        pass
-        # if self._func_type != "matrix":
-        #     logging.warning("Not a matrix-valued polynomial: cannot compute its determinant.")
-        #     return None
-        
-        # if self._output_dim[0] != self._output_dim[1]:
-        #     logging.warning("Cannot compute the determinant of a non-square matrix polynomial.")
-        #     return None
-        
-        
+        if self._dim != 2:
+            pass
 
     def get_kernel(self):
         ''' Returns the monomial basis vector '''
         return self.kernel
 
+    @classmethod
+    def from_poly(cls, poly: MultiPoly):
+        ''' Constructor for creating KernelLinear from a MultiPoly '''
+
+        n = len(poly.kernel[0])
+        kernel = Kernel(dim=n, monomials=poly.kernel)
+
+        return cls(kernel=kernel, coeffs=poly.coeffs)
+
     def __str__(self):
         ''' Prints KernelLinear '''
+
         if hasattr(self, "_func_type"):
             text = f"{self._func_type.capitalize()}-valued polynomial f: R^{self._dim} --> R^{self._output_dim} created from "
         else:
