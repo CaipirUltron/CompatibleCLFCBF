@@ -1,5 +1,6 @@
-import numpy as np
 import operator
+import numpy as np
+import sympy as sym
 
 from functions import Kernel, KernelLinear, MultiPoly
 
@@ -13,17 +14,17 @@ kernel = Kernel(dim=n, degree=2)
 p = kernel._num_monomials
 print(kernel)
 
-data_type = "scalar"
+# data_type = "scalar"
 # data_type = "vector"
-# data_type = "matrix"
+data_type = "matrix"
 
 size = 2
 if data_type == "scalar": args = []
 elif data_type == "vector": args = [size]
 elif data_type == "matrix": args = [size, size]
 
-coeffs1 = [ np.random.randn(*args) for k in range(p) ]
-coeffs2 = [ np.random.randn(*args) for k in range(p) ]
+coeffs1 = [ np.random.randn(*args) for _ in range(p) ]
+coeffs2 = [ np.random.randn(*args) for _ in range(p) ]
 
 p1 = MultiPoly(kernel=kernel._powers, coeffs=coeffs1)
 p2 = MultiPoly(kernel=kernel._powers, coeffs=coeffs2)
@@ -58,5 +59,7 @@ print(f"Running {N} random tests with {data_type}-valued polynomials.\n")
 test_op(operator.add, N)
 test_op(operator.sub, N)
 test_op(operator.mul, N)
-if data_type != "scalar":
-    test_op(operator.matmul, N)
+if data_type != "scalar": test_op(operator.matmul, N)
+
+print(p1)
+print(p1[1,1]*2)

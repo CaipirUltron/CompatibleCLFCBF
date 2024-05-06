@@ -997,16 +997,16 @@ class MultiPoly:
         if (type1, type2) != ('int','int'):
             raise Exception("Monomial exponents must be integers.")
 
-        if poly1.data_type != poly2.data_type:
-            raise Exception("Cannot perform aritmetic operations btw polynomials of different data types.")
+        # if poly1.data_type != poly2.data_type:
+        #     raise Exception("Cannot perform aritmetic operations btw polynomials of different data types.")
         
-        if poly1.data_type == "vector":
-            if len(poly1.coeffs[0]) != len(poly2.coeffs[0]):
-                raise Exception("Cannot perform aritmetic operations btw vector polynomials of different dimensions.")
+        # if poly1.data_type == "vector":
+        #     if len(poly1.coeffs[0]) != len(poly2.coeffs[0]):
+        #         raise Exception("Cannot perform aritmetic operations btw vector polynomials of different dimensions.")
 
-        if poly1.data_type == "matrix":
-            if poly1.coeffs[0].shape != poly2.coeffs[0].shape:
-                raise Exception("Cannot perform aritmetic operations btw matrix polynomials of different dimensions.")
+        # if poly1.data_type == "matrix":
+        #     if poly1.coeffs[0].shape != poly2.coeffs[0].shape:
+        #         raise Exception("Cannot perform aritmetic operations btw matrix polynomials of different dimensions.")
 
     def _addition(poly1, poly2, op):
         '''
@@ -1144,6 +1144,15 @@ class MultiPoly:
     __mul__, __rmul__, __imul__ = _operator_fallbacks(_mul, operator.mul)
     __matmul__, __rmatmul__, __imatmul__ = _operator_fallbacks(_matmul, operator.matmul)
 
+    def __getitem__(self, items):
+        ''' Subscritable method '''
+
+        if self.data_type == "scalar" or not isinstance(items, (int, tuple)):
+            raise IndexError
+        
+        index_coeffs = [ c[items] for c in self.coeffs ]
+        return MultiPoly(self.kernel, index_coeffs)
+
     def __repr__(self):
         ''' Representation of MultiPoly '''
         poly_repr = f"{self.data_type.capitalize()} poly on x:\n"
@@ -1277,7 +1286,7 @@ class KernelLinear(Function):
             raise Exception("Number of coefficients must be the same as the kernel dimension.")
 
         # Scalar-valued function
-        is_scalar = are_all_type(coeffs, (int,float))
+        is_scalar = are_all_type(coeffs, (int, float))
         if is_scalar:
             self._func_type = "scalar"
             self._output_dim = 1
@@ -1351,7 +1360,7 @@ class KernelLinear(Function):
                     shape_matrix[j][i] = 0.5 * coeffs[k]
 
         return shape_matrix
-        
+
     def determinant(self):
         ''' Compute the determinant polynomial if the coefficients are square matrices (by Laplace expansion) '''
         
@@ -1367,9 +1376,16 @@ class KernelLinear(Function):
         ''' Returns the monomial basis vector '''
         return self.kernel
 
+    def to_poly(self):
+        ''' Returns corresponding MultiPoly object '''
+        return MultiPoly(self.kernel._powers, self.coeffs)
+
     @classmethod
     def from_poly(cls, poly: MultiPoly):
         ''' Constructor for creating KernelLinear from a MultiPoly '''
+
+        if isinstance(poly.coeffs[0], sym.Expr):
+            raise Exception("Simbolic coefficients are not supported.")
 
         n = len(poly.kernel[0])
         kernel = Kernel(dim=n, monomials=poly.kernel)
