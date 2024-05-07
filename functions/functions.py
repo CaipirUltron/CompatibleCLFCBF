@@ -1,11 +1,11 @@
 import time
+import logging
+import warnings
 import itertools
 import numpy as np
 import scipy as sp
 import sympy as sym
 import cvxpy as cp
-import logging
-import warnings
 
 import operator
 import contourpy as ctp
@@ -909,44 +909,56 @@ class LeadingShape:
     bound: str = ''
     approximate: bool = False
 
-@dataclass
 class MultiPoly:
     '''
-    Data class representing multivariable polynomials. 
+    Class representing multivariable polynomials.
     To be used as a tool for the Kernel, KernelLinear and KernelQuadratic classes,
     simply to represent polynomial data and perform operations between polynomials.
+    Implementation: coefficients are ALWAYS float/np.ndarray (internally, they can be numeric or symbolic)
     '''
-    kernel: list[tuple[int]]
-    coeffs: list = None
-    data_type: None = None # scalar, vector or matrix
+    def __init__(self, kernel, coeffs = None):
 
-    def __post_init__(self):
-        '''  Post constructor '''
+        self.kernel = kernel
+        self.coeffs = coeffs
+        self.coeffs_type = None       # scalar, vector or matrix
 
-        if self.coeffs == None:
+        self.is_empty = False
+        if self.kernel == None:
+            self.is_empty = True
+            return
+
+        if self.coeffs is None:
             self.coeffs = [ None for _ in self.kernel ]
 
-        if isinstance(self.coeffs[0], list):
-            self.coeffs = [ np.array(coeff) for coeff in self.coeffs ]
+        # Convert to standard types
+        for k, coeff in enumerate(self.coeffs):
+            if isinstance(coeff, int):
+                self.coeffs[k] = float(coeff)
+                self.coeffs_type = float
+            elif isinstance(coeff, list):
+                self.coeffs[k] = np.array(coeff)
+                self.coeffs_type = np.ndarray
+            elif isinstance(coeff, np.ndarray):
+                self.coeffs_type = np.ndarray
+            elif isinstance(coeff, sym.Expr):
+                self.coeffs_type = sym.Expr
+                if isinstance(coeff, sym.MatrixExpr):
+                    self.coeffs_type = sym.MatrixExpr
 
-        # Collect data types from each coefficient
-        data_types = []
-        for coeff in self.coeffs:
-            if isinstance( coeff, (int, float, sym.Expr)):
-                data_types.append("scalar")
-            elif isinstance( coeff, np.ndarray):
-                if coeff.ndim == 1:
-                    data_types.append("vector")
-                if coeff.ndim == 2:
-                    data_types.append("matrix")
+        if self.coeffs_type is np.ndarray:
+            self.shape = self.coeffs[0].shape
+            self.ndim = self.coeffs[0].ndim
+        elif self.coeffs_type is sym.MatrixExpr:
+            self.shape = self.coeffs[0].shape
+            if self.shape[0] == 1 and self.shape[1] == 1:
+                self.ndim = 0
+            elif self.shape[0] == 1 or self.shape[1] == 1:
+                self.ndim = 1
             else:
-                data_types.append(None)
-        
-        # Checks if coefficients are all of the same data type (necessary for performing operations)
-        if data_types.count(data_types[0]) == len(data_types):
-            self.data_type = data_types[0]
+                self.ndim = 2
         else:
-            raise Exception("Coefficients are not the same data type.")
+            self.ndim = 0
+            self.shape = ()
 
         self._sort_kernel()
 
@@ -1016,24 +1028,22 @@ class MultiPoly:
         MultiPoly._verify_op(poly1, poly2)
 
         res_kernel = list( set(poly1.kernel).union(set(poly2.kernel)) )
-        
-        if poly1.data_type == "scalar":
-            res_coeffs = [ 0.0 for _ in res_kernel ]
-        if poly1.data_type in ("vector", "matrix"):
-            res_coeffs = [ np.zeros(poly1.coeffs[0].shape) for _ in res_kernel ]
 
-        for k, mon in enumerate(res_kernel):
+        res_coeffs = []
+        for mon in res_kernel:
 
             if mon in poly1.kernel:
                 i = poly1.kernel.index( mon )
-                res_coeffs[k] += poly1.coeffs[i]
+                new_c1 = poly1.coeffs[i]
 
             if mon in poly2.kernel:
                 i = poly2.kernel.index( mon )
                 if op > 0: 
-                    res_coeffs[k] += poly2.coeffs[i]
+                    new_c2 = +poly2.coeffs[i]
                 else: 
-                    res_coeffs[k] -= poly2.coeffs[i]
+                    new_c2 = -poly2.coeffs[i]
+
+            res_coeffs.append( new_c1 + new_c2 )
 
         return MultiPoly(kernel=res_kernel, coeffs=res_coeffs)
 
@@ -1060,14 +1070,7 @@ class MultiPoly:
                 res_kernel.append(mon)
 
         # Initialization of product coefficients
-        res_coeffs = []
-        data_sample = poly1.coeffs[0]
-        if isinstance(data_sample, (int, float, sym.Symbol)):
-            res_coeffs = [ 0.0 for _ in range(len(res_kernel)) ]
-        if isinstance(data_sample, (np.ndarray)):
-            res_coeffs = [ np.zeros(data_sample.shape) for _ in range(len(res_kernel)) ]
-            # if data_sample.ndim == 2: 
-            #     multiply_as_matrix = True
+        res_coeffs = [ None for _ in range(len(res_kernel)) ]
 
         # Populate coefficients
         zipped1 = zip(poly1.kernel, poly1.coeffs)
@@ -1079,11 +1082,14 @@ class MultiPoly:
 
             mon = tuple([ int(dim1)+int(dim2) for dim1, dim2 in zip(mon1,mon2) ])
             index = res_kernel.index( mon )
-            
-            if op > 0:
-                res_coeffs[index] += coeff1 * coeff2
+
+            if op > 0: term_to_be_added = coeff1 * coeff2       # scalar multiplication
+            else: term_to_be_added = coeff1 @ coeff2            # matrix multiplication
+
+            if res_coeffs[index] is None:
+                res_coeffs[index] = term_to_be_added
             else:
-                res_coeffs[index] += coeff1 @ coeff2
+                res_coeffs[index] += term_to_be_added
 
         return MultiPoly(kernel=res_kernel, coeffs=res_coeffs)
 
@@ -1093,10 +1099,14 @@ class MultiPoly:
 
     def _matmul(poly1, poly2):
         ''' Matrix polynomial multiplication '''
-
-        if poly1.data_type == "scalar":
-            return NotImplemented
         return MultiPoly._multiply(poly1, poly2, -1)
+
+    def __pos__(self):
+        return self
+
+    def __neg__(self):
+        index_coeffs = [ -c for c in self.coeffs ]
+        return MultiPoly(self.kernel, index_coeffs)
 
     def _operator_fallbacks(operation, op_name):
         ''' Implementation of forward, reverse and inplace operations for MultiPoly '''
@@ -1147,27 +1157,160 @@ class MultiPoly:
     def __getitem__(self, items):
         ''' Subscritable method '''
 
-        if self.data_type == "scalar" or not isinstance(items, (int, tuple)):
+        if not isinstance(items, (int, tuple)):
             raise IndexError
-        
+
+        if isinstance(items[0], slice):
+            if items[0].start == items[0].stop or items[0].start == self.shape[0]:
+                return MultiPoly.empty()
+            
+        if isinstance(items[1], slice):
+            if items[1].start == items[1].stop or items[1].start == self.shape[1]:
+                return MultiPoly.empty()
+
         index_coeffs = [ c[items] for c in self.coeffs ]
         return MultiPoly(self.kernel, index_coeffs)
 
     def __repr__(self):
         ''' Representation of MultiPoly '''
-        poly_repr = f"{self.data_type.capitalize()} poly on x:\n"
+
+        if self.is_empty:
+            return "Empty polynomial"
+
+        if self.ndim == 0: type_text = "scalar"
+        elif self.ndim == 1: type_text = "vector"
+        elif self.ndim == 2: type_text = "matrix"
+
+        poly_repr = f"{type_text.capitalize()} poly on x:\n"
         for coeff, power in zip(self.coeffs, self.kernel):
-            if isinstance(coeff, (int, float, sym.Expr)):
+            if isinstance(coeff, (int, float)):
                 if coeff > 0: sign_text = "+ "
                 else: sign_text = "- "
                 poly_repr += sign_text + f"{abs(coeff):.3f}*x^{power} "
             else:
-                poly_repr +=  f"{coeff}*x^{power} + "
+                poly_repr +=  f"( {coeff} )*x^{power} + "
+
         return poly_repr
 
     def __str__(self):
         ''' Printing for MultiPoly '''
         return self.__repr__()
+
+    @classmethod
+    def empty(cls):
+        return cls(kernel=None)
+
+    def filter(self):
+        ''' Returns a new multipoly without zero coefficient terms '''
+
+        new_kernel, new_coeffs = [], []
+        for mon, coeff in zip(self.kernel, self.coeffs):
+
+            to_be_added = False
+            if isinstance(coeff, float) and coeff > 0.0:
+                to_be_added = True
+            elif isinstance(coeff, np.ndarray):
+                if coeff.dtype in ("int", "float") and np.linalg.norm(coeff) > 0.0:
+                    to_be_added = True
+                if coeff.dtype == "object" and coeff != sym.zeros(*coeff.shape):
+                    to_be_added = True
+
+            if to_be_added:
+                new_kernel.append(mon)
+                new_coeffs.append(coeff)
+
+        return MultiPoly(new_kernel, new_coeffs)
+
+    def hstack(poly1, poly2):
+        ''' Horizontally stack two polys. Is able to stack empty polynomials '''
+
+        if poly1.is_empty:
+            return poly2
+
+        if poly2.is_empty:
+            return poly1
+
+        if poly1.kernel != poly2.kernel:
+            raise TypeError("LIMITATION: polynomials must have the same kernel.")
+
+        if poly1.shape[0] != poly2.shape[0]:
+            raise TypeError("Cannot hor. stack polynomials with diff. number of lines.")
+
+        if poly1.coeffs_type is sym.MatrixExpr:
+            index_coeffs = [ sym.BlockMatrix([c1,c2]) for c1, c2 in zip(poly1.coeffs, poly2.coeffs) ]
+        else:
+            index_coeffs = [ np.hstack([c1,c2]) for c1, c2 in zip(poly1.coeffs, poly2.coeffs) ]
+            
+        return MultiPoly(poly1.kernel, index_coeffs)
+
+    def vstack(poly1, poly2):
+        ''' Vertically stack two polys. Is able to stack empty polynomials '''
+
+        if poly1.is_empty:
+            return poly2
+
+        if poly2.is_empty:
+            return poly1
+
+        if poly1.kernel != poly2.kernel:
+            raise TypeError("LIMITATION: polynomials must have the same kernel.")
+
+        if poly1.shape[1] != poly2.shape[1]:
+            raise TypeError("Cannot vert. stack polynomials with diff. number of lines.")
+
+        if poly1.coeffs_type is sym.MatrixExpr:
+            index_coeffs = [ sym.BlockMatrix([[c1],[c2]]) for c1, c2 in zip(poly1.coeffs, poly2.coeffs) ]
+        else:
+            index_coeffs = [ np.vstack([c1,c2]) for c1, c2 in zip(poly1.coeffs, poly2.coeffs) ]
+
+        return MultiPoly(poly1.kernel, index_coeffs)
+
+    def minor(self, index: tuple):
+        ''' Returns the cofactor of index '''
+
+        if self.ndim != 2:
+            raise TypeError("Cannot compute the minor of a non-matrix polynomial.")
+        
+        i,j = index            
+
+        blk11 = self[0:i , 0:j]
+        blk12 = self[0:i ,j+1:]
+        blk21 = self[i+1:, 0:j]
+        blk22 = self[i+1:,j+1:]
+
+        blk1 = MultiPoly.hstack(blk11, blk12)
+        blk2 = MultiPoly.hstack(blk21, blk22)
+
+        minor = MultiPoly.vstack(blk1, blk2)
+        return minor
+
+    def determinant(self):
+        '''
+        Returns the polynomial determinant for a multiply matrix.
+        The algorithm used here is Laplace expansion with recursion.
+        '''
+        if self.shape[0] != self.shape[1]:
+            raise TypeError("Cannot compute the determinant of a non-square matrix polynomial.")
+
+        if self.ndim == 0 or self.shape == (1,1):   # polynomial is a scalar
+            return self
+        
+        i = 1           # expansion from first line
+        det = None
+        for j in range(self.shape[1]):
+            term = (-1)**(i + j) * self[i, j] * self.minor( (i,j) ).determinant()
+            if det is None: det = term
+            else: det += term
+
+        return det.to_scalar()
+
+    def to_scalar(self):
+        ''' Convert 1x1 matrix poly to scalar poly '''
+
+        if self.shape != (1,1):
+            raise Exception("Only 1x1 matrix polys can be converted to scalar.")
+        
+        return MultiPoly(self.kernel, coeffs = [ c[0,0] for c in self.coeffs ])
 
 class KernelLinear(Function):
     '''
@@ -1364,7 +1507,7 @@ class KernelLinear(Function):
     def determinant(self):
         ''' Compute the determinant polynomial if the coefficients are square matrices (by Laplace expansion) '''
         
-        if self.data_type != "matrix":
+        if self.ndim != 2:
             raise Exception("Not a polynomial matrix. Cannot compute determinant.")
         if self.coeffs[0].shape[0] != self.coeffs[0].shape[1]:
             raise Exception("Cannot compute determinant of a non-square matrix.")
