@@ -1,12 +1,12 @@
 import numpy as np
-import scipy as sp
 import sympy as sym
-
 import matplotlib.pyplot as plt
+from scipy.optimize import minimize
+
 from functions import Kernel, KernelLyapunov, KernelQuadratic, MultiPoly
 from common import lyap, create_quadratic, rot2D, symmetric_basis
 
-np.set_printoptions(precision=3, suppress=True)
+# np.set_printoptions(precision=3, suppress=True)
 limits = 3*np.array((-1,1,-1,1))
 
 fig = plt.figure(constrained_layout=True)
@@ -54,62 +54,80 @@ print(f"|∇Φ|(x) = {det}")
 sos_kernel = det.sos_kernel()
 sos_index_matrix = det.sos_index_matrix(sos_kernel)
 shape_matrix = det.shape_matrix(sos_kernel, sos_index_matrix)
+sym.pprint(f"D(N) = {shape_matrix}")
+
 shape_fun = sym.lambdify( N, shape_matrix )
 
-def find_invex(N: np.ndarray):
-    ''' Returns an N matrix that produces an invex function k(x).T N.T P N K(x) on the given kernel k(x) '''
-
-    if N.shape != (n, kernel_dim):
+def find_invex(Ninit: np.ndarray):
+    '''
+    Returns an N matrix that produces an invex function k(x).T N.T P N K(x) on the given kernel k(x).
+    PROBLEM: find N such that shape_fun(N) >> 0
+    '''
+    if Ninit.shape != (n, kernel_dim):
         raise ValueError("N must be a n x p matrix.")
 
-    shape_fun(N) >> 0
+    def objective(var):
+        return 1.0
 
-    P = N.T @ G @ N # this is always p.s.d.
+    def invex(var: np.ndarray):
+        N = var.reshape((n, kernel_dim))
+        min_eig = float(np.min(np.linalg.eigvals(shape_fun(N))))
+        return min_eig - 1e-0
 
+    constraints = [ {"type": "ineq", "fun": invex} ]
 
-# solve_N( kernel=kernel._powers, N=N )
+    init_var = Ninit.flatten()
+    sol = minimize( objective, init_var, constraints=constraints )
 
-# clf = KernelLyapunov(kernel=kernel, P=Pinit, limits=limits, spacing=0.01 )
+    print(sol.message)
+    N = sol.x.reshape((n, kernel_dim))
 
-# #---------------------------------------------------------------------------
-# pt = plt.ginput(1, timeout=0)
-# init_x = [ pt[0][0], pt[0][1] ]
-# V = clf.function(init_x)
-# clf_contour = clf.plot_levels(ax=ax, levels=[V])
-# plt.pause(0.001)
+    return N
 
-# init_x_plot, = ax.plot([init_x[0]],[init_x[1]],'ob', alpha=0.5)
-# N = 100
-# for i in range(N):
+N = np.zeros((n, kernel_dim))
+N[:,1:n+1] = np.eye(n)
+Pinit = N.T @ G @ N
+D = shape_fun(N)
+print(f"λ( D(N) ) = {np.linalg.eigvals(D)}")
+clf = KernelLyapunov(kernel=kernel, P=Pinit, limits=limits, spacing=0.01 )
 
-#     pt = plt.ginput(1, timeout=0)
-#     init_x = [ pt[0][0], pt[0][1] ]
-#     init_x_plot.set_data([init_x[0]], [init_x[1]])
+#------------------------------ Plotting -----------------------------------
+pt = plt.ginput(1, timeout=0)
+init_x = [ pt[0][0], pt[0][1] ]
+V = clf.function(init_x)
+clf_contour = clf.plot_levels(ax=ax, levels=[V])
+plt.pause(0.001)
 
-#     N = np.random.randn(n,kernel_dim)
-#     P = N.T @ G @ N
+init_x_plot, = ax.plot([init_x[0]],[init_x[1]],'ob', alpha=0.5)
+num_sim = 100
+for i in range(num_sim):
 
-#     clf.set_params(P=P)
-#     clf.generate_contour()
+    pt = plt.ginput(1, timeout=0)
+    init_x = [ pt[0][0], pt[0][1] ]
+    init_x_plot.set_data([init_x[0]], [init_x[1]])
 
-#     if "clf_contour" in locals():
-#         for coll in clf_contour:
-#             coll.remove()
-#         del clf_contour
+    N0 = np.random.randn(n,kernel_dim)
+    N = find_invex(Ninit=N0)
 
-#     U, sdvals, V = np.linalg.svd(N)
+    D = shape_fun(N)
+    P = N.T @ G @ N
 
-#     print(f"U(N) = {U}")
-#     print(f"Singular values of N = {sdvals}")
-#     print(f"V(N) = {V}")
+    clf.set_params(P=P)
+    clf.generate_contour()
 
-#     # print(F"P = {P}")
-#     print(f"λ(P) = {np.linalg.eigvals(P)}")
-#     V = clf.function(init_x)
-#     print(f"V({init_x}) = {V}")
+    if "clf_contour" in locals():
+        for coll in clf_contour:
+            coll.remove()
+        del clf_contour
 
-#     num_levels = 20
-#     clf_contour = clf.plot_levels(ax=ax, levels=[ V*((k+1)/num_levels) for k in range(num_levels) ])
-#     plt.pause(0.001)
+    V = clf.function(init_x)
+    # print(f"V({init_x}) = {V}")
 
-# plt.show()
+    # print(f"λ(P) = {np.linalg.eigvals(P)}")
+    print(f"λ( D(N) ) = {np.linalg.eigvals(D)}")
+
+    num_levels = 20
+    clf_contour = clf.plot_levels(ax=ax, levels=[ V*((k+1)/num_levels) for k in range(num_levels) ])
+    plt.pause(0.001)
+
+plt.show()
