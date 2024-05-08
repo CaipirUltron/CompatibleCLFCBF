@@ -9,7 +9,7 @@ np.set_printoptions(precision=3, suppress=True)
 # ------------------------------------ Define kernel -----------------------------------
 n = 2
 d = [2,3]
-kernel = Kernel(dim=n, degree=1)
+kernel = Kernel(dim=n, degree=4)
 
 p = kernel._num_monomials
 print(kernel)
@@ -23,14 +23,14 @@ if data_type == "scalar": args = []
 elif data_type == "vector": args = [size]
 elif data_type == "matrix": args = [size, size]
 
-# coeffs1 = [ np.random.randn(*args) for _ in range(p) ]
-# coeffs2 = [ np.random.randn(*args) for _ in range(p) ]
+coeffs1 = [ np.random.randn(*args) for _ in range(p) ]
+coeffs2 = [ np.random.randn(*args) for _ in range(p) ]
 
 # coeffs1 = [ np.random.randint(low=-4, high=4, size=args) for _ in range(p) ]
 # coeffs2 = [ np.random.randint(low=-4, high=4, size=args) for _ in range(p) ]
 
-coeffs1 = [ np.eye(size) for _ in range(p) ]
-coeffs2 = [ np.eye(size) for _ in range(p) ]
+# coeffs1 = [ np.eye(size) for _ in range(p) ]
+# coeffs2 = [ np.eye(size) for _ in range(p) ]
 
 p1 = MultiPoly(kernel=kernel._powers, coeffs=coeffs1)
 p2 = MultiPoly(kernel=kernel._powers, coeffs=coeffs2)
@@ -61,11 +61,11 @@ def test_op(op, N):
 # -------------------------------- Run numeric tests -----------------------------------
 N = 100
 
-print(f"Running {N} random numeric tests with {data_type}-valued polynomials.\n")
-test_op(operator.add, N)
-test_op(operator.sub, N)
-test_op(operator.mul, N)
-if data_type != "scalar": test_op(operator.matmul, N)
+# print(f"Running {N} random numeric tests with {data_type}-valued polynomials.\n")
+# test_op(operator.add, N)
+# test_op(operator.sub, N)
+# test_op(operator.mul, N)
+# if data_type != "scalar": test_op(operator.matmul, N)
 
 # print( p1.determinant() )
 
@@ -74,21 +74,16 @@ if data_type != "scalar": test_op(operator.matmul, N)
 coeffs1 = [ sym.MatrixSymbol("U{}".format(k), *args) for k in range(p) ]
 coeffs2 = [ sym.MatrixSymbol("V{}".format(k), *args) for k in range(p) ]
 
-# coeffs1 = [ [ [ sym.Symbol("U{}{}{}".format(i,j,k)) for j in range(size) ] for i in range(size) ] for k in range(p) ]
-# coeffs2 = [ [ [ sym.Symbol("V{}{}{}".format(i,j,k)) for j in range(size) ] for i in range(size) ] for k in range(p) ]
-
 P1 = MultiPoly(kernel=kernel._powers, coeffs=coeffs1)
 P2 = MultiPoly(kernel=kernel._powers, coeffs=coeffs2)
 
-# print(P1)
-# print(P2)
+coeffs = [ sym.Symbol("u{}".format(k)) for k in range(p) ]
+p = MultiPoly(kernel=kernel._powers, coeffs=coeffs)
 
-# P = P1+P2
+sos_kernel = p.sos_kernel()
+sos_index_matrix = p.sos_index_matrix(sos_kernel)
+shape_matrix = p.shape_matrix(sos_kernel, sos_index_matrix)
 
-# print(coeffs1[0][1:,1:])
+print( p )
 
-print( P1.determinant() )
-
-# print(P[0:0,1])
-# print(P[:2,2].ndim)
-# print(P[:2,2].shape)
+shape_fun = sym.lambdify( coeffs, shape_matrix )

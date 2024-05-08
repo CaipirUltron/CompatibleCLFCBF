@@ -1009,17 +1009,6 @@ class MultiPoly:
         if (type1, type2) != ('int','int'):
             raise Exception("Monomial exponents must be integers.")
 
-        # if poly1.data_type != poly2.data_type:
-        #     raise Exception("Cannot perform aritmetic operations btw polynomials of different data types.")
-        
-        # if poly1.data_type == "vector":
-        #     if len(poly1.coeffs[0]) != len(poly2.coeffs[0]):
-        #         raise Exception("Cannot perform aritmetic operations btw vector polynomials of different dimensions.")
-
-        # if poly1.data_type == "matrix":
-        #     if poly1.coeffs[0].shape != poly2.coeffs[0].shape:
-        #         raise Exception("Cannot perform aritmetic operations btw matrix polynomials of different dimensions.")
-
     def _addition(poly1, poly2, op):
         '''
         Add/subtract two instances of multipoly.
@@ -1101,13 +1090,6 @@ class MultiPoly:
         ''' Matrix polynomial multiplication '''
         return MultiPoly._multiply(poly1, poly2, -1)
 
-    def __pos__(self):
-        return self
-
-    def __neg__(self):
-        index_coeffs = [ -c for c in self.coeffs ]
-        return MultiPoly(self.kernel, index_coeffs)
-
     def _operator_fallbacks(operation, op_name):
         ''' Implementation of forward, reverse and inplace operations for MultiPoly '''
 
@@ -1154,6 +1136,13 @@ class MultiPoly:
     __mul__, __rmul__, __imul__ = _operator_fallbacks(_mul, operator.mul)
     __matmul__, __rmatmul__, __imatmul__ = _operator_fallbacks(_matmul, operator.matmul)
 
+    def __pos__(self):
+        return self
+
+    def __neg__(self):
+        index_coeffs = [ -c for c in self.coeffs ]
+        return MultiPoly(self.kernel, index_coeffs)
+
     def __getitem__(self, items):
         ''' Subscritable method '''
 
@@ -1196,10 +1185,6 @@ class MultiPoly:
         ''' Printing for MultiPoly '''
         return self.__repr__()
 
-    @classmethod
-    def empty(cls):
-        return cls(kernel=None)
-
     def filter(self):
         ''' Returns a new multipoly without zero coefficient terms '''
 
@@ -1212,7 +1197,7 @@ class MultiPoly:
             elif isinstance(coeff, np.ndarray):
                 if coeff.dtype in ("int", "float") and np.linalg.norm(coeff) > 0.0:
                     to_be_added = True
-                if coeff.dtype == "object" and coeff != sym.zeros(*coeff.shape):
+                if coeff.dtype == "object" and np.all(coeff != np.zeros(coeff.shape)):
                     to_be_added = True
 
             if to_be_added:
@@ -1302,15 +1287,107 @@ class MultiPoly:
             if det is None: det = term
             else: det += term
 
-        return det.to_scalar()
+        return det.scalar()
 
-    def to_scalar(self):
+    def sos_kernel(self):
+        ''' Function for computing the corresponding polynomial SOS kernel '''
+
+        sos_kernel = []
+        for mon in self.kernel:
+            possible_curr_combinations = set([ tuple(np.array(mon1)+np.array(mon2)) for mon1,mon2 in itertools.combinations(sos_kernel, 2) ])
+
+            if mon in possible_curr_combinations: 
+                continue
+
+            if len(possible_curr_combinations) == 0: 
+                sos_kernel.append(mon)
+                continue
+
+            # If mon is not on possible with current combinations, check if its possible to create it from them...
+            possibilities = []
+
+            # If all exponents of mon are even, it can be created from 
+            if np.all([ exp % 2 == 0 for exp in mon ]):
+                possibilities.append( tuple([int(exp/2) for exp in mon]) )
+
+            # Checks if mon can be created from the combination of monomials already in self._sos_monomials and another
+            for sos_mon in sos_kernel:
+                pos = np.array(mon) - np.array(sos_mon)
+                if np.all(pos >= 0): 
+                    possibilities.append( tuple([ int(exp) for exp in pos ]) )
+
+            index = np.argmin([ np.linalg.norm(pos) for pos in possibilities ])
+            new_sos_mon = possibilities[index]
+            if new_sos_mon not in sos_kernel:
+                sos_kernel.append(new_sos_mon)
+
+        return sos_kernel
+
+    def sos_index_matrix(self, sos_kernel):
+        '''
+        Computes the index matrix representing the rule for placing the coefficients in the correct places on the 
+        shape matrix of the SOS representation. Algorithm gives preference for putting the elements of coeffs 
+        closer to the main diagonal of the SOS matrix.
+        '''     
+        sos_kernel_dim = len(sos_kernel)
+        index_matrix = -np.ones([sos_kernel_dim, sos_kernel_dim], dtype='int')
+
+        for k in range(len(self.kernel)):
+
+            mon = self.kernel[k]
+
+            # Checks the possible (i,j) locations on SOS matrix where the monomial can be put
+            possible_places = []
+            for (i,j) in itertools.product(range(sos_kernel_dim),range(sos_kernel_dim)):
+                if i > j: continue
+                sos_mon_i, sos_mon_j = np.array(sos_kernel[i]), np.array(sos_kernel[j])
+
+                if mon == tuple(sum([sos_mon_i, sos_mon_j])):
+                    possible_places.append( (i,j) )
+
+            # From these, chooses the place closest to SOS matrix diagonal
+            distances_from_diag = np.array([ np.abs(place[0] - place[1]) for place in possible_places ])
+            i,j = possible_places[np.argmin(distances_from_diag)]
+
+            index_matrix[i,j] = k
+
+        return index_matrix
+
+    def shape_matrix(self, sos_kernel, sos_index_matrix):
+        '''
+        Using the index matrix, returns the SOS shape matrix correctly populated by the coefficients.
+        '''
+        if len(self.coeffs) != len(self.kernel):
+            raise Exception("The number of coefficients must be equal to the kernel dimension.")
+        
+        sos_kernel_dim = len(sos_kernel)
+        shape_matrix = np.zeros([sos_kernel_dim, sos_kernel_dim]).tolist()
+
+        for (i,j) in itertools.product(range(sos_kernel_dim),range(sos_kernel_dim)):
+            if i > j: continue
+
+            k = sos_index_matrix[i,j]
+            if k >= 0:
+                if i == j:
+                    shape_matrix[i][j] = self.coeffs[k]
+                else:
+                    shape_matrix[i][j] = 0.5 * self.coeffs[k]
+                    shape_matrix[j][i] = 0.5 * self.coeffs[k]
+
+        return shape_matrix
+
+    def scalar(self):
         ''' Convert 1x1 matrix poly to scalar poly '''
 
         if self.shape != (1,1):
-            raise Exception("Only 1x1 matrix polys can be converted to scalar.")
+            logging.warning("Only 1x1 matrix polys can be converted to scalar.")
+            return self
         
         return MultiPoly(self.kernel, coeffs = [ c[0,0] for c in self.coeffs ])
+
+    @classmethod
+    def empty(cls):
+        return cls(kernel=None)
 
 class KernelLinear(Function):
     '''
@@ -1503,17 +1580,6 @@ class KernelLinear(Function):
                     shape_matrix[j][i] = 0.5 * coeffs[k]
 
         return shape_matrix
-
-    def determinant(self):
-        ''' Compute the determinant polynomial if the coefficients are square matrices (by Laplace expansion) '''
-        
-        if self.ndim != 2:
-            raise Exception("Not a polynomial matrix. Cannot compute determinant.")
-        if self.coeffs[0].shape[0] != self.coeffs[0].shape[1]:
-            raise Exception("Cannot compute determinant of a non-square matrix.")
-
-        if self._dim != 2:
-            pass
 
     def get_kernel(self):
         ''' Returns the monomial basis vector '''

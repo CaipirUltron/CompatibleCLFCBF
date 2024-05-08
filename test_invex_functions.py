@@ -31,50 +31,43 @@ def quadratic(eigen: np.ndarray, angle: float):
     R = rot2D(angle)
     return R.T @ np.diag(eigen) @ R
 
-eigenvalues = [2, 1]
-center = [0, 0]
+G = quadratic(eigen=[2, 1], angle=np.deg2rad(45))
 
-G = quadratic(eigenvalues, np.deg2rad(45))
-N = np.zeros([n,kernel_dim])
-N[:,1:n+1] = np.eye(n)
-Pinit = N.T @ G @ N
+N = sym.MatrixSymbol("N", n, kernel_dim)
+N_list = [ N @ Ai for Ai in A_list ]    # list of n x p
 
-def solve_N( kernel, N ):
-    ''' Returns an N matrix that produces an invex function k(x).T N.T P N K(x) on the given kernel k(x). '''
+M_list = []
+for k in range(kernel_dim):
+    Mk = np.zeros([n,n], dtype=N_list[0].dtype )
+    for i, Ni in enumerate(N_list):
+        Mk[:,i] = Ni[:,k]
+    M_list.append(Mk)
 
-    if not isinstance(N, (list, np.ndarray)):
-        raise ValueError("N must be a 2-dimensional array-like object.")
+# ------------------------------- Generation of ∇Φ(x) -----------------------------
+delPhi = MultiPoly(kernel._powers, M_list).filter()
+det = delPhi.determinant()
 
-    n = len(kernel[0])
-    p = len(kernel)
-    
-    N = np.array(N)
-    if N.ndim != 2 or N.shape != (n,p): 
-        raise ValueError("N must be a n x p matrix, where n, p are the state/kernel dimension.")
+print(f"∇Φ(x) = {delPhi}")
+print(f"|∇Φ|(x) = {det}")
 
-    Ni_list = [ N @ Ai for Ai in A_list ]    # list of n x p
+# --------------------------- SOS factorization of |∇Φ(x)| -------------------------
+sos_kernel = det.sos_kernel()
+sos_index_matrix = det.sos_index_matrix(sos_kernel)
+shape_matrix = det.shape_matrix(sos_kernel, sos_index_matrix)
+shape_fun = sym.lambdify( N, shape_matrix )
 
-    M_list = []
-    for k in range(p):                       # p times
-        Mk = np.zeros([n,n], dtype=Ni_list[0].dtype )
-        for i, Ni in enumerate(Ni_list):     # n times
-            Mk[:,i] = Ni[:,k]
-        M_list.append(Mk)
+def find_invex(N: np.ndarray):
+    ''' Returns an N matrix that produces an invex function k(x).T N.T P N K(x) on the given kernel k(x) '''
 
-    delPhi = MultiPoly(kernel, M_list)
-    print(delPhi)
+    if N.shape != (n, kernel_dim):
+        raise ValueError("N must be a n x p matrix.")
 
-    delPhi = delPhi.filter()
-    det = delPhi.determinant()
+    shape_fun(N) >> 0
 
-    print(f"∇Φ(x) = {delPhi}")
-    print(f"|∇Φ|(x) = {det}")
+    P = N.T @ G @ N # this is always p.s.d.
 
-# N = np.random.randn(n,kernel_dim)
-N = [ [ sym.Symbol("c{}{}".format(i,j)) for j in range(kernel_dim) ] for i in range(n) ]
-sym.pprint(N)
 
-solve_N( kernel=kernel._powers, N=N )
+# solve_N( kernel=kernel._powers, N=N )
 
 # clf = KernelLyapunov(kernel=kernel, P=Pinit, limits=limits, spacing=0.01 )
 
