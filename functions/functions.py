@@ -1385,6 +1385,40 @@ class MultiPoly:
         
         return MultiPoly(self.kernel, coeffs = [ c[0,0] for c in self.coeffs ])
 
+    def hyperbolic_transform(self):
+
+        if self.shape not in ( (1,1), () ):
+            raise Exception("Hyperbolic transform is only defined for scalar polynomials.")
+        
+        ncoeffs = len(self.coeffs)
+        new_variables = []
+        matrix = np.array([ [] for _ in range(ncoeffs) ])
+        for k, coeff in enumerate(self.coeffs):
+            
+            for term in sym.Add.make_args(coeff):
+                
+                for atom in term.args:
+                    constant = 1.0
+                    if atom != atom.free_symbols:
+                        constant = atom
+                        break
+
+                term = term/constant
+                if term not in new_variables:
+                    new_variables.append(term)
+                    matrix = np.hstack([matrix, np.zeros((ncoeffs, 1))])
+                    matrix[k,-1] = constant
+                else:
+                    term_index = new_variables.index( term )
+                    matrix[k, term_index] = constant
+
+        return new_variables, matrix
+
+        print(f"New hyperbolic variables = ")
+        for var in new_variables: print(var)
+        print(f"Transformation matrix = \n{matrix}")
+        # print( np.linalg.lstsq( matrix, np.array([ 1.0 if k == 0 else 0.0 for k in range(ncoeffs) ]), rcond=None ) )
+
     @classmethod
     def empty(cls):
         return cls(kernel=None)

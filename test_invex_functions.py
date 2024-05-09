@@ -18,7 +18,7 @@ ax.set_xlim(limits[0], limits[1])
 ax.set_ylim(limits[2], limits[3])
 
 # ------------------------------------ Define kernel and CLF -----------------------------------
-n, d = 2, 2
+n, d = 2, 3
 kernel = Kernel(dim=n, degree=d)
 print(kernel)
 kernel_dim = kernel._num_monomials
@@ -54,18 +54,22 @@ print("Coefficients of |∇Φ(x)|:")
 for k, c in enumerate(det.coeffs):
     print(f"c{k} = {c}")
 
-print(type(det.coeffs))
-
 det_coeffs_fun = sym.lambdify( N, det.coeffs )
 
 # ----------- SOS factorization of |∇Φ(x)| (not needed for the idea of unimodular matrices) ---------
 sos_kernel = det.sos_kernel()
 sos_index_matrix = det.sos_index_matrix(sos_kernel)
 shape_matrix = det.shape_matrix(sos_kernel, sos_index_matrix)
-# sym.pprint(f"D(N) = {shape_matrix}")
+sym.pprint(f"D(N) = {shape_matrix}")
 
-# shape_fun = sym.lambdify( N, shape_matrix ) # >> 0
+shape_fun = sym.lambdify( N, shape_matrix ) # >> 0
 
+tol = 1e-0
+Tol = np.zeros((len(sos_kernel), len(sos_kernel)))
+Tol[0,0] = 1
+Tol = tol*Tol
+
+#---------------------------------- Function for invexification -----------------------------------
 def find_invex(Ninit: np.ndarray):
     '''
     Returns an N matrix that produces an invex function k(x).T N.T P N K(x) on the given kernel k(x).
@@ -83,8 +87,12 @@ def find_invex(Ninit: np.ndarray):
         N = var.reshape((n, kernel_dim))
         det = det_coeffs_fun(N)
         unimodular_target = np.zeros(len(det))
-        unimodular_target[0] = 1
+        unimodular_target[0] = det_coeffs_fun(Ninit)[0]
         return det - unimodular_target
+
+    def initializer(var: np.ndarray):
+        N = var.reshape((n, kernel_dim))
+        return N.flatten() - np.ones(n*kernel_dim)
 
     def unimodular_equality(var: np.ndarray):
         N = var.reshape((n, kernel_dim))
@@ -93,29 +101,30 @@ def find_invex(Ninit: np.ndarray):
 
     def unimodular_inequality(var: np.ndarray):
         N = var.reshape((n, kernel_dim))
-        return det_coeffs_fun(N)[0] - 1
+        dinit = det_coeffs_fun(Ninit)
+        if dinit[0] > 0: return + det_coeffs_fun(N)[0] - 1
+        if dinit[0] < 0: return - det_coeffs_fun(N)[0] - 1
+
+    def invex(var: np.ndarray):
+        N = var.reshape((n, kernel_dim))
+        D = np.array(shape_fun(N))
+        return min(np.linalg.eigvals( D - Tol ))
 
     def centered(var: np.ndarray):
         N = var.reshape((n, kernel_dim))
         m0 = kernel.function(np.zeros(n))
         return m0.T @ N.T @ G @ N @ m0
 
-    # tol = 5e-0
-    # def invex(var: np.ndarray):
-    #     N = var.reshape((n, kernel_dim))
-    #     eigs = np.linalg.eigvals( shape_fun(N) )
-    #     max_eig = float(np.max(eigs))
-    #     min_eig = float(np.min(eigs))
-    #     return + min_eig - tol
+    # constraints = [ {"type": "eq", "fun": unimodular} ]
+    constraints = [ {"type": "eq", "fun": invex} ]
 
-    # constraints = [ {"type": "ineq", "fun": invex} ]
-    constraints = [ {"type": "eq", "fun": unimodular} ]
+    # constraints += [ {"type": "ineq", "fun": initializer} ]
     # constraints = [ {"type": "eq", "fun": unimodular_equality} ]
     # constraints += [ {"type": "ineq", "fun": unimodular_inequality} ]
     constraints += [ {"type": "eq", "fun": centered} ]
 
     init_var = Ninit.flatten()
-    sol = minimize( objective, init_var, constraints=constraints, options={"disp": True, "maxiter":1000} )
+    sol = minimize( objective, init_var, constraints=constraints, options={"disp": False, "maxiter":1000} )
 
     print(sol.message)
     N = sol.x.reshape((n, kernel_dim))
@@ -123,20 +132,18 @@ def find_invex(Ninit: np.ndarray):
     return N
 
 # ----- Example of N with unimodular |∇Φ(x)| = 1 resulting in CONVEX function (quadratic) -----
-Ninit = np.zeros((n, kernel_dim))
-Ninit[:,1:n+1] = np.eye(n)
+Nconvex = np.zeros((n, kernel_dim))
+Nconvex[:,1:n+1] = np.eye(n)
+print(f"Coefficients of |∇Φ(x)| at Nconvex = {det_coeffs_fun(Nconvex)}")
 
 # ----- Example of N with unimodular |∇Φ(x)| = 1 resulting in invex, NON-CONVEX function (n=2, d=2) -----
 # Ninit = np.array([[0, 1, 0, 1, -2, 1],
 #                   [0, 0, 1, 1, -2, 1]])
 
-print( Ninit )
-print( det_coeffs_fun(Ninit) )
-
-Pinit = Ninit.T @ G @ Ninit
+Pconvex = Nconvex.T @ G @ Nconvex
 # Dinit = shape_fun(Ninit)
 # print(f"λ( D(N) ) = {np.linalg.eigvals(Dinit)}")
-clf = KernelLyapunov(kernel=kernel, P=Pinit, limits=limits, spacing=0.01 )
+clf = KernelLyapunov(kernel=kernel, P=Pconvex, limits=limits, spacing=0.01 )
 
 #------------------------------ Plotting -----------------------------------
 pt = plt.ginput(1, timeout=0)
@@ -154,9 +161,12 @@ for i in range(num_sim):
     init_x_plot.set_data([init_x[0]], [init_x[1]])
 
     Ninit = np.random.randn(n,kernel_dim)
+    # Ninit = np.random.randint(low=1, high=5, size=(n,kernel_dim))
+    # print(f"Coefficients of |∇Φ(x)| at Ninit = {det_coeffs_fun(Ninit)}")
+
     N = find_invex(Ninit)
 
-    # D = shape_fun(N)
+    D = shape_fun(N)
     P = N.T @ G @ N
 
     clf.set_params(P=P)
@@ -168,14 +178,12 @@ for i in range(num_sim):
         del clf_contour
 
     V = clf.function(init_x)
-    # print(f"V({init_x}) = {V}")
+    print(f"V(x) = {V}")
 
-    # print(f"λ(P) = {np.linalg.eigvals(P)}")
-    # print(f"λ( D(N) ) = {np.linalg.eigvals(D)}")
-    print(f"Coefficients of |∇Φ(x)| = {det_coeffs_fun(N)}")
+    print(f"λ(P) = {np.linalg.eigvals(P).real}")
+    print(f"λ( D(N) ) = {np.linalg.eigvals(D)}")
+    # print(f"Coefficients of |∇Φ(x)| at N = {det_coeffs_fun(N)}")
 
     num_levels = 20
     clf_contour = clf.plot_levels(ax=ax, levels=[ V*((k+1)/num_levels) for k in range(num_levels) ])
     plt.pause(0.001)
-
-plt.show()
