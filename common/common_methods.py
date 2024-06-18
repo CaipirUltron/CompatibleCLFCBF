@@ -439,14 +439,16 @@ def circular_boundary_shape( radius, center, kernel_dim ):
 
     return circular_quadratic
 
-def sontag_formula(a, b):
+def sontag_formula(a, b, params):
     '''
-    General Sontag's formula for stabilization.
+    Sontag's formula.
     '''
-    kappa = 0
-    if b != 0:
-        kappa = - (a + np.sqrt(a**2 + b**4))/b
-    return kappa
+    norm_b = np.linalg.norm(b)
+    if norm_b >= params["threshold"]:
+        normalized_b = b/np.linalg.norm(b)
+        return - (a + np.sqrt(a**2 + params["gamma"]*norm_b**4)) * normalized_b
+    else:
+        return np.zeros(len(b))
 
 def lyap(A: np.ndarray, P: np.ndarray) -> np.ndarray:
     ''' Computes Lyapunov form A P + P A.T '''

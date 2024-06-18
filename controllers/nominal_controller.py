@@ -2,11 +2,61 @@ import numpy as np
 import cvxpy as cp
 import scipy as sp
 
-from common import create_quadratic
+from common import create_quadratic, sontag_formula
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 from controllers.compatibility import CLFCBFPair
 from controllers.equilibrium_algorithms import equilibrium_field, compute_equilibria, S, L, is_equilibria
+
+class SontagController():
+    '''
+    Class for a CLBF-based controller, using Sontag's universal formula.
+    '''
+    def __init__(self, plant, clbf):
+
+        # Dimensions and system model initialization
+        self.plant = plant
+        self.clfb = clbf
+
+        if self.plant.kernel != self.clbf:
+            raise Exception("Plant and CLBF must be based on the same kernel.")
+        if self.plant.n != self.clbf._dim:
+            raise Exception("Plant and CLBF dimensions are not equal.")
+
+        self.kernel = clbf.kernel
+        self.A_list = clbf.kernel.get_A_matrices()
+
+        self.state_dim = self.clf._dim
+        self.control_dim = self.plant.m
+        self.kernel_dim = self.kernel._num_monomials
+
+        self.ctrl_params = {"gamma": 1, "threshold": 0.001}
+
+    def get_control(self):
+        '''
+        Computes the control based on Sontag's formula
+        '''
+        # Affine plant dynamics
+        state = self.plant.get_state()
+
+        f = self.plant.get_f(state)
+        g = self.plant.get_g(state)
+
+        # CLBF function and gradient
+        W = self.clbf.function(state)
+        nablaW = self.clbf.gradient(state)
+
+        # Lie derivatives
+        LfW = nablaW.dot(f)
+        LgW = g.T.dot(nablaW)
+
+        return sontag_formula(LfW, LgW, params=self.ctrl_params)
+
+    def get_clf_control():
+        return None
+
+    def update_clf_dynamics( clf_control ):
+        pass
 
 class NominalQP():
     '''
