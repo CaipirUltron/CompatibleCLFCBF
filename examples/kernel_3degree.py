@@ -4,10 +4,10 @@ from shapely import LineString, LinearRing, Polygon
 
 from controllers import NominalQP
 from dynamic_systems import KernelAffineSystem
-from functions import LeadingShape, Kernel, KernelLyapunov, KernelBarrier, KernelTriplet
+from functions import LeadingShape, Kernel, KernelLyapunov, KernelBarrier, KernelFamily
 from common import create_quadratic, circular_boundary_shape, rot2D, polygon, load_compatible, discretize, segmentize, enclosing_circle
 
-initial_state = [0.2, 2.5]
+initial_state = [0.2, 6.5]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
@@ -74,10 +74,11 @@ cbf_leading = LeadingShape(shape_matrix, bound='lower')
 cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, skeleton=skeleton_segs, leading=cbf_leading, limits=limits, spacing=0.1)
 cbf.is_bounded_by(cbf_leading.shape, verbose=True)
 
+cbfs = [ cbf ]
 # ------------------------------------------------- Define controller ------------------------------------------------------
-sample_time = .002
+sample_time = .005
 p, alpha, beta = 1.0, 1.0, 1.0
-kerneltriplet = KernelTriplet( plant=plant, clf=clf, cbf=cbf,
+kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs,
                                params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta},
                                limits=limits.tolist(), spacing=0.2)
 
@@ -89,4 +90,4 @@ plot_config = {
     "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits,
     "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": True
 }
-logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": cbf.Q.tolist() }
+logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": [ cbf.Q.tolist() for cbf in cbfs ] }

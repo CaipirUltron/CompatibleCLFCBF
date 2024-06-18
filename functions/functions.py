@@ -2128,17 +2128,18 @@ class KernelBarrier(KernelQuadratic):
         ''' Computes the boundary level set '''
         return self.get_levels(levels=[0.0])[0]
 
-class KernelTriplet():
+class KernelFamily():
     '''
-    Class for kernel-based triplets of: plant, CLF and CBF.
-    Defines common algorithms for CLF-CBF compatibility, such as computation of the invariat set, equilibrium points, and optimizations over the invariant set branches.
+    Class for kernel-based family of: plant, CLF and any number of CBFs.
+    For simplicity, all entities share the same kernel function.
+    Defines common algorithms for CLF-CBF pair compatibility, such as computation of the invariat set, equilibrium points, and optimizations over the invariant set branches.
     The variable self.P is used for online computations with the CLF shape.
     '''
     def __init__(self, **kwargs):
         
         self.plant = None
         self.clf = None
-        self.cbf = None
+        self.cbfs = []
         self.params = {"slack_gain": 1.0, "clf_gain": 1.0, "cbf_gain": 1.0}
 
         self.limits = [ [-1, +1] for _ in range(2) ]
@@ -2148,24 +2149,21 @@ class KernelTriplet():
         self.compatibility_options = { "barrier_sep": 0.1, "min_curvature": 1.1 }
         self.interior_eq_threshold = 1e-1
         self.max_P_eig = 100
-        self.invariant_lines_plot = []
         self.plotted_attrs = {}
 
-        self.comp_process_data = {"step": 0, 
-                                  "start_time": 0.0, 
-                                  "execution_time": 0.0, 
-                                  "gui_eventloop_time": 0.3,
-                                  "invariant_segs_log": [] }
-        
         self.comp_graphics = { "fig": None,
                                "text": None,
                                "clf_artists": [] }
 
         # Defines main class attributes
         self.set_param(**kwargs)
-        
-        # Initialize matrix for determinant computation
-        self.W = np.empty((self.n,2))
+
+        self.invariant_lines_plot = [ [] for _ in self.cbfs ]
+        self.comp_process_data = {"step": 0, 
+                                  "start_time": 0.0, 
+                                  "execution_time": 0.0, 
+                                  "gui_eventloop_time": 0.3,
+                                  "invariant_segs_log": [ [] for _ in self.cbfs ] }
 
         # Initialize cost and constraints for scipy.optimize computation
         self.cost = 0.0
@@ -2193,8 +2191,10 @@ class KernelTriplet():
         # Compute limit lines (obstacle should be completely contained inside the rectangle)
         self.create_limit_lines()
 
-        # Compute CBF boundary
-        self.compute_cbf_boundary()
+        # Compute CBF boundaries
+        self.boundary_lines = [ [] for _ in self.cbfs ]
+        for cbf_index in range(self.num_cbfs):
+            self.compute_cbf_boundary(cbf_index)
 
         # Initialize invariant set
         self.update_invariant_set(verbose=True)
@@ -2229,12 +2229,12 @@ class KernelTriplet():
         right_y = spam_y
         self.limit_lines.append({"x": right_x, "y": right_y})
 
-    def compute_cbf_boundary(self):
+    def compute_cbf_boundary(self, cbf_index):
         '''Compute CBF boundary'''
-        self.boundary_lines = []
-        for boundary_seg in self.cbf.get_boundary():
+
+        for boundary_seg in self.cbfs[cbf_index].get_boundary():
             boundary_line = geometry.LineString(boundary_seg)
-            self.boundary_lines.append(boundary_line)
+            self.boundary_lines[cbf_index].append(boundary_line)
 
     def set_param(self, **kwargs):
         '''
@@ -2261,8 +2261,9 @@ class KernelTriplet():
             if key == "clf":
                 self.clf = kwargs["clf"]
                 continue
-            if key == "cbf":
-                self.cbf = kwargs["cbf"]
+            if key == "cbfs":
+                self.cbfs = kwargs["cbfs"]
+                self.num_cbfs = len(self.cbfs)
                 continue
             if key == "params":
                 params = kwargs["params"]
@@ -2274,12 +2275,12 @@ class KernelTriplet():
                     if "cbf_gain":
                         self.params["cbf_gain"] = params["cbf_gain"]
 
-        if "limits" not in kwargs.keys():
-            if len(self.cbf.points) > 0:
-                pts = np.array([ pt["coords"] for pt in self.cbf.points ])
-                bbox = minimum_bounding_rectangle(pts)                
-                xmin, xmax, ymin, ymax = np.min(bbox[:,0]), np.max( bbox[:,0] ), np.min(bbox[:,1]), np.max(bbox[:,1])
-                self.limits = ( xmin, xmax, ymin, ymax )
+        # if "limits" not in kwargs.keys():
+        #     if len(self.cbf.points) > 0:
+        #         pts = np.array([ pt["coords"] for pt in self.cbf.points ])
+        #         bbox = minimum_bounding_rectangle(pts)                
+        #         xmin, xmax, ymin, ymax = np.min(bbox[:,0]), np.max( bbox[:,0] ), np.min(bbox[:,1]), np.max(bbox[:,1])
+        #         self.limits = ( xmin, xmax, ymin, ymax )
 
         # Initialize grids used for determinant computation
         if hasattr(self, "limits") and hasattr(self, "spacing"):
@@ -2290,12 +2291,12 @@ class KernelTriplet():
             self.xg, self.yg = np.meshgrid(x,y)
             self.grid_shape = self.xg.shape
             self.grid_pts = list( zip( self.xg.flatten(), self.yg.flatten() ) )
-            self.determinant_grid = np.empty(self.grid_shape, dtype=float)
+            self.determinant_grid = [ np.empty(self.grid_shape, dtype=float) for _ in self.cbfs ]
 
-        N = 10
-        x = np.random.uniform(xmin, xmax, N)
-        y = np.random.uniform(ymin, ymax, N)
-        self.pts = np.column_stack((x, y))
+        # N = 10
+        # x = np.random.uniform(xmin, xmax, N)
+        # y = np.random.uniform(ymin, ymax, N)
+        # self.pts = np.column_stack((x, y))
 
         self.verify_kernel()
         self.counter = 0
@@ -2307,16 +2308,23 @@ class KernelTriplet():
         try:
             if not isinstance(self.plant, KernelAffineSystem) or not isinstance(self.plant.kernel, Kernel):
                 raise Exception("Plant is not kernel affine.")
+            
             if not isinstance(self.clf, KernelLyapunov) or not isinstance(self.clf.kernel, Kernel):
                 raise Exception("CLF is not kernel-based.")
-            if not isinstance(self.cbf, KernelBarrier) or not isinstance(self.cbf.kernel, Kernel):
-                raise Exception("CBF is not kernel-based.")
-            if not (self.plant.kernel == self.clf.kernel and self.plant.kernel == self.cbf.kernel):
-                raise Exception("Kernels are not compatible.")
-
+            
+            for cbf in self.cbfs:
+                if not isinstance(cbf, KernelBarrier) or not isinstance(cbf.kernel, Kernel):
+                    raise Exception("CBF is not kernel-based.")
+                
+            equal_kernels = [ self.plant.kernel == self.clf.kernel ]
+            equal_kernels += [ self.clf.kernel == cbf.kernel for cbf in self.cbfs ]
+            if not all(equal_kernels):
+                raise Exception("Plant, CBF and CBF kernels are not the same.")
             self.kernel = self.plant.kernel
 
-            if (self.kernel._dim != self.plant.n) or (self.kernel._dim != self.clf._dim) or (self.kernel._dim != self.cbf._dim):
+            equal_dims = [ self.kernel._dim == self.plant.n, self.kernel._dim == self.clf._dim ]
+            equal_dims += [ self.kernel._dim == cbf._dim for cbf in self.cbfs ]
+            if not all(equal_dims):
                 raise Exception("Dimensions are not compatible.")
             
             self.n = self.kernel._dim
@@ -2325,17 +2333,20 @@ class KernelTriplet():
 
             self.F = self.plant.get_F()
             self.P = self.clf.P
-            self.Q = self.cbf.Q
-            self.ATQ_matrices = [ A.T @ self.Q for A in self.A_matrices ]
+
+            self.Q = []
+            for cbf in self.cbfs:
+                self.Q.append(cbf.Q)
+                self.ATQ_matrices = [ [ A.T @ cbf.Q for A in self.A_matrices ] for cbf in self.cbfs ]
             
         except Exception as error:
             print(error)
             return False
 
-    def vecQ_fun(self, pt: np.ndarray) -> np.ndarray:
-        '''Returns the vector vQ = ∇h'''    
+    def vecQ_fun(self, pt: np.ndarray, cbf_index: int) -> np.ndarray:
+        '''Returns the vector vQ = ∇h'''
         m = self.kernel.function(pt)
-        return np.array([ m.T @ ATQ @ m for ATQ in self.ATQ_matrices ])
+        return np.array([ m.T @ ATQ @ m for ATQ in self.ATQ_matrices[cbf_index] ])
 
     def vecP_fun_with_shape(self, pt: np.ndarray, P) -> list:
         '''Returns the vector vP = p gamma V(x, self.P) ∇V - fc '''
@@ -2371,39 +2382,50 @@ class KernelTriplet():
         '''Returns the CLF gradient using self P matrix'''  
         return self.clf_gradient_with_shape(pt, self.P)
 
-    def lambda_fun(self, pt):
-        '''Given a point x in the invariant set, compute its corresponding lambda scalar.'''
-        vQ = self.vecQ_fun(pt)
+    def lambda_fun(self, pt: np.ndarray, cbf_index: int) -> float:
+        '''Given a point x in an invariant set, compute its corresponding lambda scalar.'''
+
+        vQ = self.vecQ_fun(pt, cbf_index)
         vP = self.vecP_fun(pt)
         return (vQ.T @ vP) / np.linalg.norm(vQ)**2
 
-    def L_fun_with_lambda_and_shape(self, pt: np.ndarray, l, P):
+    def L_fun_with_lambda_and_shape(self, pt: np.ndarray, l, P, cbf_index: int = -1):
         '''Returns matrix L = F + l Q - p gamma V(x, self.P) P'''
 
         slk_gain = self.params["slack_gain"]
         clf_gain = self.params["clf_gain"]
         V = self.clf_fun(pt)
 
-        return self.F + l * self.Q - slk_gain * clf_gain * V * P
+        if cbf_index >= 0:
+            return self.F + l * self.Q[cbf_index] - slk_gain * clf_gain * V * P
+        else:
+            return self.F - slk_gain * clf_gain * V * P
 
-    def L_fun(self, pt):
+    def L_fun(self, pt: np.ndarray, cbf_index: int = -1):
         '''Returns matrix L = F + l(x) Q - p gamma V(x, self.P) P with l(pt) and self P matrix'''
-        return self.L_fun_with_lambda_and_shape( pt, self.lambda_fun(pt), self.P )
+        if cbf_index >= 0:
+            return self.L_fun_with_lambda_and_shape( pt, self.lambda_fun(pt), self.P, cbf_index )
+        else:
+            return self.L_fun_with_lambda_and_shape( pt, 0, self.P, -1 )
 
-    def invariant_equation(self, pt: np.ndarray, l, P):
+    def invariant_equation(self, pt: np.ndarray, l, P, cbf_index: int = -1):
         '''Returns invariant equation l vQ - vP for a given pt, l and P'''
+
         m = self.kernel.function(pt)
         Jm = self.kernel.jacobian(pt)
-        return Jm.T @ self.L_fun_with_lambda_and_shape(pt, l, P) @ m
+        if cbf_index >= 0:
+            return Jm.T @ self.L_fun_with_lambda_and_shape(pt, l, P, cbf_index) @ m
+        else:
+            return Jm.T @ self.L_fun_with_lambda_and_shape(pt, 0, P, -1) @ m
 
-    def S_fun_with_lambda_and_shape(self, pt: np.ndarray, l, P):
+    def S_fun_with_lambda_and_shape(self, pt: np.ndarray, l, P, cbf_index: int = -1):
         '''Returns matrix S = H - (1/p gamma V**2) * fc fc.T, for stability computation of equilibrium points'''
 
         V = self.clf_fun(pt)
         m = self.kernel.function(pt)
         fc = self.plant.get_fc(pt)
 
-        L = self.L_fun_with_lambda_and_shape(pt, l, P)
+        L = self.L_fun_with_lambda_and_shape(pt, l, P, cbf_index)
 
         slk_gain = self.params["slack_gain"]
         clf_gain = self.params["clf_gain"]
@@ -2415,20 +2437,26 @@ class KernelTriplet():
                 S[-1].append( m.T @ Ai.T @ ( L @ Aj + Aj.T @ L ) @ m - fc[i]*fc[j] / ( slk_gain * clf_gain * ( V**2 ) ) )
         return S
 
-    def S_fun(self, pt: np.ndarray) -> np.ndarray:
+    def S_fun(self, pt: np.ndarray, cbf_index: int = -1) -> np.ndarray:
         '''Returns matrix S = H - (1/p gamma V**2) * fc fc.T with l(pt) and self P matrix'''
-        return np.array(self.S_fun_with_lambda_and_shape(pt, self.lambda_fun(pt), self.P))
+        if cbf_index >= 0:
+            return np.array(self.S_fun_with_lambda_and_shape(pt, self.lambda_fun(pt, cbf_index), self.P, cbf_index))
+        else:
+            return np.array(self.S_fun_with_lambda_and_shape(pt, 0, self.P))
 
-    def stability_fun(self, x_eq, type_eq): 
+    def stability_fun(self, x_eq, type_eq, cbf_index: int = -1): 
         '''Compute the stability number for a given equilibrium point'''
+
         V = self.clf_fun(x_eq)
         nablaV = self.clf_gradient(x_eq)
-        nablah = self.cbf.gradient(x_eq)
-        norm_nablaV = np.linalg.norm(nablaV)
-        norm_nablah = np.linalg.norm(nablah)
-        unit_nablah = nablah/norm_nablah
 
-        S = self.S_fun(x_eq)
+        if cbf_index >= 0:
+            nablah = self.cbfs[cbf_index].gradient(x_eq)
+            norm_nablaV = np.linalg.norm(nablaV)
+            norm_nablah = np.linalg.norm(nablah)
+            unit_nablah = nablah/norm_nablah
+
+        S = self.S_fun(x_eq, cbf_index)
         if type_eq == "boundary":
             curvatures, basis_for_TpS = compute_curvatures( S, unit_nablah )
             max_index = np.argmax(curvatures)
@@ -2440,10 +2468,10 @@ class KernelTriplet():
         '''
         If the CLF-CBF gradients are collinear, then the stability_number is equivalent to the diff. btw CBF and CLF curvatures at the equilibrium point:
         '''
-        eta = self.eta_fun(x_eq)
+        eta = self.eta_fun(x_eq, cbf_index)
         # if (eta - 1) < 1e-10:
         #     curv_V = self.clf.get_curvature(x)
-        #     curv_h = self.cbf.get_curvature(x)
+        #     curv_h = self.cbfs[cbf_index].get_curvature(x)
         #     diff_curvatures = curv_h - curv_V
         #     print(f"Difference of curvatures = {diff_curvatures}")
         #     print(f"Stability = {stability_number}")
@@ -2452,12 +2480,14 @@ class KernelTriplet():
 
         return stability_number, eta
 
-    def eta_fun(self, x_eq):
+    def eta_fun(self, x_eq, cbf_index):
         '''
         Returns the value of eta (between 0 and 1), depending on the collinearity between the CLF-CBF gradients.
         '''
+        if cbf_index < 0: return
+
         nablaV = self.clf_gradient(x_eq)
-        nablah = self.cbf.gradient(x_eq)
+        nablah = self.cbfs[cbf_index].gradient(x_eq)
 
         g = self.plant.get_g(x_eq)
         G = g @ g.T
@@ -2484,27 +2514,32 @@ class KernelTriplet():
 
     def update_determinant_grid(self):
         '''
-        Evaluates det([ vQ, vP ]) = 0 over a grid.
+        Evaluates det([ vQ, vP ]) = 0 over a grid for each CBF.
         Returns: a grid of shape self.grid_shape with the determinant values corresponding to each pt on the grid
         '''
-        self.W_list, self.lambda_grid = [], []
+        W_list = [ [] for _ in self.cbfs ]
+        lambda_grid = [ [] for _ in self.cbfs ]
         for pt in self.grid_pts:
-            vQ = self.vecQ_fun(pt)
+
             vP = self.vecP_fun(pt)
+            for cbf_index in range(self.num_cbfs):
+                vQ = self.vecQ_fun(pt, cbf_index)
+                
+                W = np.hstack([vQ.reshape(self.n,1), vP.reshape(self.n,1)])
+                W_list[cbf_index].append(W)
 
-            W = np.hstack([vQ.reshape(self.n,1), vP.reshape(self.n,1)])
-            self.W_list.append(W)
+                l = (vQ.T @ vP) / np.linalg.norm(vQ)**2
+                lambda_grid[cbf_index].append( l )
 
-            self.lambda_grid.append( (vQ.T @ vP) / np.linalg.norm(vQ)**2 )
+        for cbf_index in range(self.num_cbfs):
+            determinant_list = np.linalg.det( W_list[cbf_index] )
 
-        determinant_list = np.linalg.det( self.W_list )
+            # Eliminate the negative lambda part
+            if not self.invariant_complete:
+                for k, l in enumerate(lambda_grid[cbf_index]):
+                    if l < 0.0: determinant_list[k] = np.inf
 
-        # Eliminate the negative lambda part
-        if not self.invariant_complete:
-            for k, l in enumerate(self.lambda_grid):
-                if l < 0.0: determinant_list[k] = np.inf
-
-        self.determinant_grid = determinant_list.reshape(self.grid_shape)
+            self.determinant_grid[cbf_index] = determinant_list.reshape(self.grid_shape)
 
     def update_invariant_set(self, verbose=False):
         '''
@@ -2514,32 +2549,42 @@ class KernelTriplet():
             warnings.warn("Currently, the computation of the invariant set is not available for dimensions higher than 2.")
             return
         
-        self.update_determinant_grid()                                                                            # updates the grid with new determinant values
-        invariant_contour = ctp.contour_generator( x=self.xg, y=self.yg, z=self.determinant_grid )  # creates new contour_generator object
-        self.invariant_lines = invariant_contour.lines(0.0)                                                           # returns the 0-valued contour lines
-        self.invariant_set_analysis(verbose=verbose)                                                                  # run through each branch of the invariant set
+        self.update_determinant_grid()                                       # updates the grid with new determinant values
+        
+        self.boundary_equilibria, self.interior_equilibria = [], []
+        self.stable_equilibria, self.unstable_equilibria = [], []
 
-    def invariant_set_analysis(self, verbose=False):
-        '''
-        Populates invariant segments with data and compute equilibrium points from invariant line data.
-        '''
-        self.invariant_segs = []
-        self.boundary_equilibria = []
-        self.interior_equilibria = []
-        self.stable_equilibria = []
-        self.unstable_equilibria = []
+        self.invariant_lines = [ None for _ in self.cbfs ]
+        self.invariant_segs = [ [] for _ in self.cbfs ]
+        for cbf_index in range(self.num_cbfs):                                                                       
+            self.invariant_set_analysis(cbf_index)                           # run through each branch of the invariant set of the given CBF
 
-        for segment_points in self.invariant_lines:
+        if verbose:
+            show_message(self.boundary_equilibria, "boundary equilibrium points")
+            show_message(self.interior_equilibria, "interior equilibrium points")
+
+    def invariant_set_analysis(self, cbf_index: int):
+        '''
+        Populates invariant segments with data and compute equilibrium points from invariant line data
+        corresponding to a given CBF.
+        '''
+        invariant_contour = ctp.contour_generator( x=self.xg, y=self.yg, z=self.determinant_grid[cbf_index] )  # creates new contour_generator object
+        self.invariant_lines[cbf_index] = invariant_contour.lines(0.0)                                         # returns the 0-valued contour lines
+
+        boundary_eqs, interior_eqs = [], []
+        stable_eqs, unstable_eqs = [], []
+        for segment_points in self.invariant_lines[cbf_index]:
 
             # ----- Loads segment dictionary
             seg_dict = {"points": segment_points}
-            seg_dict["lambdas"] = [ self.lambda_fun(pt) for pt in segment_points ]
+            seg_dict["lambdas"] = [ self.lambda_fun(pt, cbf_index) for pt in segment_points ]
 
             seg_dict["clf_values"] = [ self.clf_fun(pt) for pt in segment_points ]
             seg_dict["clf_gradients"] = [ self.clf_gradient(pt) for pt in segment_points ]
 
-            seg_dict["cbf_values"] = [ self.cbf.function(pt) for pt in segment_points ]
-            seg_dict["cbf_gradients"] = [ self.cbf.gradient(pt) for pt in segment_points ]
+            seg_dict["cbf_index"] = cbf_index
+            seg_dict["cbf_values"] = [ self.cbfs[cbf_index].function(pt) for pt in segment_points ]
+            seg_dict["cbf_gradients"] = [ self.cbfs[cbf_index].gradient(pt) for pt in segment_points ]
 
             # ----- Computes the corresponding equilibrium points and critical segment values
             self.seg_boundary_equilibria(seg_dict)
@@ -2547,27 +2592,31 @@ class KernelTriplet():
             self.seg_critical(seg_dict)
 
             # ----- Adds the segment dicts and equilibrium points to corresponding data structures
-            self.invariant_segs.append(seg_dict)
-            self.boundary_equilibria += seg_dict["boundary_equilibria"]
-            self.interior_equilibria += seg_dict["interior_equilibria"]
+            self.invariant_segs[cbf_index].append(seg_dict)
+            boundary_eqs += seg_dict["boundary_equilibria"]
+            interior_eqs += seg_dict["interior_equilibria"]
 
-        for b_eq in self.boundary_equilibria:
-            if b_eq["equilibrium"] == "stable": self.stable_equilibria.append(b_eq)
-            if b_eq["equilibrium"] == "unstable": self.unstable_equilibria.append(b_eq)
+        for b_eq in boundary_eqs:
+            if b_eq["equilibrium"] == "stable": stable_eqs.append(b_eq)
+            if b_eq["equilibrium"] == "unstable": unstable_eqs.append(b_eq)
 
-        for i_eq in self.interior_equilibria:
-            if i_eq["equilibrium"] == "stable": self.stable_equilibria.append(i_eq)
-            if i_eq["equilibrium"] == "unstable": self.unstable_equilibria.append(i_eq)
+        for i_eq in interior_eqs:
+            if i_eq["equilibrium"] == "stable": stable_eqs.append(i_eq)
+            if i_eq["equilibrium"] == "unstable": unstable_eqs.append(i_eq)
 
-        if verbose:
-            show_message(self.boundary_equilibria, "boundary equilibrium points")
-            show_message(self.interior_equilibria, "interior equilibrium points")
+        self.boundary_equilibria += boundary_eqs
+        self.interior_equilibria += interior_eqs
+        self.stable_equilibria += stable_eqs
+        self.unstable_equilibria += unstable_eqs
 
-    def get_boundary_intersections(self, seg_data: list[np.ndarray]):
+    def get_boundary_intersections(self, seg_dict: dict[str,]):
         ''' Computes the intersections with boundary segments of a particular segment of the invariant set '''
 
+        cbf_index = seg_dict["cbf_index"]
+        seg_data = seg_dict["points"]
+
         intersection_pts = []
-        for boundary_line in self.boundary_lines:
+        for boundary_line in self.boundary_lines[cbf_index]:
             invariant_seg_line = geometry.LineString(seg_data)
             intersections = intersection( boundary_line, invariant_seg_line )
 
@@ -2590,19 +2639,21 @@ class KernelTriplet():
     def seg_boundary_equilibria(self, seg_dict: dict[str,]):
         ''' Computes boundary equilibrium points for given segment data '''
 
+        cbf_index = seg_dict["cbf_index"]
         seg_dict["boundary_equilibria"] = []
-        intersection_pts = self.get_boundary_intersections(seg_dict["points"])
+        intersection_pts = self.get_boundary_intersections(seg_dict)
 
         # Boundary equilibrium are intersection points with positive lambda:
         for pt in intersection_pts:
-            lambda_pt = self.lambda_fun(pt)
+            lambda_pt = self.lambda_fun(pt, cbf_index)
             if lambda_pt >= 0.0:
                 seg_boundary_equilibrium = {"x": pt}
+                seg_boundary_equilibrium["cbf_index"] = cbf_index
                 seg_boundary_equilibrium["lambda"] = lambda_pt
-                seg_boundary_equilibrium["h"] = self.cbf.function(pt)
-                seg_boundary_equilibrium["nablah"] = self.cbf.gradient(pt)
+                seg_boundary_equilibrium["h"] = self.cbfs[cbf_index].function(pt)
+                seg_boundary_equilibrium["nablah"] = self.cbfs[cbf_index].gradient(pt)
 
-                stability, eta = self.stability_fun(pt, "boundary")
+                stability, eta = self.stability_fun(pt, "boundary", cbf_index)
                 seg_boundary_equilibrium["eta"], seg_boundary_equilibrium["stability"] = eta, stability
                 seg_boundary_equilibrium["equilibrium"] = "stable"
                 if stability > 0: seg_boundary_equilibrium["equilibrium"] = "unstable"
@@ -2612,6 +2663,7 @@ class KernelTriplet():
     def seg_interior_equilibria(self, seg_dict: dict[str,]):
         ''' Computes interior equilibrium points for given segment data '''
 
+        cbf_index = seg_dict["cbf_index"]
         seg_dict["interior_equilibria"] = []
         seg_data = seg_dict["points"]
 
@@ -2632,14 +2684,15 @@ class KernelTriplet():
                 group_pts = [ ele[0] for ele in group ]
                 group_costs = [ ele[1] for ele in group ]
                 new_eq = group_pts[np.argmin(group_costs)]
-                seg_dict["interior_equilibria"].append({"x":new_eq, 
-                                                        "lambda": self.lambda_fun(new_eq), 
-                                                        "h": self.cbf.function(new_eq), 
-                                                        "nablah": self.cbf.gradient(new_eq)})
+                seg_dict["interior_equilibria"].append({"x": new_eq,
+                                                        "cbf_index": cbf_index,
+                                                        "lambda": self.lambda_fun(new_eq, cbf_index), 
+                                                        "h": self.cbfs[cbf_index].function(new_eq), 
+                                                        "nablah": self.cbfs[cbf_index].gradient(new_eq)})
 
         # Computes the equilibrium stability
         for eq in seg_dict["interior_equilibria"]:
-            stability, eta = self.stability_fun(eq["x"], "boundary")
+            stability, eta = self.stability_fun(eq["x"], "boundary", cbf_index)
             eq["eta"], eq["stability"] = eta, stability
             eq["equilibrium"] = "stable"
             if stability > 0:
@@ -2659,8 +2712,9 @@ class KernelTriplet():
         '''
         Computes the segment integral
         '''
+        cbf_index = seg_dict["cbf_index"]
         seg_data = seg_dict["points"]
-        barrier_vals = np.array([ self.cbf.function(0.5*( pt + seg_data[k+1,:] )) for k, pt in enumerate(seg_data[0:-1,:]) ])
+        barrier_vals = np.array([ self.cbfs[cbf_index].function(0.5*( pt + seg_data[k+1,:] )) for k, pt in enumerate(seg_data[0:-1,:]) ])
 
         # segment is removable (starts AND ends completely outside/inside the unsafe set)
         if barrier_vals[0] * barrier_vals[-1] > 0:
@@ -2744,17 +2798,17 @@ class KernelTriplet():
 
         return self.CVXPY_P.value
 
-    def non_removable_stable_equilibria(self) -> list[np.ndarray]:
-        '''
-        This function returns a list with all non-removable stable equilibrium points.
-        '''
-        nonremovable_stables = []
-        for seg_dict in self.invariant_segs:
-            if seg_dict["removable"] == 0:
-                for eq in seg_dict["boundary_equilibria"]:
-                    if eq["equilibrium"] == "stable":
-                        nonremovable_stables.append( np.array(eq["x"]) )
-        return nonremovable_stables
+    # def non_removable_stable_equilibria(self) -> list[np.ndarray]:
+    #     '''
+    #     This function returns a list with all non-removable stable equilibrium points.
+    #     '''
+    #     nonremovable_stables = []
+    #     for seg_dict in self.invariant_segs:
+    #         if seg_dict["removable"] == 0:
+    #             for eq in seg_dict["boundary_equilibria"]:
+    #                 if eq["equilibrium"] == "stable":
+    #                     nonremovable_stables.append( np.array(eq["x"]) )
+    #     return nonremovable_stables
 
     def compatibilize(self, obj_type="closest", verbose=False, animate=False) -> dict:
         '''
@@ -2836,7 +2890,8 @@ class KernelTriplet():
             self.comp_process_data["step"] += 1
             
             # for later json serialization...
-            self.comp_process_data["invariant_segs_log"].append( [ seg.tolist() for seg in self.invariant_lines ] )
+            for cbf_index in range(self.num_cbfs):
+                self.comp_process_data["invariant_segs_log"][cbf_index].append( [ seg.tolist() for seg in self.invariant_lines[cbf_index] ] )
 
             if verbose:
                 print( f"Steps = {self.counter}" )
@@ -2900,17 +2955,17 @@ class KernelTriplet():
     
         return comp_result
 
-    def plot_invariant(self, ax, *args):
+    def plot_invariant(self, ax, cbf_index, *args):
         '''
-        Plots the invariant set segments into ax.
+        Plots the invariant set segments corresponding to CBF into ax.
         Optional arguments specify the indexes of each invariant segment to be plotted.
         If no optional argument is passed, plots all invariant segments.
         '''
         # Which segments to plot?
-        num_segs_to_plot = len(self.invariant_segs)
+        num_segs_to_plot = len(self.invariant_segs[cbf_index])
         segs_to_plot = [ i for i in range(num_segs_to_plot) ]
 
-        if np.any( np.array(args) > len(self.invariant_segs)-1 ):
+        if np.any( np.array(args) > len(self.invariant_segs[cbf_index])-1 ):
             print("Invariant segment list index out of range. Plotting all")
 
         elif len(args) > 0:
@@ -2918,21 +2973,21 @@ class KernelTriplet():
             segs_to_plot = list(args)
 
         # Adds or removes lines according to the total number of segments to be plotted 
-        if num_segs_to_plot >= len(self.invariant_lines_plot):
-            for _ in range(num_segs_to_plot - len(self.invariant_lines_plot)):
+        if num_segs_to_plot >= len(self.invariant_lines_plot[cbf_index]):
+            for _ in range(num_segs_to_plot - len(self.invariant_lines_plot[cbf_index])):
                 line2D, = ax.plot([],[], color=np.random.rand(3), linestyle='dashed', linewidth=1.2 )
-                self.invariant_lines_plot.append(line2D)
+                self.invariant_lines_plot[cbf_index].append(line2D)
         else:
-            for _ in range(len(self.invariant_lines_plot) - num_segs_to_plot):
-                self.invariant_lines_plot[-1].remove()
-                del self.invariant_lines_plot[-1]
+            for _ in range(len(self.invariant_lines_plot[cbf_index]) - num_segs_to_plot):
+                self.invariant_lines_plot[cbf_index][-1].remove()
+                del self.invariant_lines_plot[cbf_index][-1]
 
         # UP TO HERE: len(self.invariant_lines_plot) == len(segs_to_plot)
 
         # Updates segment lines with data from each invariant segment
         for k in range(num_segs_to_plot):
             seg_index = segs_to_plot[k]
-            self.invariant_lines_plot[k].set_data( self.invariant_segs[seg_index]["points"][:,0], self.invariant_segs[seg_index]["points"][:,1] )
+            self.invariant_lines_plot[cbf_index][k].set_data( self.invariant_segs[cbf_index][seg_index]["points"][:,0], self.invariant_segs[cbf_index][seg_index]["points"][:,1] )
 
     def plot_attr(self, ax, attr_name: str, plot_color='k', alpha=1.0):
         '''
@@ -2962,8 +3017,10 @@ class KernelTriplet():
 
     def init_comp_plot(self, ax):
         ''' Initialize compatibilization animation plot '''
+
         self.comp_graphics["text"] = ax.text(0.01, 0.99, str("Optimization step = 0"), ha='left', va='top', transform=ax.transAxes, fontsize=10)
-        self.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=self.limits)
+        for cbf in self.cbfs:
+            cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=self.limits)
         self.update_comp_plot(ax)
 
     def update_comp_plot(self, ax):
@@ -2972,7 +3029,9 @@ class KernelTriplet():
         step = self.comp_process_data["step"]
         self.comp_graphics["text"].set_text(f"Optimization step = {step}")
 
-        self.plot_invariant(ax)
+        for cbf_index in range(self.num_cbfs):
+            self.plot_invariant(ax, cbf_index)
+
         self.plot_attr(ax, "stable_equilibria", mcolors.BASE_COLORS["r"], 1.0)
         self.plot_attr(ax, "unstable_equilibria", mcolors.BASE_COLORS["g"], 0.8)
 

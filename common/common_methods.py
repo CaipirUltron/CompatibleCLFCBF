@@ -902,11 +902,12 @@ def show_message(pts, text):
         print(f"Found {num_pts} {text}.")
     for sol in pts:
         if "x" in sol.keys():
+            cbf_index = sol["cbf_index"]
             x = sol["x"]
             l = sol["lambda"]
             h = sol["h"]
             gradh = sol["nablah"]
-            output_text = "x = " + str(x) + ", lambda = " + str(l) + ", h = " + str(h) + ", ||∇h|| = " + str(gradh)
+            output_text = f"CBF{cbf_index+1}: x = " + str(x) + ", lambda = " + str(l) + ", h = " + str(h) + ", ||∇h|| = " + str(gradh)
             if "equilibrium" in sol.keys() and "stability" in sol.keys():
                 type_of = sol["equilibrium"]
                 stability = sol["stability"]

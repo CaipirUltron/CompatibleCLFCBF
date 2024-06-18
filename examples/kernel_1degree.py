@@ -1,7 +1,7 @@
 import numpy as np
 
 from dynamic_systems import KernelAffineSystem
-from functions import Kernel, KernelLyapunov, KernelBarrier, KernelTriplet
+from functions import Kernel, KernelLyapunov, KernelBarrier, KernelFamily
 from controllers import NominalQP
 from common import create_quadratic, rot2D, load_compatible
 
@@ -43,10 +43,11 @@ cbf_angle = np.deg2rad(5)
 Qquadratic = create_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
 cbf = KernelBarrier(kernel=kernel, Q=Qquadratic, limits=limits)
 
+cbfs = [ cbf ]
 # -------------------------------------------Define triplet and controller -------------------------------------------------
 sample_time = .002
 p, alpha, beta = 1.0, 1.0, 1.0
-kerneltriplet = KernelTriplet( plant=plant, clf=clf, cbf=cbf, 
+kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, 
                                params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta}, 
                                limits=limits, spacing=0.2 )
 
@@ -59,4 +60,4 @@ plot_config = {
     "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": True
 }
 
-logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": cbf.Q.tolist() }
+logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": [ cbf.Q.tolist() for cbf in cbfs ] }

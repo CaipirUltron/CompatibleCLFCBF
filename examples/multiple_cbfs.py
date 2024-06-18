@@ -1,7 +1,7 @@
 import numpy as np
 
 from dynamic_systems import KernelAffineSystem
-from functions import LeadingShape, Kernel, KernelQuadratic, KernelLyapunov, KernelBarrier, KernelFamily
+from functions import Kernel, KernelLyapunov, KernelBarrier, KernelFamily
 from controllers import NominalQP
 from common import create_quadratic, rot2D, box, load_compatible
 
@@ -50,15 +50,22 @@ clf = KernelLyapunov(kernel=kernel, P=load_compatible(__file__, Pquadratic, load
 clf.is_SOS_convex(verbose=True)
 
 # ----------------------------------------------------- Define CBFs --------------------------------------------------------
-# Fits CBF to a box-shaped obstacle
-center = [ 0.0, 2.0 ]
+# First CBF is quadratic
+cbf_eig = 0.3*np.array([ 0.2, 1.2 ])
+cbf_center = [-3.0, -3.0]
+cbf_angle = np.deg2rad(-45)
+
+Qquadratic = create_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
+cbf1 = KernelBarrier(kernel=kernel, Q=Qquadratic, limits=limits)
+
+# Second CBF is a box-shaped obstacle
+center = [ 2.0, 5.0 ]
 pts = box( center=center, height=5, width=5, angle=10, spacing=0.4 )
-cbf = KernelBarrier(kernel=kernel, boundary=pts, centers=[center], limits=limits, spacing=0.1)
-# cbf = KernelBarrier(kernel=kernel, boundary=pts, skeleton=skeleton, leading=LeadingShape(Qquadratic,bound='upper'))
+cbf2 = KernelBarrier(kernel=kernel, boundary=pts, centers=[center], limits=limits, spacing=0.1)
+# cbf2 = KernelBarrier(kernel=kernel, boundary=pts, skeleton=skeleton, leading=LeadingShape(Qquadratic,bound='upper'))
+cbf2.is_SOS_convex(verbose=True)
 
-cbf.is_SOS_convex(verbose=True)
-
-cbfs = [ cbf ]
+cbfs = [ cbf1, cbf2 ]
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .005
 p, alpha, beta = 1.0, 1.0, 1.0

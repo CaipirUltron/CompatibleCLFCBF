@@ -32,24 +32,25 @@ ax.set_ylim(ymin, ymax)
 # if hasattr(sim, "quadratic_cbf"):
 #     sim.quadratic_cbf.plot_levels(ax=ax, levels = [0.0], color='g')
 
+# print(f"λ(M(P)) = {np.linalg.eigvals(sim.kernel.get_lowerbound(sim.clf.P))}\n")
+# print(f"λ(M(Q)) = {np.linalg.eigvals(sim.kernel.get_lowerbound(sim.cbf.Q))}\n")
+
 num_levels = 5
-contour_unsafe = sim.cbf.plot_levels(ax=ax, levels = [ -(0.5/num_levels)*k for k in range(num_levels-1,-1,-1) ])
+for k in range(len(sim.cbfs)):
+    contour_unsafe = sim.cbfs[k].plot_levels(ax=ax, levels = [ -(0.5/num_levels)*k for k in range(num_levels-1,-1,-1) ])
+    sim.kerneltriplet.plot_invariant(ax, k)
 
-print(f"λ(M(P)) = {np.linalg.eigvals(sim.kernel.get_lowerbound(sim.clf.P))}\n")
-print(f"λ(M(Q)) = {np.linalg.eigvals(sim.kernel.get_lowerbound(sim.cbf.Q))}\n")
-
-sim.kerneltriplet.plot_invariant(ax)
 sim.kerneltriplet.plot_attr(ax, "stable_equilibria", mcolors.BASE_COLORS["r"], 1.0)
 sim.kerneltriplet.plot_attr(ax, "unstable_equilibria", mcolors.BASE_COLORS["g"], 0.8)
 
-for k, seg in enumerate(sim.kerneltriplet.invariant_segs):
-    message = f"Segment {k+1} is "
-    if seg["removable"] == +1: message += "removable from the outside, "
-    if seg["removable"] == -1: message += "removable from the inside, "
-    if seg["removable"] == 0: message += "not removable, "
-    critical = seg["segment_critical"]
-    message += f"with critical value = {critical}."
-    print(message)
+# for k, seg in enumerate(sim.kerneltriplet.invariant_segs):
+#     message = f"Segment {k+1} is "
+#     if seg["removable"] == +1: message += "removable from the outside, "
+#     if seg["removable"] == -1: message += "removable from the inside, "
+#     if seg["removable"] == 0: message += "not removable, "
+#     critical = seg["segment_critical"]
+#     message += f"with critical value = {critical}."
+#     print(message)
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 while True:
@@ -65,16 +66,16 @@ while True:
     V = sim.clf.function(init_x)
     gradV = sim.clf.gradient(init_x)
 
-    h = sim.cbf.function(init_x)
-    gradh = sim.cbf.gradient(init_x)
+    # h = sim.cbf.function(init_x)
+    # gradh = sim.cbf.gradient(init_x)
 
-    print(f"lambda = {sim.kerneltriplet.lambda_fun(init_x)}")
+    # print(f"lambda = {sim.kerneltriplet.lambda_fun(init_x)}")
 
     print(f"V = {V}")
     print(f"||∇V|| = {np.linalg.norm(gradV)}")
 
-    print(f"h = {h}")
-    print(f"||∇h|| = {np.linalg.norm(gradh)}")
+    # print(f"h = {h}")
+    # print(f"||∇h|| = {np.linalg.norm(gradh)}")
 
     clf_contour = sim.clf.plot_levels(ax=ax, levels=[V])
 

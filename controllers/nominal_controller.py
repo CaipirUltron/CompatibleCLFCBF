@@ -12,20 +12,22 @@ class NominalQP():
     '''
     Class for the nominal QP controller.
     '''
-    def __init__(self, kernel_triplet, dt = 0.001):
+    def __init__(self, kernel_family, dt = 0.001):
 
         # Dimensions and system model initialization
-        self.plant = kernel_triplet.plant
-        self.clf = kernel_triplet.clf
-        self.cbf = kernel_triplet.cbf
+        self.plant = kernel_family.plant
+        self.clf = kernel_family.clf
+        self.cbfs = kernel_family.cbfs
 
-        self.kernel = kernel_triplet.kernel
-        self.A_list = kernel_triplet.A_matrices
+        self.kernel = kernel_family.kernel
+        self.A_list = kernel_family.A_matrices
 
-        if self.cbf != None:
-            if self.clf.kernel != self.cbf.kernel:
+        if len(self.cbfs) > 0:
+            equal_kernels = [ self.clf.kernel == cbf.kernel for cbf in self.cbfs ]
+            equal_dims = [ self.clf._dim == cbf._dim for cbf in self.cbfs ]
+            if not all(equal_kernels):
                 raise Exception("CLF and CBF must be based on the same kernel.")
-            if self.clf._dim != self.cbf._dim:
+            if not all(equal_dims):
                 raise Exception("CLF and CBF dimensions are not equal.")
 
         self.state_dim = self.clf._dim
@@ -33,9 +35,9 @@ class NominalQP():
         self.kernel_dim = self.kernel._num_monomials
 
         # QP parameters
-        self.p = kernel_triplet.params["slack_gain"]
-        self.alpha = kernel_triplet.params["clf_gain"]
-        self.beta = kernel_triplet.params["cbf_gain"]
+        self.p = kernel_family.params["slack_gain"]
+        self.alpha = kernel_family.params["clf_gain"]
+        self.beta = kernel_family.params["cbf_gain"]
 
         self.QP_dim = self.control_dim + 1
         P = np.eye(self.QP_dim)
@@ -92,7 +94,7 @@ class NominalQP():
         # Gets CLF and CBF constraints
         a_clf, b_clf = self.get_clf_constraint()
         a_cbf, b_cbf = [], []
-        if self.cbf == None:
+        if len(self.cbfs) == 0:
             A = np.vstack([ a_clf ])
             b = np.hstack([ b_clf ]) 
         else:
@@ -339,23 +341,26 @@ class NominalQP():
 
     def get_cbf_constraint(self):
         '''
-        Sets the i-th barrier constraint.
+        Sets the barrier constraints.
         '''
         state = self.plant.get_state()
 
         f = self.plant.get_f(state)
         g = self.plant.get_g(state)
 
-        # Barrier function and gradient
-        h = self.cbf.function(state)
-        nablah = self.cbf.gradient(state)
+        # Barrier functions and gradients
+        a_cbf = np.zeros([len(self.cbfs), self.QP_dim])
+        b_cbf = np.zeros(len(self.cbfs))
+        for i, cbf in enumerate(self.cbfs):
+            h = cbf.function(state)
+            nablah = cbf.gradient(state)
 
-        Lfh = nablah.dot(f)
-        Lgh = g.T @ nablah
+            Lfh = nablah.dot(f)
+            Lgh = g.T @ nablah
 
-        # CBF contraint for the QP
-        a_cbf = -np.hstack( [ Lgh, 0.0 ])
-        b_cbf = self.beta * h + Lfh
+            # CBF contraint for the QP
+            a_cbf[i,:] = -np.hstack([ Lgh, 0.0 ])
+            b_cbf[i] = self.beta * h + Lfh
 
         return a_cbf, b_cbf
 
