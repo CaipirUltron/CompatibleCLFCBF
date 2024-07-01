@@ -694,6 +694,7 @@ class Kernel():
 
         self.Asum = sum(self.A)
         self.Asum2 = self.Asum @ self.Asum
+        self.Aops = [ Op(A) for A in self.A ]
 
     def _compute_N(self):
         '''
@@ -837,6 +838,12 @@ class Kernel():
     def jacobian(self, point):
         ''' Compute kernel Jacobian '''
         return np.array(self._lambda_jacobian_monomials(*self._validate(point)))
+
+    def get_diff_operators(self):
+        '''
+        Return the diff. operators
+        '''
+        return self.Aops
 
     def get_A_matrices(self):
         '''
@@ -2087,7 +2094,49 @@ class KernelLyapunov(KernelQuadratic):
         super().__init__(**kwargs)
 
     def __str__(self):
-        return "Polynominal kernel-based CLF V(x) = ½ k(x)' P k(x)"
+        return "Polynominal kernel-based CLF V(x) = √ k(x)' P k(x)"
+
+    def _function(self, point: np.ndarray) -> np.ndarray:
+        '''
+        Computes FUNCTION ½ V**2 = ½ k(x)' P k(x)
+        '''
+        V_old = super()._function(self._validate(point))
+        return np.sqrt( 2 * V_old )
+
+    def _gradient(self, point: np.ndarray) -> np.ndarray:
+        '''
+        Computes GRADIENT ∇V = 1/V Jm(x)' P m(x)
+        '''
+        V = self.function(point)
+        gradV_old = super()._gradient(self._validate(point))
+        return (1/V)*gradV_old
+
+    def _hessian(self, point: np.ndarray) -> np.ndarray:
+        '''
+        Computes HESSIAN ∇x∇(V) = 1/V ( ∇x∇( ½ V**2 ) - ∇V ∇V' )
+        '''
+        V = self.function(point)
+        gradV = self.gradient(point)
+        hessianV_old = super()._hessian(self._validate(point))
+        return (1/V)*( hessianV_old - np.outer(gradV, gradV) )
+
+    def function_from_P(self, x, P):
+        '''
+        Computes FUNCTION ½ V**2 = ½ k(x)' P k(x)
+        '''
+        m = self.kernel.function(x)
+        V = m.T @ P @ m
+        return np.sqrt(V)
+
+    def gradient_from_P(self, x, P):
+        '''
+        Computes GRADIENT ∇V = 1/V Jm(x)' P m(x)
+        '''
+        m = self.kernel.function(x)
+        Jm = self.kernel.jacobian(x)
+        V = self.function_from_P(x, P)
+        gradV = (1/V) * Jm.T @ P @ m
+        return gradV
 
     def set_params(self, **kwargs):
         '''
@@ -2099,40 +2148,6 @@ class KernelLyapunov(KernelQuadratic):
 
         super().set_params(**kwargs)
         self.P = self.shape_matrix
-
-class KernelLyapunovQuad(KernelLyapunov):
-    '''
-    Class for quadratic kernel-based Lyapunov functions.
-    '''
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    def __str__(self):
-        return "Polynominal kernel-based CLF V(x) = √ k(x)' P k(x)"
-
-    def _function(self, point: np.ndarray) -> np.ndarray:
-        '''
-        Computes FUCNTION ½ V**2 = ½ k(x)' P k(x)
-        '''
-        V_old = super()._function(self._validate(point))
-        return np.sqrt( 2 * V_old )
-
-    def _gradient(self, point: np.ndarray) -> np.ndarray:
-        '''
-        Computes GRADIENT ½ V**2 = ½ k(x)' P k(x)
-        '''
-        V = self.function(point)
-        gradV_old = super()._gradient(self._validate(point))
-        return (1/V)*gradV_old
-
-    def _hessian(self, point: np.ndarray) -> np.ndarray:
-        '''
-        Computes HESSIAN of ½ V**2 = ½ k(x)' P k(x)
-        '''
-        V = self.function(point)
-        gradV = self.gradient(point)
-        hessianV_old = super()._hessian(self._validate(point))
-        return (1/V)*( hessianV_old - np.outer(gradV, gradV) )
 
 class KernelBarrier(KernelQuadratic):
     '''
@@ -2327,11 +2342,6 @@ class KernelFamily():
             self.grid_pts = list( zip( self.xg.flatten(), self.yg.flatten() ) )
             self.determinant_grid = [ np.empty(self.grid_shape, dtype=float) for _ in self.cbfs ]
 
-        # N = 10
-        # x = np.random.uniform(xmin, xmax, N)
-        # y = np.random.uniform(ymin, ymax, N)
-        # self.pts = np.column_stack((x, y))
-
         self.verify_kernel()
         self.counter = 0
 
@@ -2368,7 +2378,6 @@ class KernelFamily():
             self.F = self.plant.get_F()
             self.P = self.clf.P
 
-            self.Aops = [ Op(A) for A in self.A_matrices ]
             self.Q = []
             self.ATQ_matrices = []
             for cbf in self.cbfs:
@@ -2380,108 +2389,74 @@ class KernelFamily():
             return False
 
     def vecQ_fun(self, pt: np.ndarray, cbf_index: int) -> np.ndarray:
-        '''Returns the vector vQ = ∇h'''
-        m = self.kernel.function(pt)
-        return np.array([ m.T @ ATQ @ m for ATQ in self.ATQ_matrices[cbf_index] ])
-
-    def vecP_fun_with_shape(self, pt: np.ndarray, P) -> list:
-        '''Returns the vector vP = p gamma V(x, self.P) ∇V - fc '''
-
-        m = self.kernel.function(pt)
-        V = self.clf_fun(pt)
-        slk_gain = self.params["slack_gain"]
-        clf_gain = self.params["clf_gain"]
-
-        vecP = [ m.T @ A.T @ ( slk_gain * clf_gain * V * P - self.F ) @ m for A in self.A_matrices ]
-        return vecP
+        '''
+        Returns the vector vQ = ∇h
+        '''
+        Qi = self.Q[cbf_index]
+        return vecQ(pt, self.kernel, Qi)
     
     def vecP_fun(self, pt: np.ndarray) -> np.ndarray:
-        '''Returns the vector vP = p gamma V(x, self.P) ∇V - fc with self P matrix'''
-        return np.array(self.vecP_fun_with_shape(pt, self.P))
-
-    def clf_fun_with_shape(self, pt: np.ndarray, P):
-        '''Returns the value of the CLF with shape defined by matrix P'''
-        m = self.kernel.function(pt)
-        return 0.5 * m.T @ P @ m
-
-    def clf_gradient_with_shape(self, pt: np.ndarray, P):
-        '''Returns the gradient of the CLF with shape defined by matrix P'''
-        m = self.kernel.function(pt)
-        Jm = self.kernel.jacobian(pt)
-        return Jm.T @ P @ m
+        '''
+        Returns the vector vP = p gamma V(x, self.P) ∇V - fc with self P matrix
+        '''
+        return vecP(pt, self.kernel, self.P, self.F, self.params)
 
     def clf_fun(self, pt: np.ndarray) -> float:
-        '''Returns the CLF value using self P matrix'''
-        return self.clf_fun_with_shape(pt, self.P)
+        '''
+        Returns the CLF value using self P matrix
+        '''
+        return self.clf.function_from_P(pt, self.P)
 
     def clf_gradient(self, pt: np.ndarray) -> np.ndarray:
-        '''Returns the CLF gradient using self P matrix'''  
-        return self.clf_gradient_with_shape(pt, self.P)
+        '''
+        Returns the CLF gradient using self P matrix
+        '''  
+        return self.clf.gradient_from_P(pt, self.P)
 
     def lambda_fun(self, pt: np.ndarray, cbf_index: int) -> float:
-        '''Given a point x in an invariant set, compute its corresponding lambda scalar.'''
-
+        '''
+        Given a point x in an invariant set, compute its corresponding lambda scalar.
+        '''
         vQ = self.vecQ_fun(pt, cbf_index)
         vP = self.vecP_fun(pt)
         return (vQ.T @ vP) / np.linalg.norm(vQ)**2
 
-    def L_fun_with_lambda_and_shape(self, pt: np.ndarray, l, P, cbf_index: int = -1):
-        '''Returns matrix L = F + l Q - p gamma V(x, self.P) P'''
-
-        slk_gain = self.params["slack_gain"]
-        clf_gain = self.params["clf_gain"]
-        V = self.clf_fun(pt)
-
+    def L_fun(self, l, P, cbf_index: int = -1):
+        '''
+        Returns pencil L = F + l Q - p gamma P
+        '''
         if cbf_index >= 0:
-            return self.F + l * self.Q[cbf_index] - slk_gain * clf_gain * V * P
+            Qi = self.Q[cbf_index]
+            return L(l, P, Qi, self.F, self.params)
         else:
-            return self.F - slk_gain * clf_gain * V * P
-
-    # def L_fun(self, pt: np.ndarray, cbf_index: int = -1):
-    #     '''Returns matrix L = F + l(x) Q - p gamma V(x, self.P) P with l(pt) and self P matrix'''
-    #     if cbf_index >= 0:
-    #         return self.L_fun_with_lambda_and_shape( pt, self.lambda_fun(pt), self.P, cbf_index )
-    #     else:
-    #         return self.L_fun_with_lambda_and_shape( pt, 0, self.P, -1 )
+            Qi = np.zeros(self.P.shape)
+            return L(0, P, Qi, self.F, self.params)
 
     def invariant_equation(self, pt: np.ndarray, l, P, cbf_index: int = -1):
-        '''Returns invariant equation l vQ - vP for a given pt, l and P'''
-
+        '''
+        Returns invariant equation l vQ - vP for a given pt, l and P
+        '''
         m = self.kernel.function(pt)
         Jm = self.kernel.jacobian(pt)
-        if cbf_index >= 0:
-            return Jm.T @ self.L_fun_with_lambda_and_shape(pt, l, P, cbf_index) @ m
-        else:
-            return Jm.T @ self.L_fun_with_lambda_and_shape(pt, 0, P, -1) @ m
-
-    def S_fun_with_lambda_and_shape(self, pt: np.ndarray, l, P, cbf_index: int = -1):
-        '''Returns matrix S = H - (1/p gamma V**2) * fc fc.T, for stability computation of equilibrium points'''
-
-        V = self.clf_fun(pt)
-        m = self.kernel.function(pt)
-        fc = self.plant.get_fc(pt)
-
-        L = self.L_fun_with_lambda_and_shape(pt, l, P, cbf_index)
-
-        slk_gain = self.params["slack_gain"]
-        clf_gain = self.params["clf_gain"]
-
-        S = []
-        for i, Ai in enumerate(self.A_matrices):
-            S.append([])
-            for j, Aj in enumerate(self.A_matrices):
-                S[-1].append( m.T @ Ai.T @ ( L @ Aj + Aj.T @ L ) @ m - fc[i]*fc[j] / ( slk_gain * clf_gain * ( V**2 ) ) )
-        return S
+        return Jm.T @ self.L_fun(l, P, cbf_index) @ m
 
     def S_fun(self, pt: np.ndarray, cbf_index: int = -1) -> np.ndarray:
-        '''Returns matrix S = H - (1/p gamma V**2) * fc fc.T with l(pt) and self P matrix'''
+        '''
+        Returns stability matrix.
+        '''
+        # x, kernel, l, P, Q, F, params
+
         if cbf_index >= 0:
-            return np.array(self.S_fun_with_lambda_and_shape(pt, self.lambda_fun(pt, cbf_index), self.P, cbf_index))
+            Qi = self.Q[cbf_index]
+            l = self.lambda_fun(pt, cbf_index)
+            return S(pt, self.kernel, l, self.P, Qi, self.F, self.params)
         else:
-            return np.array(self.S_fun_with_lambda_and_shape(pt, 0, self.P))
+            return S(pt, self.kernel, 0, self.P, Qi, self.F, self.params)
 
     def stability_fun(self, x_eq, type_eq, cbf_index: int = -1): 
-        '''Compute the stability number for a given equilibrium point'''
+        '''
+        Compute the stability number for a given equilibrium point
+        '''
 
         V = self.clf_fun(x_eq)
         nablaV = self.clf_gradient(x_eq)
@@ -2833,18 +2808,6 @@ class KernelFamily():
         fit_problem.solve(verbose=False)
 
         return self.CVXPY_P.value
-
-    # def non_removable_stable_equilibria(self) -> list[np.ndarray]:
-    #     '''
-    #     This function returns a list with all non-removable stable equilibrium points.
-    #     '''
-    #     nonremovable_stables = []
-    #     for seg_dict in self.invariant_segs:
-    #         if seg_dict["removable"] == 0:
-    #             for eq in seg_dict["boundary_equilibria"]:
-    #                 if eq["equilibrium"] == "stable":
-    #                     nonremovable_stables.append( np.array(eq["x"]) )
-    #     return nonremovable_stables
 
     def compatibilize(self, obj_type="closest", verbose=False, animate=False) -> dict:
         '''
