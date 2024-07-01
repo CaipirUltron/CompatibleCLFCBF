@@ -2100,6 +2100,40 @@ class KernelLyapunov(KernelQuadratic):
         super().set_params(**kwargs)
         self.P = self.shape_matrix
 
+class KernelLyapunovQuad(KernelLyapunov):
+    '''
+    Class for quadratic kernel-based Lyapunov functions.
+    '''
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def __str__(self):
+        return "Polynominal kernel-based CLF V(x) = √ k(x)' P k(x)"
+
+    def _function(self, point: np.ndarray) -> np.ndarray:
+        '''
+        Computes FUCNTION ½ V**2 = ½ k(x)' P k(x)
+        '''
+        V_old = super()._function(self._validate(point))
+        return np.sqrt( 2 * V_old )
+
+    def _gradient(self, point: np.ndarray) -> np.ndarray:
+        '''
+        Computes GRADIENT ½ V**2 = ½ k(x)' P k(x)
+        '''
+        V = self.function(point)
+        gradV_old = super()._gradient(self._validate(point))
+        return (1/V)*gradV_old
+
+    def _hessian(self, point: np.ndarray) -> np.ndarray:
+        '''
+        Computes HESSIAN of ½ V**2 = ½ k(x)' P k(x)
+        '''
+        V = self.function(point)
+        gradV = self.gradient(point)
+        hessianV_old = super()._hessian(self._validate(point))
+        return (1/V)*( hessianV_old - np.outer(gradV, gradV) )
+
 class KernelBarrier(KernelQuadratic):
     '''
     Class for kernel-based barrier functions.
