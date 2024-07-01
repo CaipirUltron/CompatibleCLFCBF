@@ -12,6 +12,16 @@ from shapely.geometry import LineString, LinearRing, Polygon
 from shapely.ops import unary_union
 from shapely import is_geometry
 
+class Op():
+    '''
+    Symmetric operator on Ak matrix
+    '''
+    def __init__(self, Ak: np.ndarray):
+        self.Ak = Ak
+    
+    def op(self, M):
+        return self.Ak.T @ M + M.T @ self.Ak
+
 def timeit(func):
     @wraps(func)
     def timeit_wrapper(*args, **kwargs):

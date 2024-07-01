@@ -2368,10 +2368,12 @@ class KernelFamily():
             self.F = self.plant.get_F()
             self.P = self.clf.P
 
+            self.Aops = [ Op(A) for A in self.A_matrices ]
             self.Q = []
+            self.ATQ_matrices = []
             for cbf in self.cbfs:
                 self.Q.append(cbf.Q)
-                self.ATQ_matrices = [ [ A.T @ cbf.Q for A in self.A_matrices ] for cbf in self.cbfs ]
+                self.ATQ_matrices.append([ A.T @ cbf.Q for A in self.A_matrices ])
             
         except Exception as error:
             print(error)
@@ -2435,12 +2437,12 @@ class KernelFamily():
         else:
             return self.F - slk_gain * clf_gain * V * P
 
-    def L_fun(self, pt: np.ndarray, cbf_index: int = -1):
-        '''Returns matrix L = F + l(x) Q - p gamma V(x, self.P) P with l(pt) and self P matrix'''
-        if cbf_index >= 0:
-            return self.L_fun_with_lambda_and_shape( pt, self.lambda_fun(pt), self.P, cbf_index )
-        else:
-            return self.L_fun_with_lambda_and_shape( pt, 0, self.P, -1 )
+    # def L_fun(self, pt: np.ndarray, cbf_index: int = -1):
+    #     '''Returns matrix L = F + l(x) Q - p gamma V(x, self.P) P with l(pt) and self P matrix'''
+    #     if cbf_index >= 0:
+    #         return self.L_fun_with_lambda_and_shape( pt, self.lambda_fun(pt), self.P, cbf_index )
+    #     else:
+    #         return self.L_fun_with_lambda_and_shape( pt, 0, self.P, -1 )
 
     def invariant_equation(self, pt: np.ndarray, l, P, cbf_index: int = -1):
         '''Returns invariant equation l vQ - vP for a given pt, l and P'''
