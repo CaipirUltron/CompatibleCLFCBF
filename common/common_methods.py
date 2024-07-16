@@ -9,7 +9,7 @@ from functools import wraps
 from scipy.spatial import ConvexHull
 from scipy.optimize import fsolve
 from shapely.geometry import LineString, LinearRing, Polygon
-from shapely.ops import unary_union
+from shapely.ops import unary_union, split
 from shapely import is_geometry
 
 class Op():
@@ -861,6 +861,14 @@ def S(x, kernel, l, P, Q, F, params):
     Lm = L(l, P, Q, F, params)
     S = 0.5 * np.array([ [ z.T @ Aj.op( Ak.op(Lm) ) @ z for Aj in Aops ] for Ak in Aops ])
     return S
+
+def get_removable_areas( boundary, segment_lines ):
+    '''
+    Gets the total area of a removable region
+    (uses the split method from shapely)
+    '''
+    geoms = split( boundary, segment_lines )
+    print(geoms)
 
 def add_to(point, l, *connections):
     '''

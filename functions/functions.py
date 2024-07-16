@@ -9,6 +9,8 @@ import cvxpy as cp
 
 import operator
 import contourpy as ctp
+from contourpy.util.mpl_renderer import MplRenderer as Renderer
+
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
@@ -2242,6 +2244,7 @@ class KernelFamily():
 
         # Compute CBF boundaries
         self.boundary_lines = [ [] for _ in self.cbfs ]
+        self.boundary_polygons = [ [] for _ in self.cbfs ]
         for cbf_index in range(self.num_cbfs):
             self.compute_cbf_boundary(cbf_index)
 
@@ -2282,8 +2285,8 @@ class KernelFamily():
         '''Compute CBF boundary'''
 
         for boundary_seg in self.cbfs[cbf_index].get_boundary():
-            boundary_line = geometry.LineString(boundary_seg)
-            self.boundary_lines[cbf_index].append(boundary_line)
+            self.boundary_lines[cbf_index].append(geometry.LineString(boundary_seg))
+            self.boundary_polygons[cbf_index].append(geometry.Polygon(boundary_seg))
 
     def set_param(self, **kwargs):
         '''
@@ -2758,6 +2761,9 @@ class KernelFamily():
                 seg_dict["segment_critical"] = np.max(barrier_vals)
                 return
 
+        # if seg_dict["removable"] != 0:
+        areas = get_removable_areas( self.boundary_polygons[cbf_index], geometry.LineString(seg_data) )
+
         pos_lines = np.where(barrier_vals >= self.compatibility_options["barrier_sep"])
         if len(pos_lines[0]) == 0: pos_lines = np.where(barrier_vals >= 0.0)
 
@@ -2975,11 +2981,15 @@ class KernelFamily():
         Plots the removable areas associated to the invariant sets
         '''
         rem_area_contour = ctp.contour_generator( x=self.xg, y=self.yg, z=self.area_function[cbf_index] )  # creates new contour_generator object for the area function
-        area_boundary_lines = rem_area_contour.filled(0.0, np.inf)
+        area_boundary_filled = rem_area_contour.filled(0.0, np.inf)
 
-        for line in area_boundary_lines:
-            print(line)
-            ax.plot(line[:,0], line[:,1], color="k", linestyle='dashed', linewidth=1.2 )
+        renderer = Renderer(figsize=(4, 2.5))
+        renderer.filled(area_boundary_filled, rem_area_contour.fill_type, color="gold")
+        renderer.show()
+        
+        # for line in area_boundary_lines:
+        #     print(line)
+        #     ax.plot(line[:,0], line[:,1], color="k", linestyle='dashed', linewidth=1.2 )
 
     def plot_invariant(self, ax, cbf_index, *args):
         '''

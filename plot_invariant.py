@@ -78,7 +78,7 @@ while True:
         print(f"CBF {cbf_index+1} λ at this point = {sim.kerneltriplet.lambda_fun(init_x, cbf_index)}")
         print(f"CBF {cbf_index+1} ||∇h|| at this point = {np.linalg.norm(gradh)}")
 
-        sim.kerneltriplet.plot_removable_areas(ax, cbf_index)
+        # sim.kerneltriplet.plot_removable_areas(ax, cbf_index)
 
     clf_contour = sim.clf.plot_levels(ax=ax, levels=[V])
 
