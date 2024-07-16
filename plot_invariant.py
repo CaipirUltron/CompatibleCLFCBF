@@ -43,14 +43,15 @@ for k in range(len(sim.cbfs)):
 sim.kerneltriplet.plot_attr(ax, "stable_equilibria", mcolors.BASE_COLORS["r"], 1.0)
 sim.kerneltriplet.plot_attr(ax, "unstable_equilibria", mcolors.BASE_COLORS["g"], 0.8)
 
-# for k, seg in enumerate(sim.kerneltriplet.invariant_segs):
-#     message = f"Segment {k+1} is "
-#     if seg["removable"] == +1: message += "removable from the outside, "
-#     if seg["removable"] == -1: message += "removable from the inside, "
-#     if seg["removable"] == 0: message += "not removable, "
-#     critical = seg["segment_critical"]
-#     message += f"with critical value = {critical}."
-#     print(message)
+for cbf_index in range(len(sim.cbfs)):
+    for k, seg in enumerate(sim.kerneltriplet.invariant_segs[cbf_index]):
+        message = f"Segment {k+1} of CBF {cbf_index+1} is "
+        if seg["removable"] == +1: message += "removable from the outside, "
+        if seg["removable"] == -1: message += "removable from the inside, "
+        if seg["removable"] == 0: message += "not removable, "
+        critical = seg["segment_critical"]
+        message += f"with critical value = {critical}."
+        print(message)
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 while True:
@@ -66,16 +67,16 @@ while True:
     V = sim.clf.function(init_x)
     gradV = sim.clf.gradient(init_x)
 
-    # h = sim.cbf.function(init_x)
-    # gradh = sim.cbf.gradient(init_x)
-
-    # print(f"lambda = {sim.kerneltriplet.lambda_fun(init_x)}")
-
     print(f"V = {V}")
     print(f"||∇V|| = {np.linalg.norm(gradV)}")
 
-    # print(f"h = {h}")
-    # print(f"||∇h|| = {np.linalg.norm(gradh)}")
+    for cbf_index, cbf in enumerate(sim.cbfs):
+        h = cbf.function(init_x)
+        gradh = cbf.gradient(init_x)
+
+        print(f"CBF {cbf_index+1} value at this point = {h}")
+        print(f"CBF {cbf_index+1} λ at this point = {sim.kerneltriplet.lambda_fun(init_x, cbf_index)}")
+        print(f"CBF {cbf_index+1} ||∇h|| at this point = {np.linalg.norm(gradh)}")
 
     clf_contour = sim.clf.plot_levels(ax=ax, levels=[V])
 

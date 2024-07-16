@@ -16,27 +16,29 @@ ax.set_title("Invariant set plot for Kernel-based CLF-CBFs")
 ax.set_aspect('equal', adjustable='box')
 
 limits = sim.plot_config["limits"]
-ax.set_xlim(limits[0][0], limits[0][1])
-ax.set_ylim(limits[1][0], limits[1][1])
+ax.set_xlim(limits[0], limits[1])
+ax.set_ylim(limits[2], limits[3])
 
-if hasattr(sim, "pts"):
-    for pt in sim.pts:
-        coords = np.array(pt["coords"])
-        ax.plot(coords[0], coords[1], 'k*', alpha=0.6)
+# if hasattr(sim, "pts"):
+#     for pt in sim.pts:
+#         coords = np.array(pt["coords"])
+#         ax.plot(coords[0], coords[1], 'k*', alpha=0.6)
 
-        if "gradient" in pt.keys():
-            gradient_vec = coords + np.array(pt["gradient"])
-            ax.plot([ coords[0], gradient_vec[0]], [ coords[1], gradient_vec[1]], 'k-', alpha=0.6)
+#         if "gradient" in pt.keys():
+#             gradient_vec = coords + np.array(pt["gradient"])
+#             ax.plot([ coords[0], gradient_vec[0]], [ coords[1], gradient_vec[1]], 'k-', alpha=0.6)
 
 num_steps = 1000
-time_text = ax.text(limits[0][1]-5.5, limits[1][0]+0.5, str("Step = 0"), fontsize=14)
+time_text = ax.text(limits[0]-5.5, limits[1]+0.5, str("Step = 0"), fontsize=14)
 
 def init():
-    sim.cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
 
-    sim.kerneltriplet.invariant_set(extended=False)
+    sim.kerneltriplet.update_invariant_set()
 
-    sim.kerneltriplet.plot_invariant(ax)
+    for cbf_index, cbf in enumerate(sim.cbfs):
+        cbf.plot_levels(levels = [ -0.1*k for k in range(4,-1,-1) ], ax=ax, limits=limits)
+        sim.kerneltriplet.plot_invariant(ax, cbf_index)
+
     sim.kerneltriplet.plot_attr(ax, "boundary_equilibria", mcolors.BASE_COLORS["g"])
     sim.kerneltriplet.plot_attr(ax, "interior_equilibria", mcolors.BASE_COLORS["k"])
 
@@ -48,10 +50,11 @@ def update(i):
         deltaP = 0.02 * np.random.rand(sim.clf.kernel_dim, sim.clf.kernel_dim)
         sim.kerneltriplet.P += deltaP.T @ deltaP
 
-        sim.kerneltriplet.invariant_set()
-        # sim.kerneltriplet.update_invariant_set()
+        sim.kerneltriplet.update_invariant_set()
 
-        sim.kerneltriplet.plot_invariant(ax)
+        for cbf_index, cbf in enumerate(sim.cbfs):
+            sim.kerneltriplet.plot_invariant(ax, cbf_index)
+
         sim.kerneltriplet.plot_attr(ax, "boundary_equilibria", mcolors.BASE_COLORS["g"])
         sim.kerneltriplet.plot_attr(ax, "interior_equilibria", mcolors.BASE_COLORS["k"])
 

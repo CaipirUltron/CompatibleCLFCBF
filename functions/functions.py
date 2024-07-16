@@ -2194,7 +2194,7 @@ class KernelFamily():
         self.limits = [ [-1, +1] for _ in range(2) ]
         self.spacing = 0.1
         self.invariant_color = mcolors.BASE_COLORS["k"]
-        self.invariant_complete = True
+        self.invariant_complete = False
         self.compatibility_options = { "barrier_sep": 0.1, "min_curvature": 1.1 }
         self.interior_eq_threshold = 1e-1
         self.max_P_eig = 100
@@ -2507,21 +2507,21 @@ class KernelFamily():
         eta = 1/(1 + self.params["slack_gain"] * z2.T @ G @ z2 )
         return eta
 
-    def local_minimize_cost(self, cost, init_pt: np.ndarray) -> np.ndarray:
-        '''Locally minimizes a passed cost function, starting with initial guess init_pt'''
-        sol = minimize( cost, init_pt )
-        return sol.x
+    # def local_minimize_cost(self, cost, init_pt: np.ndarray) -> np.ndarray:
+    #     '''Locally minimizes a passed cost function, starting with initial guess init_pt'''
+    #     sol = minimize( cost, init_pt )
+    #     return sol.x
 
-    def find_closest_valid(self, Pnom: np.ndarray, verbose=False) -> np.ndarray:
-        ''' Find closest shape matrix to Pnom belongin to family of valid CLFs (without local minima) '''
+    # def find_closest_valid(self, Pnom: np.ndarray, verbose=False) -> np.ndarray:
+    #     ''' Find closest shape matrix to Pnom belongin to family of valid CLFs (without local minima) '''
 
-        self.CVXPY_Pnom.value = Pnom
+    #     self.CVXPY_Pnom.value = Pnom
 
-        if np.any( np.linalg.eigvals(self.kernel.get_left_lowerbound(Pnom)) != 0 ):
-            self.CVXPY_family_problem.solve(verbose=verbose)
-            return self.CVXPY_P.value
-        else:
-            return self.CVXPY_Pnom.value
+    #     if np.any( np.linalg.eigvals(self.kernel.get_left_lowerbound(Pnom)) != 0 ):
+    #         self.CVXPY_family_problem.solve(verbose=verbose)
+    #         return self.CVXPY_P.value
+    #     else:
+    #         return self.CVXPY_Pnom.value
 
     def update_determinant_grid(self):
         '''
@@ -2554,7 +2554,7 @@ class KernelFamily():
 
     def update_invariant_set(self, verbose=False):
         '''
-        Computes the invariant set for the given CLF-CBF pair.
+        Computes the invariant sets.
         '''
         if self.n > 2:
             warnings.warn("Currently, the computation of the invariant set is not available for dimensions higher than 2.")
@@ -2709,15 +2709,15 @@ class KernelFamily():
             if stability > 0:
                 eq["equilibrium"] = "unstable"
         
-    def seg_clf_minima(self, seg_data: list[np.ndarray]):
-        '''
-        Computes CLF local minima for given segment data
-        '''
+    # def seg_clf_minima(self, seg_data: list[np.ndarray]):
+    #     '''
+    #     Computes CLF local minima for given segment data
+    #     '''
 
-    def seg_cbf_minima(self, seg_data: list[np.ndarray]):
-        '''
-        Computes CBF local minima for given segment data
-        '''
+    # def seg_cbf_minima(self, seg_data: list[np.ndarray]):
+    #     '''
+    #     Computes CBF local minima for given segment data
+    #     '''
 
     def seg_critical(self, seg_dict: dict[str,]) -> float:
         '''
@@ -2725,7 +2725,17 @@ class KernelFamily():
         '''
         cbf_index = seg_dict["cbf_index"]
         seg_data = seg_dict["points"]
-        barrier_vals = np.array([ self.cbfs[cbf_index].function(0.5*( pt + seg_data[k+1,:] )) for k, pt in enumerate(seg_data[0:-1,:]) ])
+
+        # Compute barrier values along the segment
+        barrier_vals = np.zeros(len(seg_data[0:-1,:]))
+        for k, pt in enumerate(seg_data[0:-1,:]):
+            mean_pt = 0.5*( pt + seg_data[k+1,:] )
+            barrier_vals[k] = self.cbfs[cbf_index].function(mean_pt)
+
+        # barrier_vals = np.array([ self.cbfs[cbf_index].function(0.5*( pt + seg_data[k+1,:] )) for k, pt in enumerate(seg_data[0:-1,:]) ])
+
+        # segment is not removable (starts OR ends outside/inside the unsafe set) - until proven otherwise
+        seg_dict["removable"] = 0
 
         # segment is removable (starts AND ends completely outside/inside the unsafe set)
         if barrier_vals[0] * barrier_vals[-1] > 0:
@@ -2740,8 +2750,9 @@ class KernelFamily():
                 seg_dict["segment_critical"] = np.max(barrier_vals)
                 return
 
-        # segment is not removable (starts OR ends outside/inside the unsafe set)
-        seg_dict["removable"] = 0
+
+
+
         pos_lines = np.where(barrier_vals >= self.compatibility_options["barrier_sep"])
         if len(pos_lines[0]) == 0: pos_lines = np.where(barrier_vals >= 0.0)
 
