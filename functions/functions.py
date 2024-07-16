@@ -80,8 +80,8 @@ class Function(ABC):
 
     def _validate(self, point):
         ''' Validates input data '''
-        if not isinstance(point, (list, np.ndarray)): raise Exception("Input data point is not a numeric array.")
-        if isinstance(point, list): point = np.array(point)
+        if not isinstance(point, (list, tuple, np.ndarray)): raise Exception("Input data point is not a numeric array.")
+        if isinstance(point, (list, tuple)): point = np.array(point)
         return point
 
     @abstractmethod
@@ -2341,6 +2341,7 @@ class KernelFamily():
             self.grid_shape = self.xg.shape
             self.grid_pts = list( zip( self.xg.flatten(), self.yg.flatten() ) )
             self.determinant_grid = [ np.empty(self.grid_shape, dtype=float) for _ in self.cbfs ]
+            self.area_function = [ np.empty(self.grid_shape, dtype=float) for _ in self.cbfs ]
 
         self.verify_kernel()
         self.counter = 0
@@ -2530,6 +2531,8 @@ class KernelFamily():
         '''
         W_list = [ [] for _ in self.cbfs ]
         lambda_grid = [ [] for _ in self.cbfs ]
+        barrier_grid = [ [] for _ in self.cbfs ]
+
         for pt in self.grid_pts:
 
             vP = self.vecP_fun(pt)
@@ -2542,7 +2545,11 @@ class KernelFamily():
                 l = (vQ.T @ vP) / np.linalg.norm(vQ)**2
                 lambda_grid[cbf_index].append( l )
 
+                h = self.cbfs[cbf_index].function(pt)
+                barrier_grid[cbf_index].append( h )
+
         for cbf_index in range(self.num_cbfs):
+
             determinant_list = np.linalg.det( W_list[cbf_index] )
 
             # Eliminate the negative lambda part
@@ -2551,6 +2558,7 @@ class KernelFamily():
                     if l < 0.0: determinant_list[k] = np.inf
 
             self.determinant_grid[cbf_index] = determinant_list.reshape(self.grid_shape)
+            self.area_function[cbf_index] = ( determinant_list * np.array( barrier_grid[cbf_index] ) ).reshape(self.grid_shape)
 
     def update_invariant_set(self, verbose=False):
         '''
@@ -2749,9 +2757,6 @@ class KernelFamily():
                 seg_dict["removable"] = -1
                 seg_dict["segment_critical"] = np.max(barrier_vals)
                 return
-
-
-
 
         pos_lines = np.where(barrier_vals >= self.compatibility_options["barrier_sep"])
         if len(pos_lines[0]) == 0: pos_lines = np.where(barrier_vals >= 0.0)
@@ -2965,6 +2970,17 @@ class KernelFamily():
     
         return comp_result
 
+    def plot_removable_areas(self, ax, cbf_index):
+        '''
+        Plots the removable areas associated to the invariant sets
+        '''
+        rem_area_contour = ctp.contour_generator( x=self.xg, y=self.yg, z=self.area_function[cbf_index] )  # creates new contour_generator object for the area function
+        area_boundary_lines = rem_area_contour.filled(0.0, np.inf)
+
+        for line in area_boundary_lines:
+            print(line)
+            ax.plot(line[:,0], line[:,1], color="k", linestyle='dashed', linewidth=1.2 )
+
     def plot_invariant(self, ax, cbf_index, *args):
         '''
         Plots the invariant set segments corresponding to CBF into ax.
@@ -2997,7 +3013,9 @@ class KernelFamily():
         # Updates segment lines with data from each invariant segment
         for k in range(num_segs_to_plot):
             seg_index = segs_to_plot[k]
-            self.invariant_lines_plot[cbf_index][k].set_data( self.invariant_segs[cbf_index][seg_index]["points"][:,0], self.invariant_segs[cbf_index][seg_index]["points"][:,1] )
+            x_seg_points = self.invariant_segs[cbf_index][seg_index]["points"][:,0]
+            y_seg_points = self.invariant_segs[cbf_index][seg_index]["points"][:,1]
+            self.invariant_lines_plot[cbf_index][k].set_data( x_seg_points, y_seg_points )
 
     def plot_attr(self, ax, attr_name: str, plot_color='k', alpha=1.0):
         '''
