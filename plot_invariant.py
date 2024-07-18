@@ -45,13 +45,8 @@ sim.kerneltriplet.plot_attr(ax, "unstable_equilibria", mcolors.BASE_COLORS["g"],
 
 for cbf_index in range(len(sim.cbfs)):
     for k, seg in enumerate(sim.kerneltriplet.invariant_segs[cbf_index]):
-        message = f"Segment {k+1} of CBF {cbf_index+1} is "
-        if seg["removable"] == +1: message += "removable from the outside, "
-        if seg["removable"] == -1: message += "removable from the inside, "
-        if seg["removable"] == 0: message += "not removable, "
-        critical = seg["segment_critical"]
-        message += f"with critical value = {critical}."
-        print(message)
+        area = seg["removable_area"]
+        print(f"Segment {k+1} of CBF {cbf_index+1} has {area} removable area.")
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 while True:

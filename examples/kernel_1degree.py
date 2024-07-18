@@ -27,7 +27,7 @@ def g(state):
 plant = KernelAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
 
 # --------------------------------------------- Define CLF (quadratic) -----------------------------------------------------
-clf_eig = np.array([ 3.0, 1.0 ])
+clf_eig = np.array([ 1.0, 2.0 ])
 clf_angle = 0
 clf_center = [0.0, -2.0]
 Pquadratic = create_quadratic( eigen=clf_eig, R=rot2D(np.deg2rad(clf_angle)), center=clf_center, kernel_dim=kernel_dim )

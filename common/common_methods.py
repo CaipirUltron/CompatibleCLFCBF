@@ -862,14 +862,6 @@ def S(x, kernel, l, P, Q, F, params):
     S = 0.5 * np.array([ [ z.T @ Aj.op( Ak.op(Lm) ) @ z for Aj in Aops ] for Ak in Aops ])
     return S
 
-def get_removable_areas( boundary, segment_lines ):
-    '''
-    Gets the total area of a removable region
-    (uses the split method from shapely)
-    '''
-    geoms = split( boundary, segment_lines )
-    print(geoms)
-
 def add_to(point, l, *connections):
     '''
     Adds point to list l, if new. point is the default dict for points in the invariant set 

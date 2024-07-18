@@ -2243,8 +2243,13 @@ class KernelFamily():
         self.create_limit_lines()
 
         # Compute CBF boundaries
+        xmin, xmax, ymin, ymax = self.limits
+        world_coords = [ (xmax, ymax), (xmax, ymin), (xmin, ymin), (xmin, ymax) ]
+        self.world_polygon = geometry.Polygon(world_coords)
+
         self.boundary_lines = [ [] for _ in self.cbfs ]
-        self.boundary_polygons = [ [] for _ in self.cbfs ]
+        self.safe_sets = [ geometry.Polygon() for _ in self.cbfs ]
+        self.unsafe_sets = [ geometry.Polygon() for _ in self.cbfs ]
         for cbf_index in range(self.num_cbfs):
             self.compute_cbf_boundary(cbf_index)
 
@@ -2284,9 +2289,15 @@ class KernelFamily():
     def compute_cbf_boundary(self, cbf_index):
         '''Compute CBF boundary'''
 
+        unsafe_set = geometry.Polygon()
         for boundary_seg in self.cbfs[cbf_index].get_boundary():
-            self.boundary_lines[cbf_index].append(geometry.LineString(boundary_seg))
-            self.boundary_polygons[cbf_index].append(geometry.Polygon(boundary_seg))
+            boundary_lines = geometry.LineString(boundary_seg)
+            self.boundary_lines[cbf_index].append(boundary_lines)
+
+            unsafe_set = unsafe_set | geometry.Polygon(boundary_seg)
+        
+        self.safe_sets[cbf_index] = self.world_polygon.difference(unsafe_set)
+        self.unsafe_sets[cbf_index] = unsafe_set
 
     def set_param(self, **kwargs):
         '''
@@ -2599,6 +2610,7 @@ class KernelFamily():
 
             # ----- Loads segment dictionary
             seg_dict = {"points": segment_points}
+            seg_dict["geom"] = geometry.LineString(segment_points)
             seg_dict["lambdas"] = [ self.lambda_fun(pt, cbf_index) for pt in segment_points ]
 
             seg_dict["clf_values"] = [ self.clf_fun(pt) for pt in segment_points ]
@@ -2611,7 +2623,7 @@ class KernelFamily():
             # ----- Computes the corresponding equilibrium points and critical segment values
             self.seg_boundary_equilibria(seg_dict)
             self.seg_interior_equilibria(seg_dict)
-            self.seg_critical(seg_dict)
+            self.seg_removable(seg_dict)
 
             # ----- Adds the segment dicts and equilibrium points to corresponding data structures
             self.invariant_segs[cbf_index].append(seg_dict)
@@ -2631,16 +2643,12 @@ class KernelFamily():
         self.stable_equilibria += stable_eqs
         self.unstable_equilibria += unstable_eqs
 
-    def get_boundary_intersections(self, seg_dict: dict[str,]):
+    def get_boundary_intersections( self, boundary_lines, seg_lines ):
         ''' Computes the intersections with boundary segments of a particular segment of the invariant set '''
 
-        cbf_index = seg_dict["cbf_index"]
-        seg_data = seg_dict["points"]
-
         intersection_pts = []
-        for boundary_line in self.boundary_lines[cbf_index]:
-            invariant_seg_line = geometry.LineString(seg_data)
-            intersections = intersection( boundary_line, invariant_seg_line )
+        for boundary_line in boundary_lines:
+            intersections = intersection( boundary_line, seg_lines )
 
             new_candidates = []
             if not intersections.is_empty:
@@ -2659,16 +2667,17 @@ class KernelFamily():
         return intersection_pts
 
     def seg_boundary_equilibria(self, seg_dict: dict[str,]):
-        ''' Computes boundary equilibrium points for given segment data '''
+        '''Computes boundary equilibrium points for given segment data '''
 
         cbf_index = seg_dict["cbf_index"]
-        seg_dict["boundary_equilibria"] = []
-        intersection_pts = self.get_boundary_intersections(seg_dict)
+        intersection_pts = self.get_boundary_intersections( self.boundary_lines[cbf_index], seg_dict["geom"] )
 
-        # Boundary equilibrium are intersection points with positive lambda:
+        # Compute all boundary equilibria: they are all intersection points with positive lambda
+        seg_dict["boundary_equilibria"] = []
         for pt in intersection_pts:
             lambda_pt = self.lambda_fun(pt, cbf_index)
             if lambda_pt >= 0.0:
+
                 seg_boundary_equilibrium = {"x": pt}
                 seg_boundary_equilibrium["cbf_index"] = cbf_index
                 seg_boundary_equilibrium["lambda"] = lambda_pt
@@ -2719,64 +2728,45 @@ class KernelFamily():
             eq["equilibrium"] = "stable"
             if stability > 0:
                 eq["equilibrium"] = "unstable"
-        
-    # def seg_clf_minima(self, seg_data: list[np.ndarray]):
-    #     '''
-    #     Computes CLF local minima for given segment data
-    #     '''
 
-    # def seg_cbf_minima(self, seg_data: list[np.ndarray]):
-    #     '''
-    #     Computes CBF local minima for given segment data
-    #     '''
-
-    def seg_critical(self, seg_dict: dict[str,]) -> float:
+    def seg_removable(self, seg_dict: dict[str,]) -> float:
         '''
-        Computes the segment integral
+        Computes the segment removable area, if it exists
         '''
         cbf_index = seg_dict["cbf_index"]
         seg_data = seg_dict["points"]
 
         # Compute barrier values along the segment
-        barrier_vals = np.zeros(len(seg_data[0:-1,:]))
-        for k, pt in enumerate(seg_data[0:-1,:]):
-            mean_pt = 0.5*( pt + seg_data[k+1,:] )
-            barrier_vals[k] = self.cbfs[cbf_index].function(mean_pt)
+        barrier_vals = [0, 0]
 
-        # barrier_vals = np.array([ self.cbfs[cbf_index].function(0.5*( pt + seg_data[k+1,:] )) for k, pt in enumerate(seg_data[0:-1,:]) ])
+        line_start = 0.5*( seg_data[0,:] + seg_data[1,:] )
+        barrier_vals[0] = self.cbfs[cbf_index].function(line_start)
 
-        # segment is not removable (starts OR ends outside/inside the unsafe set) - until proven otherwise
-        seg_dict["removable"] = 0
+        line_end = 0.5*( seg_data[-2,:] + seg_data[-1,:] )
+        barrier_vals[1] = self.cbfs[cbf_index].function(line_end)
 
-        # segment is removable (starts AND ends completely outside/inside the unsafe set)
-        if barrier_vals[0] * barrier_vals[-1] > 0:
+        # for k, pt in enumerate(seg_data[0:-1,:]):
+        #     mean_pt = 0.5*( pt + seg_data[k+1,:] )
+        #     barrier_vals[k] = self.cbfs[cbf_index].function(mean_pt)
+
+        # segment is not removable until proven otherwise
+        seg_dict["removable_area"] = 0
+
+        # If segment has two or more intersections and starts AND ends completely outside/inside the unsafe set, it is removable
+        num_seg_eq = len(seg_dict["boundary_equilibria"])
+        if num_seg_eq >= 2 and barrier_vals[0] * barrier_vals[-1] > 0:
 
             if barrier_vals[0] > 0:                                                 # removable from outside
-                seg_dict["removable"] = +1
-                seg_dict["segment_critical"] = np.min(barrier_vals)
-                return
-            
+                unsafe_geom = self.unsafe_sets[cbf_index]
+                splitted_region = split( unsafe_geom, seg_dict["geom"] ) 
+
             if barrier_vals[0] < 0:                                                 # removable from inside
-                seg_dict["removable"] = -1
-                seg_dict["segment_critical"] = np.max(barrier_vals)
-                return
-
-        # if seg_dict["removable"] != 0:
-        areas = get_removable_areas( self.boundary_polygons[cbf_index], geometry.LineString(seg_data) )
-
-        pos_lines = np.where(barrier_vals >= self.compatibility_options["barrier_sep"])
-        if len(pos_lines[0]) == 0: pos_lines = np.where(barrier_vals >= 0.0)
-
-        if barrier_vals[0] < 0:                                                                     # starts inside (ends outside)
-            sep_index = pos_lines[0][0]
-            removable_line = barrier_vals[sep_index:]
-
-        if barrier_vals[0] > 0:                                                                     # starts outside (ends inside)
-            sep_index = pos_lines[0][-1]+1
-            removable_line = barrier_vals[0:sep_index]
-
-        seg_dict["segment_critical"] = np.min(removable_line)
-        return 
+                safe_geom = self.safe_sets[cbf_index]
+                splitted_region = split( safe_geom, seg_dict["geom"] )
+            
+            areas = [ geom.area for geom in splitted_region.geoms ]
+            areas.sort()
+            seg_dict["removable_area"] = sum(areas[0:-1])
 
     def is_compatible(self) -> bool:
         '''
