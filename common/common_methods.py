@@ -82,6 +82,9 @@ def asymmetric_sat(u, limits, slope):
 
     return (max - min)/(1+np.exp( -slope*(u - t0) )) + min
 
+def gaussian(x, sigma):
+    return np.exp(-0.5 * (x / sigma)**2)
+
 def sat(u, limits):
     '''
     Scalar saturation.

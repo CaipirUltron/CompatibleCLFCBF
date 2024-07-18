@@ -2210,6 +2210,8 @@ class KernelFamily():
         self.set_param(**kwargs)
 
         self.invariant_lines_plot = [ [] for _ in self.cbfs ]
+        self.comp_process_params = { "stability_threshold": 0.1, 
+                                     "area_threshold": 0.1 }
         self.comp_process_data = {"step": 0, 
                                   "start_time": 0.0, 
                                   "execution_time": 0.0, 
@@ -2472,7 +2474,6 @@ class KernelFamily():
         '''
         Compute the stability number for a given equilibrium point
         '''
-
         V = self.clf_fun(x_eq)
         nablaV = self.clf_gradient(x_eq)
 
@@ -2486,7 +2487,7 @@ class KernelFamily():
         if type_eq == "boundary":
             curvatures, basis_for_TpS = compute_curvatures( S, unit_nablah )
             max_index = np.argmax(curvatures)
-            stability_number = curvatures[max_index] / ( self.params["slack_gain"] * self.params["clf_gain"] * V * norm_nablaV )
+            stability_number = curvatures[max_index] / ( self.params["slack_gain"] * self.params["clf_gain"] * norm_nablaV )
 
         if type_eq == "interior":
             stability_number = np.max( np.linalg.eigvals(S) )
@@ -2623,7 +2624,8 @@ class KernelFamily():
             # ----- Computes the corresponding equilibrium points and critical segment values
             self.seg_boundary_equilibria(seg_dict)
             self.seg_interior_equilibria(seg_dict)
-            self.seg_removable(seg_dict)
+            self.seg_stability_pressure(seg_dict)
+            self.seg_removable_area(seg_dict)
 
             # ----- Adds the segment dicts and equilibrium points to corresponding data structures
             self.invariant_segs[cbf_index].append(seg_dict)
@@ -2729,25 +2731,42 @@ class KernelFamily():
             if stability > 0:
                 eq["equilibrium"] = "unstable"
 
-    def seg_removable(self, seg_dict: dict[str,]) -> float:
+    def seg_stability_pressure(self, seg_dict: dict[str,]):
+        '''
+        Computes the segment stability pressure, expressed as a line integral
+        '''
+        cbf_index = seg_dict["cbf_index"]
+        seg_data = seg_dict["points"]
+        
+        # Integrate the segment stability pressure
+        pressure_integral = 0.0
+        segment_length = 0.0
+        for k, pt in enumerate(seg_data[0:-1,:]):
+            mean_pt = 0.5*( pt + seg_data[k+1,:] )
+            ds = np.linalg.norm(mean_pt)
+            segment_length += ds
+            h = self.cbfs[cbf_index].function(mean_pt)
+
+            stability, eta = self.stability_fun(mean_pt, type_eq="boundary", cbf_index=cbf_index)
+            fun = gaussian(h, sigma = 0.1) * ( stability - self.comp_process_params["stability_threshold"] )
+            pressure_integral += fun*ds
+
+        seg_dict["length"] = segment_length
+        seg_dict["stability_pressure"] = pressure_integral/segment_length
+
+    def seg_removable_area(self, seg_dict: dict[str,]) -> float:
         '''
         Computes the segment removable area, if it exists
         '''
         cbf_index = seg_dict["cbf_index"]
         seg_data = seg_dict["points"]
 
-        # Compute barrier values along the segment
-        barrier_vals = [0, 0]
+        barrier_vals = [ 0, 0 ]
+        start_pt = 0.5*( seg_data[0,:] + seg_data[1,:] )
+        end_pt = 0.5*( seg_data[-1,:] + seg_data[-2,:] )
 
-        line_start = 0.5*( seg_data[0,:] + seg_data[1,:] )
-        barrier_vals[0] = self.cbfs[cbf_index].function(line_start)
-
-        line_end = 0.5*( seg_data[-2,:] + seg_data[-1,:] )
-        barrier_vals[1] = self.cbfs[cbf_index].function(line_end)
-
-        # for k, pt in enumerate(seg_data[0:-1,:]):
-        #     mean_pt = 0.5*( pt + seg_data[k+1,:] )
-        #     barrier_vals[k] = self.cbfs[cbf_index].function(mean_pt)
+        barrier_vals[0] = self.cbfs[cbf_index].function(start_pt)
+        barrier_vals[1] = self.cbfs[cbf_index].function(end_pt)
 
         # segment is not removable until proven otherwise
         seg_dict["removable_area"] = 0

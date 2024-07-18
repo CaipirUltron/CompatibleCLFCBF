@@ -47,9 +47,9 @@ Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_cent
 clf_leading = LeadingShape(Pquadratic,approximate=True)
 
 # clf = KernelLyapunov(kernel=kernel, P=load_compatible(__file__, Pquadratic, load_compatible=True), limits=limits)
-# clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
+clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
 # clf = KernelLyapunov(kernel=kernel, points=points, centers=[clf_center], limits=limits)
-clf = KernelLyapunov(kernel=kernel, points=points, centers=[clf_center], leading=clf_leading, limits=limits)
+# clf = KernelLyapunov(kernel=kernel, points=points, centers=[clf_center], leading=clf_leading, limits=limits)
 clf.is_SOS_convex(verbose=True)
 
 # ------------------------------------------- Define CBF for U-shaped obstacle ---------------------------------------------

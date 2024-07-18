@@ -45,8 +45,9 @@ sim.kerneltriplet.plot_attr(ax, "unstable_equilibria", mcolors.BASE_COLORS["g"],
 
 for cbf_index in range(len(sim.cbfs)):
     for k, seg in enumerate(sim.kerneltriplet.invariant_segs[cbf_index]):
+        press = seg["stability_pressure"]
         area = seg["removable_area"]
-        print(f"Segment {k+1} of CBF {cbf_index+1} has {area} removable area.")
+        print(f"Segment {k+1} of CBF {cbf_index+1} has {press} of stability pressure and {area} removable measure.")
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 while True:
