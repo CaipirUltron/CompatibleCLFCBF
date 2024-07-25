@@ -3,7 +3,7 @@ import numpy as np
 from dynamic_systems import KernelAffineSystem
 from functions import Kernel, KernelLyapunov, KernelBarrier, KernelFamily
 from controllers import NominalQP
-from common import create_quadratic, rot2D, box, load_compatible
+from common import kernel_quadratic, rot2D, box, load_compatible
 
 initial_state = [-5.0, 9.38]
 initial_control = [0.0, 0.0]
@@ -39,7 +39,7 @@ base_level = 25
 
 clf_eig = np.array([ 1.0, 1.0 ])
 clf_angle = np.deg2rad(-45)
-Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
+Pquadratic = kernel_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
 
 # fun = KernelQuadratic(kernel=kernel, P=Pquadratic, limits=limits, spacing=0.1)
 # print(fun.matrix_coefs)
@@ -55,7 +55,7 @@ cbf_eig = 0.3*np.array([ 0.2, 1.2 ])
 cbf_center = [-3.0, -3.0]
 cbf_angle = np.deg2rad(-45)
 
-Qquadratic = create_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
+Qquadratic = kernel_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
 cbf1 = KernelBarrier(kernel=kernel, Q=Qquadratic, limits=limits)
 
 # Second CBF is a box-shaped obstacle

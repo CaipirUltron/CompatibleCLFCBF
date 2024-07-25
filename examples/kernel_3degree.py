@@ -5,7 +5,7 @@ from shapely import LineString, LinearRing, Polygon
 from controllers import NominalQP
 from dynamic_systems import KernelAffineSystem
 from functions import LeadingShape, Kernel, KernelLyapunov, KernelBarrier, KernelFamily
-from common import create_quadratic, circular_boundary_shape, rot2D, polygon, load_compatible, discretize, segmentize, enclosing_circle
+from common import kernel_quadratic, circular_boundary_shape, rot2D, polygon, load_compatible, discretize, segmentize, enclosing_circle
 
 initial_state = [0.2, 6.5]
 initial_control = [0.0, 0.0]
@@ -43,7 +43,7 @@ points.append({ "coords": [ 0.0,  1.0], "gradient": [ 0.0,  1.0], "curvature": -
 
 clf_eig = np.array([ 8.0, 1.0 ])
 clf_angle = np.deg2rad(0)
-Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
+Pquadratic = kernel_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
 clf_leading = LeadingShape(Pquadratic,approximate=True)
 
 # clf = KernelLyapunov(kernel=kernel, P=load_compatible(__file__, Pquadratic, load_compatible=True), limits=limits)

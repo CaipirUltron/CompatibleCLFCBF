@@ -2,7 +2,7 @@ import numpy as np
 import cvxpy as cp
 import scipy as sp
 
-from common import create_quadratic, sontag_formula
+from common import kernel_quadratic, sontag_formula
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
 from controllers.compatibility import CLFCBFPair
@@ -129,7 +129,7 @@ class NominalQP():
         #         center = pt["point"]
         #         break
         # Vvalue = 10
-        # self.Pquadratic = create_quadratic((1/Vvalue)*np.ones(self.state_dim), np.eye(self.state_dim), center, self.kernel_dim)
+        # self.Pquadratic = kernel_quadratic((1/Vvalue)*np.ones(self.state_dim), np.eye(self.state_dim), center, self.kernel_dim)
 
         self.objective = cp.Minimize( cp.norm( self.Pnew - self.Pnom, p='fro' ) )
         self.constraints = { "psd": [ self.Pnew >> 0.0 ], 

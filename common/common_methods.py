@@ -404,7 +404,7 @@ def kernel_constraints( z, terms_by_degree ):
 
     return F, matrix_constraints
 
-def create_quadratic(eigen, R, center, kernel_dim):
+def kernel_quadratic(eigen, R, center, kernel_dim):
     '''
     This function generates the coefficient matrix for a kernel quadratic function
     corresponding to a general quadratic function f(x) = (x-center).T H (x-center)
@@ -435,6 +435,15 @@ def create_quadratic(eigen, R, center, kernel_dim):
     std_centered_quadratic[1:n+1,1:n+1] = H
 
     return std_centered_quadratic
+
+def hessian_2Dquadratic(eigen: np.ndarray, angle: float):
+    '''
+    Generates hessian matrix of a 2D quadratic function, from eigenvalues and angle of principal axis of inertia
+    '''
+    if len(eigen) != 2: raise Exception("Only works for n= 2")
+    if np.any(np.array(eigen) < 0): raise Exception("Eigenvalues must be non-negative.")
+    R = rot2D(angle)
+    return R.T @ np.diag(eigen) @ R
 
 def circular_boundary_shape( radius, center, kernel_dim ):
     ''' Returns shape matrix of (kernel_dim x kernel_dim) representing a circular obstacle with radius and center '''

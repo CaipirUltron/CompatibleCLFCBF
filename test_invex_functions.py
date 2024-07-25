@@ -116,7 +116,7 @@ def find_invex(Ninit: np.ndarray):
         return m0.T @ N.T @ G @ N @ m0
 
     # constraints = [ {"type": "eq", "fun": unimodular} ]
-    constraints = [ {"type": "eq", "fun": invex} ]
+    constraints = [ {"type": "ineq", "fun": invex} ]
 
     # constraints += [ {"type": "ineq", "fun": initializer} ]
     # constraints = [ {"type": "eq", "fun": unimodular_equality} ]

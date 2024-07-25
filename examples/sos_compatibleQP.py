@@ -3,7 +3,7 @@ import numpy as np
 from dynamic_systems import ConservativeAffineSystem
 from functions import Kernel, KernelLyapunov, KernelBarrier
 from controllers import NominalQP
-from common import create_quadratic, rot2D
+from common import kernel_quadratic, rot2D
 from controllers.equilibrium_algorithms import generate_boundary, compute_equilibria, closest_compatible
 
 initial_state = [1.2, 6.0]
@@ -39,7 +39,7 @@ clf = KernelLyapunov(*initial_state, kernel=kernel, points=points)
 
 # eig = [1.0, 1.0]
 # center = [0.0, 0.0]
-# P = create_quadratic(eig, rot2D(0.0), center, kern_dim)
+# P = kernel_quadratic(eig, rot2D(0.0), center, kern_dim)
 # clf = KernelLyapunov(*initial_state, kernel=kernel, P=P)
 
 # ----------------------------------------------------- Define CBF ---------------------------------------------------------

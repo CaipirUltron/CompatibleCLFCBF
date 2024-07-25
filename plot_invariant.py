@@ -4,6 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
+from operator import itemgetter
+
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples."+simulation_file, package=None)
@@ -45,9 +47,18 @@ sim.kerneltriplet.plot_attr(ax, "unstable_equilibria", mcolors.BASE_COLORS["g"],
 
 for cbf_index in range(len(sim.cbfs)):
     for k, seg in enumerate(sim.kerneltriplet.invariant_segs[cbf_index]):
+
+        extremal_pairs = seg["extremal_pairs"]
+        first = extremal_pairs["first"]
+        last = extremal_pairs["last"]
+        
         press = seg["stability_pressure"]
         area = seg["removable_area"]
-        print(f"Segment {k+1} of CBF {cbf_index+1} has {press} of stability pressure and {area} removable measure.")
+
+        print(f"Segment {k+1} of CBF {cbf_index+1} has:")
+        print(f"First = {first}")
+        print(f"Last = {last}")
+        print(f"stab. press. = {press}, rem. area = {area},")
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 while True:

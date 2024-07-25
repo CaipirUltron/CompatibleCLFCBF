@@ -3,7 +3,7 @@ import numpy as np
 from dynamic_systems import KernelAffineSystem
 from functions import LeadingShape, Kernel, KernelQuadratic, KernelLyapunov, KernelBarrier, KernelFamily
 from controllers import NominalQP
-from common import create_quadratic, rot2D, box, load_compatible
+from common import kernel_quadratic, rot2D, box, load_compatible
 
 initial_state = [-5.0, 9.38]
 initial_control = [0.0, 0.0]
@@ -39,7 +39,7 @@ base_level = 25
 
 clf_eig = np.array([ 1.0, 1.0 ])
 clf_angle = np.deg2rad(-45)
-Pquadratic = create_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
+Pquadratic = kernel_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
 
 # fun = KernelQuadratic(kernel=kernel, P=Pquadratic, limits=limits, spacing=0.1)
 # print(fun.matrix_coefs)

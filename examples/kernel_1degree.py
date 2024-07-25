@@ -3,7 +3,7 @@ import numpy as np
 from dynamic_systems import KernelAffineSystem
 from functions import Kernel, KernelLyapunov, KernelBarrier, KernelFamily
 from controllers import NominalQP
-from common import create_quadratic, rot2D, load_compatible
+from common import kernel_quadratic, rot2D, load_compatible
 
 initial_state = [0.2, 6.0]
 initial_control = [0.0, 0.0]
@@ -30,17 +30,17 @@ plant = KernelAffineSystem(initial_state=initial_state, initial_control=initial_
 clf_eig = np.array([ 4.0, 1.0 ])
 clf_angle = 0
 clf_center = [0.0, -2.0]
-Pquadratic = create_quadratic( eigen=clf_eig, R=rot2D(np.deg2rad(clf_angle)), center=clf_center, kernel_dim=kernel_dim )
+Pquadratic = kernel_quadratic( eigen=clf_eig, R=rot2D(np.deg2rad(clf_angle)), center=clf_center, kernel_dim=kernel_dim )
 
-# clf = KernelLyapunov(kernel=kernel, P=load_compatible( __file__, Pquadratic, load_compatible = True ), limits=limits )
-clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
+clf = KernelLyapunov(kernel=kernel, P=load_compatible( __file__, Pquadratic, load_compatible = True ), limits=limits )
+# clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
 
 # --------------------------------------------- Define CBF (quadratic) -----------------------------------------------------
 cbf_eig = 0.2*np.array([ 0.2, 1.2 ])
 cbf_center = [0.0, 3.0]
 cbf_angle = np.deg2rad(5)
 
-Qquadratic = create_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
+Qquadratic = kernel_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
 cbf = KernelBarrier(kernel=kernel, Q=Qquadratic, limits=limits)
 
 cbfs = [ cbf ]

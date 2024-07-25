@@ -5,6 +5,7 @@ The results are stored in a json file.
 import sys
 import json
 import importlib
+import numpy as np
 
 # Load simulation file
 simulation_file = sys.argv[1].replace(".json","")
@@ -15,7 +16,8 @@ if sim.kerneltriplet.is_compatible():
 else: 
     print("Given CLF is not compatible with CBF and plant.")
 
-    compatibility_result = sim.kerneltriplet.compatibilize(obj_type="closest", verbose=True, animate=True)
+    Ninit, _ = sim.kerneltriplet.get_N(sim.Pquadratic)
+    compatibility_result = sim.kerneltriplet.compatibilize(Ninit, sim.clf_center, verbose=True, animate=True)
 
     try:
         with open("logs/"+simulation_file+"_comp.json", "w") as file:
