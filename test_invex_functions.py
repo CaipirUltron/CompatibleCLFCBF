@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 
 from functions import Kernel, KernelLyapunov, MultiPoly
-from common import rot2D
+from common import rot2D, timeit
 
 # np.set_printoptions(precision=3, suppress=True)
 limits = 3*np.array((-1,1,-1,1))
@@ -70,6 +70,7 @@ Tol[0,0] = 1
 Tol = tol*Tol
 
 #---------------------------------- Function for invexification -----------------------------------
+@timeit
 def find_invex(Ninit: np.ndarray):
     '''
     Returns an N matrix that produces an invex function k(x).T N.T P N K(x) on the given kernel k(x).
@@ -164,6 +165,7 @@ for i in range(num_sim):
     # Ninit = np.random.randint(low=1, high=5, size=(n,kernel_dim))
     # print(f"Coefficients of |∇Φ(x)| at Ninit = {det_coeffs_fun(Ninit)}")
 
+    
     N = find_invex(Ninit)
 
     D = shape_fun(N)

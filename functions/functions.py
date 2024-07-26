@@ -2643,7 +2643,7 @@ class KernelFamily():
             self.seg_boundary_equilibria(seg_dict)
             self.seg_interior_equilibria(seg_dict)
             self.seg_stability_pressure(seg_dict)
-            self.seg_removable_area(seg_dict)
+            self.seg_removable_measure(seg_dict)
 
             # ----- Adds the segment dicts and equilibrium points to corresponding data structures
             self.invariant_segs[cbf_index].append(seg_dict)
@@ -2772,9 +2772,9 @@ class KernelFamily():
         seg_dict["length"] = segment_length
         seg_dict["stability_pressure"] = pressure_integral/segment_length
 
-    def seg_removable_area(self, seg_dict: dict[str,]) -> float:
+    def seg_removable_measure(self, seg_dict: dict[str,]) -> float:
         '''
-        Computes the segment removable area, if it exists
+        Computes the segment removable measure, if it exists
         '''
         cbf_index = seg_dict["cbf_index"]
         seg_data = seg_dict["points"]
@@ -2787,13 +2787,14 @@ class KernelFamily():
         barrier_vals[1] = self.cbfs[cbf_index].function(end_pt)
 
         # segment is not removable until proven otherwise
-        seg_dict["removable_area"] = 0
+        seg_dict["removable_measure"] = 0
 
         # If segment has two or more intersections and starts AND ends completely outside/inside the unsafe set, it is removable
         num_seg_eq = len(seg_dict["boundary_equilibria"])
         if num_seg_eq >= 2 and barrier_vals[0] * barrier_vals[-1] > 0:
 
             if barrier_vals[0] > 0:                                                 # removable from outside
+
                 unsafe_geom = self.unsafe_sets[cbf_index]
                 splitted_region = split( unsafe_geom, seg_dict["geom"] ) 
 
@@ -2803,7 +2804,10 @@ class KernelFamily():
             
             areas = [ geom.area for geom in splitted_region.geoms ]
             areas.sort()
-            seg_dict["removable_area"] = sum(areas[0:-1])
+            seg_dict["removable_measure"] = sum(areas[0:-1])
+        else:
+            pass
+        # TO BE IMPLEMENTED
 
     def is_compatible(self) -> bool:
         '''
@@ -2912,6 +2916,38 @@ class KernelFamily():
         cost = objective(sol.x)
 
         return Nsol, cost
+    
+    def get_invex(self, Ninit: np.ndarray, center):
+        '''
+        Returns an N matrix that produces an invex function k(x).T N.T P N K(x) on the given kernel k(x).
+        PROBLEM: find N such that shape_fun(N) >> 0
+        '''
+        G = self.comp_process_params["G"]
+
+        def objective(var):
+            N = self.var_to_N(var)
+            return np.linalg.norm(N - Ninit)
+
+        def invex(var: np.ndarray):
+            N = self.var_to_N(var)
+            D = np.array(self.sos_factorized(N))
+            self.invexity = min(np.linalg.eigvals( D - self.invex_tol ))
+            return self.invexity
+
+        def centered(var: np.ndarray):
+            N = self.var_to_N(var)
+            m_center = self.kernel.function(center)
+            self.centering = m_center.T @ N.T @ G @ N @ m_center
+            return self.centering
+
+        constraints = [ {"type": "ineq", "fun": invex} ]
+        constraints += [ {"type": "eq", "fun": centered} ]
+
+        init_var = self.N_to_var(Ninit)
+        sol = minimize( objective, init_var, constraints=constraints, options={"disp": False, "maxiter":1000} )
+        N = self.var_to_N(sol.x)
+
+        return N
 
     def compatibilize(self, Ninit: np.ndarray, center: np.ndarray, verbose=False, animate=False) -> dict:
         '''
@@ -2958,8 +2994,14 @@ class KernelFamily():
         def objective(var: np.ndarray) -> float:
             ''' Minimizes the changes to the CLF geometry '''
             self.counter += 1
-            N = self.var_to_N(var)
+
+            N = self.get_invex( self.var_to_N(var), center )    # get closest invex
+
+            self.P = N.T @ G @ N
+            self.update_invariant_set()      # The invariant set must be updated to get the current state of the optimization
+
             self.cost = np.linalg.norm(N - Ninit)
+
             return self.cost
 
         def invexity_constr(var: np.ndarray) -> float:
@@ -2978,16 +3020,18 @@ class KernelFamily():
 
         def lambda_max_constr(var: np.ndarray) -> list[float]:
             ''' Avoids eigenvalues of P from exploding '''
-            N = self.var_to_N(var)
+            N = self.get_invex( self.var_to_N(var), center )    # get closest invex
+
             max_eig = self.comp_process_params["max_P_eigenvalue"]
             P = N.T @ G @ N
+
             self.max_eig_constr = max_eig - max(np.linalg.eigvals(P))
             return self.max_eig_constr
 
         def stability_constr(var: np.ndarray) -> list[float]:
             ''' Forces stability pressure to be positive in every branch, for every CBF '''
-
-            N = self.var_to_N(var)
+            
+            N = self.get_invex( self.var_to_N(var), center )    # get closest invex
             self.P = N.T @ G @ N
             
             self.update_invariant_set()      # The invariant set must be updated to get the current state of the optimization
@@ -3001,7 +3045,7 @@ class KernelFamily():
         def removability_constr(var: np.ndarray) -> list[float]:
             ''' Removes removable branches, for each CBF'''
 
-            N = self.var_to_N(var)
+            N = self.get_invex( self.var_to_N(var), center )    # get closest invex
             self.P = N.T @ G @ N
             
             self.update_invariant_set()     # The invariant set must be updated to get the current state of the optimization
@@ -3009,7 +3053,7 @@ class KernelFamily():
             self.areas = np.zeros(self.num_cbfs)
             for cbf_index in range(self.num_cbfs):
                 for seg in self.invariant_segs[cbf_index]:
-                    self.areas[cbf_index] += seg["removable_area"]
+                    self.areas[cbf_index] += seg["removable_measure"]
             return self.areas
 
         if animate:
@@ -3051,8 +3095,9 @@ class KernelFamily():
             self.counter = 0
             self.comp_process_data["start_time"] = time.perf_counter()
 
-        constraints = [ {"type": "ineq", "fun": invexity_constr} ]
-        constraints += [ {"type": "eq", "fun": center_constr} ]
+        constraints = []
+        # constraints += [ {"type": "ineq", "fun": invexity_constr} ]
+        # constraints += [ {"type": "eq", "fun": center_constr} ]
         constraints += [ {"type": "ineq", "fun": lambda_max_constr} ]
         constraints += [ {"type": "ineq", "fun": stability_constr} ]
         constraints += [ {"type": "eq", "fun": removability_constr} ]

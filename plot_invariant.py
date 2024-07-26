@@ -53,7 +53,7 @@ for cbf_index in range(len(sim.cbfs)):
         last = extremal_pairs["last"]
         
         press = seg["stability_pressure"]
-        area = seg["removable_area"]
+        area = seg["removable_measure"]
 
         print(f"Segment {k+1} of CBF {cbf_index+1} has:")
         print(f"First = {first}")
