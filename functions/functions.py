@@ -77,8 +77,7 @@ class Function(ABC):
 
         self.set_params(**kwargs)
 
-        if self._output_dim == 1:
-            self.generate_contour()
+        if self._output_dim == 1: self.generate_contour()
 
     def _validate(self, point):
         ''' Validates input data '''
@@ -1826,7 +1825,7 @@ class KernelQuadratic(Function):
         return bound
 
     def set_shape(self, shape_matrix):
-        ''' Setting method for tyhe shape matrix. '''
+        ''' Setting method for the shape matrix. '''
 
         # If a one dimensional array was passed, checks if it can be converted to symmetric matrix
         if shape_matrix.ndim == 1:
@@ -1839,7 +1838,7 @@ class KernelQuadratic(Function):
         if shape_matrix.shape[0] != shape_matrix.shape[1]:
             raise Exception("Matrix of coefficients must be a square.")
         
-        if not np.all( shape_matrix == shape_matrix.T ):
+        if np.linalg.norm( shape_matrix == shape_matrix.T ) > 1e-3:
             warnings.warn("Matrix of coefficients is not symmetric. The symmetric part will be used.")
 
         # if not np.all(np.linalg.eigvals(shape_matrix) >= -1e-5):
@@ -2081,7 +2080,7 @@ class KernelQuadratic(Function):
         '''
         self.dynamics.set_control(param_ctrl)
         self.dynamics.actuate(dt)
-        self.set_params( coefficients = self.dynamics.get_state() )
+        self.set_params( coefficients = self.dynamics.get_state() )   
 
 class KernelLyapunov(KernelQuadratic):
     '''
@@ -2229,74 +2228,10 @@ class KernelFamily():
         self.invexity = 0.0
         self.centering = 0.0
         self.max_eig_constr = 0.0
+        self.counter = 0
 
         self.stability_pressures = np.zeros(self.num_cbfs)
         self.measures = np.zeros(self.num_cbfs)
-
-        # Initialize CVXPY parameters (for OLD optimization)
-
-        # self.CVXPY_P = cp.Variable( (self.p,self.p), symmetric=True )
-        # self.CVXPY_Pnom = cp.Parameter( (self.p,self.p), symmetric=True )
-        # self.CVXPY_lambdas = []
-
-        # self.CVXPY_cost = cp.norm(self.CVXPY_P - self.CVXPY_Pnom)
-        # self.CVXPY_base_constraints = [ self.CVXPY_P >> 0, cp.lambda_max(self.CVXPY_P) <= self.max_P_eig ]
-        # self.CVXPY_constraints = self.CVXPY_base_constraints
-
-        # self.CVXPY_family_cost = cp.norm(self.CVXPY_P - self.CVXPY_Pnom)
-        # self.CVXPY_family_constraints = [ self.CVXPY_P >> 0, 
-        #                                   self.kernel.get_left_lowerbound(self.CVXPY_P) == 0,
-        #                                   self.kernel.get_constrained_shape(self.CVXPY_P) == self.CVXPY_P,
-        #                                   cp.lambda_max(self.CVXPY_P) <= self.max_P_eig ]
-        
-        # self.CVXPY_family_problem = cp.Problem( cp.Minimize( self.CVXPY_family_cost ), self.CVXPY_family_constraints )
-
-        # Compute limit lines (obstacle should be completely contained inside the rectangle)
-        self.create_limit_lines()
-
-        # Compute CBF boundaries
-        xmin, xmax, ymin, ymax = self.limits
-        world_coords = [ (xmax, ymax), (xmax, ymin), (xmin, ymin), (xmin, ymax) ]
-        self.world_polygon = geometry.Polygon(world_coords)
-
-        self.boundary_lines = [ [] for _ in self.cbfs ]
-        self.safe_sets = [ geometry.Polygon() for _ in self.cbfs ]
-        self.unsafe_sets = [ geometry.Polygon() for _ in self.cbfs ]
-        for cbf_index in range(self.num_cbfs):
-            self.compute_cbf_boundary(cbf_index)
-
-        # Initialize invariant set
-        self.update_invariant_set(verbose=True)
-
-    def create_limit_lines(self, spacing=0.1):
-        '''
-        Creates the 4 boundary lines used in fast_equilibria()
-        '''
-        xmin, xmax, ymin, ymax = self.limits
-
-        spam_x = np.arange(xmin, xmax, spacing)
-        spam_y = np.arange(ymin, ymax, spacing)
-        spam_x = spam_x.reshape( len(spam_x), 1 )
-        spam_y = spam_y.reshape( len(spam_y), 1 )
-
-        # Create 4 lines representing the window boundaries
-        self.limit_lines = []
-        
-        top_x = spam_x
-        top_y = ymax * np.ones(spam_x.shape)
-        self.limit_lines.append({"x": top_x, "y": top_y})
-
-        bottom_x = spam_x
-        bottom_y = ymin * np.ones(spam_x.shape)
-        self.limit_lines.append({"x": bottom_x, "y": bottom_y})
-
-        left_x = xmin * np.ones(spam_y.shape)
-        left_y = spam_y
-        self.limit_lines.append({"x": left_x, "y": left_y})
-
-        right_x = xmax * np.ones(spam_y.shape)
-        right_y = spam_y
-        self.limit_lines.append({"x": right_x, "y": right_y})
 
     def compute_cbf_boundary(self, cbf_index):
         '''Compute CBF boundary'''
@@ -2317,12 +2252,19 @@ class KernelFamily():
                                        invariant_color, equilibria_color
                                        plant, clf, cbf, params
         '''
+        update_invariant = False
+
+        if "limits" in kwargs.keys():
+            self.limits = kwargs["limits"]
+            xmin, xmax, ymin, ymax = self.limits
+            world_coords = [ (xmax, ymax), (xmax, ymin), (xmin, ymin), (xmin, ymax) ]
+            self.world_polygon = geometry.Polygon(world_coords)
+
+        if "spacing" in kwargs.keys():
+            self.spacing = kwargs["spacing"]
+
         for key in kwargs.keys():
-            if key == "limits":
-                self.limits = kwargs["limits"]
-                continue
-            if key == "spacing":
-                self.spacing = kwargs["spacing"]
+            if key in ("limits", "spacing"): # already dealt with
                 continue
             if key == "invariant_color":
                 self.invariant_color = kwargs["invariant_color"]
@@ -2332,32 +2274,36 @@ class KernelFamily():
                 continue
             if key == "plant":
                 self.plant = kwargs["plant"]
+                update_invariant = True
                 continue
             if key == "clf":
                 self.clf = kwargs["clf"]
+                update_invariant = True
                 continue
             if key == "cbfs":
                 self.cbfs = kwargs["cbfs"]
                 self.num_cbfs = len(self.cbfs)
-                self.invariant_lines_plot = [ [] for _ in self.cbfs ] # For plotting invariant lines associated to each CBF
+                self.boundary_lines = [ [] for _ in self.cbfs ]
+                self.safe_sets = [ geometry.Polygon() for _ in self.cbfs ]
+                self.unsafe_sets = [ geometry.Polygon() for _ in self.cbfs ]
+                self.invariant_lines_plot = [ [] for _ in self.cbfs ]
                 self.comp_process_data["invariant_segs_log"] = [ [] for _ in self.cbfs ]
+                for cbf_index in range(self.num_cbfs): 
+                    self.compute_cbf_boundary(cbf_index)
+                update_invariant = True
                 continue
             if key == "params":
                 params = kwargs["params"]
                 for key in params.keys():
                     if "slack_gain":
                         self.params["slack_gain"] = params["slack_gain"]
+                        update_invariant = True
                     if "clf_gain":
                         self.params["clf_gain"] = params["clf_gain"]
+                        update_invariant = True
                     if "cbf_gain":
                         self.params["cbf_gain"] = params["cbf_gain"]
-
-        # if "limits" not in kwargs.keys():
-        #     if len(self.cbf.points) > 0:
-        #         pts = np.array([ pt["coords"] for pt in self.cbf.points ])
-        #         bbox = minimum_bounding_rectangle(pts)                
-        #         xmin, xmax, ymin, ymax = np.min(bbox[:,0]), np.max( bbox[:,0] ), np.min(bbox[:,1]), np.max(bbox[:,1])
-        #         self.limits = ( xmin, xmax, ymin, ymax )
+                        update_invariant = True
 
         # Initialize grids used for invariant set computation
         if hasattr(self, "limits") and hasattr(self, "spacing"):
@@ -2373,7 +2319,7 @@ class KernelFamily():
 
         self.verify_kernel()
         self.init_invex_generation()
-        self.counter = 0
+        if update_invariant: self.update_invariant_set(verbose=True)
 
     def verify_kernel(self):
         '''
@@ -2535,22 +2481,6 @@ class KernelFamily():
         z2 = nablaV - nablaV.T @ G @ z1 * z1
         eta = 1/(1 + self.params["slack_gain"] * z2.T @ G @ z2 )
         return eta
-
-    # def local_minimize_cost(self, cost, init_pt: np.ndarray) -> np.ndarray:
-    #     '''Locally minimizes a passed cost function, starting with initial guess init_pt'''
-    #     sol = minimize( cost, init_pt )
-    #     return sol.x
-
-    # def find_closest_valid(self, Pnom: np.ndarray, verbose=False) -> np.ndarray:
-    #     ''' Find closest shape matrix to Pnom belongin to family of valid CLFs (without local minima) '''
-
-    #     self.CVXPY_Pnom.value = Pnom
-
-    #     if np.any( np.linalg.eigvals(self.kernel.get_left_lowerbound(Pnom)) != 0 ):
-    #         self.CVXPY_family_problem.solve(verbose=verbose)
-    #         return self.CVXPY_P.value
-    #     else:
-    #         return self.CVXPY_Pnom.value
 
     def update_determinant_grid(self):
         '''
@@ -2826,42 +2756,6 @@ class KernelFamily():
 
         return True
 
-    # def fit_curvatures(self, points: list[np.ndarray], Pinit: np.ndarray) -> np.ndarray:
-    #     '''
-    #     Solves the convex optimization problem of finding the closest P matrix to Pinit s.t. 
-    #     all input points are with unstable boundary equilibria.
-
-    #     Parameters: points - boundary equilibrium points
-    #                 Pinit - initial P matrix
-
-    #     Returns: P - the final result of optimization. 
-    #     '''
-    #     if len(points) == 0: return self.P
-
-    #     self.CVXPY_Pnom.value = Pinit
-    #     for pt in points:
-
-    #         # Level set constraint
-    #         self.CVXPY_constraints.append( self.clf_fun_with_shape(pt, self.CVXPY_P) == self.clf_fun_with_shape(pt, Pinit) )
-
-    #         # Equilibrium point constraint (the equilibrium point locations must be constant)
-    #         self.CVXPY_lambdas.append( cp.Variable(pos=True) )
-    #         CVXPY_lambda = self.CVXPY_lambdas[-1]
-    #         self.CVXPY_constraints.append( self.invariant_equation(pt, CVXPY_lambda, self.CVXPY_P) == 0 )
-
-    #         # Curvature constraint for equilibrium point instabilization
-    #         init_gradient = self.clf_gradient_with_shape(pt, Pinit)
-    #         norm_init_gradient = np.linalg.norm(init_gradient)
-    #         v = rot2D(np.pi/2) @ init_gradient/norm_init_gradient
-
-    #         S = self.S_fun_with_lambda_and_shape(pt, CVXPY_lambda, self.CVXPY_P)
-    #         self.CVXPY_constraints.append( v.T @ S @ v / norm_init_gradient - self.compatibility_options["min_curvature"] >= 0 )
-
-    #     fit_problem = cp.Problem( cp.Minimize( self.CVXPY_cost ), self.CVXPY_constraints )
-    #     fit_problem.solve(verbose=False)
-
-    #     return self.CVXPY_P.value
-
     def init_invex_generation(self):
         '''
         Method for generating initializing all necessary parameters for the compatibilization process.
@@ -2900,22 +2794,102 @@ class KernelFamily():
         '''Transforms matrix N into an array of size n*p'''
         return N.flatten()
 
-    def get_N(self, P):
+    def N_decomposition(self, P):
         '''
-        This method computes the closest matrix N satisfying N.T G N = P
+        Converts from P to a corresponding N. This can be done optimally by expanding P in its eigenbasis and truncating the least significant terms.
+        After that, Ptrunc = N.T G N will always have a N solution.
+        Returns the resulting N and cost.
         '''
-        def objective(var: np.ndarray) -> float:
-            G = self.comp_process_params["G"]
-            N = self.var_to_N(var)
-            return np.linalg.norm( N.T @ G @ N - P )
+        G = self.comp_process_params["G"]
 
+        eigs, eigvecs = np.linalg.eig(P)
+        sort_indexes = np.argsort(eigs)
+        sorted_eigs, sorted_eigvecs = eigs[sort_indexes][::-1], eigvecs[:,sort_indexes][:,::-1]
+
+        Ptrunc = np.zeros(P.shape)
+        for k in range(self.n):
+            q = sorted_eigvecs[:,k]
+            Ptrunc += sorted_eigs[k] * np.outer(q,q)
+
+        def objective(var: np.ndarray) -> float:
+            ''' Frobenius norm '''
+            N = self.var_to_N(var)
+            return np.linalg.norm( N.T @ G @ N - Ptrunc )
+        
         init_var = np.random.rand(self.n*self.p)
         sol = minimize( objective, init_var )
-        
-        Nsol = self.var_to_N( sol.x )
-        cost = objective(sol.x)
+        N = self.var_to_N( sol.x )
+        decomp_cost = objective(sol.x)
 
-        return Nsol, cost
+        return N, decomp_cost
+
+    def get_invex_P(self, P, center):
+        '''
+        This method computes the closest invex P to Pinit
+        '''
+        G = self.comp_process_params["G"]
+
+        Ninit, decomp_cost = self.N_decomposition(P)
+        print(f"Decomposition cost = {decomp_cost}")
+
+        # Finds closest invex N to Ninit
+        Dinit = np.array(self.sos_factorized(Ninit))
+        D_eig = np.linalg.eigvals(Dinit)
+        print(f"D eigs = {D_eig}")
+
+        if len(D_eig) > 1:
+            if np.abs(min(D_eig)) <= np.abs(max(D_eig)):
+                cone = +1
+                print(f"D(N) in psd cone")
+            else:
+                cone = -1
+                print(f"D(N) in nsd cone")
+        else:
+            if D_eig >= 0: 
+                cone = +1
+                print(f"D(N) in psd cone")
+            else:
+                cone = -1
+                print(f"D(N) in nsd cone")
+
+        def objective(var: np.ndarray) -> float:
+            ''' Frobenius norm '''
+            N = self.var_to_N(var)
+            return np.linalg.norm( N - Ninit )
+
+        def invexity_constr(var: np.ndarray) -> float:
+            ''' Keeps the CLF invex '''
+            N = self.var_to_N(var)
+            D = np.array(self.sos_factorized(N))
+
+            if cone == +1:
+                self.invexity = min(np.linalg.eigvals( D - self.invex_tol ))
+            if cone == -1:
+                self.invexity = -max(np.linalg.eigvals( D + self.invex_tol ))
+
+            return self.invexity
+
+        def center_constr(var: np.ndarray):
+            ''' Keeps the CLF centered '''
+            N = self.var_to_N(var)
+            m_center = self.kernel.function(center)
+            P = N.T @ G @ N
+            return m_center.T @ P @ m_center
+
+        constrs = []
+        constrs += [ {"type": "ineq", "fun": invexity_constr} ]
+        constrs += [ {"type": "eq", "fun": center_constr} ]
+
+        init_var2 = self.N_to_var(Ninit)
+        sol2 = minimize( objective, init_var2, constraints=constrs )
+        invex_N =  self.var_to_N( sol2.x )
+        invex_P = invex_N.T @ G @ invex_N
+
+        center_cost = center_constr(sol2.x)
+        print(f"Invexity = {self.invexity}")
+        print(f"Center cost = {center_cost}")
+
+        return invex_P
     
     def get_invex(self, Ninit: np.ndarray, center):
         '''
@@ -3017,7 +2991,7 @@ class KernelFamily():
             if np.abs(D_eig_bounds[0]) < np.abs(D_eig_bounds[1]):
                 return min(np.linalg.eigvals( D - self.invex_tol ))
             else:
-                return -max(np.linalg.eigvals( D - self.invex_tol ))
+                return -max(np.linalg.eigvals( D + self.invex_tol ))
 
         def center_constr(var: np.ndarray):
             ''' Keeps the CLF centered '''

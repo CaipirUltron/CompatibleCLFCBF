@@ -13,7 +13,7 @@ n = len(initial_state)
 m = len(initial_control)
 
 # limits = np.array(((-7.5, 7.5,-4, 5))
-limits = 10*np.array((-1,1,-1,1))
+limits = 8*np.array((-1,1,-1,1))
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 kernel = Kernel(dim=n, degree=3)
@@ -25,8 +25,7 @@ fx, fy = 0.0, 0.0                       # constant force with fx, fy components
 F = np.zeros([kernel_dim,kernel_dim])
 F[1,0], F[2,0] = fx, fy
 
-def g(state):
-    return np.eye(m)
+def g(state): return np.eye(m)
 
 plant = KernelAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
 
@@ -35,7 +34,7 @@ clf_center = [0.0, -5.0]
 base_level = 25
 
 points = []
-points.append({ "coords": [ 0.0,  1.0], "gradient": [ 0.0,  1.0], "curvature": -10.0 })
+points.append({ "coords": [ 0.0,  1.0], "gradient": [ 0.0,  1.0], "curvature": -4.0 })
 # points.append({ "coords": [-5.0,  3.0], "gradient": [-1.0,  1.0] })
 # points.append({ "coords": [ 5.0,  3.0], "gradient": [ 1.0,  1.0] })
 # points.append({ "coords": [ 5.0,  0.0], "gradient": [ 1.0, -1.0] })
@@ -47,8 +46,8 @@ Pquadratic = kernel_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_cent
 clf_leading = LeadingShape(Pquadratic,approximate=True)
 
 # clf = KernelLyapunov(kernel=kernel, P=load_compatible(__file__, Pquadratic, load_compatible=True), limits=limits)
-clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
-# clf = KernelLyapunov(kernel=kernel, points=points, centers=[clf_center], limits=limits)
+# clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
+clf = KernelLyapunov(kernel=kernel, points=points, centers=[clf_center], limits=limits)
 # clf = KernelLyapunov(kernel=kernel, points=points, centers=[clf_center], leading=clf_leading, limits=limits)
 clf.is_SOS_convex(verbose=True)
 
@@ -81,6 +80,18 @@ p, alpha, beta = 1.0, 1.0, 1.0
 kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs,
                                params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta},
                                limits=limits.tolist(), spacing=0.2)
+
+invex_P = kerneltriplet.get_invex_P( clf.P, clf_center )
+eig_P = np.linalg.eigvals(clf.P)
+eig_invex_P = np.linalg.eigvals(invex_P)
+
+print(f"Eigs P ={eig_P}")
+print(f"Eigs invex P ={eig_invex_P}")
+
+# clf.set_params(P=invex_P)
+# clf.generate_contour()
+
+# kerneltriplet.set_param(clf=clf)
 
 controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 15

@@ -80,13 +80,18 @@ def find_invex(Ninit: np.ndarray):
         raise ValueError("N must be a n x p matrix.")
 
     Dinit = np.array(shape_fun(Ninit))
-    initial_Deigs = np.linalg.eigvals( Dinit )
-    print(f"Initial eigenvalues of D = {initial_Deigs}")
+    D_eig = np.linalg.eigvals( Dinit )
+    print(f"Initial eigenvalues of D = {D_eig}")
+    if np.abs(min(D_eig)) < np.abs(max(D_eig)):
+        cone = +1
+        print(f"D(N) in psd cone")
+    else:
+        cone = -1
+        print(f"D(N) in nsd cone")
 
     def objective(var):
         N = var.reshape((n, kernel_dim))
         return np.linalg.norm(N - Ninit)
-        # return 1.0
 
     def unimodular(var: np.ndarray):
         N = var.reshape((n, kernel_dim))
@@ -113,8 +118,12 @@ def find_invex(Ninit: np.ndarray):
     def invex(var: np.ndarray):
         N = var.reshape((n, kernel_dim))
         D = np.array(shape_fun(N))
-        return min(np.linalg.eigvals( D - Tol ))
 
+        if cone == +1:
+            return min(np.linalg.eigvals( D - Tol ))
+        if cone == -1:
+            return -max(np.linalg.eigvals( D + Tol ))
+        
     def centered(var: np.ndarray):
         N = var.reshape((n, kernel_dim))
         m0 = kernel.function(np.zeros(n))
@@ -169,7 +178,6 @@ for i in range(num_sim):
     # Ninit = np.random.randint(low=1, high=5, size=(n,kernel_dim))
     # print(f"Coefficients of |∇Φ(x)| at Ninit = {det_coeffs_fun(Ninit)}")
 
-    
     N = find_invex(Ninit)
 
     D = shape_fun(N)

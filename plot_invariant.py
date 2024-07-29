@@ -45,18 +45,18 @@ for k in range(len(sim.cbfs)):
 sim.kerneltriplet.plot_attr(ax, "stable_equilibria", mcolors.BASE_COLORS["r"], 1.0)
 sim.kerneltriplet.plot_attr(ax, "unstable_equilibria", mcolors.BASE_COLORS["g"], 0.8)
 
-for cbf_index in range(len(sim.cbfs)):
-    for k, seg in enumerate(sim.kerneltriplet.invariant_segs[cbf_index]):
+# for cbf_index in range(len(sim.cbfs)):
+#     for k, seg in enumerate(sim.kerneltriplet.invariant_segs[cbf_index]):
 
-        # extremal_pairs = seg["extremal_pairs"]
-        # first = extremal_pairs["first"]
-        # last = extremal_pairs["last"]
+#         # extremal_pairs = seg["extremal_pairs"]
+#         # first = extremal_pairs["first"]
+#         # last = extremal_pairs["last"]
         
-        press = seg["stability_pressure"]
-        measure = seg["removable_measure"]
+#         press = seg["stability_pressure"]
+#         measure = seg["removable_measure"]
 
-        print(f"Segment {k+1} of CBF {cbf_index+1} has:")
-        print(f"stab. press. = {press}, rem. measure = {measure},")
+#         print(f"Segment {k+1} of CBF {cbf_index+1} has:")
+#         print(f"stab. press. = {press}, rem. measure = {measure},")
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 while True:
@@ -86,5 +86,4 @@ while True:
         # sim.kerneltriplet.plot_removable_areas(ax, cbf_index)
 
     clf_contour = sim.clf.plot_levels(ax=ax, levels=[V])
-
-plt.show()
+    plt.pause(0.001)

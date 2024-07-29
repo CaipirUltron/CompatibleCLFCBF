@@ -32,8 +32,8 @@ clf_angle = 0
 clf_center = [0.0, -2.0]
 Pquadratic = kernel_quadratic( eigen=clf_eig, R=rot2D(np.deg2rad(clf_angle)), center=clf_center, kernel_dim=kernel_dim )
 
-clf = KernelLyapunov(kernel=kernel, P=load_compatible( __file__, Pquadratic, load_compatible = True ), limits=limits )
-# clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
+# clf = KernelLyapunov(kernel=kernel, P=load_compatible( __file__, Pquadratic, load_compatible = True ), limits=limits )
+clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
 
 # --------------------------------------------- Define CBF (quadratic) -----------------------------------------------------
 cbf_eig = 0.2*np.array([ 0.2, 1.2 ])
@@ -50,6 +50,8 @@ p, alpha, beta = 1.0, 1.0, 1.0
 kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, 
                                params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta}, 
                                limits=limits, spacing=0.2 )
+
+P = kerneltriplet.get_invex_P( clf.P, clf_center )
 
 controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 30

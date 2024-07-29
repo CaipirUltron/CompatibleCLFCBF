@@ -28,7 +28,7 @@ plant = KernelAffineSystem(initial_state=initial_state, initial_control=initial_
 
 # ---------------------------------------------------- Define CLF ----------------------------------------------------------
 clf_center = [0.0, -3.0]
-base_level = 25
+base_level = 15
 
 # points = []
 # points.append({ "coords": [-4.0,  6.0], "gradient": [-1.0,  0.5] })
@@ -65,6 +65,8 @@ p, alpha, beta = 1.0, 1.0, 1.0
 kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, 
                                params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta}, 
                                limits=limits, spacing=0.2 )
+
+P = kerneltriplet.get_invex_P( clf.P, clf_center )
 
 controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 15
