@@ -79,6 +79,10 @@ def find_invex(Ninit: np.ndarray):
     if Ninit.shape != (n, kernel_dim):
         raise ValueError("N must be a n x p matrix.")
 
+    Dinit = np.array(shape_fun(Ninit))
+    initial_Deigs = np.linalg.eigvals( Dinit )
+    print(f"Initial eigenvalues of D = {initial_Deigs}")
+
     def objective(var):
         N = var.reshape((n, kernel_dim))
         return np.linalg.norm(N - Ninit)

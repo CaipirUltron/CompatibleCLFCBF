@@ -48,17 +48,15 @@ sim.kerneltriplet.plot_attr(ax, "unstable_equilibria", mcolors.BASE_COLORS["g"],
 for cbf_index in range(len(sim.cbfs)):
     for k, seg in enumerate(sim.kerneltriplet.invariant_segs[cbf_index]):
 
-        extremal_pairs = seg["extremal_pairs"]
-        first = extremal_pairs["first"]
-        last = extremal_pairs["last"]
+        # extremal_pairs = seg["extremal_pairs"]
+        # first = extremal_pairs["first"]
+        # last = extremal_pairs["last"]
         
         press = seg["stability_pressure"]
-        area = seg["removable_measure"]
+        measure = seg["removable_measure"]
 
         print(f"Segment {k+1} of CBF {cbf_index+1} has:")
-        print(f"First = {first}")
-        print(f"Last = {last}")
-        print(f"stab. press. = {press}, rem. area = {area},")
+        print(f"stab. press. = {press}, rem. measure = {measure},")
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 while True:

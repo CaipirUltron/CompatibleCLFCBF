@@ -2205,10 +2205,10 @@ class KernelFamily():
 
         # Dict of compatibilization process parameters
         self.comp_process_params = { "stability_threshold": 0.1, 
-                                     "area_threshold": 0.1,
+                                     "measure_threshold": 0.01,
                                      "G": hessian_2Dquadratic(eigen=[1, 1], angle=np.deg2rad(45)),
-                                     "invex_tol": 1e-1,
-                                     "max_P_eigenvalue": 100 }
+                                     "invex_tol": 1e-0,
+                                     "max_P_eigenvalue": 10 }
         
         # Dict for storing compatibilization process data
         self.comp_process_data = {"step": 0, 
@@ -2231,7 +2231,7 @@ class KernelFamily():
         self.max_eig_constr = 0.0
 
         self.stability_pressures = np.zeros(self.num_cbfs)
-        self.areas = np.zeros(self.num_cbfs)
+        self.measures = np.zeros(self.num_cbfs)
 
         # Initialize CVXPY parameters (for OLD optimization)
 
@@ -2759,55 +2759,55 @@ class KernelFamily():
         # Integrate the segment stability pressure
         pressure_integral = 0.0
         segment_length = 0.0
+        seg_dict["s"] = [0.0]
         for k, pt in enumerate(seg_data[0:-1,:]):
             mean_pt = 0.5*( pt + seg_data[k+1,:] )
             ds = np.linalg.norm(mean_pt)
             segment_length += ds
+            seg_dict["s"] += [segment_length]
             h = self.cbfs[cbf_index].function(mean_pt)
 
             stability, eta = self.stability_fun(mean_pt, type_eq="boundary", cbf_index=cbf_index)
             fun = gaussian(h, sigma = 0.1) * ( stability - self.comp_process_params["stability_threshold"] )
             pressure_integral += fun*ds
 
-        seg_dict["length"] = segment_length
+        seg_dict["length"] = seg_dict["s"][-1]
+        seg_dict["gradient_cbf_values"] = np.gradient(seg_dict["cbf_values"], seg_dict["s"])
         seg_dict["stability_pressure"] = pressure_integral/segment_length
 
     def seg_removable_measure(self, seg_dict: dict[str,]) -> float:
         '''
         Computes the segment removable measure, if it exists
         '''
-        cbf_index = seg_dict["cbf_index"]
-        seg_data = seg_dict["points"]
-
-        barrier_vals = [ 0, 0 ]
-        start_pt = 0.5*( seg_data[0,:] + seg_data[1,:] )
-        end_pt = 0.5*( seg_data[-1,:] + seg_data[-2,:] )
-
-        barrier_vals[0] = self.cbfs[cbf_index].function(start_pt)
-        barrier_vals[1] = self.cbfs[cbf_index].function(end_pt)
+        barrier_vals = seg_dict["cbf_values"]
+        grad_barrier_vals = seg_dict["gradient_cbf_values"]
 
         # segment is not removable until proven otherwise
-        seg_dict["removable_measure"] = 0
+        seg_dict["removable_measure"] = +np.inf
+        if len(seg_dict["boundary_equilibria"]) == 0: 
+            return
+        
+        # If segment starts AND ends completely outside/inside the unsafe set, it's removable
+        if barrier_vals[0] * barrier_vals[-1] > 0:
 
-        # If segment has two or more intersections and starts AND ends completely outside/inside the unsafe set, it is removable
-        num_seg_eq = len(seg_dict["boundary_equilibria"])
-        if num_seg_eq >= 2 and barrier_vals[0] * barrier_vals[-1] > 0:
+            # removable from outside
+            if barrier_vals[0] > 0:                                     
+                seg_dict["removable_measure"] = min(barrier_vals) - self.comp_process_params["measure_threshold"]
 
-            if barrier_vals[0] > 0:                                                 # removable from outside
+            # removable from inside
+            if barrier_vals[0] < 0:                                     
+                seg_dict["removable_measure"] = - max(barrier_vals) - self.comp_process_params["measure_threshold"]
 
-                unsafe_geom = self.unsafe_sets[cbf_index]
-                splitted_region = split( unsafe_geom, seg_dict["geom"] ) 
-
-            if barrier_vals[0] < 0:                                                 # removable from inside
-                safe_geom = self.safe_sets[cbf_index]
-                splitted_region = split( safe_geom, seg_dict["geom"] )
-            
-            areas = [ geom.area for geom in splitted_region.geoms ]
-            areas.sort()
-            seg_dict["removable_measure"] = sum(areas[0:-1])
+        # If segment starts/ends inside and ends/starts outside, it's not removable (crosses boundary at least once)
         else:
-            pass
-        # TO BE IMPLEMENTED
+
+            # starts inside (cbf values must be strictly increasing)
+            if barrier_vals[0] < 0:                                     
+                seg_dict["removable_measure"] = min(grad_barrier_vals)
+
+            # starts outside (cbf values must be strictly decreasing)
+            if barrier_vals[0] > 0:                                     
+                seg_dict["removable_measure"] = - max(grad_barrier_vals)
 
     def is_compatible(self) -> bool:
         '''
@@ -2984,6 +2984,12 @@ class KernelFamily():
         G = self.comp_process_params["G"]
         Pinit = Ninit.T @ G @ Ninit
 
+        Dinit = np.array(self.sos_factorized(Ninit))
+        D_eig = np.linalg.eigvals( Dinit)
+        D_eig_bounds = [ min(D_eig), max(D_eig) ]
+        
+        print(f"Dinit bounds = {D_eig_bounds}")
+
         # Initialize CLF geometry 
         self.P = Pinit
         self.update_invariant_set()
@@ -2995,66 +3001,61 @@ class KernelFamily():
             ''' Minimizes the changes to the CLF geometry '''
             self.counter += 1
 
-            N = self.get_invex( self.var_to_N(var), center )    # get closest invex
+            N = self.var_to_N(var)
+            P = N.T @ G @ N
 
-            self.P = N.T @ G @ N
-            self.update_invariant_set()      # The invariant set must be updated to get the current state of the optimization
-
-            self.cost = np.linalg.norm(N - Ninit)
-
+            self.cost = np.linalg.norm(N - Ninit) + np.linalg.norm( np.linalg.eigvals(P) )
             return self.cost
 
         def invexity_constr(var: np.ndarray) -> float:
             ''' Keeps the CLF invex '''
             N = self.var_to_N(var)
             D = np.array(self.sos_factorized(N))
-            self.invexity = min(np.linalg.eigvals( D - self.invex_tol ))
-            return self.invexity
+
+            self.invexity = np.linalg.eigvals(D)
+
+            if np.abs(D_eig_bounds[0]) < np.abs(D_eig_bounds[1]):
+                return min(np.linalg.eigvals( D - self.invex_tol ))
+            else:
+                return -max(np.linalg.eigvals( D - self.invex_tol ))
 
         def center_constr(var: np.ndarray):
             ''' Keeps the CLF centered '''
             N = self.var_to_N(var)
             m_center = self.kernel.function(center)
-            self.centering = m_center.T @ N.T @ G @ N @ m_center
+            P = N.T @ G @ N
+            self.centering = m_center.T @ P @ m_center
             return self.centering
 
         def lambda_max_constr(var: np.ndarray) -> list[float]:
             ''' Avoids eigenvalues of P from exploding '''
-            N = self.get_invex( self.var_to_N(var), center )    # get closest invex
 
+            N = self.var_to_N(var)
             max_eig = self.comp_process_params["max_P_eigenvalue"]
             P = N.T @ G @ N
 
             self.max_eig_constr = max_eig - max(np.linalg.eigvals(P))
             return self.max_eig_constr
 
-        def stability_constr(var: np.ndarray) -> list[float]:
-            ''' Forces stability pressure to be positive in every branch, for every CBF '''
+        def compatibilization_constr(var: np.ndarray) -> list[float]:
+            ''' Forces stability pressure + removable measures to be positive in every branch, for every CBF '''
             
-            N = self.get_invex( self.var_to_N(var), center )    # get closest invex
+            N = self.var_to_N(var)
             self.P = N.T @ G @ N
             
             self.update_invariant_set()      # The invariant set must be updated to get the current state of the optimization
 
-            self.stability_pressures = np.zeros(self.num_cbfs)
+            self.stability_pressures, self.measures = np.zeros(self.num_cbfs), np.zeros(self.num_cbfs)
             for cbf_index in range(self.num_cbfs):
+                seg_measures = []
                 for seg in self.invariant_segs[cbf_index]:
                     self.stability_pressures[cbf_index] += seg["stability_pressure"]
-            return self.stability_pressures
+                    seg_measures.append( seg["removable_measure"] )
+                self.measures[cbf_index] = min(seg_measures)
 
-        def removability_constr(var: np.ndarray) -> list[float]:
-            ''' Removes removable branches, for each CBF'''
-
-            N = self.get_invex( self.var_to_N(var), center )    # get closest invex
-            self.P = N.T @ G @ N
-            
-            self.update_invariant_set()     # The invariant set must be updated to get the current state of the optimization
-
-            self.areas = np.zeros(self.num_cbfs)
-            for cbf_index in range(self.num_cbfs):
-                for seg in self.invariant_segs[cbf_index]:
-                    self.areas[cbf_index] += seg["removable_measure"]
-            return self.areas
+            constraints = np.hstack([self.stability_pressures, self.measures ])
+            print(constraints)
+            return constraints
 
         if animate:
             self.comp_graphics["fig"], ax = plt.subplots(nrows=1, ncols=1)
@@ -3085,7 +3086,7 @@ class KernelFamily():
                 print( f"Invexity = {self.invexity}" )
                 print( f"Centering = {self.centering}" )
                 print( f"Stability pressures = {self.stability_pressures}")
-                print( f"Removable areas = {self.areas}")
+                print( f"Removable measures = {self.measures}")
                 print(self.comp_process_data["execution_time"], "seconds have passed...")
 
             if animate: 
@@ -3096,11 +3097,10 @@ class KernelFamily():
             self.comp_process_data["start_time"] = time.perf_counter()
 
         constraints = []
-        # constraints += [ {"type": "ineq", "fun": invexity_constr} ]
-        # constraints += [ {"type": "eq", "fun": center_constr} ]
+        constraints += [ {"type": "ineq", "fun": invexity_constr} ]
+        constraints += [ {"type": "eq", "fun": center_constr} ]
         constraints += [ {"type": "ineq", "fun": lambda_max_constr} ]
-        constraints += [ {"type": "ineq", "fun": stability_constr} ]
-        constraints += [ {"type": "eq", "fun": removability_constr} ]
+        constraints += [ {"type": "ineq", "fun": compatibilization_constr} ]
 
         #--------------------------- Main compatibilization process ---------------------------
         print("Starting compatibilization process. This may take a while...")

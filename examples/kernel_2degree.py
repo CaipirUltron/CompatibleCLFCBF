@@ -44,8 +44,8 @@ Pquadratic = kernel_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_cent
 # fun = KernelQuadratic(kernel=kernel, P=Pquadratic, limits=limits, spacing=0.1)
 # print(fun.matrix_coefs)
 
-clf = KernelLyapunov(kernel=kernel, P=load_compatible(__file__, Pquadratic, load_compatible=True), limits=limits)
-# clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
+# clf = KernelLyapunov(kernel=kernel, P=load_compatible(__file__, Pquadratic, load_compatible=True), limits=limits)
+clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
 # clf = KernelLyapunov(kernel=kernel, leading=LeadingShape(Pquadratic,bound='lower',approximate=True), limits=limits)
 clf.is_SOS_convex(verbose=True)
 
