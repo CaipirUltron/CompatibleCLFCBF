@@ -34,9 +34,6 @@ ax.set_ylim(ymin, ymax)
 # if hasattr(sim, "quadratic_cbf"):
 #     sim.quadratic_cbf.plot_levels(ax=ax, levels = [0.0], color='g')
 
-# print(f"λ(M(P)) = {np.linalg.eigvals(sim.kernel.get_lowerbound(sim.clf.P))}\n")
-# print(f"λ(M(Q)) = {np.linalg.eigvals(sim.kernel.get_lowerbound(sim.cbf.Q))}\n")
-
 num_levels = 5
 for k in range(len(sim.cbfs)):
     contour_unsafe = sim.cbfs[k].plot_levels(ax=ax, levels = [ -(0.5/num_levels)*k for k in range(num_levels-1,-1,-1) ])
@@ -79,11 +76,11 @@ while True:
         h = cbf.function(init_x)
         gradh = cbf.gradient(init_x)
 
+        eigsQ = np.linalg.eigvals(cbf.Q)
+        print(f"CBF {cbf_index+1} eigenvalues = {eigsQ}")
         print(f"CBF {cbf_index+1} value at this point = {h}")
         print(f"CBF {cbf_index+1} λ at this point = {sim.kerneltriplet.lambda_fun(init_x, cbf_index)}")
         print(f"CBF {cbf_index+1} ||∇h|| at this point = {np.linalg.norm(gradh)}")
-
-        # sim.kerneltriplet.plot_removable_areas(ax, cbf_index)
 
     clf_contour = sim.clf.plot_levels(ax=ax, levels=[V])
     plt.pause(0.001)

@@ -579,6 +579,7 @@ class Kernel():
         # Compute numeric A and N matrices
         self._compute_A()
         self._compute_N()
+        self._compute_D()
 
         # Lambda functions
         self._lambda_monomials = sym.lambdify( list(self._symbols), self._monomials )
@@ -717,6 +718,33 @@ class Kernel():
         self.N = []
         for k in range(solutions.shape[1]):
             self.N.append( mat( solutions[:,k] ) )
+
+    def _compute_D(self):
+        '''
+        Given a vector function Φ(x) = N m(x), Φ: Rn -> Rn, this method computes the SOS factorized form 
+        of the determinant of the Jacobian, that is, |∇Φ(x)| = mΦ(x)' D(N) mΦ(x) for some kernel mΦ(x).
+        Computes: self.D is a symmetric matrix lambda function of matrix N (Rn x Rp).
+        Application: generation of invex CLF/CBFs.
+        '''
+        N = sym.MatrixSymbol("N", self._dim, self._num_monomials)
+        N_list = [ N @ Ai for Ai in self.get_A_matrices() ]    # list of n x p
+
+        M_list = []
+        for k in range(self._num_monomials):
+            Mk = np.zeros([self._dim, self._dim], dtype=N_list[0].dtype )
+            for i, Ni in enumerate(N_list):
+                Mk[:,i] = Ni[:,k]
+            M_list.append(Mk)
+
+        # ------------------------ Generation and SOS factorization of |∇Φ(x)| -----------------------------
+        delPhi = MultiPoly(self._powers, M_list).filter()
+        det = delPhi.determinant()
+        self.det_kernel = det.sos_kernel()
+        self.dim_det_kernel = len(self.det_kernel)
+
+        sos_index_matrix = det.sos_index_matrix(self.det_kernel)
+        shape_matrix = det.shape_matrix(self.det_kernel, sos_index_matrix)
+        self._Dfun = sym.lambdify( N, shape_matrix ) # >> 0
 
     def _find_partition(self, Msym):
         ''' 
@@ -896,6 +924,11 @@ class Kernel():
             return True
         else:
             return False
+
+    def D(self, N):
+        if N.shape != (self._dim, self._num_monomials):
+            raise Exception("Passed N matrix has incorrect dimensions.")
+        return self._Dfun(N)
 
     def __eq__(self, other):
         '''
@@ -1669,6 +1702,10 @@ class KernelQuadratic(Function):
         self.last_opt_results = None
         self.max_eigenvalue = 10.0
 
+        self.invex_fit = False
+        self.cost_functions = []
+        self.G = hessian_2Dquadratic(eigen=[1, 1], angle=0.0)
+
         super().__init__(**kwargs)
         self.reset_optimization()
 
@@ -1690,8 +1727,14 @@ class KernelQuadratic(Function):
 
         self.SHAPE = cp.Variable( (self.kernel_dim,self.kernel_dim), symmetric=True )
 
+        self.Pinit = kernel_quadratic(eigen=np.ones(self._dim), R=np.eye(self._dim), center=np.zeros(self._dim), kernel_dim=self.kernel_dim)
+        dim_D = self.kernel.dim_det_kernel
+        self.Tol = np.zeros((dim_D,dim_D))
+        self.Tol[0,0] = 1
+        self.Tol = 0.1*self.Tol
+
         self.reset_optimization()
-            
+
     def _gradient_const_matrices(self, shape_matrix):
         ''' Compute constant matrices composing the elements of the gradient '''
 
@@ -1926,9 +1969,20 @@ class KernelQuadratic(Function):
                 self.add_leading_constraints(leading)
                 continue
 
+            if key == "invex_seed":
+                G = kwargs["invex_seed"]
+                if G.shape != (self.n, self.n):
+                    warnings.warn("Passed G (invex seed) has incorrect dimensions. Initializing with default seed.")
+                    continue
+                self.G = kwargs["invex_seed"]
+                continue
+
         # If fitting conditions are satisfied, fits and sets new, fitted shape
         if type(self.cost) != int and len(self.constraints) > 2 and not np.any(self.shape_matrix):
-            fitted_shape = self.fitting()
+            if self.invex_fit:
+                fitted_shape = self.invex_fitting()
+            else:
+                fitted_shape = self.convex_fitting()
             self.set_shape(fitted_shape)
 
     def add_psd_constraint(self):
@@ -1954,10 +2008,12 @@ class KernelQuadratic(Function):
         # Define point-level constraints
         if "level" in keys:
             if point["level"] >= -self.constant:
+
                 if self.force_coords or point["force_coord"]:
                     self.constraints += [ self._fun(point["coords"], self.SHAPE) == point["level"] ]
                 else:
                     self.cost += ( self._fun(point["coords"], self.SHAPE) - point["level"] )**2
+                self.cost_functions += [ lambda N : ( self._fun(point["coords"], N.T @ self.G @ N) - point["level"] )**2 ]
 
         # Define gradient constraints
         if "gradient" in keys:
@@ -1970,6 +2026,10 @@ class KernelQuadratic(Function):
                 self.constraints += [ self._grad(point["coords"], self.SHAPE) == gradient_norm * normalized ]
             else:
                 self.cost += cp.norm( self._grad(point["coords"], self.SHAPE) - gradient_norm * normalized )
+            
+            gradient = np.array(point["gradient"])
+            normalized = gradient/np.linalg.norm(gradient)
+            self.cost_functions += [ lambda N : ( normalized.T @ self.clf._grad(point["coords"], N.T @ self.G @ N) - np.linalg.norm(self.clf._grad(point["coords"], N.T @ self.G @ N)) )**2 ]
 
         # Define curvature constraints (2D only)
         if "curvature" in keys:
@@ -1980,6 +2040,7 @@ class KernelQuadratic(Function):
 
             v = rot2D(np.pi/2) @ normalized
             self.cost += ( self._hessian_quadratic_form(point["coords"], self.SHAPE, v) - point["curvature"] )**2
+            self.cost_functions += [ lambda N : ( v.T @ self.clf._hess(point["coords"], N.T @ self.G @ N) @ v - point["curvature"] )**2 ]
 
     def add_leading_constraints(self, leading: LeadingShape):
         '''
@@ -2060,7 +2121,7 @@ class KernelQuadratic(Function):
             self.add_center_constraints(point_list=segment)
             self.add_continuity_constraints(segment, increasing=True)
 
-    def fitting(self):
+    def convex_fitting(self):
         ''' 
         Convex optimization problem for fitting the coefficient matrix to the current cost and constraints.
         Returns: the optimization results.
@@ -2073,7 +2134,65 @@ class KernelQuadratic(Function):
             return self.SHAPE.value
         else:
             raise Exception("Problem is " + fit_problem.status + ".")
+
+    def invex_fitting(self):
+        ''' 
+        Nonconvex optimization problem for fitting an invex function to point-like constraints.
+        Must be correctly initialized by an invex function.
+        Returns: an invex P shape
+        '''
+        n = self._dim
+        p = self.kernel_dim
+
+        Ninit, decomp_cost = NGN_decomposition(self.G, self.Pinit)
+        print(f"NGN decomposition error = {decomp_cost}")
+
+        # Finds closest invex N to Ninit
+        Dinit = np.array( self.kernel.D(Ninit) )
+        D_eig = np.linalg.eigvals(Dinit)
+
+        if len(D_eig) > 1:
+            if np.abs(min(D_eig)) <= np.abs(max(D_eig)): cone = +1
+            else: cone = -1
+        else:
+            if D_eig >= 0: cone = +1
+            else: cone = -1
+
+        def objective(var: np.ndarray) -> float:
+
+            N = var.reshape((n,p))
+            # P = N.T @ self.G @ N
+
+            # cost = np.linalg.norm( P - Ninit.T @ self.G @ Ninit )**2
+            cost = 0.0
+            cost += sum([ cost_fun(N) for cost_fun in self.cost_functions ])
+
+            print(f"Total cost = {cost}")
+
+            return cost
+
+        def invexity_constr(var: np.ndarray) -> float:
+            ''' Keeps the CLF invex '''
+
+            N = var.reshape((n,p))
+            D = np.array(self.kernel.D(N))
+
+            if cone == +1: return min(np.linalg.eigvals( D - self.Tol ))
+            if cone == -1: return -max(np.linalg.eigvals( D + self.Tol ))
         
+        init_var = Ninit.flatten()
+        sol = minimize( objective, init_var, constraints=[ {"type": "ineq", "fun": invexity_constr} ] )
+        invex_N =  sol.x.reshape((n,p))
+        invex_P = invex_N.T @ self.G @ invex_N
+        
+        total_cost = objective(sol.x)
+        print(f"Total cost = {total_cost}")
+
+        invexity = np.linalg.eigvals( self.kernel.D(invex_N) )
+        print(f"Invexity = {invexity}")
+
+        return invex_P
+
     def update(self, param_ctrl, dt):
         '''
         Integrates and updates parameters
@@ -2097,29 +2216,38 @@ class KernelLyapunov(KernelQuadratic):
     def __str__(self):
         return "Polynominal kernel-based CLF V(x) = √ k(x)' P k(x)"
 
+    def _fun(self, x, shape_matrix):
+        V_old = super()._fun(x, shape_matrix)
+        return np.sqrt( 2 * V_old )
+    
+    def _grad(self, x, shape_matrix):
+        V = self._fun(x, shape_matrix)
+        gradV_old = super()._grad(x, shape_matrix)
+        return (1/V)*gradV_old
+
+    def _hess(self, x, shape_matrix):
+        V = self._fun(x, shape_matrix)
+        gradV = self._grad(x, shape_matrix)
+        hessianV_old = super()._hess(x, shape_matrix)
+        return (1/V)*( hessianV_old - np.outer(gradV, gradV) )
+
     def _function(self, point: np.ndarray) -> np.ndarray:
         '''
         Computes FUNCTION ½ V**2 = ½ k(x)' P k(x)
         '''
-        V_old = super()._function(self._validate(point))
-        return np.sqrt( 2 * V_old )
+        return self._fun(self._validate(point), self.P)
 
     def _gradient(self, point: np.ndarray) -> np.ndarray:
         '''
         Computes GRADIENT ∇V = 1/V Jm(x)' P m(x)
         '''
-        V = self.function(point)
-        gradV_old = super()._gradient(self._validate(point))
-        return (1/V)*gradV_old
+        return self._grad(self._validate(point), self.P)
 
     def _hessian(self, point: np.ndarray) -> np.ndarray:
         '''
         Computes HESSIAN ∇x∇(V) = 1/V ( ∇x∇( ½ V**2 ) - ∇V ∇V' )
         '''
-        V = self.function(point)
-        gradV = self.gradient(point)
-        hessianV_old = super()._hessian(self._validate(point))
-        return (1/V)*( hessianV_old - np.outer(gradV, gradV) )
+        return self._hess(self._validate(point), self.P)
 
     def function_from_P(self, x, P):
         '''
@@ -2230,6 +2358,12 @@ class KernelFamily():
         self.max_eig_constr = 0.0
         self.counter = 0
 
+        tol = self.comp_process_params["invex_tol"]
+        dim_D = self.kernel.dim_det_kernel
+        self.Tol = np.zeros((dim_D,dim_D))
+        self.Tol[0,0] = 1
+        self.Tol = tol*self.Tol
+
         self.stability_pressures = np.zeros(self.num_cbfs)
         self.measures = np.zeros(self.num_cbfs)
 
@@ -2318,7 +2452,6 @@ class KernelFamily():
             self.area_function = [ np.empty(self.grid_shape, dtype=float) for _ in self.cbfs ]
 
         self.verify_kernel()
-        self.init_invex_generation()
         if update_invariant: self.update_invariant_set(verbose=True)
 
     def verify_kernel(self):
@@ -2756,36 +2889,6 @@ class KernelFamily():
 
         return True
 
-    def init_invex_generation(self):
-        '''
-        Method for generating initializing all necessary parameters for the compatibilization process.
-        It generates a suitable SOS factorization of the |∇Φ(x)|, in order to generate invex CLFs
-        '''
-        N = sym.MatrixSymbol("N", self.n, self.p)
-        N_list = [ N @ Ai for Ai in self.A_matrices ]    # list of n x p
-
-        M_list = []
-        for k in range(self.p):
-            Mk = np.zeros([self.n,self.n], dtype=N_list[0].dtype )
-            for i, Ni in enumerate(N_list):
-                Mk[:,i] = Ni[:,k]
-            M_list.append(Mk)
-
-        # ------------------------ Generation and SOS factorization of |∇Φ(x)| -----------------------------
-        delPhi = MultiPoly(self.kernel._powers, M_list).filter()
-        det = delPhi.determinant()
-
-        sos_kernel = det.sos_kernel()
-        sos_index_matrix = det.sos_index_matrix(sos_kernel)
-        shape_matrix = det.shape_matrix(sos_kernel, sos_index_matrix)
-
-        self.sos_factorized = sym.lambdify( N, shape_matrix ) # >> 0
-
-        tol = self.comp_process_params["invex_tol"]
-        self.invex_tol = np.zeros((len(sos_kernel), len(sos_kernel)))
-        self.invex_tol[0,0] = 1
-        self.invex_tol = tol*self.invex_tol
-
     def var_to_N(self, var: np.ndarray) -> np.ndarray:
         ''' Transforms an n*p array representing a stacked N matrix'''
         return var.reshape((self.n, self.p))
@@ -2794,46 +2897,17 @@ class KernelFamily():
         '''Transforms matrix N into an array of size n*p'''
         return N.flatten()
 
-    def N_decomposition(self, P):
-        '''
-        Converts from P to a corresponding N. This can be done optimally by expanding P in its eigenbasis and truncating the least significant terms.
-        After that, Ptrunc = N.T G N will always have a N solution.
-        Returns the resulting N and cost.
-        '''
-        G = self.comp_process_params["G"]
-
-        eigs, eigvecs = np.linalg.eig(P)
-        sort_indexes = np.argsort(eigs)
-        sorted_eigs, sorted_eigvecs = eigs[sort_indexes][::-1], eigvecs[:,sort_indexes][:,::-1]
-
-        Ptrunc = np.zeros(P.shape)
-        for k in range(self.n):
-            q = sorted_eigvecs[:,k]
-            Ptrunc += sorted_eigs[k] * np.outer(q,q)
-
-        def objective(var: np.ndarray) -> float:
-            ''' Frobenius norm '''
-            N = self.var_to_N(var)
-            return np.linalg.norm( N.T @ G @ N - Ptrunc )
-        
-        init_var = np.random.rand(self.n*self.p)
-        sol = minimize( objective, init_var )
-        N = self.var_to_N( sol.x )
-        decomp_cost = objective(sol.x)
-
-        return N, decomp_cost
-
-    def get_invex_P(self, P, center):
+    def compute_invex(self, P, center, points=[]):
         '''
         This method computes the closest invex P to Pinit
         '''
         G = self.comp_process_params["G"]
 
-        Ninit, decomp_cost = self.N_decomposition(P)
+        Ninit, decomp_cost = NGN_decomposition(G, P)
         print(f"Decomposition cost = {decomp_cost}")
 
         # Finds closest invex N to Ninit
-        Dinit = np.array(self.sos_factorized(Ninit))
+        Dinit = np.array(self.kernel.D(Ninit))
         D_eig = np.linalg.eigvals(Dinit)
         print(f"D eigs = {D_eig}")
 
@@ -2854,18 +2928,46 @@ class KernelFamily():
 
         def objective(var: np.ndarray) -> float:
             ''' Frobenius norm '''
+
             N = self.var_to_N(var)
-            return np.linalg.norm( N - Ninit )
+            P = N.T @ G @ N
+
+            cost = 0.0
+            for pt in points:
+                
+                # Add clf value
+                if "level" in pt.keys():
+                    clf_value = self.clf._fun(pt["coords"], P)
+                    cost += ( clf_value - pt["level"] )**2
+
+                # Add clf gradient
+                if "gradient" in pt.keys():
+                    gradient = np.array(pt["gradient"])
+                    normalized = gradient/np.linalg.norm(gradient)
+                    clf_grad = self.clf._grad(pt["coords"], P)
+                    clf_grad_norm = np.linalg.norm(clf_grad)
+                    cost += ( clf_grad.T @ normalized - clf_grad_norm )**2
+
+                # Add clf curvature
+                if "curvature" in pt.keys():
+                    if "gradient" not in pt.keys():
+                        raise Exception("Cannot specify a curvature without specifying the gradient.")
+                    v = rot2D(np.pi/2) @ normalized
+                    Hv = self.clf._hess(pt["coords"], P)
+                    cost += ( v.T @ Hv @ v - pt["curvature"] )**2
+            
+            Pinit = Ninit.T @ G @ Ninit
+            return np.linalg.norm( P - Pinit )**2 + cost
 
         def invexity_constr(var: np.ndarray) -> float:
             ''' Keeps the CLF invex '''
             N = self.var_to_N(var)
-            D = np.array(self.sos_factorized(N))
+            D = np.array(self.kernel.D(N))
 
             if cone == +1:
-                self.invexity = min(np.linalg.eigvals( D - self.invex_tol ))
+                self.invexity = min(np.linalg.eigvals( D - self.Tol ))
             if cone == -1:
-                self.invexity = -max(np.linalg.eigvals( D + self.invex_tol ))
+                self.invexity = -max(np.linalg.eigvals( D + self.Tol ))
 
             return self.invexity
 
@@ -2881,47 +2983,17 @@ class KernelFamily():
         constrs += [ {"type": "eq", "fun": center_constr} ]
 
         init_var2 = self.N_to_var(Ninit)
-        sol2 = minimize( objective, init_var2, constraints=constrs )
+        sol2 = minimize( objective, init_var2, constraints=constrs, options={"disp": False, "maxiter":1000} )
         invex_N =  self.var_to_N( sol2.x )
         invex_P = invex_N.T @ G @ invex_N
-
+        
+        total_cost = objective(sol2.x)
         center_cost = center_constr(sol2.x)
+        print(f"Total cost = {total_cost}")
         print(f"Invexity = {self.invexity}")
         print(f"Center cost = {center_cost}")
 
         return invex_P
-    
-    def get_invex(self, Ninit: np.ndarray, center):
-        '''
-        Returns an N matrix that produces an invex function k(x).T N.T P N K(x) on the given kernel k(x).
-        PROBLEM: find N such that shape_fun(N) >> 0
-        '''
-        G = self.comp_process_params["G"]
-
-        def objective(var):
-            N = self.var_to_N(var)
-            return np.linalg.norm(N - Ninit)
-
-        def invex(var: np.ndarray):
-            N = self.var_to_N(var)
-            D = np.array(self.sos_factorized(N))
-            self.invexity = min(np.linalg.eigvals( D - self.invex_tol ))
-            return self.invexity
-
-        def centered(var: np.ndarray):
-            N = self.var_to_N(var)
-            m_center = self.kernel.function(center)
-            self.centering = m_center.T @ N.T @ G @ N @ m_center
-            return self.centering
-
-        constraints = [ {"type": "ineq", "fun": invex} ]
-        constraints += [ {"type": "eq", "fun": centered} ]
-
-        init_var = self.N_to_var(Ninit)
-        sol = minimize( objective, init_var, constraints=constraints, options={"disp": False, "maxiter":1000} )
-        N = self.var_to_N(sol.x)
-
-        return N
 
     def compatibilize(self, Ninit: np.ndarray, center: np.ndarray, verbose=False, animate=False) -> dict:
         '''

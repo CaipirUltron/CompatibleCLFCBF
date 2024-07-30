@@ -7,7 +7,7 @@ import numpy as np
 
 from functools import wraps
 from scipy.spatial import ConvexHull
-from scipy.optimize import fsolve
+from scipy.optimize import fsolve, minimize
 from shapely.geometry import LineString, LinearRing, Polygon
 from shapely.ops import unary_union, split
 from shapely import is_geometry
@@ -954,6 +954,50 @@ def load_compatible(file_name, P, load_compatible=True):
     except IOError:
         print("Couldn't locate compatibilization file. Returning passed P matrix.")
         return P
+
+def NGN_decomposition(G, P):
+    '''
+    Find the following decomposition of a given P = N.T G N, for a given G matrix.
+    Returns the resulting N and cost.
+    '''
+    if G.shape[0] != G.shape[1]:
+        raise Exception("G is not a square matrix.")
+    
+    if P.shape[0] != P.shape[1]:
+        raise Exception("P is not a square matrix.")
+
+    n, p = G.shape[0], P.shape[0]
+
+    eigsG = np.linalg.eigvals(G)
+    eigsP, eigvecsP = np.linalg.eig(P)
+
+    psdG = np.all(eigsG >= 0.0) and ( not np.all(eigsP >= 0.0) )
+    nsdG = np.all(eigsG <= 0.0) and ( not np.all(eigsP <= 0.0) )
+    psdP = np.all(eigsP >= 0.0) and ( not np.all(eigsG >= 0.0) )
+    nsdP = np.all(eigsP <= 0.0) and ( not np.all(eigsG <= 0.0) )
+
+    if any((psdG, nsdG, psdP, nsdP)):
+        raise Exception("Impossible decomposition.")
+
+    sort_indexes = np.argsort(eigsP)
+    sorted_eigs, sorted_eigvecs = eigsP[sort_indexes][::-1], eigvecsP[:,sort_indexes][:,::-1]
+
+    Ptrunc = np.zeros(P.shape)
+    for k in range(n):
+        q = sorted_eigvecs[:,k]
+        Ptrunc += sorted_eigs[k] * np.outer(q,q)
+
+    def objective(var: np.ndarray) -> float:
+        ''' Frobenius norm '''
+        N = var.reshape((n, p))
+        return np.linalg.norm( N.T @ G @ N - Ptrunc )
+    
+    init_var = np.random.rand(n*p)
+    sol = minimize( objective, init_var )
+    N = sol.x.reshape((n, p))
+    decomp_cost = objective(sol.x)
+
+    return N, decomp_cost
 
 class Rect():
     '''

@@ -51,7 +51,7 @@ kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs,
                                params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta}, 
                                limits=limits, spacing=0.2 )
 
-P = kerneltriplet.get_invex_P( clf.P, clf_center )
+# P = kerneltriplet.get_invex_P( clf.P, clf_center )
 
 controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 30

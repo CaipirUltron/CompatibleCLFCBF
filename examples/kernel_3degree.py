@@ -13,7 +13,7 @@ n = len(initial_state)
 m = len(initial_control)
 
 # limits = np.array(((-7.5, 7.5,-4, 5))
-limits = 8*np.array((-1,1,-1,1))
+limits = 12*np.array((-1,1,-1,1))
 
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 kernel = Kernel(dim=n, degree=3)
@@ -34,8 +34,9 @@ clf_center = [0.0, -5.0]
 base_level = 25
 
 points = []
-points.append({ "coords": [ 0.0,  1.0], "gradient": [ 0.0,  1.0], "curvature": -4.0 })
-# points.append({ "coords": [-5.0,  3.0], "gradient": [-1.0,  1.0] })
+points.append({ "coords": [ 0.0,  1.0], "gradient": [ 0.0, 1.0], "curvature": -7.0 })
+points.append({ "coords": [ -1.0,  1.0], "gradient": [ 0.0, 1.0], "curvature": 3.0 })
+# points.append({ "coords": [0.0,  -3.0], "gradient": [ 0.0,-1.0] })
 # points.append({ "coords": [ 5.0,  3.0], "gradient": [ 1.0,  1.0] })
 # points.append({ "coords": [ 5.0,  0.0], "gradient": [ 1.0, -1.0] })
 # points.append({ "coords": [-5.0,  0.0], "gradient": [-1.0, -1.0] })
@@ -46,16 +47,16 @@ Pquadratic = kernel_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_cent
 clf_leading = LeadingShape(Pquadratic,approximate=True)
 
 # clf = KernelLyapunov(kernel=kernel, P=load_compatible(__file__, Pquadratic, load_compatible=True), limits=limits)
-# clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
-clf = KernelLyapunov(kernel=kernel, points=points, centers=[clf_center], limits=limits)
+clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
+# clf = KernelLyapunov(kernel=kernel, points=points, centers=[clf_center], limits=limits)
 # clf = KernelLyapunov(kernel=kernel, points=points, centers=[clf_center], leading=clf_leading, limits=limits)
 clf.is_SOS_convex(verbose=True)
 
 # ------------------------------------------- Define CBF for U-shaped obstacle ---------------------------------------------
 center = (0, 0)
 
-safe_pts = [(-3, 3), (-2, 3), (-1, 3), (0, 3), (1, 3), (2, 3), (3, 3)]
-safe_pts += [(-3, 2.5), (-2, 2.5), (-1, 2.5), (0, 2.5), (1, 2.5), (2, 2.5), (3, 2.5)]
+# safe_pts = [(-3, 3), (-2, 3), (-1, 3), (0, 3), (1, 3), (2, 3), (3, 3)]
+# safe_pts += [(-3, 2.5), (-2, 2.5), (-1, 2.5), (0, 2.5), (1, 2.5), (2, 2.5), (3, 2.5)]
 
 centers = [(-4, 3), (-4, 0), center, (4, 0), (4, 3)]
 skeleton_line = LineString(centers)
@@ -70,6 +71,7 @@ cbf_leading = LeadingShape(shape_matrix, bound='lower')
 
 # quadratic_cbf = KernelBarrier(kernel=kernel, Q=shape_matrix, limits=limits, spacing=0.1)
 
+# cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, centers=[center], limits=limits, spacing=0.1)
 cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, skeleton=skeleton_segs, leading=cbf_leading, limits=limits, spacing=0.1)
 cbf.is_bounded_by(cbf_leading.shape, verbose=True)
 
@@ -78,19 +80,12 @@ cbfs = [ cbf ]
 sample_time = .005
 p, alpha, beta = 1.0, 1.0, 1.0
 kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs,
-                               params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta},
-                               limits=limits.tolist(), spacing=0.2)
+                              params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta},
+                              limits=limits.tolist(), spacing=0.2)
 
-invex_P = kerneltriplet.get_invex_P( clf.P, clf_center )
-eig_P = np.linalg.eigvals(clf.P)
-eig_invex_P = np.linalg.eigvals(invex_P)
-
-print(f"Eigs P ={eig_P}")
-print(f"Eigs invex P ={eig_invex_P}")
-
+# invex_P = kerneltriplet.compute_invex( P=clf.P, center=clf_center, points=points)
 # clf.set_params(P=invex_P)
 # clf.generate_contour()
-
 # kerneltriplet.set_param(clf=clf)
 
 controller = NominalQP(kerneltriplet, dt=sample_time)
