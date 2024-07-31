@@ -53,32 +53,30 @@ clf.is_SOS_convex(verbose=True)
 # Fits CBF to a box-shaped obstacle
 
 box_center = [ 0.0, 2.0 ]
-box_angle = 30
+box_angle = 0
 box_height, box_width = 5, 5
 
 init_eig = [ 0.2/box_height, 0.2/box_width ]
 init_R = rot2D(np.deg2rad(box_angle))
 Qinit = kernel_quadratic(eigen=init_eig, R=init_R, center=box_center, kernel_dim=kernel_dim)
-
-print(f"Eigs of Qinit = {np.linalg.eigvals(Qinit)}")
 boundary_pts = box( center=box_center, height=box_height, width=box_width, angle=box_angle, spacing=0.4 )
 
 # cbf = KernelBarrier(kernel=kernel, Q=Qinit, limits=limits, spacing=0.1)
 cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, centers=[box_center], initial_shape = Qinit, limits=limits, spacing=0.1)
 # cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, skeleton=skeleton, leading=LeadingShape(Qquadratic,bound='upper'), limits=limits, spacing=0.1)
 
-eigQ = np.linalg.eigvals(cbf.Q)
-print(f"Spectra of Q = {eigQ}")
+# eigQ = np.linalg.eigvals(cbf.Q)
+# print(f"Spectra of Q = {eigQ}")
 
-N, G, error = NGN_decomposition(n, cbf.Q)
-print(f"Decomposition error norm = {np.linalg.norm(error)}")
+# N, G, error = NGN_decomposition(n, cbf.Q)
+# print(f"Decomposition error norm = {np.linalg.norm(error)}")
 
-D = kernel.D(N)
-eigD = np.linalg.eigvals(D)
-print(f"Spectra of D(N) = {eigD}")
+# D = kernel.D(N)
+# eigD = np.linalg.eigvals(D)
+# print(f"Spectra of D(N) = {eigD}")
 
-cbf.set_params(Q = N.T @ G @ N)
-cbf.generate_contour()
+# cbf.set_params(Q = N.T @ G @ N)
+# cbf.generate_contour()
 
 cbfs = [ cbf ]
 # ------------------------------------------------- Define controller ------------------------------------------------------

@@ -978,7 +978,7 @@ def NGN_decomposition(n, P):
 
     return N, G, matrix_error
 
-def SDcone_closest(P, psd = True):
+def semidefinite_projection(P, psd = True):
     '''
     Computes the matrix projetion onto the PSD/NSD cone.
     '''
@@ -998,10 +998,10 @@ def SDcone_closest(P, psd = True):
     return Pproj
 
 def PSD_closest(P):
-    return SDcone_closest(P, psd=True)
+    return semidefinite_projection(P, psd=True)
 
 def NSD_closest(P):
-    return SDcone_closest(P, psd=False)
+    return semidefinite_projection(P, psd=False)
 
 def principal_minors(matrix):
     """ Compute all principal minors of a square matrix """

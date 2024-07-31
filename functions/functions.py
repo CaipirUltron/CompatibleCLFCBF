@@ -1707,7 +1707,7 @@ class KernelQuadratic(Function):
         self.cost_functions = []
         self.eq_constraint_functions = []
         self.ineq_constraint_functions = []
-        self.fit_options = { "invex_fit": False, 
+        self.fit_options = { "invex_fit": True, 
                              "invex_constraint": True }
 
         super().__init__(**kwargs)
@@ -2146,10 +2146,11 @@ class KernelQuadratic(Function):
         p = self.kernel_dim
 
         N_arr = var[0:n*p]
-        G_arr = var[n*p:]
+        sqG_arr = var[n*p:]
 
         N = N_arr.reshape((n,p))
-        G = G_arr.reshape((n,n))
+        sqG = sqG_arr.reshape((n,n))
+        G = sqG.T @ sqG
 
         return N, G
 
@@ -2157,8 +2158,9 @@ class KernelQuadratic(Function):
         ''' Converts from N, G to var array '''
 
         N_arr = N.flatten()
-        G_arr = G.flatten()
-        var = np.hstack([N_arr, G_arr])
+        sqG = sp.linalg.sqrtm(G)
+        sqG_arr = sqG.flatten()
+        var = np.hstack([N_arr, sqG_arr])
 
         return var
 
@@ -2192,13 +2194,23 @@ class KernelQuadratic(Function):
         def objective(var: np.ndarray) -> float:
 
             N, G = self.reshape(var)
-            eigs = np.linalg.eigvals(G)
-            error_eigs = eigs - init_eigs
             
             cost = 0.0
-            # cost += error_eigs.T @ error_eigs
+            cost += invex_cost(var)
             cost += sum([ cost_fun(N,G) for cost_fun in self.cost_functions ])
             return cost
+
+        def invex_cost(var: np.ndarray) -> float:
+
+            N, G = self.reshape(var)            
+            D = self.kernel.D(N)
+
+            if cone == +1:
+                invex_Proj = PSD_closest(D)
+            if cone == -1:
+                invex_Proj = NSD_closest(D)
+
+            return np.linalg.norm(invex_Proj)
 
         def eq_constr(var: np.ndarray) -> list[float]:
 
@@ -2232,10 +2244,10 @@ class KernelQuadratic(Function):
             eigs = np.diag(G)
 
             # eig_upperbound, eig_lowerbound = np.max(init_eigs), np.min(init_eigs)
-            eig_upperbound, eig_lowerbound = 25, 0.0
-            eig_bounds = np.array([ eig_upperbound - max(eigs) ])
+            eig_upperbound, eig_lowerbound = 10.0, 0.0
+            eig_bounds = np.array([ eig_upperbound - max(eigs), min(eigs) - eig_lowerbound ])
 
-            return np.hstack([eig_bounds, eigs])
+            return np.hstack([eig_bounds])
 
         constraints = []
         constraints += [ {"type": "ineq", "fun": eig_bounds_constr} ]
@@ -2243,8 +2255,8 @@ class KernelQuadratic(Function):
         constraints += [ {"type": "ineq", "fun": ineq_constr} ]
 
         constraints += [ {"type": "eq", "fun": orthonormality_constr} ]
-        if self.fit_options["invex_constraint"]:
-            constraints += [ {"type": "ineq", "fun": invexity_constr} ]
+        # if self.fit_options["invex_constraint"]:
+        #     constraints += [ {"type": "ineq", "fun": invexity_constr} ]
 
         init_var = self.flatten(Ninit, Ginit)
         sol = minimize( objective, init_var, constraints=constraints, options={"maxiter": 1000} )
@@ -2255,6 +2267,7 @@ class KernelQuadratic(Function):
         
         total_cost = objective(sol.x)
         print(f"Total cost = {total_cost}")
+        print(f"Invex cost = {invex_cost(sol.x)}")
 
         invexity = np.linalg.eigvals( self.kernel.D(Nsol) )
         print(f"Fitting invexity = {invexity}")

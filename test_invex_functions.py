@@ -68,7 +68,15 @@ def find_invex(Ninit: np.ndarray):
 
     def objective(var):
         N = var.reshape((n, kernel_dim))
-        return np.linalg.norm(N - Ninit)
+        D = kernel.D(N)
+
+        if cone == +1:
+            Proj = PSD_closest(D)
+        if cone == -1:
+            Proj = NSD_closest(D)
+
+        # return np.linalg.norm(N - Ninit)
+        return np.linalg.norm(Proj)
     
     def invex(var: np.ndarray):
         N = var.reshape((n, kernel_dim))
@@ -84,14 +92,25 @@ def find_invex(Ninit: np.ndarray):
         m0 = kernel.function(np.zeros(n))
         return m0.T @ N.T @ G @ N @ m0
 
-    constraints = [ {"type": "ineq", "fun": invex} ]
+    def orthonormality_constr(var: np.ndarray) -> float:
+        ''' Keeps N orthonormal '''
+
+        N = var.reshape((n, kernel_dim))
+        return np.linalg.norm( N @ N.T - np.eye(n) )
+
+    constraints = []
+    # constraints += [ {"type": "ineq", "fun": invex} ]
     constraints += [ {"type": "eq", "fun": centered} ]
+    constraints += [ {"type": "eq", "fun": orthonormality_constr} ]
 
     init_var = Ninit.flatten()
     sol = minimize( objective, init_var, constraints=constraints, options={"disp": False, "maxiter":1000} )
 
     print(sol.message)
     N = sol.x.reshape((n, kernel_dim))
+
+    print(f"Invexity of N = {objective(sol.x)}")
+    print(f"Orthonormality of N = {orthonormality_constr(sol.x)}")
 
     return N, cone
 
@@ -122,6 +141,8 @@ for i in range(num_sim):
     # print(f"Coefficients of |∇Φ(x)| at Ninit = {det_coeffs_fun(Ninit)}")
 
     N, cone = find_invex(Ninit)
+    G = np.random.randn(n,n)
+    G = G.T @ G
 
     D = kernel.D(N)
     Deigs = np.linalg.eigvals(D)
