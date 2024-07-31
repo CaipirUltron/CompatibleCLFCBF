@@ -24,7 +24,9 @@ print(kernel)
 kernel_dim = kernel._num_monomials
 q = kernel.dim_det_kernel
 
-num_sim = 5000
+print(f"D(N) = {kernel.Dfun_symbolic}")
+
+num_sim = 1
 for i in range(num_sim):
 
     N = np.random.randn(n,kernel_dim)
@@ -40,7 +42,7 @@ for i in range(num_sim):
 
 G = hessian_2Dquadratic(eigen=[2, 1], angle=np.deg2rad(45))
 
-tol = 1e-1
+tol = 1e-2
 Tol = np.zeros((q,q))
 Tol[0,0] = 1
 Tol = tol*Tol
@@ -67,27 +69,18 @@ def find_invex(Ninit: np.ndarray):
         print(f"D(Ninit) closer to NSD cone.")
 
     def objective(var):
+
         N = var.reshape((n, kernel_dim))
         D = kernel.D(N)
-
         if cone == +1:
-            Proj = PSD_closest(D)
+            ProjD = PSD_closest(D-Tol)
         if cone == -1:
-            Proj = NSD_closest(D)
+            ProjD = NSD_closest(D+Tol)
 
         # return np.linalg.norm(N - Ninit)
-        return np.linalg.norm(Proj)
+        return np.linalg.norm(D - ProjD)
     
-    def invex(var: np.ndarray):
-        N = var.reshape((n, kernel_dim))
-        D = kernel.D(N)
-
-        if cone == +1:
-            return min(np.linalg.eigvals( D - Tol ))
-        if cone == -1:
-            return -max(np.linalg.eigvals( D + Tol ))
-        
-    def centered(var: np.ndarray):
+    def center_constr(var: np.ndarray):
         N = var.reshape((n, kernel_dim))
         m0 = kernel.function(np.zeros(n))
         return m0.T @ N.T @ G @ N @ m0
@@ -98,18 +91,31 @@ def find_invex(Ninit: np.ndarray):
         N = var.reshape((n, kernel_dim))
         return np.linalg.norm( N @ N.T - np.eye(n) )
 
+    def invexity_constr(var: np.ndarray):
+
+        N = var.reshape((n, kernel_dim))
+        D = kernel.D(N)
+
+        if cone == +1:
+            ProjD = PSD_closest(D-Tol)
+        if cone == -1:
+            ProjD = NSD_closest(D+Tol)
+
+        return np.linalg.norm(D - ProjD)
+
     constraints = []
-    # constraints += [ {"type": "ineq", "fun": invex} ]
-    constraints += [ {"type": "eq", "fun": centered} ]
+    constraints += [ {"type": "eq", "fun": center_constr} ]
+    # constraints += [ {"type": "eq", "fun": invexity_constr} ]
     constraints += [ {"type": "eq", "fun": orthonormality_constr} ]
 
     init_var = Ninit.flatten()
-    sol = minimize( objective, init_var, constraints=constraints, options={"disp": False, "maxiter":1000} )
+    sol = minimize( invexity_constr, init_var, constraints=constraints, options={"disp": False, "maxiter":1000} )
 
     print(sol.message)
     N = sol.x.reshape((n, kernel_dim))
 
-    print(f"Invexity of N = {objective(sol.x)}")
+    # print(f"Cost = {objective(sol.x)}")
+    print(f"Invexity = {invexity_constr(sol.x)}")
     print(f"Orthonormality of N = {orthonormality_constr(sol.x)}")
 
     return N, cone

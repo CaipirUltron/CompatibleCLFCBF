@@ -736,17 +736,36 @@ class Kernel():
                 Mk[:,i] = Ni[:,k]
             M_list.append(Mk)
 
-        # ------------------------ Generation and SOS factorization of |∇Φ(x)| -----------------------------
+        # ------------------------ Generation and SOS factorization of |JΦ(x)| -----------------------------
+
+        ''' Compute the Jacobian JΦ(x) of the vector function Φ(x) = N m(x) and its determinant |JΦ(x)| '''
         delPhi = MultiPoly(self._powers, M_list).filter()
         det = delPhi.determinant()
         self.det_coeffs_fun = sym.lambdify( N, det.coeffs )
 
+        ''' Compute suitable kernel mΦ(x) for SOS factorization of |JΦ(x)| '''
         self.det_kernel = det.sos_kernel()
         self.dim_det_kernel = len(self.det_kernel)
 
+        '''
+        Compute the symbolic matrix function D(N) for SOS form of |JΦ(x)|, that is, 
+        |JΦ(x)| = mΦ(x)' D(N) mΦ(x), and its corresponding lambda function for numeric computation.
+        '''
         sos_index_matrix = det.sos_index_matrix(self.det_kernel)
         self.Dfun_symbolic = det.shape_matrix(self.det_kernel, sos_index_matrix)
         self._Dfun = sym.lambdify( N, self.Dfun_symbolic ) # >> 0
+
+        ''' Compute the matrix derivatives of D(N) with respect to each Nij variable, and corresponding lambda functions '''
+        self.Dfun_symbolic_derivatives = [ [ None for _ in range(self._num_monomials) ] for _ in range(self._dim) ]
+        self._Dfun_derivatives = [ [ None for _ in range(self._num_monomials) ] for _ in range(self._dim) ]
+        for i, j in itertools.product( range(self._dim), range(self._num_monomials) ):
+
+            Derivative = [ [ None for _ in range(self.dim_det_kernel) ] for _ in range(self.dim_det_kernel) ]
+            for k, l in itertools.product( range(self.dim_det_kernel), range(self.dim_det_kernel) ):
+                Derivative[k][l] = sym.diff( self.Dfun_symbolic[k][l], N[i,j] )
+
+            self.Dfun_symbolic_derivatives[i][j] = Derivative
+            self._Dfun_derivatives[i][j] = sym.lambdify( N, Derivative )
 
     def _find_partition(self, Msym):
         ''' 
@@ -931,6 +950,17 @@ class Kernel():
         if N.shape != (self._dim, self._num_monomials):
             raise Exception("Passed N matrix has incorrect dimensions.")
         return np.array(self._Dfun(N))
+
+    def Dderivatives(self, N):
+        if N.shape != (self._dim, self._num_monomials):
+            raise Exception("Passed N matrix has incorrect dimensions.")
+        
+        q = self.dim_det_kernel
+        Dfun_derivatives = [ [ np.zeros((q,q)) for _ in range(self._num_monomials) ] for _ in range(self._dim) ]
+        for i, j in itertools.product( range(self._dim), range(self._num_monomials) ):
+            Dfun_derivatives[i][j] = np.array( self._Dfun_derivatives[i][j](N) )
+
+        return Dfun_derivatives
 
     def __eq__(self, other):
         '''
@@ -1707,7 +1737,7 @@ class KernelQuadratic(Function):
         self.cost_functions = []
         self.eq_constraint_functions = []
         self.ineq_constraint_functions = []
-        self.fit_options = { "invex_fit": True, 
+        self.fit_options = { "invex_fit": False, 
                              "invex_constraint": True }
 
         super().__init__(**kwargs)
@@ -1731,9 +1761,16 @@ class KernelQuadratic(Function):
 
         self.SHAPE = cp.Variable( (self.kernel_dim,self.kernel_dim), symmetric=True )
 
-        # self.Pinit = kernel_quadratic(eigen=np.ones(self._dim), R=np.eye(self._dim), center=np.zeros(self._dim), kernel_dim=self.kernel_dim)
+        # init_shape = kernel_quadratic(eigen=np.ones(self._dim), R=np.eye(self._dim), center=np.zeros(self._dim), kernel_dim=self.kernel_dim)
+        init_shape = np.random.randn(self.kernel_dim, self.kernel_dim)
         init_shape = np.zeros((self.kernel_dim, self.kernel_dim))
         self.fit_options["initial_shape"] = init_shape.T @ init_shape
+        
+        tol = 0e-2
+        q = self.kernel.dim_det_kernel
+        self.Tol = np.zeros((q,q))
+        self.Tol[0,0] = 1
+        self.Tol = tol*self.Tol
 
         self.reset_optimization()
 
@@ -2196,21 +2233,9 @@ class KernelQuadratic(Function):
             N, G = self.reshape(var)
             
             cost = 0.0
-            cost += invex_cost(var)
+            # cost += invexity_constr(var)
             cost += sum([ cost_fun(N,G) for cost_fun in self.cost_functions ])
             return cost
-
-        def invex_cost(var: np.ndarray) -> float:
-
-            N, G = self.reshape(var)            
-            D = self.kernel.D(N)
-
-            if cone == +1:
-                invex_Proj = PSD_closest(D)
-            if cone == -1:
-                invex_Proj = NSD_closest(D)
-
-            return np.linalg.norm(invex_Proj)
 
         def eq_constr(var: np.ndarray) -> list[float]:
 
@@ -2223,14 +2248,17 @@ class KernelQuadratic(Function):
             return [ fun(N,G) for fun in self.ineq_constraint_functions ]
 
         def invexity_constr(var: np.ndarray) -> float:
-            ''' Keeps the CLF invex '''
 
-            N, G = self.reshape(var)
+            N, G = self.reshape(var)            
             D = self.kernel.D(N)
-            invexity = np.linalg.eigvals(D)            
 
-            return cone * invexity
-        
+            if cone == +1:
+                ProjD = PSD_closest(D-self.Tol)
+            if cone == -1:
+                ProjD = NSD_closest(D+self.Tol)
+
+            return np.linalg.norm(D - ProjD)
+
         def orthonormality_constr(var: np.ndarray) -> float:
             ''' Keeps N orthonormal '''
 
@@ -2249,17 +2277,23 @@ class KernelQuadratic(Function):
 
             return np.hstack([eig_bounds])
 
+        def intermediate(res):
+            
+            N, G = self.reshape(res)
+            print(F"N = {N}")
+            print(F"G = {G}")
+
         constraints = []
         constraints += [ {"type": "ineq", "fun": eig_bounds_constr} ]
         constraints += [ {"type": "eq", "fun": eq_constr} ]
         constraints += [ {"type": "ineq", "fun": ineq_constr} ]
 
         constraints += [ {"type": "eq", "fun": orthonormality_constr} ]
-        # if self.fit_options["invex_constraint"]:
-        #     constraints += [ {"type": "ineq", "fun": invexity_constr} ]
+        if self.fit_options["invex_constraint"]:
+            constraints += [ {"type": "eq", "fun": invexity_constr} ]
 
         init_var = self.flatten(Ninit, Ginit)
-        sol = minimize( objective, init_var, constraints=constraints, options={"maxiter": 1000} )
+        sol = minimize( objective, init_var, constraints=constraints, callback=intermediate, options={"disp": True, "maxiter": 1000} )
         print(sol.message)
 
         Nsol, Gsol =  self.reshape(sol.x)
@@ -2267,7 +2301,7 @@ class KernelQuadratic(Function):
         
         total_cost = objective(sol.x)
         print(f"Total cost = {total_cost}")
-        print(f"Invex cost = {invex_cost(sol.x)}")
+        print(f"Invex cost = {invexity_constr(sol.x)}")
 
         invexity = np.linalg.eigvals( self.kernel.D(Nsol) )
         print(f"Fitting invexity = {invexity}")
