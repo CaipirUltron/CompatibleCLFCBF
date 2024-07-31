@@ -739,12 +739,14 @@ class Kernel():
         # ------------------------ Generation and SOS factorization of |∇Φ(x)| -----------------------------
         delPhi = MultiPoly(self._powers, M_list).filter()
         det = delPhi.determinant()
+        self.det_coeffs_fun = sym.lambdify( N, det.coeffs )
+
         self.det_kernel = det.sos_kernel()
         self.dim_det_kernel = len(self.det_kernel)
 
         sos_index_matrix = det.sos_index_matrix(self.det_kernel)
-        shape_matrix = det.shape_matrix(self.det_kernel, sos_index_matrix)
-        self._Dfun = sym.lambdify( N, shape_matrix ) # >> 0
+        self.Dfun_symbolic = det.shape_matrix(self.det_kernel, sos_index_matrix)
+        self._Dfun = sym.lambdify( N, self.Dfun_symbolic ) # >> 0
 
     def _find_partition(self, Msym):
         ''' 
@@ -928,7 +930,7 @@ class Kernel():
     def D(self, N):
         if N.shape != (self._dim, self._num_monomials):
             raise Exception("Passed N matrix has incorrect dimensions.")
-        return self._Dfun(N)
+        return np.array(self._Dfun(N))
 
     def __eq__(self, other):
         '''
@@ -1702,9 +1704,11 @@ class KernelQuadratic(Function):
         self.last_opt_results = None
         self.max_eigenvalue = 10.0
 
-        self.invex_fit = False
         self.cost_functions = []
-        self.G = hessian_2Dquadratic(eigen=[1, 1], angle=0.0)
+        self.eq_constraint_functions = []
+        self.ineq_constraint_functions = []
+        self.fit_options = { "invex_fit": False, 
+                             "invex_constraint": True }
 
         super().__init__(**kwargs)
         self.reset_optimization()
@@ -1727,11 +1731,9 @@ class KernelQuadratic(Function):
 
         self.SHAPE = cp.Variable( (self.kernel_dim,self.kernel_dim), symmetric=True )
 
-        self.Pinit = kernel_quadratic(eigen=np.ones(self._dim), R=np.eye(self._dim), center=np.zeros(self._dim), kernel_dim=self.kernel_dim)
-        dim_D = self.kernel.dim_det_kernel
-        self.Tol = np.zeros((dim_D,dim_D))
-        self.Tol[0,0] = 1
-        self.Tol = 0.1*self.Tol
+        # self.Pinit = kernel_quadratic(eigen=np.ones(self._dim), R=np.eye(self._dim), center=np.zeros(self._dim), kernel_dim=self.kernel_dim)
+        init_shape = np.zeros((self.kernel_dim, self.kernel_dim))
+        self.fit_options["initial_shape"] = init_shape.T @ init_shape
 
         self.reset_optimization()
 
@@ -1881,7 +1883,7 @@ class KernelQuadratic(Function):
         if shape_matrix.shape[0] != shape_matrix.shape[1]:
             raise Exception("Matrix of coefficients must be a square.")
         
-        if np.linalg.norm( shape_matrix == shape_matrix.T ) > 1e-3:
+        if np.linalg.norm( shape_matrix - shape_matrix.T ) > 1e-3:
             warnings.warn("Matrix of coefficients is not symmetric. The symmetric part will be used.")
 
         # if not np.all(np.linalg.eigvals(shape_matrix) >= -1e-5):
@@ -1913,6 +1915,9 @@ class KernelQuadratic(Function):
 
         if "constant" in keys:
             self.constant = kwargs["constant"]
+
+        if "initial_shape" in keys:
+            self.fit_options["initial_shape"] = kwargs["initial_shape"]
 
         for key in keys:
 
@@ -1969,17 +1974,9 @@ class KernelQuadratic(Function):
                 self.add_leading_constraints(leading)
                 continue
 
-            if key == "invex_seed":
-                G = kwargs["invex_seed"]
-                if G.shape != (self.n, self.n):
-                    warnings.warn("Passed G (invex seed) has incorrect dimensions. Initializing with default seed.")
-                    continue
-                self.G = kwargs["invex_seed"]
-                continue
-
         # If fitting conditions are satisfied, fits and sets new, fitted shape
         if type(self.cost) != int and len(self.constraints) > 2 and not np.any(self.shape_matrix):
-            if self.invex_fit:
+            if self.fit_options["invex_fit"]:
                 fitted_shape = self.invex_fitting()
             else:
                 fitted_shape = self.convex_fitting()
@@ -2013,7 +2010,7 @@ class KernelQuadratic(Function):
                     self.constraints += [ self._fun(point["coords"], self.SHAPE) == point["level"] ]
                 else:
                     self.cost += ( self._fun(point["coords"], self.SHAPE) - point["level"] )**2
-                self.cost_functions += [ lambda N : ( self._fun(point["coords"], N.T @ self.G @ N) - point["level"] )**2 ]
+                self.cost_functions += [ lambda N, G : ( self._fun(point["coords"], N.T @ G @ N) - point["level"] )**2 ]
 
         # Define gradient constraints
         if "gradient" in keys:
@@ -2025,11 +2022,14 @@ class KernelQuadratic(Function):
             if self.force_gradients or point["force_gradient"]:
                 self.constraints += [ self._grad(point["coords"], self.SHAPE) == gradient_norm * normalized ]
             else:
-                self.cost += cp.norm( self._grad(point["coords"], self.SHAPE) - gradient_norm * normalized )
+                if isinstance(self, KernelLyapunov):
+                    self.cost += cp.norm( self._grad(point["coords"], self.SHAPE) - gradient_norm * normalized )
+                else:
+                    self.cost += cp.norm( self._grad(point["coords"], self.SHAPE) - gradient_norm * normalized )
             
             gradient = np.array(point["gradient"])
             normalized = gradient/np.linalg.norm(gradient)
-            self.cost_functions += [ lambda N : ( normalized.T @ self.clf._grad(point["coords"], N.T @ self.G @ N) - np.linalg.norm(self.clf._grad(point["coords"], N.T @ self.G @ N)) )**2 ]
+            self.cost_functions += [ lambda N, G : ( normalized.T @ self._grad(point["coords"], N.T @ G @ N) - np.linalg.norm(self._grad(point["coords"], N.T @ G @ N)) )**2 ]
 
         # Define curvature constraints (2D only)
         if "curvature" in keys:
@@ -2040,7 +2040,7 @@ class KernelQuadratic(Function):
 
             v = rot2D(np.pi/2) @ normalized
             self.cost += ( self._hessian_quadratic_form(point["coords"], self.SHAPE, v) - point["curvature"] )**2
-            self.cost_functions += [ lambda N : ( v.T @ self.clf._hess(point["coords"], N.T @ self.G @ N) @ v - point["curvature"] )**2 ]
+            self.cost_functions += [ lambda N, G : ( v.T @ self._hess(point["coords"], N.T @ G @ N) @ v - point["curvature"] )**2 ]
 
     def add_leading_constraints(self, leading: LeadingShape):
         '''
@@ -2074,7 +2074,9 @@ class KernelQuadratic(Function):
         '''
         for pt in point_list:
             self.add_point_constraints(coords = pt, level=level)
-            if contained: self.constraints.append( self._fun(pt, self.SHAPE) <= level )
+            if contained: 
+                self.constraints.append( self._fun(pt, self.SHAPE) <= level )
+                self.ineq_constraint_functions += [ lambda N, G: level - self._fun(pt, N.T @ G @ N ) ]
 
     def add_center_constraints(self, point_list: list):
         '''
@@ -2108,8 +2110,11 @@ class KernelQuadratic(Function):
             curr_pt = np.array(points_sequence[k])
             next_pt = np.array(points_sequence[k+1])
 
-            inner = (+1 if increasing else -1) * ( next_pt - curr_pt ).T @ self._grad(curr_pt, self.SHAPE)
-            self.constraints.append( self._fun(next_pt, self.SHAPE) - self._fun(curr_pt, self.SHAPE) >= inner )
+            inner_cvxpy = (+1 if increasing else -1) * ( next_pt - curr_pt ).T @ self._grad(curr_pt, self.SHAPE)
+            self.constraints.append( self._fun(next_pt, self.SHAPE) - self._fun(curr_pt, self.SHAPE) >= inner_cvxpy )
+
+            inner = lambda N, G: (+1 if increasing else -1) * ( next_pt - curr_pt ).T @ self._grad(curr_pt, N.T @ G @ N)
+            self.ineq_constraint_functions += [ lambda N, G : self._fun(next_pt, N.T @ G @ N) - self._fun(curr_pt, N.T @ G @ N) - inner(N,G) ]
                 
     def add_skeleton_constraints(self, skeleton_segments):
         '''
@@ -2135,63 +2140,131 @@ class KernelQuadratic(Function):
         else:
             raise Exception("Problem is " + fit_problem.status + ".")
 
+    def reshape(self, var: np.ndarray):
+        ''' Converts from array var to tuple of matrices N and G '''
+        n = self._dim
+        p = self.kernel_dim
+
+        N_arr = var[0:n*p]
+        G_arr = var[n*p:]
+
+        N = N_arr.reshape((n,p))
+        G = G_arr.reshape((n,n))
+
+        return N, G
+
+    def flatten(self, N, G):
+        ''' Converts from N, G to var array '''
+
+        N_arr = N.flatten()
+        G_arr = G.flatten()
+        var = np.hstack([N_arr, G_arr])
+
+        return var
+
     def invex_fitting(self):
         ''' 
         Nonconvex optimization problem for fitting an invex function to point-like constraints.
         Must be correctly initialized by an invex function.
         Returns: an invex P shape
         '''
-        n = self._dim
-        p = self.kernel_dim
+        initial_shape = self.fit_options["initial_shape"]
+        Ninit, Ginit, _ = NGN_decomposition(self._dim, initial_shape)
+        init_eigs = np.linalg.eigvals(Ginit)
+        eig_upperbound, eig_lowerbound = np.max(init_eigs), np.min(init_eigs)
 
-        Ninit, decomp_cost = NGN_decomposition(self.G, self.Pinit)
-        print(f"NGN decomposition error = {decomp_cost}")
+        print(f"Initial eigenvalues = {init_eigs}")
 
-        # Finds closest invex N to Ninit
-        Dinit = np.array( self.kernel.D(Ninit) )
-        D_eig = np.linalg.eigvals(Dinit)
+        if not np.all( np.linalg.eigvals(Ginit) >= 0):
+            raise Exception("Initial P must be psd.")
 
-        if len(D_eig) > 1:
-            if np.abs(min(D_eig)) <= np.abs(max(D_eig)): cone = +1
-            else: cone = -1
-        else:
-            if D_eig >= 0: cone = +1
-            else: cone = -1
+        Dinit = self.kernel.D(Ninit)
+        dist_to_psd = np.linalg.norm( PSD_closest(Dinit) - Dinit )
+        dist_to_nsd = np.linalg.norm( NSD_closest(Dinit) - Dinit )
+
+        if dist_to_psd <= dist_to_nsd: 
+            cone = +1
+            print(f"D(Ninit) closer to PSD cone.")
+        else: 
+            cone = -1
+            print(f"D(Ninit) closer to NSD cone.")
 
         def objective(var: np.ndarray) -> float:
 
-            N = var.reshape((n,p))
-            # P = N.T @ self.G @ N
-
-            # cost = np.linalg.norm( P - Ninit.T @ self.G @ Ninit )**2
+            N, G = self.reshape(var)
+            eigs = np.linalg.eigvals(G)
+            error_eigs = eigs - init_eigs
+            
             cost = 0.0
-            cost += sum([ cost_fun(N) for cost_fun in self.cost_functions ])
-
-            print(f"Total cost = {cost}")
-
+            # cost += error_eigs.T @ error_eigs
+            cost += sum([ cost_fun(N,G) for cost_fun in self.cost_functions ])
             return cost
+
+        def eq_constr(var: np.ndarray) -> list[float]:
+
+            N, G = self.reshape(var)
+            return [ fun(N,G) for fun in self.eq_constraint_functions ]
+
+        def ineq_constr(var: np.ndarray) -> list[float]:
+
+            N, G = self.reshape(var)
+            return [ fun(N,G) for fun in self.ineq_constraint_functions ]
 
         def invexity_constr(var: np.ndarray) -> float:
             ''' Keeps the CLF invex '''
 
-            N = var.reshape((n,p))
-            D = np.array(self.kernel.D(N))
+            N, G = self.reshape(var)
+            D = self.kernel.D(N)
+            invexity = np.linalg.eigvals(D)            
 
-            if cone == +1: return min(np.linalg.eigvals( D - self.Tol ))
-            if cone == -1: return -max(np.linalg.eigvals( D + self.Tol ))
+            return cone * invexity
         
-        init_var = Ninit.flatten()
-        sol = minimize( objective, init_var, constraints=[ {"type": "ineq", "fun": invexity_constr} ] )
-        invex_N =  sol.x.reshape((n,p))
-        invex_P = invex_N.T @ self.G @ invex_N
+        def orthonormality_constr(var: np.ndarray) -> float:
+            ''' Keeps N orthonormal '''
+
+            N, G = self.reshape(var)
+            return np.linalg.norm( N @ N.T - np.eye(self._dim) )
+
+        def eig_bounds_constr(var: np.ndarray) -> list[float]:
+            ''' Keeps eigenvalues of P well-behaved '''
+
+            N, G = self.reshape(var)
+            eigs = np.diag(G)
+
+            # eig_upperbound, eig_lowerbound = np.max(init_eigs), np.min(init_eigs)
+            eig_upperbound, eig_lowerbound = 25, 0.0
+            eig_bounds = np.array([ eig_upperbound - max(eigs) ])
+
+            return np.hstack([eig_bounds, eigs])
+
+        constraints = []
+        constraints += [ {"type": "ineq", "fun": eig_bounds_constr} ]
+        constraints += [ {"type": "eq", "fun": eq_constr} ]
+        constraints += [ {"type": "ineq", "fun": ineq_constr} ]
+
+        constraints += [ {"type": "eq", "fun": orthonormality_constr} ]
+        if self.fit_options["invex_constraint"]:
+            constraints += [ {"type": "ineq", "fun": invexity_constr} ]
+
+        init_var = self.flatten(Ninit, Ginit)
+        sol = minimize( objective, init_var, constraints=constraints, options={"maxiter": 1000} )
+        print(sol.message)
+
+        Nsol, Gsol =  self.reshape(sol.x)
+        Psol = Nsol.T @ Gsol @ Nsol
         
         total_cost = objective(sol.x)
         print(f"Total cost = {total_cost}")
 
-        invexity = np.linalg.eigvals( self.kernel.D(invex_N) )
-        print(f"Invexity = {invexity}")
+        invexity = np.linalg.eigvals( self.kernel.D(Nsol) )
+        print(f"Fitting invexity = {invexity}")
 
-        return invex_P
+        eigs = np.linalg.eigvals( Gsol )
+        print(f"Fitting eigenvalues = {eigs}")
+
+        print(f"Orthonormality of N = {orthonormality_constr(sol.x)}")
+
+        return Psol
 
     def update(self, param_ctrl, dt):
         '''
@@ -2217,15 +2290,28 @@ class KernelLyapunov(KernelQuadratic):
         return "Polynominal kernel-based CLF V(x) = √ k(x)' P k(x)"
 
     def _fun(self, x, shape_matrix):
+
+        if isinstance(shape_matrix, cp.expressions.variable.Variable):
+            print("Yes")
+            return super()._fun(x, shape_matrix)
+
         V_old = super()._fun(x, shape_matrix)
         return np.sqrt( 2 * V_old )
     
     def _grad(self, x, shape_matrix):
+
+        if isinstance(shape_matrix, cp.expressions.variable.Variable): 
+            return super()._grad(x, shape_matrix)
+        
         V = self._fun(x, shape_matrix)
         gradV_old = super()._grad(x, shape_matrix)
         return (1/V)*gradV_old
 
     def _hess(self, x, shape_matrix):
+
+        if isinstance(shape_matrix, cp.expressions.variable.Variable): 
+            return super()._hess(x, shape_matrix)
+
         V = self._fun(x, shape_matrix)
         gradV = self._grad(x, shape_matrix)
         hessianV_old = super()._hess(x, shape_matrix)
@@ -2370,15 +2456,15 @@ class KernelFamily():
     def compute_cbf_boundary(self, cbf_index):
         '''Compute CBF boundary'''
 
-        unsafe_set = geometry.Polygon()
+        # unsafe_set = geometry.Polygon()
         for boundary_seg in self.cbfs[cbf_index].get_boundary():
             boundary_lines = geometry.LineString(boundary_seg)
             self.boundary_lines[cbf_index].append(boundary_lines)
 
-            unsafe_set = unsafe_set | geometry.Polygon(boundary_seg)
+            # unsafe_set = unsafe_set | geometry.Polygon(boundary_seg)
         
-        self.safe_sets[cbf_index] = self.world_polygon.difference(unsafe_set)
-        self.unsafe_sets[cbf_index] = unsafe_set
+        # self.safe_sets[cbf_index] = self.world_polygon.difference(unsafe_set)
+        # self.unsafe_sets[cbf_index] = unsafe_set
 
     def set_param(self, **kwargs):
         '''

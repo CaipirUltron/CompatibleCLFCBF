@@ -21,22 +21,28 @@ xmin, xmax, ymin, ymax = limits
 ax.set_xlim(xmin, xmax)
 ax.set_ylim(ymin, ymax)
 
-# if hasattr(sim, "boundary_pts"):
-#     for pt in sim.boundary_pts:
-#         coords = np.array(pt)
-#         ax.plot(coords[0], coords[1], 'k*', alpha=0.6)
+if hasattr(sim, "boundary_pts"):
+    for pt in sim.boundary_pts:
+        coords = np.array(pt)
+        ax.plot(coords[0], coords[1], 'k*', alpha=0.6)
 
 # if hasattr(sim, "skeleton_pts"):
-#     # for seg in sim.skeleton_pts:
-#         for pt in sim.skeleton_pts:
-#             ax.plot(pt[0], pt[1], 'b*', alpha=0.6)
+#     for pt in sim.skeleton_pts:
+#         ax.plot(pt[0], pt[1], 'b*', alpha=0.6)
+
+if hasattr(sim, "centers"):
+    for pt in sim.centers:
+        ax.plot(pt[0], pt[1], 'r*', alpha=0.6)
 
 # if hasattr(sim, "quadratic_cbf"):
 #     sim.quadratic_cbf.plot_levels(ax=ax, levels = [0.0], color='g')
 
-num_levels = 5
+num_lvls = 10
+initial_lvl = 0
+final_lvl = -0.4
 for k in range(len(sim.cbfs)):
-    contour_unsafe = sim.cbfs[k].plot_levels(ax=ax, levels = [ -(0.5/num_levels)*k for k in range(num_levels-1,-1,-1) ])
+    lvls = [ final_lvl*(k/(num_lvls-1)) + initial_lvl*(1-k/(num_lvls-1)) for k in range(num_lvls) ]
+    contour_unsafe = sim.cbfs[k].plot_levels(ax=ax, levels = lvls + [0.0] )
     sim.kerneltriplet.plot_invariant(ax, k)
 
 sim.kerneltriplet.plot_attr(ax, "stable_equilibria", mcolors.BASE_COLORS["r"], 1.0)

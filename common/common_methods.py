@@ -1,7 +1,7 @@
 import time
 import math
 import json
-from itertools import product
+from itertools import product, combinations
 
 import numpy as np
 
@@ -955,49 +955,72 @@ def load_compatible(file_name, P, load_compatible=True):
         print("Couldn't locate compatibilization file. Returning passed P matrix.")
         return P
 
-def NGN_decomposition(G, P):
+def NGN_decomposition(n, P):
     '''
-    Find the following decomposition of a given P = N.T G N, for a given G matrix.
-    Returns the resulting N and cost.
+    Computes the rank n < p decomposition of P = N.T G N
+    Returns the resulting N (n x p) matrix
     '''
-    if G.shape[0] != G.shape[1]:
-        raise Exception("G is not a square matrix.")
-    
     if P.shape[0] != P.shape[1]:
         raise Exception("P is not a square matrix.")
+    p = P.shape[0]
 
-    n, p = G.shape[0], P.shape[0]
-
-    eigsG = np.linalg.eigvals(G)
     eigsP, eigvecsP = np.linalg.eig(P)
-
-    psdG = np.all(eigsG >= 0.0) and ( not np.all(eigsP >= 0.0) )
-    nsdG = np.all(eigsG <= 0.0) and ( not np.all(eigsP <= 0.0) )
-    psdP = np.all(eigsP >= 0.0) and ( not np.all(eigsG >= 0.0) )
-    nsdP = np.all(eigsP <= 0.0) and ( not np.all(eigsG <= 0.0) )
-
-    if any((psdG, nsdG, psdP, nsdP)):
-        raise Exception("Impossible decomposition.")
-
     sort_indexes = np.argsort(eigsP)
     sorted_eigs, sorted_eigvecs = eigsP[sort_indexes][::-1], eigvecsP[:,sort_indexes][:,::-1]
 
-    Ptrunc = np.zeros(P.shape)
+    G = np.zeros((n,n))
+    N = np.zeros((n,p))
     for k in range(n):
-        q = sorted_eigvecs[:,k]
-        Ptrunc += sorted_eigs[k] * np.outer(q,q)
+        G[k,k] = sorted_eigs[k]
+        N[k,:] = sorted_eigvecs[:,k].T
 
-    def objective(var: np.ndarray) -> float:
-        ''' Frobenius norm '''
-        N = var.reshape((n, p))
-        return np.linalg.norm( N.T @ G @ N - Ptrunc )
+    matrix_error = P - N.T @ G @ N
+
+    return N, G, matrix_error
+
+def SDcone_closest(P, psd = True):
+    '''
+    Computes the matrix projetion onto the PSD/NSD cone.
+    '''
+    if P.shape[0] != P.shape[1]:
+        raise Exception("P is not a square matrix.")
+    p = P.shape[0]
+
+    eigsP, eigvecsP = np.linalg.eig(P)
+    Pproj = np.zeros((p,p))
+    for k in range(p):
+        q = eigvecsP[:,k]
+        if psd:
+            Pproj += np.max(( eigsP[k], 0 ))*np.outer(q,q)
+        else:
+            Pproj += np.min(( eigsP[k], 0 ))*np.outer(q,q)
+
+    return Pproj
+
+def PSD_closest(P):
+    return SDcone_closest(P, psd=True)
+
+def NSD_closest(P):
+    return SDcone_closest(P, psd=False)
+
+def principal_minors(matrix):
+    """ Compute all principal minors of a square matrix """
+    n = matrix.shape[0]
+    minors = []
     
-    init_var = np.random.rand(n*p)
-    sol = minimize( objective, init_var )
-    N = sol.x.reshape((n, p))
-    decomp_cost = objective(sol.x)
+    def get_principal_submatrix(matrix, rows_cols):
+        """ Get the principal submatrix given rows and columns to include """
+        return matrix[np.ix_(rows_cols, rows_cols)]
 
-    return N, decomp_cost
+    # Iterate over all possible sizes of submatrices
+    for k in range(1,n+1):
+        # Generate all combinations of k rows/columns
+        for rows_cols in combinations(range(n), k):
+            submatrix = get_principal_submatrix(matrix, rows_cols)
+            minor = np.linalg.det(submatrix)
+            minors.append(minor)
+    
+    return np.array(minors)
 
 class Rect():
     '''

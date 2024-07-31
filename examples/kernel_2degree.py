@@ -3,7 +3,7 @@ import numpy as np
 from dynamic_systems import KernelAffineSystem
 from functions import LeadingShape, Kernel, KernelQuadratic, KernelLyapunov, KernelBarrier, KernelFamily
 from controllers import NominalQP
-from common import kernel_quadratic, rot2D, box, load_compatible
+from common import kernel_quadratic, rot2D, box, load_compatible, NGN_decomposition, PSD_closest, NSD_closest
 
 initial_state = [-5.0, 9.38]
 initial_control = [0.0, 0.0]
@@ -51,12 +51,34 @@ clf.is_SOS_convex(verbose=True)
 
 # ----------------------------------------------------- Define CBFs --------------------------------------------------------
 # Fits CBF to a box-shaped obstacle
-center = [ 0.0, 2.0 ]
-pts = box( center=center, height=5, width=5, angle=10, spacing=0.4 )
-cbf = KernelBarrier(kernel=kernel, boundary=pts, centers=[center], limits=limits, spacing=0.1)
-# cbf = KernelBarrier(kernel=kernel, boundary=pts, skeleton=skeleton, leading=LeadingShape(Qquadratic,bound='upper'))
 
-cbf.is_SOS_convex(verbose=True)
+box_center = [ 0.0, 2.0 ]
+box_angle = 30
+box_height, box_width = 5, 5
+
+init_eig = [ 0.2/box_height, 0.2/box_width ]
+init_R = rot2D(np.deg2rad(box_angle))
+Qinit = kernel_quadratic(eigen=init_eig, R=init_R, center=box_center, kernel_dim=kernel_dim)
+
+print(f"Eigs of Qinit = {np.linalg.eigvals(Qinit)}")
+boundary_pts = box( center=box_center, height=box_height, width=box_width, angle=box_angle, spacing=0.4 )
+
+# cbf = KernelBarrier(kernel=kernel, Q=Qinit, limits=limits, spacing=0.1)
+cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, centers=[box_center], initial_shape = Qinit, limits=limits, spacing=0.1)
+# cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, skeleton=skeleton, leading=LeadingShape(Qquadratic,bound='upper'), limits=limits, spacing=0.1)
+
+eigQ = np.linalg.eigvals(cbf.Q)
+print(f"Spectra of Q = {eigQ}")
+
+N, G, error = NGN_decomposition(n, cbf.Q)
+print(f"Decomposition error norm = {np.linalg.norm(error)}")
+
+D = kernel.D(N)
+eigD = np.linalg.eigvals(D)
+print(f"Spectra of D(N) = {eigD}")
+
+cbf.set_params(Q = N.T @ G @ N)
+cbf.generate_contour()
 
 cbfs = [ cbf ]
 # ------------------------------------------------- Define controller ------------------------------------------------------
@@ -65,8 +87,6 @@ p, alpha, beta = 1.0, 1.0, 1.0
 kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, 
                                params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta}, 
                                limits=limits, spacing=0.2 )
-
-# P = kerneltriplet.get_invex_P( clf.P, clf_center )
 
 controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 15
