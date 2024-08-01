@@ -34,8 +34,8 @@ clf_center = [0.0, -5.0]
 base_level = 25
 
 points = []
-points.append({ "coords": [ 0.0,  1.0], "gradient": [ 0.0, 1.0], "curvature": -7.0 })
-points.append({ "coords": [ -1.0,  1.0], "gradient": [ 0.0, 1.0], "curvature": 3.0 })
+points.append({ "coords": [ 0.0,  1.0], "gradient": [ 0.0, 1.0], "curvature": -15.0 })
+# points.append({ "coords": [ -1.0,  1.0], "gradient": [ 0.0, 1.0], "curvature": 3.0 })
 
 clf_eig = np.array([ 8.0, 1.0 ])
 clf_angle = np.deg2rad(0)
@@ -68,7 +68,7 @@ cbf_leading = LeadingShape(shape_matrix, bound='lower')
 
 # quadratic_cbf = KernelBarrier(kernel=kernel, Q=shape_matrix, limits=limits, spacing=0.1)
 
-# cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, centers=[center], limits=limits, spacing=0.1)
+# cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, centers=centers, limits=limits, spacing=0.1)
 # cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, skeleton=skeleton_segs, limits=limits, spacing=0.1)
 cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, skeleton=skeleton_segs, leading=cbf_leading, limits=limits, spacing=0.1)
 cbf.is_bounded_by(cbf_leading.shape, verbose=True)
