@@ -1022,6 +1022,12 @@ def principal_minors(matrix):
     
     return np.array(minors)
 
+def dirac(k,l):
+    if k == l:
+        return 1
+    else:
+        return 0
+
 class Rect():
     '''
     Simple rectangle.

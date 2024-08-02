@@ -462,7 +462,9 @@ class Kernel():
             raise Exception("Passed N matrix has incorrect dimensions.")
         return np.array(self._Dfun(N))
 
-    def D_partials(self, N):
+    def D_diff(self, N):
+        ''' Returns all partial derivatives of D(N) '''
+        
         if N.shape != (self._dim, self._num_monomials):
             raise Exception("Passed N matrix has incorrect dimensions.")
         

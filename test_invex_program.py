@@ -1,13 +1,11 @@
-import itertools
-import warnings
-
 import numpy as np
 import matplotlib.pyplot as plt
 
-from functions import Kernel, InvexProgram, KernelLyapunov
+from common import box
+from functions import Kernel, InvexProgram, KernelLyapunov, KernelBarrier
 
 # np.set_printoptions(precision=3, suppress=True)
-limits = 3*np.array((-1,1,-1,1))
+limits = 12*np.array((-1,1,-1,1))
 
 fig = plt.figure(constrained_layout=True)
 ax = fig.add_subplot(111)
@@ -27,26 +25,38 @@ p = kernel._num_monomials
 
 print(f"D(N) = \n{kernel.Dfun_symbolic}")
 
-#------------------------------------- Compute invex -----------------------------------
-N = np.random.randn(p,p)
-invex_program = InvexProgram(kernel, initial_shape = N.T @ N, invex_tol=1e-2)
-P = invex_program.find_invex()
+#---------------------------- Define some points for fitting ---------------------------
+box_center = [ 0.0, 2.0 ]
+box_angle = 30
+box_height, box_width = 5, 5
+boundary_pts = box( center=box_center, height=box_height, width=box_width, angle=box_angle, spacing=0.4 )
 
-clf = KernelLyapunov(kernel=kernel, P=P, limits=limits, spacing=0.01 )
+points = [ {"point": box_center, "level": -0.5} ]
+for pt in boundary_pts:
+    coords = np.array(pt)
+    ax.plot(coords[0], coords[1], 'k*', alpha=0.6)
+    points.append({"point": pt, "level": 0.0})
+
+#------------------------------------- Compute invex -----------------------------------
+N = 0.1*np.random.randn(p,p)
+invex_program = InvexProgram(kernel, fit_to = 'cbf', points=points, initial_shape = N.T @ N, barrier_gain = 100, invex_tol=1e-1)
+Q = invex_program.find_invex()
+
+cbf = KernelBarrier(kernel=kernel, Q=Q, limits=limits, spacing=0.2 )
 
 #---------------------------------------- Plotting -------------------------------------
 while True:
 
-    if "clf_contour" in locals():
-        for coll in clf_contour:
+    if "cbf_contour" in locals():
+        for coll in cbf_contour:
             coll.remove()
-        del clf_contour
+        del cbf_contour
 
     pt = plt.ginput(1, timeout=0)
     init_x = [ pt[0][0], pt[0][1] ]
-    V = clf.function(init_x)
-    print(f"V(x) = {V}")
+    h = cbf.function(init_x)
+    print(f"h(x) = {h}")
 
     num_levels = 20
-    clf_contour = clf.plot_levels(ax=ax, levels=[ V*((k+1)/num_levels) for k in range(num_levels) ])
+    cbf_contour = cbf.plot_levels(ax=ax, levels=[ h*((k+1)/num_levels) for k in range(num_levels) ])
     plt.pause(0.001)

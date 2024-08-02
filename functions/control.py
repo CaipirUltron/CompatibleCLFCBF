@@ -9,6 +9,8 @@ from shapely import geometry, intersection
 from contourpy.util.mpl_renderer import MplRenderer as Renderer
 from dynamic_systems import Integrator, KernelAffineSystem
 
+import sys
+import signal
 import warnings
 import itertools
 import numpy as np
@@ -1280,8 +1282,13 @@ class InvexProgram():
         self._init_optimization()
 
         ''' Default parameters '''
-        self.type = "cbf"
-
+        self.invexify = False
+        self.fit_to = None
+        self.points_to_fit = []
+        '''
+        self.points_to_fit should be a list of dicts of the form:
+        { "point": [...], "level": lvl, "gradient": [...], "curvature": curv } 
+        '''
         for sdp_param in ('slack_gain', 'invex_gain', 'cost_gain', 'barrier_gain'):
             self.sdp_params_cvxpy[sdp_param].value = 1.0
 
@@ -1291,7 +1298,7 @@ class InvexProgram():
         self.set_geometry( default_geometry )
 
         ''' Customize parameters '''
-        self.set_params(**kwargs)
+        self.set_param(**kwargs)
 
     def _init_optimization(self):
 
@@ -1300,52 +1307,75 @@ class InvexProgram():
         self.q = self.kernel.dim_det_kernel
 
         ''' Define integrator dynamics '''
-        self.dynamics_dim = self.p*self.n
+        self.geom_shape = (self.p, self.p)
+        self.state_shape = (self.n, self.p)
+        self.invex_shape = (self.q, self.q)
+        self.dynamics_dim = self.n * self.p
         init_state = np.zeros(self.dynamics_dim)
         init_ctrl = np.zeros(self.dynamics_dim)
         self.geo_dynamics = Integrator( init_state, init_ctrl )
 
         ''' Define cvxpy variables/parameters '''
-        self.U = cp.Variable( (self.n, self.p) )
-        self.slack = cp.Variable(1)
 
-        self.cone = cp.Parameter()                      # +1/-1 for PSD/NSD cones, respectively
-        self.D = cp.Parameter( (self.q, self.q) )
-        self.Tol = cp.Parameter( (self.q, self.q), PSD=True )
-        self.D_partials = [ [ cp.Parameter( (self.q, self.q) ) for _ in range(self.p) ] for _ in range(self.n) ]
+        # ---------------------------- Overall parameters ---------------------------
         self.sdp_params_cvxpy = { "slack_gain": cp.Parameter(nonneg=True), 
                                   "invex_gain": cp.Parameter(nonneg=True), 
                                   "cost_gain": cp.Parameter(nonneg=True), 
                                   "barrier_gain": cp.Parameter(nonneg=True) }
+
+        # ---------------------------- Decision variables ---------------------------
+        self.U = cp.Variable( self.state_shape )
+        self.slack = cp.Variable(1)
 
         ''' 
         Define invexity LMI constraint (Matrix Barrier Function) 
         -> This constraint is the STAR of the party! If it works, 
         it will allow for a search in the space of invex functions. 
         '''
-        slack_gain = self.sdp_params_cvxpy["slack_gain"]
-        invex_gain = self.sdp_params_cvxpy["invex_gain"]
-        self.Uflatten = cp.vec(self.U)
+        self.cone = cp.Parameter()                                          # +1/-1 for PSD/NSD cones, respectively
+        self.D = cp.Parameter( self.invex_shape )
+        self.Tol = cp.Parameter( self.invex_shape, PSD=True )
+        self.D_diff = [ [ cp.Parameter( self.invex_shape ) for _ in range(self.p) ] for _ in range(self.n) ]
 
         Ddot = 0
-        for i, gradD_line in enumerate(self.D_partials):
+        for i, gradD_line in enumerate(self.D_diff):
             for j, gradD in enumerate(gradD_line):
                 Ddot += gradD * self.U[i][j]
 
         M = self.cone * self.D - self.Tol
         Mdot = self.cone * Ddot
-        self.invex_constraint = [ Mdot + invex_gain * M >> 0 ]
+        
+        invex_gain = self.sdp_params_cvxpy["invex_gain"]
+        self.invex_constraint = Mdot + invex_gain * M >> 0
 
-        self.cost = cp.norm(self.U,'fro') + slack_gain * cp.norm(self.slack)
-        self.constraints = []
-        self.point_constraints = []
+        ''' 
+        Define scalar constraint for minimization of total cost 
+        (Control Lyapunov Function). This constraint allows for 
+        a search in the space of geometries that minimize the sums of psd costs.
+        '''
+        self.tcost = cp.Parameter()                                                            
+        self.tcost_diff = cp.Parameter(self.state_shape)
 
-    def set_params(self, **kwargs):
+        tcost_dot = 0
+        for (i,j) in itertools.product( range(self.n), range(self.p) ):
+            tcost_dot += self.tcost_diff[i][j] * self.U[i][j]
+
+        tcost_gain = self.sdp_params_cvxpy["cost_gain"]
+        self.cost_constraint = tcost_dot + tcost_gain * self.tcost <= self.slack
+
+        # ----------------------- Define the SDP cost (minimizing the energy of geometry dynamics) ---------------------------
+        slack_gain = self.sdp_params_cvxpy["slack_gain"]
+        self.sdp_cost = cp.norm(self.U,'fro') + slack_gain * (self.slack)**2
+            
+        self.additional_constraints = []
+        self.fitting_constraints = []
+
+    def set_param(self, **kwargs):
         
         for key in kwargs.keys():
             key = key.lower()
-            if key in ('clf', 'cbf'):
-                self.type = key
+            if key == 'fit_to':
+                self.fit_to = kwargs[key]
                 continue
             if key == 'initial_shape':
                 self.set_geometry(kwargs[key])
@@ -1357,72 +1387,120 @@ class InvexProgram():
                 invex_tol = kwargs[key]
                 self.Tol.value = np.zeros((self.q, self.q))
                 self.Tol.value[0,0] = invex_tol
-            if key in ('point_constraints'):
-                self.point_constraints = kwargs[key]
-                # list of { "point": [ 0.0,  1.0], "level": 0.0, "gradient": [ 0.0, 1.0], "curvature": -15.0 }
+                # self.Tol.value = invex_tol * np.eye(self.q)
+            if key == 'points':
+                self.points_to_fit = kwargs[key]
+                continue
+            if key == 'invex':
+                self.invexify = kwargs[key]
                 continue
 
-    def set_points(self, constraints):
-        ''' Sets the point-like constraints for optimization '''
-
-        if isinstance(constraints, list):
-            for constr in constraints:
-                self.set_points(constr)
-
-        if isinstance(constraints, dict):
-            pass
+        self.basic_constraints = [ self.cost_constraint ]
+        if self.invexify:
+            self.basic_constraints.append( self.invex_constraint )
 
     def set_geometry(self, geometry):
 
         ''' Sets a new geometry '''
-        if geometry.shape != (self.p, self.p):
-            raise Exception("Geometry dimensions are not compatible with the kernel.")
-        self.geometry = geometry
-
-        ''' Checks whether geometry is in η-invexifiable class '''
-        N, G, matrix_error = NGN_decomposition(self.n, self.geometry)
-        self.N = sp.linalg.sqrtm(G) @ N
-        if np.linalg.norm(matrix_error) > 1e-8:
-            message = "Geometry is not η-invexifiable.\n" 
-            message += "Setting the geometry dynamic system state to closest η-invexifiable."
-            print(message)
-        else:
-            print("Geometry is invexifiable.")
+        self.N = self.lowrank_decomposition(geometry, verbose=True)
 
         ''' Sets integrator state '''
         self.geo_dynamics.set_state( self.vec( self.N ) )
 
+    def lowrank_decomposition(self, geometry, verbose=False):
+        ''' Performs a low-rank decomposition on given geometry '''
+
+        if geometry.shape != self.geom_shape:
+            raise Exception("Geometry dimensions are not compatible with the kernel.")
+
+        N, G, matrix_error = NGN_decomposition(self.n, geometry)
+        decomp_error = np.linalg.norm(matrix_error)
+
+        if verbose:
+            if decomp_error > 1e-8: print("Geometry is not low-rank.")
+            else: print("Geometry is low-rank.")
+
+        return sp.linalg.sqrtm(G) @ N
+
+    def is_invex(self, verbose=False):
+        ''' Checks if current geometry is invex '''
+
         eigD = np.linalg.eigvals( self.kernel.D( self.N ) )
-        psd = np.all( eigD >= 0.0 )
-        nsd = np.all( eigD <= 0.0 )
-        if psd or nsd: print("Geometry is invex.")
-        else: print("Geometry is not invex.")
+        psd, nsd = np.all( eigD >= 0.0 ), np.all( eigD <= 0.0 )
+        invex = psd or nsd
+
+        if verbose:
+            if invex: print("Geometry is invex.")
+            else: print("Geometry is not invex.")
+
+        return invex
 
     def mat(self, state):
         state = np.array(state)
         if len(state) != self.dynamics_dim:
             raise Exception("State vector has incorrect dimensions.")
-        return state.reshape(self.n, self.p)
+        return state.reshape(self.state_shape)
 
     def vec(self, N):
         N = np.array(N)
-        if N.shape != (self.n, self.p):
+        if N.shape != self.state_shape:
             raise Exception("N has incorrect dimensions.")
         return N.flatten()
 
     def update_geom(self):
 
-        ''' Updates D(N) and ∇D(N) (for invexity constraint) '''
+        ''' Updates D(N) and ∇D(N) (for invexity) '''
         self.D.value = self.kernel.D(self.N)
 
-        D_partials_values = self.kernel.D_partials(self.N)
+        D_diff_values = self.kernel.D_diff(self.N)
         for i,j in itertools.product( range(self.n), range(self.p) ):
-            self.D_partials[i][j].value = D_partials_values[i][j] 
+            self.D_diff[i][j].value = D_diff_values[i][j] 
+
+        '''
+        Updates c(N) and ∇c(N) (for fitting) 
+        For now, only level fitting is implemented.
+        '''
+        self.tcost.value = 0.0
+        self.tcost_diff.value = np.zeros(self.state_shape)
+        for point in self.points_to_fit:
+
+            pt = point["point"]
+            level = point["level"]
+
+            pt_cost, pt_cost_diff = self.level_fitting_cost(pt, level)
+            self.tcost.value += pt_cost
+            self.tcost_diff.value += pt_cost_diff
+
+        # N = len(self.points_to_fit)
+        # self.tcost.value *= 1/N
+        # self.tcost_diff.value *= 1/N
+
+    def level_fitting_cost(self, point, level):
+        ''' 
+        c(N) = 0.5 ( m(x)' N'N m(x) - lvl )² ( fit CLF/CBF level set 'lvl' to point x )
+        '''
+
+        if self.fit_to == None: const = level
+        if self.fit_to == 'clf': const = level**2
+        if self.fit_to == 'cbf': const = 2*level + 1
+
+        m = self.kernel.function(point)
+        error = 0.5 * ( m.T @ self.N.T @ self.N @ m - const )
+
+        cost = 0.5 * error**2
+
+        cost_diff = np.zeros((self.n, self.p))
+        for (i,j) in itertools.product( range(self.n), range(self.p) ):
+            Nm = self.N @ m
+            cost_diff[i,j] = error * Nm[i] * m[j]
+
+        return cost, cost_diff
 
     def find_invex(self):
 
         ''' Defines cvxpy problem '''
-        self.problem = cp.Problem( cp.Minimize( self.cost ), self.invex_constraint )
+        sdpconstraints = self.basic_constraints + self.additional_constraints
+        self.problem = cp.Problem( cp.Minimize( self.sdp_cost ), constraints=sdpconstraints )
 
         ''' Check whether the initial state is closer to the PSD/NSD cone '''
         Dinit = self.kernel.D(self.N)
@@ -1439,8 +1517,28 @@ class InvexProgram():
 
         time.sleep(2.0)
 
-        ''' Starts optimization '''
-        geometry_delta = 1e-3
+        ''' First part of the optimization lowers the cost (invexification == OFF) '''
+        try:
+            self.run_optimization()
+        except KeyboardInterrupt:
+            pass
+
+        print("Cost was lowered... next: invexity!")
+        time.sleep(2.0)
+
+        ''' Second part invexifies, while trying to keep the cost low (invexification == ON) '''
+        self.set_param(invex = True)
+        # self.problem = cp.Problem( cp.Minimize( self.sdp_cost ), constraints=[self.invex_constraint] )
+
+        try:
+            self.run_optimization()
+        except KeyboardInterrupt:
+            print("Interrupted! Code will continue...")
+
+        return self.N.T @ self.N
+
+    def run_optimization(self):
+
         step = 0
         self.running = True
         while self.running:
@@ -1458,27 +1556,110 @@ class InvexProgram():
                 raise Exception("Problem is " + self.problem.status + ".")
             
             ''' Main integration step (update N state with computed U control) '''
-            dt = perf_counter() - tk
+            dt = min( perf_counter() - tk, 1e-1)
             Uflatten = self.U.value.flatten()
             self.geo_dynamics.set_control( Uflatten )
             self.geo_dynamics.actuate(dt)
             self.N = self.mat( self.geo_dynamics.get_state() )
-            geometry = self.N.T @ self.N
 
-            N, G, _ = NGN_decomposition(self.n, geometry)
+            ''' If is optimal, ends optimization '''
+            if self.is_optimal(verbose=True): self.running = False
 
-            eig_geom = np.linalg.eigvals(G)
-            eigD = np.linalg.eigvals(self.kernel.D(self.N))
-            print(f"Step {step}, dt = {dt:.5f}s, control energy = {np.linalg.norm(self.U.value)}, spectra of D(N) = {eigD}, spectra of N'N = {eig_geom}")
+        return step
 
-            stop_criteria = []
-            stop_criteria += [ np.linalg.norm(self.U.value) <= geometry_delta ]
+    def is_optimal(self, verbose=False):
+        ''' Checks if optimization has reached its optimal value '''
+
+        Dvalue = self.kernel.D(self.N)
+        eigD = np.linalg.eigvals(Dvalue)
+
+        MBarrier = self.cone.value*Dvalue - self.Tol.value
+        eigMBarrier = np.linalg.eigvals(MBarrier)
+
+        if verbose:
+            message = f"Control energy = {np.linalg.norm(self.U.value):.5f}, "
+            message += f"total cost = {self.tcost.value:.3f}, "
+            message += f"spectra of MBF = {np.around(np.sort(eigMBarrier),4)}, "
+            message += f"||N|| = {np.linalg.norm(self.N):.3f}, "
+            print(message)
+
+        stop_criteria = []
+        stop_criteria += [ np.linalg.norm(self.U.value) <= 1e-8 ]
+        stop_criteria += [ self.tcost.value <= 100 ]
+        if self.invexify:
+            stop_criteria.pop(-1)
             stop_criteria += [ np.all( self.cone.value*eigD > 0.0 ) ]
+            return any(stop_criteria)
 
-            if all(stop_criteria): self.running = False
+        return any(stop_criteria)
 
-        return self.N.T @ self.N
+    def standard_cost(self, fun, collection: list[dict]):
+        '''
+        Standard scalar psd cost (to be minimized), given by the general expression
 
+        c(N) = 0.5 * Σ_i ei(N)' @ Mi @ ei(N) >= 0 , 
+        ei(N) = F(N) @ vi - Mi^-1 @ wi      , with the following parameters:
+
+        - vi     -> vector / scalar parameter with dimension vi.dim / -
+        - wi     -> vector / scalar parameter with dimension wi.dim / -
+        - Mi > 0 -> symmetric pd matrix / scalar parameter with dimension (wi.dim, wi.dim) / -
+        - F(N)   -> matrix / vector function of N with dimension (wi.dim, vi.dim) / vi.dim
+
+        The ei(N) are vector / scalar error functions, since the minimum of c(N) occurs at ei(N) = 0, i = 0, 1, ...
+        
+        This expression allows for many cost expressions, 
+        ranging from Frobenius norms of matrices to gradient collinearity costs.
+
+        Three distinct types are possible, depending on the shape of F(N):
+            i)  contravariant vector - F(N) is column vector: vi is a scalar, Mi is matrix / 
+            ii) covariant vector     - F(N) is row vector
+            iii) tensor              - F(N) is a matrix
+        The correct dimensions for each case are as indicated above.
+
+        Parameters: - fun -> method implementing f(N) and ∇f(N).
+                    - collection -> list of dicts {"M": Mi, "v": vi, "w": wi } containing the parameters {Mi, vi, wi} for each term of the sum.
+
+        Returns: - c(N)  -> scalar cost function computed at self.N
+                 - ∇c(N) -> array containing the cost function gradients wrt to Nij at self.N, with dimensions (self.n, self.p).
+        '''
+
+        F, F_diff = fun(self.N)
+
+        cost = 0.0
+        cost_diff = np.zeros((self.n, self.p))
+
+        for item in collection:
+
+            Mk, vk, wk = item["M"],item["v"], item["w"]
+
+            ''' Compute cost and gradient '''
+            sqMk = sp.linalg.sqrtm(Mk)
+            if np.linalg.norm(wk) >= 0.0:
+                error_k = sqMk @ ( F @ vk - np.linalg.inv(Mk) @ wk )
+            else:
+                error_k = sqMk @ F @ vk
+            
+            cost += 0.5 * float( ( error_k.T @ Mk @ error_k ).reshape(1,) )
+            
+            for (i,j) in itertools.product( range(self.n), range(self.p) ):
+                cost_diff[i,j] += ( error_k.T @ Mk @ F_diff[i,j] ) @ vk
+
+        return cost, cost_diff
+
+        ''' 
+        F(N) and ∇F(N) matrix / vector valued function used in standard cost expression.
+        The following types of cost functions are supported 
+        and have suitable parametrizations using the standard_cost.
+        
+        1) c(N) = || F(N) - F₀ ||²                 ( minimize Frobenius norm distance from matrix F(N) to 'F₀' )
+        2) c(N) = ( m(x)' N'N m(x) - lvl )²        ( fit CLF/CBF level set 'lvl' to point x )
+        3) c(N) = || ∇f ||² - ( ∇f' n )² ,             
+              f = m(x)' N'N m(x)                   ( fit CLF/CBF gradient direction 'n' to point x )
+        4) c(N) = ( m(x)' S(N,v) m(x) - curv )²    ( fit CLF/CBF curvature 'curv' at direction 'v' to point x )
+
+        ... among others.
+        '''
+    
 class CLBF(KernelQuadratic):
     '''
     Class for kernel-based Control Lyapunov Barrier Functions.

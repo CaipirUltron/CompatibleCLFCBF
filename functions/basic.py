@@ -1,27 +1,19 @@
-import time
 import logging
-import warnings
 import itertools
 import numpy as np
-import scipy as sp
 import sympy as sym
-import cvxpy as cp
 
 import operator
 import contourpy as ctp
-from contourpy.util.mpl_renderer import MplRenderer as Renderer
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
-from math import comb
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from scipy.optimize import minimize
-from shapely import geometry, intersection
 
 from common import *
-from dynamic_systems import Integrator, KernelAffineSystem
+from dynamic_systems import Integrator
 
 def are_all_type( element_list, set_of_types ):
     ''' 
@@ -60,6 +52,13 @@ def mat(vec):
         raise Exception('Input vector does not represent a vectorized square matrix.')
     n = int(n)
     return vec.reshape(n,n).T
+
+@dataclass
+class LeadingShape:
+    ''' Data class for a leading shape (to be used as an approximation tool) '''
+    shape: np.ndarray
+    bound: str = ''
+    approximate: bool = False
 
 class Function(ABC):
     ''' 
@@ -354,13 +353,6 @@ class Gaussian(Function):
         '''
         v = np.array(point) - self.mu
         return - self.c * np.exp( -v.T @ self.Sigma @ v ) * ( self.Sigma - np.outer( self.Sigma @ v, self.Sigma @ v ) )
-
-@dataclass
-class LeadingShape:
-    ''' Data class for a leading shape (to be used as an approximation tool) '''
-    shape: np.ndarray
-    bound: str = ''
-    approximate: bool = False
 
 class MultiPoly:
     '''
