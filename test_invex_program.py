@@ -1,3 +1,4 @@
+import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -23,7 +24,13 @@ kernel_dim = kernel._num_monomials
 q = kernel.dim_det_kernel
 p = kernel._num_monomials
 
-print(f"D(N) = \n{kernel.Dfun_symbolic}")
+print(f"D(N) = \n")
+for (i,j) in itertools.product( range(q), range(q) ):
+    print(f"D{i,j} = {kernel.Dfun_symbolic[i][j]}")
+
+print(f"∇D(N) = \n")
+for (i,j) in itertools.product( range(n), range(p) ):
+    print(f"∇D{i,j} = {kernel.Dfun_symbolic_derivatives[i][j]}")
 
 #---------------------------- Define some points for fitting ---------------------------
 box_center = [ 0.0, 2.0 ]
