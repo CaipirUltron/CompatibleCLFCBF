@@ -17,6 +17,7 @@ import cvxpy as cp
 import contourpy as ctp
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import platform, os
 
 class QuadraticLyapunov(Quadratic):
     '''
@@ -1280,7 +1281,7 @@ class InvexProgram():
         self._init_optimization()
 
         ''' Default parameters '''
-        self.invexify = False
+        self.opmode = 'costinvex'                               # options = { 'cost', 'invex' }
         self.fit_to = None
         self.points_to_fit = []
         '''
@@ -1291,6 +1292,8 @@ class InvexProgram():
             self.sdp_params_cvxpy[sdp_param].value = 1.0
 
         self.Tol.value = np.zeros((self.q, self.q))
+        self.vecTol.value = np.zeros(self.q)
+        self.invex_mode = 'eigen'                          # options = { 'matrix', 'eigen' }
 
         default_geometry = kernel_quadratic(np.ones(self.n), np.eye(self.n), np.zeros(self.n), self.p)
         self.set_geometry( default_geometry )
@@ -1330,6 +1333,9 @@ class InvexProgram():
         -> This constraint is the STAR of the party! If it works, 
         it will allow for a search in the space of invex functions. 
         '''
+        invex_gain = self.sdp_params_cvxpy["invex_gain"]
+
+        # ----------------------- For Matrix Barrier Function ------------------------
         self.cone = cp.Parameter()                                          # +1/-1 for PSD/NSD cones, respectively
         self.D = cp.Parameter( self.invex_shape )
         self.Tol = cp.Parameter( self.invex_shape, PSD=True )
@@ -1342,9 +1348,21 @@ class InvexProgram():
 
         M = self.cone * self.D - self.Tol
         Mdot = self.cone * Ddot
-        
-        invex_gain = self.sdp_params_cvxpy["invex_gain"]
-        self.invex_constraint = Mdot + invex_gain * M >> 0
+        self.matrix_invex_constraint = Mdot + invex_gain * M >> 0
+
+        # ----------------------- For Vector Barrier Function ------------------------
+        self.vecTol = cp.Parameter( self.q )
+        self.lambdaD = cp.Parameter( self.q )
+        self.lambdaD_diff = [ [ cp.Parameter( self.q ) for _ in range(self.p) ] for _ in range(self.n) ]
+
+        lambdaDdot = 0
+        for i, gradlambdaD_line in enumerate(self.lambdaD_diff):
+            for j, gradlambdaD in enumerate(gradlambdaD_line):
+                lambdaDdot += gradlambdaD * self.U[i][j]
+
+        vecBarrier = self.cone * self.lambdaD - self.vecTol
+        vecBarrierDot = self.cone * lambdaDdot
+        self.vector_invex_constraint = vecBarrierDot + invex_gain * vecBarrier >= 0
 
         ''' 
         Define scalar constraint for minimization of total cost 
@@ -1385,17 +1403,39 @@ class InvexProgram():
                 invex_tol = kwargs[key]
                 self.Tol.value = np.zeros((self.q, self.q))
                 self.Tol.value[0,0] = invex_tol
+                self.vecTol.value = invex_tol*np.ones(self.q)
                 # self.Tol.value = invex_tol * np.eye(self.q)
             if key == 'points':
                 self.points_to_fit = kwargs[key]
                 continue
-            if key == 'invex':
-                self.invexify = kwargs[key]
+            if key == 'mode':
+                self.opmode = ''
+                for t in kwargs[key]:
+                    self.opmode += t       # ('cost','invex')
+                continue
+            if key == 'invex_mode':
+                self.invex_mode = kwargs[key]
                 continue
 
-        self.basic_constraints = [ self.cost_constraint ]
-        if self.invexify:
-            self.basic_constraints.append( self.invex_constraint )
+        self.basic_constraints = []
+        if 'cost' in self.opmode:
+            self.basic_constraints.append(self.cost_constraint)
+            print("Cost minimization is ON.")
+        else:
+            print("Cost minimization is OFF.")
+
+        if 'invex' in self.opmode:
+            if self.invex_mode == 'matrix':
+                print("MBF-based invexification is ON.")
+                self.basic_constraints.append( self.matrix_invex_constraint )
+            if self.invex_mode == 'eigen':
+                print("Eigen-based invexification is ON.")
+                self.basic_constraints.append( self.vector_invex_constraint )
+        else:
+            print("Invexification is OFF.")
+
+        ''' Sets up the problem '''
+        self.problem = cp.Problem( cp.Minimize( self.sdp_cost ), constraints=self.basic_constraints )
 
     def set_geometry(self, geometry):
 
@@ -1447,18 +1487,49 @@ class InvexProgram():
 
     def update_geom(self):
 
-        ''' Updates D(N) and ∇D(N) (for invexity) '''
-        self.D.value = self.kernel.D(self.N)
+        ''' Updates D(N) and ∇D(N) (for MBF-based invexity) '''
+        if self.invex_mode == 'matrix':
 
-        D_diff_values = self.kernel.D_diff(self.N)
-        for i,j in itertools.product( range(self.n), range(self.p) ):
-            self.D_diff[i][j].value = D_diff_values[i][j] 
+            self.D.value, D_diff = self.invex_barrier()
+            for i,j in itertools.product( range(self.n), range(self.p) ):
+                self.D_diff[i][j].value = D_diff[i][j]
+
+        ''' Updates λ(D)(N) and ∇λ(D)(N) (for eigen-based invexity) '''
+        if self.invex_mode == 'eigen':
+
+            self.lambdaD.value, lambdaD_diff = self.invex_barrier()
+            for i,j in itertools.product( range(self.n), range(self.p) ):
+                self.lambdaD_diff[i][j].value = lambdaD_diff[i][j]
 
         '''
         Updates c(N) and ∇c(N) (for fitting many points) 
         For now, only level fitting is fully implemented.
         '''
         self.tcost.value, self.tcost_diff.value = self.fitting_cost()
+
+    def invex_barrier(self):
+        '''
+        Returns: (i)  D(self.N), ∇D(self.N)_ij (matrices), if option == 'matrix'
+                 (ii) λ(D)(self.N), ∇λ(self.N)_ij (vectors), if option == 'eigen'
+        '''
+        D = self.kernel.D(self.N)
+        D_diff = self.kernel.D_diff(self.N)
+
+        if self.invex_mode == 'matrix': 
+            return D, D_diff
+
+        if self.invex_mode == 'eigen': 
+
+            eigvals, eigvecs = np.linalg.eig(D)
+            lambdaD = np.zeros(self.q)
+            lambdaD_diff = [ [ np.zeros(self.q) for _ in range(self.p) ] for _ in range(self.n) ]
+            for k, eigD in enumerate(eigvals):
+                v = eigvecs[:,k]
+                lambdaD[k] = eigD
+                for i,j in itertools.product( range(self.n), range(self.p) ):
+                    lambdaD_diff[i][j][k] = v.T @ D_diff[i][j] @ v
+            
+            return lambdaD, lambdaD_diff
 
     def fitting_cost(self):
         ''' 
@@ -1481,10 +1552,14 @@ class InvexProgram():
                 pt_cost, pt_cost_diff = self.level_cost(pt, level)
                 cost += pt_cost
                 cost_diff += pt_cost_diff
-            
+
             if "gradient" in keys:
                 direction = point["gradient"]
-                pt_cost, pt_cost_diff = self.gradient_cost(pt, direction)
+                if "norm" in keys:
+                    norm = point["norm"]
+                    pt_cost, pt_cost_diff = self.gradient_cost(pt, direction, norm)
+                else:
+                    pt_cost, pt_cost_diff = self.gradient_cost(pt, direction)
                 cost += pt_cost
                 cost_diff += pt_cost_diff
             
@@ -1519,20 +1594,22 @@ class InvexProgram():
 
         return cost, cost_diff
 
-    def gradient_cost(self, point, direction):
+    def gradient_cost(self, point, direction, norm=1.0):
         '''
-        Cost for fitting the gradient on a point to a particular direction unit n.
-        c(N) = || ∇f ||² - ( ∇f' n )²
+        Cost for fitting the gradient norm on a point to a particular value.
+        c(N) = || ∇f ||² - norm²
         TO BE IMPLEMENTED
         '''
-        direction = np.array(direction)
-        normalized = direction/np.linalg.norm(direction)
-
         m = self.kernel.function(point)
         Jm = self.kernel.jacobian(point)
 
         gradient = Jm.T @ self.N.T @ self.N @ m
-        cost = np.linalg.norm(gradient)**2 - ( gradient.T @ normalized )**2
+        grad_norm = norm
+        normalized = direction/np.linalg.norm(direction)
+
+        grad_error = gradient - grad_norm * normalized
+
+        cost = grad_error.T @ grad_error
         cost_diff = np.zeros(self.state_shape)
 
         return cost, cost_diff
@@ -1546,15 +1623,10 @@ class InvexProgram():
         '''
         return 0.0, np.zeros(self.state_shape)
 
-    def find_invex(self):
-
-        ''' Defines cvxpy problem '''
-        sdpconstraints = self.basic_constraints + self.additional_constraints
-        self.problem = cp.Problem( cp.Minimize( self.sdp_cost ), constraints=sdpconstraints )
+    def solve_program(self):
 
         ''' Check whether the initial state is closer to the PSD/NSD cone '''
         Dinit = self.kernel.D(self.N)
-        print(f"Initial spectra of D(N) = {np.linalg.eigvals(Dinit)}")
 
         dist_to_psd = np.linalg.norm( PSD_closest(Dinit) - Dinit )
         dist_to_nsd = np.linalg.norm( NSD_closest(Dinit) - Dinit )
@@ -1564,21 +1636,15 @@ class InvexProgram():
         else: 
             self.cone.value = -1
             print(f"D(N) -> NSD cone")
-
-        time.sleep(2.0)
-
-        ''' First part of the optimization lowers the cost (invexification == OFF) '''
+     
+        self.set_param(mode='cost')
         try:
             self.run_optimization()
         except KeyboardInterrupt:
             pass
 
-        print("Cost was lowered... next: invexity!")
+        self.set_param(mode='invexcost')
         time.sleep(2.0)
-
-        ''' Second part invexifies, while trying to keep the cost low (invexification == ON) '''
-        self.set_param(invex = True)
-        # self.problem = cp.Problem( cp.Minimize( self.sdp_cost ), constraints=[self.invex_constraint] )
 
         try:
             self.run_optimization()
@@ -1623,23 +1689,23 @@ class InvexProgram():
         Dvalue = self.kernel.D(self.N)
         eigD = np.linalg.eigvals(Dvalue)
 
-        MBarrier = self.cone.value*Dvalue - self.Tol.value
-        eigMBarrier = np.linalg.eigvals(MBarrier)
-
         if verbose:
+            if platform.system().lower() != 'windows':
+                os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
             message = f"Control energy = {np.linalg.norm(self.U.value):.5f}, "
             message += f"total cost = {self.tcost.value:.3f}, "
-            message += f"spectra of MBF = {np.around(np.sort(eigMBarrier),4)}, "
+            message += f"spectra of D(N) = {np.around(np.sort(eigD),3)}, "
             message += f"||N|| = {np.linalg.norm(self.N):.3f}, "
             print(message)
 
         stop_criteria = []
-        stop_criteria += [ np.linalg.norm(self.U.value) <= 1e-8 ]
-        stop_criteria += [ self.tcost.value <= 100 ]
-        if self.invexify:
-            stop_criteria.pop(-1)
-            stop_criteria += [ np.all( self.cone.value*eigD > 0.0 ) ]
-            return any(stop_criteria)
+        stop_criteria += [ np.linalg.norm(self.U.value) <= 1e-6 ]
+
+        # if 'invex' in self.opmode:
+        #     stop_criteria += [ np.all( eigD >= 0.0 ) or np.all( eigD <= 0.0 ) ]
+
+        # if 'cost' in self.opmode:
+        #     stop_criteria += [ self.tcost.value <= 1e-1 ]
 
         return any(stop_criteria)
 

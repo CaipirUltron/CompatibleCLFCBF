@@ -42,12 +42,12 @@ points = [ {"point": box_center, "level": -0.5} ]
 for pt in boundary_pts:
     coords = np.array(pt)
     ax.plot(coords[0], coords[1], 'k*', alpha=0.6)
-    points.append({"point": pt, "level": 0.0})
+    # points.append({"point": pt, "level": 0.0})
 
 #------------------------------------- Compute invex -----------------------------------
-N = 0.1*np.random.randn(p,p)
-invex_program = InvexProgram(kernel, fit_to = 'cbf', points=points, initial_shape = N.T @ N, barrier_gain = 100, invex_tol=1e-1)
-Q = invex_program.find_invex()
+N = 0.5*np.random.randn(p,p)
+invex_program = InvexProgram(kernel, fit_to='cbf', points=points, initial_shape = N.T @ N, barrier_gain = 10, invex_tol=1e-1)
+Q = invex_program.solve_program()
 
 cbf = KernelBarrier(kernel=kernel, Q=Q, limits=limits, spacing=0.2 )
 
