@@ -1025,6 +1025,8 @@ class KernelQuadratic(Function):
         Adds point-like constraints to optimization problem.
         Parameter: point = { "coords": ArrayLike, "level": float >= -self.constant, "gradient": ArrayLike, "curvature" : float }
         '''
+        from .control import KernelLyapunov
+
         keys = point.keys()
 
         if "coords" not in keys: raise Exception("Point coordinates must be specified.")

@@ -9,8 +9,6 @@ from shapely import geometry, intersection
 from contourpy.util.mpl_renderer import MplRenderer as Renderer
 from dynamic_systems import Integrator, KernelAffineSystem
 
-import sys
-import signal
 import warnings
 import itertools
 import numpy as np
@@ -1457,27 +1455,52 @@ class InvexProgram():
             self.D_diff[i][j].value = D_diff_values[i][j] 
 
         '''
-        Updates c(N) and ∇c(N) (for fitting) 
-        For now, only level fitting is implemented.
+        Updates c(N) and ∇c(N) (for fitting many points) 
+        For now, only level fitting is fully implemented.
         '''
-        self.tcost.value = 0.0
-        self.tcost_diff.value = np.zeros(self.state_shape)
+        self.tcost.value, self.tcost_diff.value = self.fitting_cost()
+
+    def fitting_cost(self):
+        ''' 
+        Total fitting cost: c(N) = Σ_i ci(N)
+        '''
+        cost = 0.0
+        cost_diff = np.zeros(self.state_shape)
+
         for point in self.points_to_fit:
 
+            keys = point.keys()
+
+            if "point" not in keys: 
+                raise Exception("Point coordinates must be specified.")
+
             pt = point["point"]
-            level = point["level"]
 
-            pt_cost, pt_cost_diff = self.level_fitting_cost(pt, level)
-            self.tcost.value += pt_cost
-            self.tcost_diff.value += pt_cost_diff
+            if "level" in keys:
+                level = point["level"]
+                pt_cost, pt_cost_diff = self.level_cost(pt, level)
+                cost += pt_cost
+                cost_diff += pt_cost_diff
+            
+            if "gradient" in keys:
+                direction = point["gradient"]
+                pt_cost, pt_cost_diff = self.gradient_cost(pt, direction)
+                cost += pt_cost
+                cost_diff += pt_cost_diff
+            
+            if "curvature" in keys:
+                direction = point["gradient"]
+                curvature = point["curvature"]
+                pt_cost, pt_cost_diff = self.curvature_cost(pt, direction, curvature)
+                cost += pt_cost
+                cost_diff += pt_cost_diff
+ 
+        return cost, cost_diff
 
-        # N = len(self.points_to_fit)
-        # self.tcost.value *= 1/N
-        # self.tcost_diff.value *= 1/N
-
-    def level_fitting_cost(self, point, level):
-        ''' 
-        c(N) = 0.5 ( m(x)' N'N m(x) - lvl )² ( fit CLF/CBF level set 'lvl' to point x )
+    def level_cost(self, point, level):
+        '''
+        Cost for fitting a point to a particular level set.
+        c(N) = 0.5 ( m(x)' N'N m(x) - lvl )²
         '''
 
         if self.fit_to == None: const = level
@@ -1495,6 +1518,33 @@ class InvexProgram():
             cost_diff[i,j] = error * Nm[i] * m[j]
 
         return cost, cost_diff
+
+    def gradient_cost(self, point, direction):
+        '''
+        Cost for fitting the gradient on a point to a particular direction unit n.
+        c(N) = || ∇f ||² - ( ∇f' n )²
+        TO BE IMPLEMENTED
+        '''
+        direction = np.array(direction)
+        normalized = direction/np.linalg.norm(direction)
+
+        m = self.kernel.function(point)
+        Jm = self.kernel.jacobian(point)
+
+        gradient = Jm.T @ self.N.T @ self.N @ m
+        cost = np.linalg.norm(gradient)**2 - ( gradient.T @ normalized )**2
+        cost_diff = np.zeros(self.state_shape)
+
+        return cost, cost_diff
+
+    def curvature_cost(self, point, gradient, curv):
+        '''
+        Cost for fitting the value of the directional curvature on a point along a 
+        particular perpendicular direction to the gradient.
+        c(N) = ( m(x)' S(N,v) m(x) - curv )²    ( fit CLF/CBF curvature 'curv' at direction 'v' to point x )
+        TO BE IMPLEMENTED
+        '''
+        return 0.0, np.zeros(self.state_shape)
 
     def find_invex(self):
 
