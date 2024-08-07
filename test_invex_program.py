@@ -24,13 +24,13 @@ kernel_dim = kernel._num_monomials
 q = kernel.dim_det_kernel
 p = kernel._num_monomials
 
-print(f"D(N) = \n")
-for (i,j) in itertools.product( range(q), range(q) ):
-    print(f"D{i,j} = {kernel.Dfun_symbolic[i][j]}")
+# print(f"D(N) = \n")
+# for (i,j) in itertools.product( range(q), range(q) ):
+#     print(f"D{i,j} = {kernel.Dfun_symbolic[i][j]}")
 
-print(f"∇D(N) = \n")
-for (i,j) in itertools.product( range(n), range(p) ):
-    print(f"∇D{i,j} = {kernel.Dfun_symbolic_derivatives[i][j]}")
+# print(f"∇D(N) = \n")
+# for (i,j) in itertools.product( range(n), range(p) ):
+#     print(f"∇D{i,j} = {kernel.Dfun_symbolic_derivatives[i][j]}")
 
 #---------------------------- Define some points for fitting ---------------------------
 box_center = [ 0.0, 2.0 ]
@@ -42,11 +42,10 @@ points = [ {"point": box_center, "level": -0.5} ]
 for pt in boundary_pts:
     coords = np.array(pt)
     ax.plot(coords[0], coords[1], 'k*', alpha=0.6)
-    # points.append({"point": pt, "level": 0.0})
+    points.append({"point": pt, "level": 0.0})
 
 #------------------------------------- Compute invex -----------------------------------
-N = 0.5*np.random.randn(p,p)
-invex_program = InvexProgram(kernel, fit_to='cbf', points=points, initial_shape = N.T @ N, barrier_gain = 10, invex_tol=1e-1)
+invex_program = InvexProgram(kernel, fit_to='cbf', points=points, center=box_center, barrier_gain = 10, invex_tol=0e-2, mode='invexcost')
 Q = invex_program.solve_program()
 
 cbf = KernelBarrier(kernel=kernel, Q=Q, limits=limits, spacing=0.2 )

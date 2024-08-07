@@ -1291,12 +1291,10 @@ class InvexProgram():
         for sdp_param in ('slack_gain', 'invex_gain', 'cost_gain', 'barrier_gain'):
             self.sdp_params_cvxpy[sdp_param].value = 1.0
 
+        self.m_center.value = self.kernel.function( np.zeros(self.n) )
         self.Tol.value = np.zeros((self.q, self.q))
         self.vecTol.value = np.zeros(self.q)
         self.invex_mode = 'eigen'                          # options = { 'matrix', 'eigen' }
-
-        default_geometry = kernel_quadratic(np.ones(self.n), np.eye(self.n), np.zeros(self.n), self.p)
-        self.set_geometry( default_geometry )
 
         ''' Customize parameters '''
         self.set_param(**kwargs)
@@ -1329,9 +1327,10 @@ class InvexProgram():
         self.slack = cp.Variable(1)
 
         ''' 
-        Define invexity LMI constraint (Matrix Barrier Function) 
-        -> This constraint is the STAR of the party! If it works, 
-        it will allow for a search in the space of invex functions. 
+        Define invexity constraint 
+        (either a Matrix Barrier Function or regular barrier with the eigenvalues)
+        -> This constraint is the STAR of the party! 
+        If it works, it will allow for a search in the space of invex functions.
         '''
         invex_gain = self.sdp_params_cvxpy["invex_gain"]
 
@@ -1364,6 +1363,10 @@ class InvexProgram():
         vecBarrierDot = self.cone * lambdaDdot
         self.vector_invex_constraint = vecBarrierDot + invex_gain * vecBarrier >= 0
 
+        # ------------------------------ Fixing the center (UPDATE: results in unfeasible problem) ---------------------------
+        self.m_center = cp.Parameter( self.p )
+        self.center_constraint = self.U @ self.m_center == 0
+
         ''' 
         Define scalar constraint for minimization of total cost 
         (Control Lyapunov Function). This constraint allows for 
@@ -1382,9 +1385,35 @@ class InvexProgram():
         # ----------------------- Define the SDP cost (minimizing the energy of geometry dynamics) ---------------------------
         slack_gain = self.sdp_params_cvxpy["slack_gain"]
         self.sdp_cost = cp.norm(self.U,'fro') + slack_gain * (self.slack)**2
-            
-        self.additional_constraints = []
-        self.fitting_constraints = []
+
+    def _init_geometry(self):
+        ''' Computes the initial geometry as any N satisfying N m(xc) = 0 '''
+
+        m_c = self.m_center.value
+        Null = sp.linalg.null_space( m_c.reshape(1,-1) )
+        # sumNull = np.sum(Null, axis=1)
+
+        self.N = np.zeros(self.state_shape)
+        for n in Null.T:
+            dim = np.random.randint(self.n)
+            self.N[dim,:] += n
+
+        D = self.kernel.D(self.N)
+        eigD = np.linalg.eigvals(D)
+        print(f"Initial λ(D)(N) = {eigD}")
+
+        ''' Checks whether the initial state is closer to the PSD/NSD cone '''
+        dist_to_psd = np.linalg.norm( PSD_closest(D) - D )
+        dist_to_nsd = np.linalg.norm( NSD_closest(D) - D )
+        if dist_to_psd <= dist_to_nsd: 
+            self.cone.value = +1
+            print(f"D(N) -> PSD cone")
+        else: 
+            self.cone.value = -1
+            print(f"D(N) -> NSD cone")
+
+        ''' Sets integrator state '''
+        self.geo_dynamics.set_state( self.vec( self.N ) )
 
     def set_param(self, **kwargs):
         
@@ -1392,9 +1421,6 @@ class InvexProgram():
             key = key.lower()
             if key == 'fit_to':
                 self.fit_to = kwargs[key]
-                continue
-            if key == 'initial_shape':
-                self.set_geometry(kwargs[key])
                 continue
             if key in ('slack_gain', 'invex_gain', 'cost_gain', 'barrier_gain'):
                 self.sdp_params_cvxpy[key].value = kwargs[key]
@@ -1404,25 +1430,27 @@ class InvexProgram():
                 self.Tol.value = np.zeros((self.q, self.q))
                 self.Tol.value[0,0] = invex_tol
                 self.vecTol.value = invex_tol*np.ones(self.q)
-                # self.Tol.value = invex_tol * np.eye(self.q)
+            if key == 'center':
+                center = kwargs[key]
+                self.m_center.value = self.kernel.function(center)
+                self._init_geometry()
+                continue
             if key == 'points':
                 self.points_to_fit = kwargs[key]
                 continue
             if key == 'mode':
                 self.opmode = ''
                 for t in kwargs[key]:
-                    self.opmode += t       # ('cost','invex')
+                    self.opmode += t       # ('cost','invex','center')
                 continue
             if key == 'invex_mode':
                 self.invex_mode = kwargs[key]
                 continue
 
+        ''' Sets up the problem accordingly '''
+
         self.basic_constraints = []
-        if 'cost' in self.opmode:
-            self.basic_constraints.append(self.cost_constraint)
-            print("Cost minimization is ON.")
-        else:
-            print("Cost minimization is OFF.")
+        self.basic_constraints.append(self.center_constraint)
 
         if 'invex' in self.opmode:
             if self.invex_mode == 'matrix':
@@ -1434,31 +1462,15 @@ class InvexProgram():
         else:
             print("Invexification is OFF.")
 
-        ''' Sets up the problem '''
+        if 'cost' in self.opmode:
+            self.basic_constraints.append(self.cost_constraint)
+            n_pts = len(self.points_to_fit)
+            print(f"Cost minimization is ON, fitting {n_pts} points.")
+        else:
+            print("Cost minimization is OFF.")
+
+        print("\n")
         self.problem = cp.Problem( cp.Minimize( self.sdp_cost ), constraints=self.basic_constraints )
-
-    def set_geometry(self, geometry):
-
-        ''' Sets a new geometry '''
-        self.N = self.lowrank_decomposition(geometry, verbose=True)
-
-        ''' Sets integrator state '''
-        self.geo_dynamics.set_state( self.vec( self.N ) )
-
-    def lowrank_decomposition(self, geometry, verbose=False):
-        ''' Performs a low-rank decomposition on given geometry '''
-
-        if geometry.shape != self.geom_shape:
-            raise Exception("Geometry dimensions are not compatible with the kernel.")
-
-        N, G, matrix_error = NGN_decomposition(self.n, geometry)
-        decomp_error = np.linalg.norm(matrix_error)
-
-        if verbose:
-            if decomp_error > 1e-8: print("Geometry is not low-rank.")
-            else: print("Geometry is low-rank.")
-
-        return sp.linalg.sqrtm(G) @ N
 
     def is_invex(self, verbose=False):
         ''' Checks if current geometry is invex '''
@@ -1623,33 +1635,20 @@ class InvexProgram():
         '''
         return 0.0, np.zeros(self.state_shape)
 
-    def solve_program(self):
+    def solve_program(self):    
 
-        ''' Check whether the initial state is closer to the PSD/NSD cone '''
-        Dinit = self.kernel.D(self.N)
-
-        dist_to_psd = np.linalg.norm( PSD_closest(Dinit) - Dinit )
-        dist_to_nsd = np.linalg.norm( NSD_closest(Dinit) - Dinit )
-        if dist_to_psd <= dist_to_nsd: 
-            self.cone.value = +1
-            print(f"D(N) -> PSD cone")
-        else: 
-            self.cone.value = -1
-            print(f"D(N) -> NSD cone")
-     
-        self.set_param(mode='cost')
         try:
             self.run_optimization()
         except KeyboardInterrupt:
             pass
 
-        self.set_param(mode='invexcost')
-        time.sleep(2.0)
+        # self.set_param(mode='invexcost')
+        # time.sleep(2.0)
 
-        try:
-            self.run_optimization()
-        except KeyboardInterrupt:
-            print("Interrupted! Code will continue...")
+        # try:
+        #     self.run_optimization()
+        # except KeyboardInterrupt:
+        #     pass
 
         return self.N.T @ self.N
 
@@ -1666,7 +1665,7 @@ class InvexProgram():
             self.update_geom()
 
             ''' Find U control (solve SDP with current N) '''
-            self.problem.solve(verbose=False)
+            self.problem.solve(verbose=False, solver=cp.ECOS)
             if "optimal" not in self.problem.status:
                 self.running = False
                 raise Exception("Problem is " + self.problem.status + ".")
@@ -1694,7 +1693,7 @@ class InvexProgram():
                 os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
             message = f"Control energy = {np.linalg.norm(self.U.value):.5f}, "
             message += f"total cost = {self.tcost.value:.3f}, "
-            message += f"spectra of D(N) = {np.around(np.sort(eigD),3)}, "
+            message += f"λ(D)(N) = {np.around(np.sort(eigD),3)}, "
             message += f"||N|| = {np.linalg.norm(self.N):.3f}, "
             print(message)
 
