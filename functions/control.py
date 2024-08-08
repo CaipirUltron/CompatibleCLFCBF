@@ -3,7 +3,7 @@ from .basic import Quadratic
 from .kernel import Kernel, KernelQuadratic
 
 from time import perf_counter
-from scipy.optimize import minimize
+from scipy.optimize import minimize, LinearConstraint, NonlinearConstraint
 from shapely import geometry, intersection
 
 from contourpy.util.mpl_renderer import MplRenderer as Renderer
@@ -1291,7 +1291,8 @@ class InvexProgram():
         for sdp_param in ('slack_gain', 'invex_gain', 'cost_gain'):
             self.sdp_params_cvxpy[sdp_param].value = 1.0
 
-        self.m_center.value = self.kernel.function( np.zeros(self.n) )
+        self.center = np.zeros(self.n)
+        self.m_center.value = self.kernel.function( self.center )
         self.Tol.value = np.zeros((self.q, self.q))
         self.vecTol.value = np.zeros(self.q)
         self.invex_mode = 'eigen'                          # options = { 'matrix', 'eigen' }
@@ -1362,7 +1363,7 @@ class InvexProgram():
         vecBarrierDot = self.cone * lambdaDdot
         self.vector_invex_constraint = vecBarrierDot + invex_gain * vecBarrier >= 0
 
-        # ------------------------------ Fixing the center (UPDATE: results in unfeasible problem) ---------------------------
+        # --------------------------- Fixing the center ------------------------------
         self.m_center = cp.Parameter( self.p )
         self.center_constraint = self.U @ self.m_center == 0
 
@@ -1385,22 +1386,32 @@ class InvexProgram():
         slack_gain = self.sdp_params_cvxpy["slack_gain"]
         self.sdp_cost = cp.norm(self.U,'fro') + slack_gain * (self.slack)**2
 
+        self.best_result = { "cost": np.inf, "invex_gap": np.inf, "control_energy": np.inf, "N": np.zeros(self.state_shape) }
+
     def _init_geometry(self):
         ''' Computes the initial geometry as any N satisfying N m(xc) = 0 '''
 
-        m_c = self.m_center.value
-        Null = sp.linalg.null_space( m_c.reshape(1,-1) )
-        # sumNull = np.sum(Null, axis=1)
+        mc = self.m_center.value
+        Null = sp.linalg.null_space( mc.reshape(1,-1) )
 
         ''' Testing with random sums of orthogonal vectors on each row dimension of N '''
         self.N = np.zeros(self.state_shape)
-        for n in Null.T:
-            dim = np.random.randint(self.n)
-            self.N[dim,:] += n
+        dim = 0
+        for perp_mc in Null.T:
+            # dim = np.random.randint(self.n)
+            if dim >= self.n: break
+            self.N[dim,:] += 1.0*perp_mc
+            dim += 1
+
+        # sumNull = np.sum(Null, axis=1)
+        # for i in range(self.n):
+        #     self.N[i,:] = sumNull
+
+        eigP = np.real(np.linalg.eigvals(self.N.T @ self.N))
+        index, = np.where( eigP > 1e-3 )
+        print(f"Initial λ(N'N) = {eigP[index]}")
 
         D = self.kernel.D(self.N)
-        eigD = np.linalg.eigvals(D)
-        print(f"Initial λ(D)(N) = {eigD}")
 
         ''' Checks whether the initial state is closer to the PSD/NSD cone '''
         dist_to_psd = np.linalg.norm( PSD_closest(D) - D )
@@ -1408,9 +1419,11 @@ class InvexProgram():
         if dist_to_psd <= dist_to_nsd: 
             self.cone.value = +1
             print(f"D(N) -> PSD cone")
+            print(f"Initial distance to PSD cone = {dist_to_psd}")
         else: 
             self.cone.value = -1
             print(f"D(N) -> NSD cone")
+            print(f"Initial distance to NSD cone = {dist_to_nsd}")
 
         ''' Sets integrator state '''
         self.geo_dynamics.set_state( self.vec( self.N ) )
@@ -1432,8 +1445,8 @@ class InvexProgram():
                 self.vecTol.value = invex_tol*np.ones(self.q)
                 continue
             if key == 'center':
-                center = kwargs[key]
-                self.m_center.value = self.kernel.function(center)
+                self.center = kwargs[key]
+                self.m_center.value = self.kernel.function(self.center)
                 self._init_geometry()
                 continue
             if key == 'points':
@@ -1658,14 +1671,15 @@ class InvexProgram():
             Uflatten = self.U.value.flatten()
             self.geo_dynamics.set_control( Uflatten )
 
-            dt = min( perf_counter() - tk, 1e-1)
+            # dt = min( perf_counter() - tk, 5e-1)
+            dt = 1e-1
             self.geo_dynamics.actuate(dt)
             self.N = self.mat( self.geo_dynamics.get_state() )
 
             ''' If is optimal, ends optimization '''
             if self.is_optimal(verbose=True): self.running = False
 
-        return step
+        return self.best_result["N"]
 
     def run_standard_opt(self, verbose=False):
         ''' Run standard optimization '''
@@ -1676,42 +1690,57 @@ class InvexProgram():
             cost, cost_diff = self.fitting_cost()
             return (cost, cost_diff)
         
-        def invexity(var):
+        def invexity_barrier(var):
             self.N = self.mat(var)
 
-            D = self.kernel.D(self.N)
-            lambdaD = np.linalg.eigvals(D)
+            lambdaD, lambdaD_diff = self.invex_barrier()
             barrier = self.cone.value * lambdaD - self.vecTol.value
             return barrier
 
-        def center(var):
+        def invexity_jac(var):
             self.N = self.mat(var)
-            return self.N @ self.m_center.value
 
-        def callback(res):
+            lambdaD, lambdaD_diff = self.invex_barrier()
+            lambdaD_jac = np.rollaxis( np.array(lambdaD_diff), 2, 0 ).reshape( self.q, self.dynamics_dim )
+            barrier_jac = self.cone.value * lambdaD_jac
 
-            N = self.mat(res)
+            return barrier_jac
+        
+        ''' 
+        This method computes the matrix A(xc) for the linear constraint 
+        A(xc) vec(N) == 0, equivalent to N m(xc) = 0 (the center constraint)'''
+        def get_A(center):
+            mc = np.array(self.kernel.function(center))
+            A = sp.linalg.block_diag(*[ mc for _ in range(self.n) ])
+            return A
+
+        def show_message(var):
+
+            N = self.mat(var)
             D = self.kernel.D(N)
             eigD = np.linalg.eigvals(D)
 
             if verbose:
                 if platform.system().lower() != 'windows':
                     os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
-                message = ''
-                cost_val, cost_diff_val = cost(res)
-                message += f"Total cost = {cost_val:.3f}, "
+                cost_val, cost_diff_val = cost(var)
+                message = f"Total cost = {cost_val:.3f}, "
                 message += f"λ(D)(N) = {np.sort(eigD)}, "
                 message += f"||N|| = {np.linalg.norm(N):.3f}, "
                 print(message)
 
-        constraints = []
-        constraints += [ {"type": "ineq", "fun": invexity} ]
-        constraints += [ {"type": "eq", "fun": center} ]
+        center_constr = LinearConstraint(get_A(self.center), lb=0.0, ub=0.0)
+        invexity_constr = NonlinearConstraint(invexity_barrier, lb=0.0, ub=np.inf, jac=invexity_jac)
+        
+        constraints = [ center_constr, invexity_constr ]
 
         init_var = self.vec(self.N)
-        sol = minimize( cost, init_var, constraints=constraints, jac=True, callback=callback, options={"disp": True, "maxiter": 5000} )
-        self.N = self.mat( sol.x )
-        return sol.message
+        sol = minimize( cost, init_var, constraints=constraints, method='SLSQP', jac=True, callback=show_message, 
+                        options={"disp": True, 'ftol': 1e-5, 'maxiter': 1000} )
+        N = self.mat( sol.x )
+        show_message(sol.x)
+
+        return N
 
     def solve_program(self):    
 
@@ -1725,7 +1754,7 @@ class InvexProgram():
         time.sleep(1.0)
 
         try:
-            print( self.run_standard_opt(verbose=True) )
+            self.run_standard_opt(verbose=True)
         except KeyboardInterrupt:
             pass
 
@@ -1735,25 +1764,44 @@ class InvexProgram():
         ''' Checks if optimization has reached its optimal value '''
 
         Dvalue = self.kernel.D(self.N)
-        eigD = np.linalg.eigvals(Dvalue)
+
+        curr_cost = self.tcost.value
+        c = self.cone.value
+        curr_invex_gap = np.linalg.norm( PSD_closest(c*Dvalue) - c*Dvalue )
+        curr_ctrl_energy = np.linalg.norm( self.U.value )
+
+        cost_decreased = False
+        if curr_cost < self.best_result["cost"]:
+            self.best_result["cost"] = curr_cost
+            cost_decreased = True
+
+        invex_gap_decreased = False
+        if curr_invex_gap < self.best_result["invex_gap"]:
+            self.best_result["invex_gap"] = curr_invex_gap
+            invex_gap_decreased = True
+
+        if curr_ctrl_energy < self.best_result["control_energy"]:
+            self.best_result["control_energy"] = curr_ctrl_energy
+
+        if all((cost_decreased, invex_gap_decreased)): 
+            self.best_result["N"] = self.N
+
+        best_cost = self.best_result["cost"]
+        best_invex_gap = self.best_result["invex_gap"]
+        min_control_energy = self.best_result["control_energy"]
+        best_N_sofar = self.best_result["N"]
 
         if verbose:
             if platform.system().lower() != 'windows':
                 os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
-            message = f"Control energy = {np.linalg.norm(self.U.value):.5f}, "
-            message += f"total cost = {self.tcost.value:.3f}, "
-            message += f"λ(D)(N) = {np.sort(eigD)}, "
+            message = f"Min. control energy = {min_control_energy:.5f}, "
+            message += f"best cost = {best_cost:.3f}, "
+            message += f"best λ(D)(N) gap = {best_invex_gap:.6f}, "
             message += f"||N|| = {np.linalg.norm(self.N):.3f}, "
             print(message)
 
         stop_criteria = []
-        stop_criteria += [ np.linalg.norm(self.U.value) <= 1e-6 ]
-
-        # if 'invex' in self.opmode:
-        #     stop_criteria += [ np.all( eigD >= 0.0 ) or np.all( eigD <= 0.0 ) ]
-
-        # if 'cost' in self.opmode:
-        #     stop_criteria += [ self.tcost.value <= 1e-1 ]
+        stop_criteria += [ best_cost <= 1e-1 ]
 
         return any(stop_criteria)
 
