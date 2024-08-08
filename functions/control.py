@@ -1288,7 +1288,7 @@ class InvexProgram():
         self.points_to_fit should be a list of dicts of the form:
         { "point": [...], "level": lvl, "gradient": [...], "curvature": curv } 
         '''
-        for sdp_param in ('slack_gain', 'invex_gain', 'cost_gain', 'barrier_gain'):
+        for sdp_param in ('slack_gain', 'invex_gain', 'cost_gain'):
             self.sdp_params_cvxpy[sdp_param].value = 1.0
 
         self.m_center.value = self.kernel.function( np.zeros(self.n) )
@@ -1319,8 +1319,7 @@ class InvexProgram():
         # ---------------------------- Overall parameters ---------------------------
         self.sdp_params_cvxpy = { "slack_gain": cp.Parameter(nonneg=True), 
                                   "invex_gain": cp.Parameter(nonneg=True), 
-                                  "cost_gain": cp.Parameter(nonneg=True), 
-                                  "barrier_gain": cp.Parameter(nonneg=True) }
+                                  "cost_gain":  cp.Parameter(nonneg=True) }
 
         # ---------------------------- Decision variables ---------------------------
         self.U = cp.Variable( self.state_shape )
@@ -1423,7 +1422,7 @@ class InvexProgram():
             if key == 'fit_to':
                 self.fit_to = kwargs[key]
                 continue
-            if key in ('slack_gain', 'invex_gain', 'cost_gain', 'barrier_gain'):
+            if key in ('slack_gain', 'invex_gain', 'cost_gain'):
                 self.sdp_params_cvxpy[key].value = kwargs[key]
                 continue
             if key == 'invex_tol':
@@ -1650,15 +1649,16 @@ class InvexProgram():
             self.update_geom()
 
             ''' Find U control (solve SDP with current N) '''
-            self.problem.solve(verbose=False, solver=cp.ECOS)
+            self.problem.solve(verbose=False, solver=cp.CLARABEL)
             if "optimal" not in self.problem.status:
                 self.running = False
                 raise Exception("Problem is " + self.problem.status + ".")
             
             ''' Main integration step (update N state with computed U control) '''
-            dt = min( perf_counter() - tk, 1e-1)
             Uflatten = self.U.value.flatten()
             self.geo_dynamics.set_control( Uflatten )
+
+            dt = min( perf_counter() - tk, 1e-1)
             self.geo_dynamics.actuate(dt)
             self.N = self.mat( self.geo_dynamics.get_state() )
 
@@ -1674,7 +1674,7 @@ class InvexProgram():
             self.N = self.mat(var)
 
             cost, cost_diff = self.fitting_cost()
-            return cost
+            return (cost, cost_diff)
         
         def invexity(var):
             self.N = self.mat(var)
@@ -1698,8 +1698,9 @@ class InvexProgram():
                 if platform.system().lower() != 'windows':
                     os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
                 message = ''
-                message += f"Total cost = {cost(res):.3f}, "
-                message += f"λ(D)(N) = {np.around(np.sort(eigD),5)}, "
+                cost_val, cost_diff_val = cost(res)
+                message += f"Total cost = {cost_val:.3f}, "
+                message += f"λ(D)(N) = {np.sort(eigD)}, "
                 message += f"||N|| = {np.linalg.norm(N):.3f}, "
                 print(message)
 
@@ -1708,30 +1709,23 @@ class InvexProgram():
         constraints += [ {"type": "eq", "fun": center} ]
 
         init_var = self.vec(self.N)
-        sol = minimize( cost, init_var, constraints=constraints, callback=callback, options={"disp": True, "maxiter": 1000} )
+        sol = minimize( cost, init_var, constraints=constraints, jac=True, callback=callback, options={"disp": True, "maxiter": 5000} )
         self.N = self.mat( sol.x )
         return sol.message
 
     def solve_program(self):    
 
-        try:
-            self.run_dynamic_opt()
-        except KeyboardInterrupt:
-            pass
-
-        self.set_param(invex_tol=0e-1, mode='invexcost')
-        time.sleep(1.0)
+        ''' What SEEMS to work so far: one round of dynamic minimization followed by one round of standard minimization (closer to the absolute minimum) '''
 
         try:
             self.run_dynamic_opt()
         except KeyboardInterrupt:
             pass
 
-        self.set_param(invex_tol=1e-1)
         time.sleep(1.0)
 
         try:
-            self.run_standard_opt(verbose=True)
+            print( self.run_standard_opt(verbose=True) )
         except KeyboardInterrupt:
             pass
 
@@ -1748,7 +1742,7 @@ class InvexProgram():
                 os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
             message = f"Control energy = {np.linalg.norm(self.U.value):.5f}, "
             message += f"total cost = {self.tcost.value:.3f}, "
-            message += f"λ(D)(N) = {np.around(np.sort(eigD),5)}, "
+            message += f"λ(D)(N) = {np.sort(eigD)}, "
             message += f"||N|| = {np.linalg.norm(self.N):.3f}, "
             print(message)
 

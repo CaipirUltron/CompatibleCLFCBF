@@ -33,7 +33,7 @@ p = kernel._num_monomials
 #     print(f"∇D{i,j} = {kernel.Dfun_symbolic_derivatives[i][j]}")
 
 #---------------------------- Define some points for fitting ---------------------------
-box_center = [ 0.0, 2.0 ]
+box_center = [ 2.0, -2.0 ]
 box_angle = 30
 box_height, box_width = 5, 5
 boundary_pts = box( center=box_center, height=box_height, width=box_width, angle=box_angle, spacing=0.4 )
@@ -45,24 +45,24 @@ for pt in boundary_pts:
     points.append({"point": pt, "level": 0.0})
 
 #------------------------------------- Compute invex -----------------------------------
-invex_program = InvexProgram(kernel, fit_to='cbf', points=points, center=box_center, barrier_gain = 10, invex_tol=1e-1, mode='invex')
+invex_program = InvexProgram(kernel, fit_to='cbf', points=points, center=box_center, mode='invexcost',
+                             slack_gain=1e+0, invex_gain=1e+0, cost_gain=1e+1, invex_tol=0.0)
 Q = invex_program.solve_program()
-
 cbf = KernelBarrier(kernel=kernel, Q=Q, limits=limits, spacing=0.2 )
 
 #---------------------------------------- Plotting -------------------------------------
-while True:
-
-    if "cbf_contour" in locals():
-        for coll in cbf_contour:
-            coll.remove()
-        del cbf_contour
+num_levels=10
+while True: 
 
     pt = plt.ginput(1, timeout=0)
     init_x = [ pt[0][0], pt[0][1] ]
     h = cbf.function(init_x)
     print(f"h(x) = {h}")
 
-    num_levels = 20
+    if "cbf_contour" in locals():
+        for coll in cbf_contour:
+            coll.remove()
+        del cbf_contour
+
     cbf_contour = cbf.plot_levels(ax=ax, levels=[ h*((k+1)/num_levels) for k in range(num_levels) ])
-    plt.pause(0.001)
+    plt.pause(0.01)
