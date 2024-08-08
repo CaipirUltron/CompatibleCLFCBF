@@ -45,7 +45,7 @@ for pt in boundary_pts:
     points.append({"point": pt, "level": 0.0})
 
 #------------------------------------- Compute invex -----------------------------------
-invex_program = InvexProgram(kernel, fit_to='cbf', points=points, center=box_center, barrier_gain = 10, invex_tol=0e-2, mode='invexcost')
+invex_program = InvexProgram(kernel, fit_to='cbf', points=points, center=box_center, barrier_gain = 10, invex_tol=1e-1, mode='invex')
 Q = invex_program.solve_program()
 
 cbf = KernelBarrier(kernel=kernel, Q=Q, limits=limits, spacing=0.2 )

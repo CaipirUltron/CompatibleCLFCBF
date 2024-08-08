@@ -1393,6 +1393,7 @@ class InvexProgram():
         Null = sp.linalg.null_space( m_c.reshape(1,-1) )
         # sumNull = np.sum(Null, axis=1)
 
+        ''' Testing with random sums of orthogonal vectors on each row dimension of N '''
         self.N = np.zeros(self.state_shape)
         for n in Null.T:
             dim = np.random.randint(self.n)
@@ -1430,6 +1431,7 @@ class InvexProgram():
                 self.Tol.value = np.zeros((self.q, self.q))
                 self.Tol.value[0,0] = invex_tol
                 self.vecTol.value = invex_tol*np.ones(self.q)
+                continue
             if key == 'center':
                 center = kwargs[key]
                 self.m_center.value = self.kernel.function(center)
@@ -1635,24 +1637,7 @@ class InvexProgram():
         '''
         return 0.0, np.zeros(self.state_shape)
 
-    def solve_program(self):    
-
-        try:
-            self.run_optimization()
-        except KeyboardInterrupt:
-            pass
-
-        # self.set_param(mode='invexcost')
-        # time.sleep(2.0)
-
-        # try:
-        #     self.run_optimization()
-        # except KeyboardInterrupt:
-        #     pass
-
-        return self.N.T @ self.N
-
-    def run_optimization(self):
+    def run_dynamic_opt(self):
 
         step = 0
         self.running = True
@@ -1682,6 +1667,76 @@ class InvexProgram():
 
         return step
 
+    def run_standard_opt(self, verbose=False):
+        ''' Run standard optimization '''
+
+        def cost(var):
+            self.N = self.mat(var)
+
+            cost, cost_diff = self.fitting_cost()
+            return cost
+        
+        def invexity(var):
+            self.N = self.mat(var)
+
+            D = self.kernel.D(self.N)
+            lambdaD = np.linalg.eigvals(D)
+            barrier = self.cone.value * lambdaD - self.vecTol.value
+            return barrier
+
+        def center(var):
+            self.N = self.mat(var)
+            return self.N @ self.m_center.value
+
+        def callback(res):
+
+            N = self.mat(res)
+            D = self.kernel.D(N)
+            eigD = np.linalg.eigvals(D)
+
+            if verbose:
+                if platform.system().lower() != 'windows':
+                    os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
+                message = ''
+                message += f"Total cost = {cost(res):.3f}, "
+                message += f"λ(D)(N) = {np.around(np.sort(eigD),5)}, "
+                message += f"||N|| = {np.linalg.norm(N):.3f}, "
+                print(message)
+
+        constraints = []
+        constraints += [ {"type": "ineq", "fun": invexity} ]
+        constraints += [ {"type": "eq", "fun": center} ]
+
+        init_var = self.vec(self.N)
+        sol = minimize( cost, init_var, constraints=constraints, callback=callback, options={"disp": True, "maxiter": 1000} )
+        self.N = self.mat( sol.x )
+        return sol.message
+
+    def solve_program(self):    
+
+        try:
+            self.run_dynamic_opt()
+        except KeyboardInterrupt:
+            pass
+
+        self.set_param(invex_tol=0e-1, mode='invexcost')
+        time.sleep(1.0)
+
+        try:
+            self.run_dynamic_opt()
+        except KeyboardInterrupt:
+            pass
+
+        self.set_param(invex_tol=1e-1)
+        time.sleep(1.0)
+
+        try:
+            self.run_standard_opt(verbose=True)
+        except KeyboardInterrupt:
+            pass
+
+        return self.N.T @ self.N
+
     def is_optimal(self, verbose=False):
         ''' Checks if optimization has reached its optimal value '''
 
@@ -1693,7 +1748,7 @@ class InvexProgram():
                 os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
             message = f"Control energy = {np.linalg.norm(self.U.value):.5f}, "
             message += f"total cost = {self.tcost.value:.3f}, "
-            message += f"λ(D)(N) = {np.around(np.sort(eigD),3)}, "
+            message += f"λ(D)(N) = {np.around(np.sort(eigD),5)}, "
             message += f"||N|| = {np.linalg.norm(self.N):.3f}, "
             print(message)
 
