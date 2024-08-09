@@ -1296,6 +1296,7 @@ class InvexProgram():
         self.Tol.value = np.zeros((self.q, self.q))
         self.vecTol.value = np.zeros(self.q)
         self.invex_mode = 'eigen'                          # options = { 'matrix', 'eigen' }
+        self.clock = perf_counter()
 
         ''' Customize parameters '''
         self.set_param(**kwargs)
@@ -1596,6 +1597,10 @@ class InvexProgram():
                 cost += pt_cost
                 cost_diff += pt_cost_diff
  
+        N = len(self.points_to_fit)
+        cost *= 1/N
+        cost_diff *= 1/N
+
         return cost, cost_diff
 
     def level_cost(self, point, level):
@@ -1649,13 +1654,15 @@ class InvexProgram():
         '''
         return 0.0, np.zeros(self.state_shape)
 
-    def run_dynamic_opt(self):
+    def run_dynamic_opt(self, Ninit=None, verbose=False):
 
+        if Ninit is not None: self.N = Ninit
+
+        step_size = 1e-3
         step = 0
         self.running = True
         while self.running:
 
-            tk = perf_counter()
             step += 1
 
             ''' Computes everything with current N '''
@@ -1671,18 +1678,19 @@ class InvexProgram():
             Uflatten = self.U.value.flatten()
             self.geo_dynamics.set_control( Uflatten )
 
-            # dt = min( perf_counter() - tk, 5e-1)
-            dt = 1e-1
-            self.geo_dynamics.actuate(dt)
+            self.geo_dynamics.actuate( dt=step_size )
             self.N = self.mat( self.geo_dynamics.get_state() )
 
             ''' If is optimal, ends optimization '''
-            if self.is_optimal(verbose=True): self.running = False
+            if self.is_optimal(verbose=verbose): 
+                self.running = False
 
         return self.best_result["N"]
 
-    def run_standard_opt(self, verbose=False):
+    def run_standard_opt(self, Ninit=None, verbose=False):
         ''' Run standard optimization '''
+
+        if Ninit is not None: self.N = Ninit
 
         def cost(var):
             self.N = self.mat(var)
@@ -1724,19 +1732,18 @@ class InvexProgram():
                 if platform.system().lower() != 'windows':
                     os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
                 cost_val, cost_diff_val = cost(var)
-                message = f"Total cost = {cost_val:.3f}, "
+                message = f"Total cost = {cost_val:.6f}, "
                 message += f"λ(D)(N) = {np.sort(eigD)}, "
                 message += f"||N|| = {np.linalg.norm(N):.3f}, "
                 print(message)
 
         center_constr = LinearConstraint(get_A(self.center), lb=0.0, ub=0.0)
         invexity_constr = NonlinearConstraint(invexity_barrier, lb=0.0, ub=np.inf, jac=invexity_jac)
-        
-        constraints = [ center_constr, invexity_constr ]
+        constrs = [ center_constr, invexity_constr ]
 
         init_var = self.vec(self.N)
-        sol = minimize( cost, init_var, constraints=constraints, method='SLSQP', jac=True, callback=show_message, 
-                        options={"disp": True, 'ftol': 1e-5, 'maxiter': 1000} )
+        sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=True, callback=show_message, 
+                        options={"disp": True, 'ftol': 1e-6, 'maxiter': 1000} )
         N = self.mat( sol.x )
         show_message(sol.x)
 
@@ -1747,7 +1754,7 @@ class InvexProgram():
         ''' What SEEMS to work so far: one round of dynamic minimization followed by one round of standard minimization (closer to the absolute minimum) '''
 
         try:
-            self.run_dynamic_opt()
+            self.run_dynamic_opt(verbose=True)
         except KeyboardInterrupt:
             pass
 
@@ -1774,6 +1781,7 @@ class InvexProgram():
         if curr_cost < self.best_result["cost"]:
             self.best_result["cost"] = curr_cost
             cost_decreased = True
+            self.clock = perf_counter()
 
         invex_gap_decreased = False
         if curr_invex_gap < self.best_result["invex_gap"]:
@@ -1786,24 +1794,28 @@ class InvexProgram():
         if all((cost_decreased, invex_gap_decreased)): 
             self.best_result["N"] = self.N
 
+        dt = perf_counter() - self.clock
+
         best_cost = self.best_result["cost"]
         best_invex_gap = self.best_result["invex_gap"]
         min_control_energy = self.best_result["control_energy"]
-        best_N_sofar = self.best_result["N"]
-
+        
         if verbose:
             if platform.system().lower() != 'windows':
                 os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
             message = f"Min. control energy = {min_control_energy:.5f}, "
-            message += f"best cost = {best_cost:.3f}, "
+            message += f"best cost = {best_cost:.6f}, "
             message += f"best λ(D)(N) gap = {best_invex_gap:.6f}, "
             message += f"||N|| = {np.linalg.norm(self.N):.3f}, "
+            message += f"Δt = {dt}"
             print(message)
 
         stop_criteria = []
-        stop_criteria += [ best_cost <= 1e-1 ]
+        stop_criteria += [ best_cost <= 1e-2 ]              # Stops if cost is smaller than threshold
+        stop_criteria += [ best_invex_gap <= 1e-4 ]         # Stops if invex gap is smaller than threshold
+        # stop_criteria += [ dt >= 10.0 ]                     # Stops if more than 5s have passed without any improvement
 
-        return any(stop_criteria)
+        return all(stop_criteria)
 
     def standard_cost(self, fun, collection: list[dict]):
         '''

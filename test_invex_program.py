@@ -2,8 +2,9 @@ import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 
-from common import box
+from common import box, discretize, segmentize
 from functions import Kernel, InvexProgram, KernelLyapunov, KernelBarrier
+from shapely import LineString
 
 # np.set_printoptions(precision=3, suppress=True)
 limits = 12*np.array((-1,1,-1,1))
@@ -24,29 +25,31 @@ kernel_dim = kernel._num_monomials
 q = kernel.dim_det_kernel
 p = kernel._num_monomials
 
-# print(f"D(N) = \n")
-# for (i,j) in itertools.product( range(q), range(q) ):
-#     print(f"D{i,j} = {kernel.Dfun_symbolic[i][j]}")
-
-# print(f"∇D(N) = \n")
-# for (i,j) in itertools.product( range(n), range(p) ):
-#     print(f"∇D{i,j} = {kernel.Dfun_symbolic_derivatives[i][j]}")
-
 #---------------------------- Define some points for fitting ---------------------------
-box_center = [ 1.0, -2.0 ]
-box_angle = -10
+''' Box-shaped obstacle (convex) '''
+center = [ 3.0, -2.0 ]
+box_angle = 30
 box_height, box_width = 5, 8
-boundary_pts = box( center=box_center, height=box_height, width=box_width, angle=box_angle, spacing=0.4 )
+boundary_pts = box( center=center, height=box_height, width=box_width, angle=box_angle, spacing=0.4 )
 
-points = [ {"point": box_center, "level": -0.5} ]
+''' U-shaped obstacle (non-convex) '''
+# center = (0, 0)
+# centers = [(-4, 3), (-4, 0), center, (4, 0), (4, 3)]
+# skeleton_line = LineString(centers)
+# obstacle_poly = skeleton_line.buffer(1.0, cap_style='flat')
+# boundary_pts = discretize(obstacle_poly, spacing=0.4)
+
+points = [ {"point": center, "level": -0.5} ]
 for pt in boundary_pts:
     coords = np.array(pt)
+    print(coords)
     ax.plot(coords[0], coords[1], 'k*', alpha=0.6)
     points.append({"point": pt, "level": 0.0})
 
 #------------------------------------- Compute invex -----------------------------------
-invex_program = InvexProgram( kernel, fit_to='cbf', points=points, center=box_center, mode='invexcost', 
-                              slack_gain=1e-1, invex_gain=1e+0, cost_gain=1e+1, invex_tol=0.0 )
+invex_program = InvexProgram( kernel, fit_to='cbf', points=points, center=center, mode='invexcost', 
+                              slack_gain=1e-0, invex_gain=1e+2, cost_gain=1e+2, invex_tol=0.0 )
+
 Q = invex_program.solve_program()
 cbf = KernelBarrier(kernel=kernel, Q=Q, limits=limits, spacing=0.2 )
 
