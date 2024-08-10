@@ -1295,7 +1295,7 @@ class InvexProgram():
         self.m_center.value = self.kernel.function( self.center )
         self.Tol.value = np.zeros((self.q, self.q))
         self.vecTol.value = np.zeros(self.q)
-        self.invex_mode = 'eigen'                          # options = { 'matrix', 'eigen' }
+        self.invex_mode = 'matrix'                          # options = { 'matrix', 'eigen' }
         self.clock = perf_counter()
 
         ''' Customize parameters '''
@@ -1381,6 +1381,7 @@ class InvexProgram():
             tcost_dot += self.tcost_diff[i][j] * self.U[i][j]
 
         tcost_gain = self.sdp_params_cvxpy["cost_gain"]
+        # self.cost_constraint = tcost_dot + tcost_gain * self.tcost <= 0.0
         self.cost_constraint = tcost_dot + tcost_gain * self.tcost <= self.slack
 
         # ----------------------- Define the SDP cost (minimizing the energy of geometry dynamics) ---------------------------
@@ -1393,30 +1394,55 @@ class InvexProgram():
         ''' Computes the initial geometry as any N satisfying N m(xc) = 0 '''
 
         mc = self.m_center.value
-        Null = sp.linalg.null_space( mc.reshape(1,-1) )
+        print(f"mc = {mc}")
+
+        E = np.eye(self.n)
+        self.Nnom = np.zeros(self.state_shape)
+        self.Nnom[:,0] = self.center
+        for k in range(self.n):
+            self.Nnom[:,k+1] = -E[:,k]
+
+        # E = np.eye(self.p)
+        # Matrix = np.zeros((self.p, self.p-self.n))
+        # for dim in range(self.p-self.n):
+        #     if dim == 0:
+        #         Matrix[:,dim] = mc
+        #     else:
+        #         Matrix[:,dim] = E[:,self.p-dim]
+
+        # self.N = sp.linalg.null_space( Matrix.T ).T
 
         ''' Testing with random sums of orthogonal vectors on each row dimension of N '''
+        Null = sp.linalg.null_space( mc.reshape(1,-1) )
+
         self.N = np.zeros(self.state_shape)
         dim = 0
         for perp_mc in Null.T:
             # dim = np.random.randint(self.n)
-            if dim >= self.n: break
+            if dim >= self.n:
+                break
             self.N[dim,:] += 1.0*perp_mc
             dim += 1
 
-        # sumNull = np.sum(Null, axis=1)
-        # for i in range(self.n):
-        #     self.N[i,:] = sumNull
+        # self.N = self.Nnom
+
+        # S = np.random.randn(self.n, Null.shape[1])
+        # self.N = S @ Null.T
+
+        print(f"N mc = {self.N @ mc}")
 
         eigP = np.real(np.linalg.eigvals(self.N.T @ self.N))
         index, = np.where( eigP > 1e-3 )
         print(f"Initial λ(N'N) = {eigP[index]}")
 
         D = self.kernel.D(self.N)
+        eigD = np.linalg.eigvals(D)
+        # self.vecTol.value = np.abs(eigD)
+        print(f"Initial λ(D)(N) = {eigD}")
 
         ''' Checks whether the initial state is closer to the PSD/NSD cone '''
-        dist_to_psd = np.linalg.norm( PSD_closest(D) - D )
-        dist_to_nsd = np.linalg.norm( NSD_closest(D) - D )
+        dist_to_psd = np.linalg.norm( PSD_closest(D) - D , 'fro')
+        dist_to_nsd = np.linalg.norm( NSD_closest(D) - D , 'fro')
         if dist_to_psd <= dist_to_nsd: 
             self.cone.value = +1
             print(f"D(N) -> PSD cone")
@@ -1538,6 +1564,7 @@ class InvexProgram():
         '''
         Returns: (i)  D(self.N), ∇D(self.N)_ij (matrices), if option == 'matrix'
                  (ii) λ(D)(self.N), ∇λ(self.N)_ij (vectors), if option == 'eigen'
+                 (iii) minλ(D)(self.N), corresponding ∇λ(self.N)_ij (scalar), if option == 'scalar'
         '''
         D = self.kernel.D(self.N)
         D_diff = self.kernel.D_diff(self.N)
@@ -1546,7 +1573,6 @@ class InvexProgram():
             return D, D_diff
 
         if self.invex_mode == 'eigen': 
-
             eigvals, eigvecs = np.linalg.eig(D)
             lambdaD = np.zeros(self.q)
             lambdaD_diff = [ [ np.zeros(self.q) for _ in range(self.p) ] for _ in range(self.n) ]
@@ -1555,6 +1581,17 @@ class InvexProgram():
                 lambdaD[k] = eigD
                 for i,j in itertools.product( range(self.n), range(self.p) ):
                     lambdaD_diff[i][j][k] = v.T @ D_diff[i][j] @ v
+            return lambdaD, lambdaD_diff
+        
+        ''' STILL NOT FULLY IMPLEMENTED '''
+        if self.invex_mode == 'scalar':   
+            eigvals, eigvecs = np.linalg.eig(D)
+            index = np.argmin(eigvals)
+            lambdaD = eigvals[index]
+            lambdaD_diff = [ [ 0.0 for _ in range(self.p) ] for _ in range(self.n) ]
+            v = eigvecs[:,index]
+            for i,j in itertools.product( range(self.n), range(self.p) ):
+                lambdaD_diff[i,j] = v.T @ D_diff[i][j] @ v
             
             return lambdaD, lambdaD_diff
 
@@ -1562,8 +1599,8 @@ class InvexProgram():
         ''' 
         Total fitting cost: c(N) = Σ_i ci(N)
         '''
-        cost = 0.0
-        cost_diff = np.zeros(self.state_shape)
+        # cost, cost_diff = self.comparison_cost()
+        cost, cost_diff = 0.0, np.zeros(self.state_shape)
 
         for point in self.points_to_fit:
 
@@ -1603,6 +1640,19 @@ class InvexProgram():
 
         return cost, cost_diff
 
+    def comparison_cost(self):
+        '''
+        Cost for minimizing ||N - Nnom||²
+        '''
+        cost = 0.5*np.linalg.norm(self.N - self.Nnom, 'fro')
+        cost_diff = np.zeros(self.state_shape)
+        for (i,j) in itertools.product( range(self.n), range(self.p) ):
+            gradNij = np.zeros(self.state_shape)
+            gradNij[i,j] = 1.0
+            cost_diff[i,j] = self.vec(self.N - self.Nnom).T @ self.vec(gradNij)
+
+        return cost, cost_diff
+
     def level_cost(self, point, level):
         '''
         Cost for fitting a point to a particular level set.
@@ -1618,7 +1668,7 @@ class InvexProgram():
 
         cost = 0.5 * error**2
 
-        cost_diff = np.zeros((self.n, self.p))
+        cost_diff = np.zeros(self.state_shape)
         for (i,j) in itertools.product( range(self.n), range(self.p) ):
             Nm = self.N @ m
             cost_diff[i,j] = error * Nm[i] * m[j]
@@ -1656,9 +1706,11 @@ class InvexProgram():
 
     def run_dynamic_opt(self, Ninit=None, verbose=False):
 
+        self.invex_mode = 'matrix'
+
         if Ninit is not None: self.N = Ninit
 
-        step_size = 1e-3
+        step_size = 1e-2
         step = 0
         self.running = True
         while self.running:
@@ -1669,10 +1721,10 @@ class InvexProgram():
             self.update_geom()
 
             ''' Find U control (solve SDP with current N) '''
-            self.problem.solve(verbose=False, solver=cp.CLARABEL)
-            if "optimal" not in self.problem.status:
-                self.running = False
-                raise Exception("Problem is " + self.problem.status + ".")
+            try:
+                self.problem.solve(verbose=False, solver=cp.CLARABEL)
+            except cp.SolverError as error:
+                print(error)
             
             ''' Main integration step (update N state with computed U control) '''
             Uflatten = self.U.value.flatten()
@@ -1689,6 +1741,8 @@ class InvexProgram():
 
     def run_standard_opt(self, Ninit=None, verbose=False):
         ''' Run standard optimization '''
+
+        self.invex_mode = 'eigen'
 
         if Ninit is not None: self.N = Ninit
 
@@ -1774,7 +1828,7 @@ class InvexProgram():
 
         curr_cost = self.tcost.value
         c = self.cone.value
-        curr_invex_gap = np.linalg.norm( PSD_closest(c*Dvalue) - c*Dvalue )
+        curr_invex_gap = np.linalg.norm( PSD_closest(c*Dvalue) - c*Dvalue, 'fro')
         curr_ctrl_energy = np.linalg.norm( self.U.value )
 
         cost_decreased = False
@@ -1804,18 +1858,23 @@ class InvexProgram():
             if platform.system().lower() != 'windows':
                 os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
             message = f"Min. control energy = {min_control_energy:.5f}, "
-            message += f"best cost = {best_cost:.6f}, "
-            message += f"best λ(D)(N) gap = {best_invex_gap:.6f}, "
+            message += f"best cost = {best_cost:.8f}, "
+            message += f"best λ(D)(N) gap = {best_invex_gap:.10f}, "
             message += f"||N|| = {np.linalg.norm(self.N):.3f}, "
             message += f"Δt = {dt}"
             print(message)
 
         stop_criteria = []
-        stop_criteria += [ best_cost <= 1e-2 ]              # Stops if cost is smaller than threshold
-        stop_criteria += [ best_invex_gap <= 1e-4 ]         # Stops if invex gap is smaller than threshold
+        stop_criteria += [ best_cost <= 1e-3 ]              # Stops if cost is smaller than threshold
+        stop_criteria += [ best_invex_gap <= 1e-7 ]         # Stops if invex gap is smaller than threshold
         # stop_criteria += [ dt >= 10.0 ]                     # Stops if more than 5s have passed without any improvement
 
         return all(stop_criteria)
+
+    def save(self, file_name=''):
+        ''' Method for saving the computed shape into a file '''
+        
+        pass
 
     def standard_cost(self, fun, collection: list[dict]):
         '''

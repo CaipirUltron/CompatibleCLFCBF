@@ -1,9 +1,9 @@
-import itertools
 import numpy as np
+import scipy as sp
 import matplotlib.pyplot as plt
 
 from common import box, discretize, segmentize
-from functions import Kernel, InvexProgram, KernelLyapunov, KernelBarrier
+from functions import Kernel, InvexProgram, KernelBarrier
 from shapely import LineString
 
 # np.set_printoptions(precision=3, suppress=True)
@@ -25,12 +25,14 @@ kernel_dim = kernel._num_monomials
 q = kernel.dim_det_kernel
 p = kernel._num_monomials
 
+print(kernel.det_kernel)
+
 #---------------------------- Define some points for fitting ---------------------------
 ''' Box-shaped obstacle (convex) '''
-center = [ 3.0, -2.0 ]
-box_angle = 30
-box_height, box_width = 5, 8
-boundary_pts = box( center=center, height=box_height, width=box_width, angle=box_angle, spacing=0.4 )
+center = [ 0.0, -0.0 ]
+box_angle = -30
+box_height, box_width = 5, 5
+boundary_pts = box( center=center, height=box_height, width=box_width, angle=box_angle, spacing=0.08 )
 
 ''' U-shaped obstacle (non-convex) '''
 # center = (0, 0)
@@ -42,25 +44,23 @@ boundary_pts = box( center=center, height=box_height, width=box_width, angle=box
 points = [ {"point": center, "level": -0.5} ]
 for pt in boundary_pts:
     coords = np.array(pt)
-    print(coords)
     ax.plot(coords[0], coords[1], 'k*', alpha=0.6)
     points.append({"point": pt, "level": 0.0})
 
 #------------------------------------- Compute invex -----------------------------------
 invex_program = InvexProgram( kernel, fit_to='cbf', points=points, center=center, mode='invexcost', 
-                              slack_gain=1e-0, invex_gain=1e+2, cost_gain=1e+2, invex_tol=0.0 )
+                              slack_gain=1e+5, invex_gain=1e+2, cost_gain=1e+2, invex_tol=0.0 )
 
 Q = invex_program.solve_program()
-cbf = KernelBarrier(kernel=kernel, Q=Q, limits=limits, spacing=0.2 )
+cbf = KernelBarrier(kernel=kernel, Q=Q, limits=limits, spacing=0.1 )
 
 #---------------------------------------- Plotting -------------------------------------
 num_levels=10
 while True: 
 
     pt = plt.ginput(1, timeout=0)
-    init_x = [ pt[0][0], pt[0][1] ]
-    h = cbf.function(init_x)
-    print(f"h(x) = {h}")
+    x = [ pt[0][0], pt[0][1] ]
+    h = cbf.function(x)
 
     if "cbf_contour" in locals():
         for coll in cbf_contour:
