@@ -32,7 +32,7 @@ print(kernel.det_kernel)
 center = [ 0.0, -0.0 ]
 box_angle = -30
 box_height, box_width = 5, 5
-boundary_pts = box( center=center, height=box_height, width=box_width, angle=box_angle, spacing=0.08 )
+boundary_pts = box( center=center, height=box_height, width=box_width, angle=box_angle, spacing=0.4 )
 
 ''' U-shaped obstacle (non-convex) '''
 # center = (0, 0)
@@ -61,6 +61,7 @@ while True:
     pt = plt.ginput(1, timeout=0)
     x = [ pt[0][0], pt[0][1] ]
     h = cbf.function(x)
+    print(f"h = {h}")
 
     if "cbf_contour" in locals():
         for coll in cbf_contour:

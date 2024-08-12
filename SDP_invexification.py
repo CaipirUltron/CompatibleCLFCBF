@@ -2,12 +2,9 @@ import itertools
 import numpy as np
 import scipy as sp
 import cvxpy as cp
-import sympy as sym
 import matplotlib.pyplot as plt
 
-from sympy import zeros, Matrix
-from common import dirac, box, discretize, segmentize
-from functions import Kernel, InvexProgram, KernelBarrier
+from functions import Kernel, KernelBarrier
 
 # np.set_printoptions(precision=3, suppress=True)
 limits = 12*np.array((-1,1,-1,1))
@@ -36,10 +33,6 @@ print(kernel.det_kernel)
 center = np.array([ 1.0, 5.0 ])
 mc = kernel.function(center)
 
-# Null = sp.linalg.null_space( mc.reshape(1,-1) )
-# S = np.random.randn(n, Null.shape[1])
-# N = S @ Null.T
-
 E = np.eye(p)
 Matrix = np.zeros((p, p-n))
 for dim in range(p-n):
@@ -49,30 +42,27 @@ for dim in range(p-n):
         Matrix[:,dim] = E[:,p-dim]
 N = sp.linalg.null_space( Matrix.T ).T
 
-print(N.shape)
+print(N)
 print(f"N mc = {N @ mc}")
 
-# N = cp.Variable( (n,p) )
-G = cp.Variable( (n,n), PSD=True )
-# P = cp.Variable( (p,p), PSD=True )
-P = N.T @ G @ N
-
-C = np.zeros((r,r))
-C[0,0] = center.T @ center
-C[0,1:n+1] = -center
-C[1:n+1,0] = -center
-C[1:n+1,1:n+1] = 1*np.eye(n)
-
 Gnom = 1*np.eye(n)
-Jphi_sq_ref = np.block([[ (Ai.T @ N.T @ Gnom @ N @ Aj)[0:r,0:r] for i, Ai in enumerate(A_list) ] for j, Aj in enumerate(A_list) ])
 
-# Jphi_sq_ref = np.block([[ (Ai.T @ N.T @ Gnom @ N @ Aj)[0:r,0:r] for i, Ai in enumerate(A_list) ] for j, Aj in enumerate(A_list) ])
-print(f"Jphi_sq = {np.linalg.eigvals(Jphi_sq_ref).real}")
+Jphi_squared = np.block([[ mc.T @ Ai.T @ N.T @ Gnom @ N @ Aj @ mc for Ai in A_list ] for Aj in A_list ])
+eigsJphi = np.linalg.eigvals(Jphi_squared)
+print(f"Jphi = {eigsJphi}")
 
-N += 0.01*np.random.randn(n,p)
+epsilon = min(eigsJphi)
+C = epsilon*np.eye(n)
+print(f"Jphi - eye = {np.linalg.eigvals(Jphi_squared-C)}")
 
-# R = cp.bmat([[ (Ai.T @ N.T @ G @ N @ Aj)[0:r,0:r] - C * dirac(i,j) for i, Ai in enumerate(A_list) ] for j, Aj in enumerate(A_list) ])
-R = cp.bmat([[ (Ai.T @ N.T @ G @ N @ Aj)[0:r,0:r] for i, Ai in enumerate(A_list) ] for j, Aj in enumerate(A_list) ]) - Jphi_sq_ref
+N += 0e-6*np.random.randn(n,p)
+R_blocks = [[ None for _ in range(n) ] for _ in range(n) ]
+for i, Ai in enumerate(A_list):
+    for j, Aj in enumerate(A_list):
+        Cij = np.zeros((r,r))
+        Cij[0,0] = C[i,j]
+        R_blocks[i][j] = (Ai.T @ N.T @ G @ N @ Aj)[0:r,0:r] - Cij
+R = cp.bmat(R_blocks)
 
 cost = cp.norm( G - Gnom ,'fro')
 problem = cp.Problem( cp.Minimize( cost ), constraints=[ R >> 0 ] )

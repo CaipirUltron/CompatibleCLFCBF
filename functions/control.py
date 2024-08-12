@@ -1396,35 +1396,33 @@ class InvexProgram():
         mc = self.m_center.value
         print(f"mc = {mc}")
 
-        E = np.eye(self.n)
-        self.Nnom = np.zeros(self.state_shape)
-        self.Nnom[:,0] = self.center
-        for k in range(self.n):
-            self.Nnom[:,k+1] = -E[:,k]
+        # E = np.eye(self.n)
+        # self.Nnom = np.zeros(self.state_shape)
+        # self.Nnom[:,0] = self.center
+        # for k in range(self.n):
+        #     self.Nnom[:,k+1] = -E[:,k]
 
-        # E = np.eye(self.p)
-        # Matrix = np.zeros((self.p, self.p-self.n))
-        # for dim in range(self.p-self.n):
-        #     if dim == 0:
-        #         Matrix[:,dim] = mc
-        #     else:
-        #         Matrix[:,dim] = E[:,self.p-dim]
-
-        # self.N = sp.linalg.null_space( Matrix.T ).T
+        E = np.eye(self.p)
+        Matrix = np.zeros((self.p, self.p-self.n))
+        for dim in range(self.p-self.n):
+            if dim == 0:
+                Matrix[:,dim] = mc
+            else:
+                Matrix[:,dim] = E[:,self.p-dim]
+        self.Nnom = 1e-1*sp.linalg.null_space( Matrix.T ).T
 
         ''' Testing with random sums of orthogonal vectors on each row dimension of N '''
-        Null = sp.linalg.null_space( mc.reshape(1,-1) )
+        # Null = sp.linalg.null_space( mc.reshape(1,-1) )
+        # self.N = np.zeros(self.state_shape)
+        # dim = 0
+        # for perp_mc in Null.T:
+        #     # dim = np.random.randint(self.n)
+        #     if dim >= self.n:
+        #         break
+        #     self.N[dim,:] += 1.0*perp_mc
+        #     dim += 1
 
-        self.N = np.zeros(self.state_shape)
-        dim = 0
-        for perp_mc in Null.T:
-            # dim = np.random.randint(self.n)
-            if dim >= self.n:
-                break
-            self.N[dim,:] += 1.0*perp_mc
-            dim += 1
-
-        # self.N = self.Nnom
+        self.N = self.Nnom
 
         # S = np.random.randn(self.n, Null.shape[1])
         # self.N = S @ Null.T
@@ -1803,19 +1801,114 @@ class InvexProgram():
 
         return N
 
+    def run_bilinear_opt(self, Ninit=None, verbose=False):
+        ''' Run bilinear optimization '''
+
+        if Ninit is not None: self.Nnom = Ninit
+
+        mc = np.array(self.kernel.function(self.center))
+        A_list = self.kernel.get_A_matrices()
+        r = self.kernel._jacobian_dim
+
+        def R_blocks(N):
+            P = N.T @ N
+            R_blocks = [[ Ai.T @ P @ Aj for Ai in A_list ] for Aj in A_list ]
+            return R_blocks
+
+        Rnom_list = R_blocks(self.Nnom)
+        Jnom_squared = np.zeros((self.n,self.n))
+        for i in range(self.n):
+            for j in range(self.n):
+                Jnom_squared[i,j] = mc.T @ Rnom_list[i][j] @ mc
+        eigsJnom_squared = np.linalg.eigvals(Jnom_squared)
+
+        # epsilon = min(eigsJnom_squared)
+        epsilon = 1e-6
+        C = epsilon*np.eye(self.n)
+        print(f"eigs Jnom'Jnom = {eigsJnom_squared}")
+
+        def R(N):
+            R_list = R_blocks(N)
+            R = [[ None for _ in range(self.n) ] for _ in range(self.n) ]
+            for i in range(self.n):
+                for j in range(self.n):
+                    Cij = np.zeros((r,r))
+                    Cij[0,0] = C[i,j]
+                    R[i][j] = R_list[i][j][0:r,0:r] - Cij
+            
+            return np.block(R)
+
+        def cost(var):
+            self.N = self.mat(var)
+
+            cost, cost_diff = self.fitting_cost()
+            return (cost, cost_diff)
+
+        ''' Computes the invexity bilinear inequality constraint '''
+        def invexity_barrier(var):
+            self.N = self.mat(var)
+            Rval = R(self.N)
+            eigR = np.linalg.eigvals(Rval).real
+
+            return np.min(eigR)
+
+        # def invexity_jacobian(var):
+        #     self.N = self.mat(var)
+        #     Rval = R(self.N)
+        #     eigR, eigvecR = np.linalg.eig( 0.5*(Rval + Rval.T) )
+
+        ''' Computes the matrix A(xc) for the linear constraint A(xc) vec(N) == 0, equivalent to N m(xc) = 0 (the center constraint)'''
+        def get_Acenter():
+            mc = np.array(self.kernel.function(self.center))
+            A = sp.linalg.block_diag(*[ mc for _ in range(self.n) ])
+            return A
+
+        def show_message(var):
+            if not verbose: return
+
+            N = self.mat(var)
+            # if platform.system().lower() != 'windows':
+            #     os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
+            cost_val, _ = cost(var)
+            barrier = invexity_barrier(var)
+            message = f"Cost = {cost_val}\n"
+            message += f"Barrier = {barrier}\n"
+            print(message)
+
+        center_constr = LinearConstraint(get_Acenter(), lb=0.0, ub=0.0)
+        invexity_constr = NonlinearConstraint(invexity_barrier, lb=0.0, ub=np.inf)
+        constrs = [ center_constr, invexity_constr ]
+
+        init_var = self.vec(self.N)
+        show_message(init_var)
+        sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=True, callback=show_message, 
+                        options={"disp": True, 'ftol': 1e-6, 'maxiter': 1000} )
+        N = self.mat( sol.x )
+        Rval = R(N)
+        eigR = np.sort(np.linalg.eigvals(Rval).real)
+
+        print(f"R eigs = {eigR}")
+
+        return N
+
     def solve_program(self):    
 
         ''' What SEEMS to work so far: one round of dynamic minimization followed by one round of standard minimization (closer to the absolute minimum) '''
 
-        try:
-            self.run_dynamic_opt(verbose=True)
-        except KeyboardInterrupt:
-            pass
+        # try:
+        #     self.run_dynamic_opt(verbose=True)
+        # except KeyboardInterrupt:
+        #     pass
 
-        time.sleep(1.0)
+        # time.sleep(1.0)
+
+        # try:
+        #     self.run_standard_opt(verbose=True)
+        # except KeyboardInterrupt:
+        #     pass
 
         try:
-            self.run_standard_opt(verbose=True)
+            self.run_bilinear_opt(verbose=True)
         except KeyboardInterrupt:
             pass
 
