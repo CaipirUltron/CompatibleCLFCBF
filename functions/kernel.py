@@ -97,6 +97,7 @@ class Kernel():
         self._lambda_jacobian_monomials = sym.lambdify( list(self._symbols), self._sym_jacobian_monomials )
         self._lambda_hessian_monomials = sym.lambdify( list(self._symbols), self._hessian_monomials )
 
+
         '''
         Obtained the formula for the dimension of the inner blocks of the lowerbound matrix 
         by studying its internal structure. Therefore, self._find_partition(), self._get_block_dependencies(), 
@@ -104,6 +105,8 @@ class Kernel():
         '''
         n = self._dim
         d = self._max_degree
+        self._kernel_dim = comb(n+d,n)
+        self._jacobian_dim = comb(n+d-1,n)
 
         r = comb(n+d-2,n)
         s = comb(n+d-2,n-1)
@@ -447,7 +450,7 @@ class Kernel():
         '''
         This function checks whether a given point is inside the kernel space.
         '''
-        if len(point) != self.kernel_dim:
+        if len(point) != self._kernel_dim:
             raise Exception("Point must be of the kernel dimension.")
 
         from common import kernel_constraints
