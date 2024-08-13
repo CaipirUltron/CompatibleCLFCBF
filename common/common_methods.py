@@ -661,13 +661,20 @@ def segmentize( segment, pivot ):
 def polygon(vertices, spacing=0.1, closed=False) -> list[tuple]:
     ''' Returns list of points forming a polygon with passed vertices and fixed distance between points '''
     
-    if closed: line = LinearRing(vertices)
-    else: line = LineString(vertices)
+    if closed: segments = LinearRing(vertices)
+    else: segments = LineString(vertices)
 
-    distances = np.arange(0, line.length, spacing)
-    points = [line.interpolate(distance) for distance in distances] + ([] if closed else [line.boundary.geoms[1]])
+    distances = np.arange(0, segments.length, spacing).tolist()
+
+    list_segments = list(map(LineString, zip(segments.coords[:-1], segments.coords[1:])))
+
+    points = []
+    for seg in list_segments:
+        num_pts = round(seg.length/spacing)
+        distances = np.linspace( 0, seg.length, num_pts )
+        points += [ seg.interpolate(distance) for distance in distances ]
+
     multipoint = unary_union(points)
-
     return [ tuple(pt.coords[0]) for pt in multipoint.geoms ]
 
 def box(center, height, width, angle=0, spacing=0.1):

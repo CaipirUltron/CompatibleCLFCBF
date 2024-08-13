@@ -1391,49 +1391,20 @@ class InvexProgram():
         self.best_result = { "cost": np.inf, "invex_gap": np.inf, "control_energy": np.inf, "N": np.zeros(self.state_shape) }
 
     def _init_geometry(self):
-        ''' Computes the initial geometry as any N satisfying N m(xc) = 0 '''
-
-        mc = self.m_center.value
-        print(f"mc = {mc}")
-
-        # E = np.eye(self.p)
-        # Matrix = np.zeros((self.p, self.p-self.n))
-        # for dim in range(self.p-self.n):
-        #     if dim == 0:
-        #         Matrix[:,dim] = mc
-        #     else:
-        #         Matrix[:,dim] = E[:,self.p-dim]
-        # self.Nnom = 1e-0*sp.linalg.null_space( Matrix.T ).T
+        ''' Computes the initial invex geometry '''
         
+        tol = 2e-1
+
         pts = [ pt['point'] for pt in self.points_to_fit ]
         H, center = min_vol_ellipsoid( pts )
-        eigH, eigvecH = np.linalg.eig( 1e-1*H )
+        eigH, eigvecH = np.linalg.eig( tol*H )
         Pnom = kernel_quadratic(eigen=eigH, R=eigvecH.T, center=center, kernel_dim=self.p)
         self.Nnom, lowrank_error = NN_decomposition(Pnom, self.n)
         self.N = self.Nnom
 
-        print(f"N mc = {self.N @ mc}")
-
         eigP = np.real(np.linalg.eigvals(self.N.T @ self.N))
         index, = np.where( eigP > 1e-3 )
         print(f"Initial λ(N'N) = {eigP[index]}")
-
-        D = self.kernel.D(self.N)
-        eigD = np.linalg.eigvals(D)
-        # self.vecTol.value = np.abs(eigD)
-        print(f"Initial λ(D)(N) = {eigD}")
-
-        ''' Checks whether the initial state is closer to the PSD/NSD cone '''
-        dist_to_psd = np.linalg.norm( PSD_closest(D) - D , 'fro')
-        dist_to_nsd = np.linalg.norm( NSD_closest(D) - D , 'fro')
-        if dist_to_psd <= dist_to_nsd: 
-            self.cone.value = +1
-            print(f"D(N) -> PSD cone")
-            print(f"Initial distance to PSD cone = {dist_to_psd}")
-        else: 
-            self.cone.value = -1
-            print(f"D(N) -> NSD cone")
-            print(f"Initial distance to NSD cone = {dist_to_nsd}")
 
         ''' Sets integrator state '''
         self.geo_dynamics.set_state( self.vec( self.N ) )
@@ -1471,29 +1442,28 @@ class InvexProgram():
                 self.invex_mode = kwargs[key]
                 continue
 
-        ''' Sets up the problem accordingly '''
+        ''' Sets up the cvxpy problem accordingly '''
 
         self.basic_constraints = []
         self.basic_constraints.append(self.center_constraint)
 
-        if 'invex' in self.opmode:
-            if self.invex_mode == 'matrix':
-                print("MBF-based invexification is ON.")
-                self.basic_constraints.append( self.matrix_invex_constraint )
-            if self.invex_mode == 'eigen':
-                print("Eigen-based invexification is ON.")
-                self.basic_constraints.append( self.vector_invex_constraint )
-        else:
-            print("Invexification is OFF.")
+        # if 'invex' in self.opmode:
+        #     if self.invex_mode == 'matrix':
+        #         print("MBF-based invexification is ON.")
+        #         self.basic_constraints.append( self.matrix_invex_constraint )
+        #     if self.invex_mode == 'eigen':
+        #         print("Eigen-based invexification is ON.")
+        #         self.basic_constraints.append( self.vector_invex_constraint )
+        # else:
+        #     print("Invexification is OFF.")
 
-        if 'cost' in self.opmode:
-            self.basic_constraints.append(self.cost_constraint)
-            n_pts = len(self.points_to_fit)
-            print(f"Cost minimization is ON, fitting {n_pts} points.")
-        else:
-            print("Cost minimization is OFF.")
+        # if 'cost' in self.opmode:
+        #     self.basic_constraints.append(self.cost_constraint)
+        #     n_pts = len(self.points_to_fit)
+        #     print(f"Cost minimization is ON, fitting {n_pts} points.")
+        # else:
+        #     print("Cost minimization is OFF.")
 
-        print("\n")
         self.problem = cp.Problem( cp.Minimize( self.sdp_cost ), constraints=self.basic_constraints )
 
     def is_invex(self, verbose=False):
@@ -1658,7 +1628,7 @@ class InvexProgram():
 
         return cost, cost_diff
 
-    def gradient_cost(self, point, direction, norm=1.0):
+    def gradient_cost(self, point, direction, grad_norm=1.0):
         '''
         Cost for fitting the gradient norm on a point to a particular value.
         c(N) = || ∇f ||² - norm²
@@ -1668,12 +1638,11 @@ class InvexProgram():
         Jm = self.kernel.jacobian(point)
 
         gradient = Jm.T @ self.N.T @ self.N @ m
-        grad_norm = norm
         normalized = direction/np.linalg.norm(direction)
 
         grad_error = gradient - grad_norm * normalized
 
-        cost = grad_error.T @ grad_error
+        cost = 0.5 * grad_error.T @ grad_error
         cost_diff = np.zeros(self.state_shape)
 
         return cost, cost_diff
@@ -1844,7 +1813,7 @@ class InvexProgram():
             A = sp.linalg.block_diag(*[ mcenter for _ in range(self.n) ])
             return A
 
-        def show_message(var, verbose=False):
+        def show_message(var, verbose=False, initial_message=''):
             if not verbose: return
 
             if platform.system().lower() != 'windows':
@@ -1853,8 +1822,9 @@ class InvexProgram():
             if jac: cost_val, _ = cost(var)
             else: cost_val = cost(var)
             eigRvals = eigRfun(var)
-            message = f"Cost = {cost_val}\n"
-            message += f"R(N) eigenvalues = {eigRvals}\n"
+            message = initial_message
+            message += f" cost = {cost_val}\n"
+            message += f"R(N) eigenvalues = {np.around(eigRvals,5)}\n"
             print(message)
 
         center_constr = LinearConstraint(get_center_matrix(), lb=0.0, ub=0.0)
@@ -1863,13 +1833,13 @@ class InvexProgram():
         constrs = [ center_constr, invexity_constr ]
 
         init_var = self.vec(self.N)
-        show_message(init_var, verbose=True)
+        show_message(init_var, verbose=True, initial_message='Initial')
 
         sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=jac,
                         callback=lambda var: show_message(var, verbose), 
-                        options={"disp": True, 'ftol': 1e-12, 'maxiter': 500} )
+                        options={"disp": True, 'maxiter': 800, 'ftol': 1e-12} )
         self.N = self.mat( sol.x )
-        show_message( sol.x, verbose=True )
+        show_message( sol.x, verbose=True, initial_message='Final' )
 
         return self.N
 
@@ -1879,7 +1849,7 @@ class InvexProgram():
         (OMG IT ACTUALLY WORKS I'M SO FUCKING HAPPY)
         '''
         try:
-            self.run_bilinear_opt(verbose=False)
+            self.run_bilinear_opt(verbose=False, jac=False)
         except KeyboardInterrupt:
             pass
 

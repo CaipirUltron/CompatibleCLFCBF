@@ -2,7 +2,7 @@ import numpy as np
 import scipy as sp
 import matplotlib.pyplot as plt
 
-from common import box, kernel_quadratic, min_bounding_rect, min_vol_ellipsoid
+from common import box, polygon, kernel_quadratic, min_vol_ellipsoid
 from functions import Kernel, InvexProgram, KernelBarrier
 from shapely import LineString
 
@@ -25,23 +25,17 @@ kernel_dim = kernel._num_monomials
 q = kernel.dim_det_kernel
 p = kernel._num_monomials
 
-print(kernel.det_kernel)
-
-#---------------------------- Define some points for fitting ---------------------------
+#-------------------------------- Define some points for fitting ----------------------------
 ''' Box-shaped obstacle (convex) '''
-center = [ 0.0, 0.0 ]
-box_angle = 30
+center = [ -2, 2 ]
+box_angle = -0
 box_height, box_width = 5, 5
 boundary_pts = box( center=center, height=box_height, width=box_width, angle=box_angle, spacing=0.4 )
 
-H, center = min_vol_ellipsoid( boundary_pts )
-
 ''' U-shaped obstacle (non-convex) '''
 # center = (0, 0)
-# centers = [(-4, 3), (-4, 0), center, (4, 0), (4, 3)]
-# skeleton_line = LineString(centers)
-# obstacle_poly = skeleton_line.buffer(1.0, cap_style='flat')
-# boundary_pts = discretize(obstacle_poly, spacing=0.4)
+# vertices = [ (-5,-1),(-5,3),(-3,3),(-3,1),(3,1),(3,3),(5,3),(5,-1) ]
+# boundary_pts = polygon(vertices, spacing=0.4, closed=True)
 
 points = [ {"point": center, "level": -0.5} ]
 for pt in boundary_pts:
@@ -49,12 +43,13 @@ for pt in boundary_pts:
     ax.plot(coords[0], coords[1], 'k*', alpha=0.6)
     points.append({"point": pt, "level": 0.0})
 
-#----------------------------------Compute Invex Program -----------------------------------
+#---------------------------------- Compute Invex Program -----------------------------------
 invex_program = InvexProgram( kernel, fit_to='cbf', points=points, center=center, mode='invexcost', 
                               slack_gain=1e+5, invex_gain=1e+2, cost_gain=1e+2, invex_tol=0.0 )
 
 Q = invex_program.solve_program()
-#---------------------------------------- Plotting -----------------------------------------
+#---------------------------------------- Plotting ------------------------------------------
+# Q = np.zeros((p,p))
 cbf = KernelBarrier(kernel=kernel, Q=Q, limits=limits, spacing=0.1 )
 
 num_levels=10
