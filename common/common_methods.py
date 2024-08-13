@@ -690,19 +690,19 @@ def box(center, height, width, angle=0, spacing=0.1):
     box_vertices = [ tuple(bottom_left), tuple(bottom_right), tuple(top_right), tuple(top_left) ]
     return polygon( vertices=box_vertices, spacing=spacing, closed=True )
 
-def minimum_bounding_rectangle(points):
+def min_bounding_rect( points: list ):
     """
-    Find the smallest bounding rectangle for a set of points.
-    Returns a set of points representing the corners of the bounding box.
+    Find the smallest bounding rectangle for a list of given points.
 
-    :param points: an nx2 matrix of coordinates
-    :rval: an nx2 matrix of coordinates
+    Returns: a list of 4 lists with the coordinates of the corners.
     """
+    pts = np.vstack([ np.array(pt) for pt in points ])
+
     # from scipy.ndimage.interpolation import rotate
     pi2 = np.pi/2.
 
     # get the convex hull for the points
-    hull_points = points[ConvexHull(points).vertices]
+    hull_points = pts[ConvexHull(pts).vertices]
 
     # calculate edge angles
     edges = np.zeros((len(hull_points)-1, 2))
@@ -760,6 +760,27 @@ def minimum_bounding_rectangle(points):
     new_bbox = centroid + factor*diffs
 
     return new_bbox
+
+def min_vol_ellipsoid( points, n=2, verbose=False ):
+    '''
+    Computes the minimum volume ellipsoid (in n dimensions) bounding a given list of points.
+    Returns: the ellipsoid Hessian matrix and center.
+    '''
+    import cvxpy as cvx
+    A = cvx.Variable( (n,n), symmetric=True )
+    b = cvx.Variable( n )
+
+    obj = cvx.Maximize(cvx.log_det(A))
+    constraints = [ cvx.norm( A @ np.array(pt) + b ) <= 1.0 for pt in points ]
+    prob = cvx.Problem(obj, constraints)
+
+    try:
+        prob.solve(verbose=verbose)
+        Hessian = A.value.T @ A.value
+        center = - np.linalg.inv(Hessian) @ A.value @ b.value
+        return Hessian, center
+    except ValueError as error:
+        print('Optimization error: ' + error)
 
 def enclosing_circle( rect_limits ):
     ''' Returns radius and center of the circle completely enclosing the passed rectangle '''
@@ -955,10 +976,10 @@ def load_compatible(file_name, P, load_compatible=True):
         print("Couldn't locate compatibilization file. Returning passed P matrix.")
         return P
 
-def NGN_decomposition(n, P):
+def NN_decomposition(P, n):
     '''
-    Computes the rank n < p decomposition of P = N.T G N
-    Returns the resulting N (n x p) matrix
+    Computes the rank n < p decomposition of P = N.T N (P is p x p)
+    Returns the resulting N (n x p) matrix.
     '''
     if P.shape[0] != P.shape[1]:
         raise Exception("P is not a square matrix.")
@@ -968,15 +989,14 @@ def NGN_decomposition(n, P):
     sort_indexes = np.argsort(eigsP)
     sorted_eigs, sorted_eigvecs = eigsP[sort_indexes][::-1], eigvecsP[:,sort_indexes][:,::-1]
 
-    G = np.zeros((n,n))
     N = np.zeros((n,p))
     for k in range(n):
-        G[k,k] = sorted_eigs[k]
-        N[k,:] = sorted_eigvecs[:,k].T
+        eigP = sorted_eigs[k]
+        N[k,:] = np.sqrt(eigP) * sorted_eigvecs[:,k].T
 
-    matrix_error = P - N.T @ G @ N
+    matrix_error = P - N.T @ N
 
-    return N, G, matrix_error
+    return N, matrix_error
 
 def semidefinite_projection(P, psd = True):
     '''

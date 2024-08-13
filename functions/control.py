@@ -1396,37 +1396,21 @@ class InvexProgram():
         mc = self.m_center.value
         print(f"mc = {mc}")
 
-        # E = np.eye(self.n)
-        # self.Nnom = np.zeros(self.state_shape)
-        # self.Nnom[:,0] = self.center
-        # for k in range(self.n):
-        #     self.Nnom[:,k+1] = -E[:,k]
-
-        E = np.eye(self.p)
-        Matrix = np.zeros((self.p, self.p-self.n))
-        for dim in range(self.p-self.n):
-            if dim == 0:
-                Matrix[:,dim] = mc
-            else:
-                Matrix[:,dim] = E[:,self.p-dim]
-
-        self.Nnom = 1e-1*sp.linalg.null_space( Matrix.T ).T
-
-        ''' Testing with random sums of orthogonal vectors on each row dimension of N '''
-        # Null = sp.linalg.null_space( mc.reshape(1,-1) )
-        # self.N = np.zeros(self.state_shape)
-        # dim = 0
-        # for perp_mc in Null.T:
-        #     # dim = np.random.randint(self.n)
-        #     if dim >= self.n:
-        #         break
-        #     self.N[dim,:] += 1.0*perp_mc
-        #     dim += 1
-
+        # E = np.eye(self.p)
+        # Matrix = np.zeros((self.p, self.p-self.n))
+        # for dim in range(self.p-self.n):
+        #     if dim == 0:
+        #         Matrix[:,dim] = mc
+        #     else:
+        #         Matrix[:,dim] = E[:,self.p-dim]
+        # self.Nnom = 1e-0*sp.linalg.null_space( Matrix.T ).T
+        
+        pts = [ pt['point'] for pt in self.points_to_fit ]
+        H, center = min_vol_ellipsoid( pts )
+        eigH, eigvecH = np.linalg.eig( 1e-1*H )
+        Pnom = kernel_quadratic(eigen=eigH, R=eigvecH.T, center=center, kernel_dim=self.p)
+        self.Nnom, lowrank_error = NN_decomposition(Pnom, self.n)
         self.N = self.Nnom
-
-        # S = np.random.randn(self.n, Null.shape[1])
-        # self.N = S @ Null.T
 
         print(f"N mc = {self.N @ mc}")
 
@@ -1802,42 +1786,46 @@ class InvexProgram():
 
         return N
 
-    def run_bilinear_opt(self, Ninit=None, verbose=False):
+    def run_bilinear_opt(self, Ninit=None, verbose=False, jac=False):
         ''' Run bilinear optimization '''
 
         if Ninit is not None: self.Nnom = Ninit
 
-        mc = np.array(self.kernel.function(self.center))
+        mcenter = np.array(self.kernel.function(self.center))
         A_list = self.kernel.get_A_matrices()
         r = self.kernel._jacobian_dim
 
         def R_blocks(N):
             P = N.T @ N
-            R_blocks = [[ Ai.T @ P @ Aj for Ai in A_list ] for Aj in A_list ]
+            R_blocks = [[ Ai.T @ P @ Aj for Aj in A_list ] for Ai in A_list ]
             return R_blocks
-        
-        # center = np.array(self.center)
-        # C = np.zeros((r,r))
-        # C[0,0] = center.T @ center
-        # C[0,1:self.n+1] = -center
-        # C[1:self.n+1,0] = -center
-        # C[1:self.n+1, 1:self.n+1] = np.eye(self.n)
 
         def Rfun(N):
-            R_list = R_blocks(N)
+            R_blks = R_blocks(N)
             R = [[ None for _ in range(self.n) ] for _ in range(self.n) ]
             for i in range(self.n):
                 for j in range(self.n):
-                    R[i][j] = R_list[i][j][0:r,0:r]
+                    R_blk = R_blks[i][j]
+                    R[i][j] = R_blk[0:r,0:r]
+                    R[i][j][0,0] -= mcenter.T @ R_blk @ mcenter
 
             return np.block(R)
+
+        def eigRfun(var):
+            self.N = self.mat(var)
+            
+            R = Rfun(self.N)
+            eigR = np.sort( np.linalg.eigvals( R ).real )
+
+            return eigR
 
         def cost(var):
             ''' Computes the fitting cost '''
             self.N = self.mat(var)
             cost, cost_diff = self.fitting_cost()
-            return (cost, cost_diff)
-
+            if jac: return (cost, cost_diff)
+            return cost
+    
         max_lambda = 10.0
         def lambda_max(var):
             ''' Computes the lambda max constraint '''
@@ -1846,97 +1834,50 @@ class InvexProgram():
 
         def invexity_barrier(var):
             ''' Computes the invexity bilinear inequality constraint '''
-            self.N = self.mat(var)
-
-            R = Rfun(self.N)
-            Rnom = Rfun(self.Nnom)
-            eigR = np.linalg.eigvals(R - Rnom)
-            return np.min( eigR )
-            # return eigR
+            return np.min( eigRfun(var) )
 
         def get_center_matrix():
             '''
             Computes the matrix A(xc) for the linear constraint A(xc) vec(N) == 0,
             equivalent to N m(xc) = 0 (the center constraint).
             '''
-            A = sp.linalg.block_diag(*[ mc for _ in range(self.n) ])
+            A = sp.linalg.block_diag(*[ mcenter for _ in range(self.n) ])
             return A
 
-        def show_message(var):
-            # if not verbose: return
+        def show_message(var, verbose=False):
+            if not verbose: return
 
-            N = self.mat(var)
-            # if platform.system().lower() != 'windows':
-            #     os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
-            cost_val, _ = cost(var)
-            barrier = invexity_barrier(var)
+            if platform.system().lower() != 'windows':
+                os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
+            
+            if jac: cost_val, _ = cost(var)
+            else: cost_val = cost(var)
+            eigRvals = eigRfun(var)
             message = f"Cost = {cost_val}\n"
-            message += f"Barrier = {barrier}\n"
+            message += f"R(N) eigenvalues = {eigRvals}\n"
             print(message)
 
         center_constr = LinearConstraint(get_center_matrix(), lb=0.0, ub=0.0)
         invexity_constr = NonlinearConstraint(invexity_barrier, lb=0.0, ub=np.inf)
-        # lambda_max_constr = NonlinearConstraint(lambda_max, lb=-np.inf, ub=max_lambda)
 
         constrs = [ center_constr, invexity_constr ]
 
         init_var = self.vec(self.N)
-        show_message(init_var)
+        show_message(init_var, verbose=True)
 
-        sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=True, 
-                        options={"disp": True, 'ftol': 1e-6, 'maxiter': 500} )
-        
+        sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=jac,
+                        callback=lambda var: show_message(var, verbose), 
+                        options={"disp": True, 'ftol': 1e-12, 'maxiter': 500} )
         self.N = self.mat( sol.x )
-        show_message( sol.x )
+        show_message( sol.x, verbose=True )
 
-        # kerN = sp.linalg.null_space(self.N)
-
-        # print(f"N = \n{self.N}")
-        # print(f"ker(N) = \n{kerN}")
-        # print(f"N mc = {self.N @ mc}")
-
-        J = np.zeros((self.n,self.n))
-        for i in range(self.n):
-            for j in range(self.n):
-                Ai, Aj = A_list[i], A_list[j]
-                J[i,j] = mc.T @ Ai.T @ self.N.T @ self.N @ Aj @ mc
-
-        print(f"J = \n{J}")
-        print(f"J eigs = {np.linalg.eigvals(J)}")
-
-        # for i in range(self.n):
-        #     Ai = A_list[i]
-        #     print(f"Ai mc = {Ai @ mc}")
-        #     print(f"N Ai mc = {self.N @ Ai @ mc}")
-        #     print(f"kerN' Ai mc = {kerN.T @ Ai @ mc}")
-
-        # R = Rfun(self.N)
-        # Rnom = Rfun(self.Nnom)
-
-        # print(f"R = \n{R}")
-        # print(f"Rnom = \n{Rnom}")
-
-        # eigR = np.sort(np.linalg.eigvals(R).real)
-
-        # print(f"R eigs = {eigR}")
         return self.N
 
-    def solve_program(self):    
-
-        ''' What SEEMS to work so far: one round of dynamic minimization followed by one round of standard minimization (closer to the absolute minimum) '''
-
-        # try:
-        #     self.run_dynamic_opt(verbose=True)
-        # except KeyboardInterrupt:
-        #     pass
-
-        # time.sleep(1.0)
-
-        # try:
-        #     self.run_standard_opt(verbose=True)
-        # except KeyboardInterrupt:
-        #     pass
-
+    def solve_program(self):
+        ''' 
+        BEST RESULT SO FAR!!! Forcing ∇Φ(x)' ∇Φ(x) - ∇Φ(xc)' ∇Φ(xc) >> 0 for all x !!! 
+        (OMG IT ACTUALLY WORKS I'M SO FUCKING HAPPY)
+        '''
         try:
             self.run_bilinear_opt(verbose=False)
         except KeyboardInterrupt:
