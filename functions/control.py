@@ -1409,6 +1409,7 @@ class InvexProgram():
                 Matrix[:,dim] = mc
             else:
                 Matrix[:,dim] = E[:,self.p-dim]
+
         self.Nnom = 1e-1*sp.linalg.null_space( Matrix.T ).T
 
         ''' Testing with random sums of orthogonal vectors on each row dimension of N '''
@@ -1814,57 +1815,55 @@ class InvexProgram():
             P = N.T @ N
             R_blocks = [[ Ai.T @ P @ Aj for Ai in A_list ] for Aj in A_list ]
             return R_blocks
+        
+        # center = np.array(self.center)
+        # C = np.zeros((r,r))
+        # C[0,0] = center.T @ center
+        # C[0,1:self.n+1] = -center
+        # C[1:self.n+1,0] = -center
+        # C[1:self.n+1, 1:self.n+1] = np.eye(self.n)
 
-        Rnom_list = R_blocks(self.Nnom)
-        Jnom_squared = np.zeros((self.n,self.n))
-        for i in range(self.n):
-            for j in range(self.n):
-                Jnom_squared[i,j] = mc.T @ Rnom_list[i][j] @ mc
-        eigsJnom_squared = np.linalg.eigvals(Jnom_squared)
-
-        # epsilon = min(eigsJnom_squared)
-        epsilon = 1e-6
-        C = epsilon*np.eye(self.n)
-        print(f"eigs Jnom'Jnom = {eigsJnom_squared}")
-
-        def R(N):
+        def Rfun(N):
             R_list = R_blocks(N)
             R = [[ None for _ in range(self.n) ] for _ in range(self.n) ]
             for i in range(self.n):
                 for j in range(self.n):
-                    Cij = np.zeros((r,r))
-                    Cij[0,0] = C[i,j]
-                    R[i][j] = R_list[i][j][0:r,0:r] - Cij
-            
+                    R[i][j] = R_list[i][j][0:r,0:r]
+
             return np.block(R)
 
         def cost(var):
+            ''' Computes the fitting cost '''
             self.N = self.mat(var)
-
             cost, cost_diff = self.fitting_cost()
             return (cost, cost_diff)
 
-        ''' Computes the invexity bilinear inequality constraint '''
-        def invexity_barrier(var):
+        max_lambda = 10.0
+        def lambda_max(var):
+            ''' Computes the lambda max constraint '''
             self.N = self.mat(var)
-            Rval = R(self.N)
-            eigR = np.linalg.eigvals(Rval).real
+            return np.max( self.N.T @ self.N )
 
-            return np.min(eigR)
+        def invexity_barrier(var):
+            ''' Computes the invexity bilinear inequality constraint '''
+            self.N = self.mat(var)
 
-        # def invexity_jacobian(var):
-        #     self.N = self.mat(var)
-        #     Rval = R(self.N)
-        #     eigR, eigvecR = np.linalg.eig( 0.5*(Rval + Rval.T) )
+            R = Rfun(self.N)
+            Rnom = Rfun(self.Nnom)
+            eigR = np.linalg.eigvals(R - Rnom)
+            return np.min( eigR )
+            # return eigR
 
-        ''' Computes the matrix A(xc) for the linear constraint A(xc) vec(N) == 0, equivalent to N m(xc) = 0 (the center constraint)'''
-        def get_Acenter():
-            mc = np.array(self.kernel.function(self.center))
+        def get_center_matrix():
+            '''
+            Computes the matrix A(xc) for the linear constraint A(xc) vec(N) == 0,
+            equivalent to N m(xc) = 0 (the center constraint).
+            '''
             A = sp.linalg.block_diag(*[ mc for _ in range(self.n) ])
             return A
 
         def show_message(var):
-            if not verbose: return
+            # if not verbose: return
 
             N = self.mat(var)
             # if platform.system().lower() != 'windows':
@@ -1875,21 +1874,52 @@ class InvexProgram():
             message += f"Barrier = {barrier}\n"
             print(message)
 
-        center_constr = LinearConstraint(get_Acenter(), lb=0.0, ub=0.0)
+        center_constr = LinearConstraint(get_center_matrix(), lb=0.0, ub=0.0)
         invexity_constr = NonlinearConstraint(invexity_barrier, lb=0.0, ub=np.inf)
+        # lambda_max_constr = NonlinearConstraint(lambda_max, lb=-np.inf, ub=max_lambda)
+
         constrs = [ center_constr, invexity_constr ]
 
         init_var = self.vec(self.N)
         show_message(init_var)
-        sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=True, callback=show_message, 
-                        options={"disp": True, 'ftol': 1e-6, 'maxiter': 1000} )
-        N = self.mat( sol.x )
-        Rval = R(N)
-        eigR = np.sort(np.linalg.eigvals(Rval).real)
 
-        print(f"R eigs = {eigR}")
+        sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=True, 
+                        options={"disp": True, 'ftol': 1e-6, 'maxiter': 500} )
+        
+        self.N = self.mat( sol.x )
+        show_message( sol.x )
 
-        return N
+        # kerN = sp.linalg.null_space(self.N)
+
+        # print(f"N = \n{self.N}")
+        # print(f"ker(N) = \n{kerN}")
+        # print(f"N mc = {self.N @ mc}")
+
+        J = np.zeros((self.n,self.n))
+        for i in range(self.n):
+            for j in range(self.n):
+                Ai, Aj = A_list[i], A_list[j]
+                J[i,j] = mc.T @ Ai.T @ self.N.T @ self.N @ Aj @ mc
+
+        print(f"J = \n{J}")
+        print(f"J eigs = {np.linalg.eigvals(J)}")
+
+        # for i in range(self.n):
+        #     Ai = A_list[i]
+        #     print(f"Ai mc = {Ai @ mc}")
+        #     print(f"N Ai mc = {self.N @ Ai @ mc}")
+        #     print(f"kerN' Ai mc = {kerN.T @ Ai @ mc}")
+
+        # R = Rfun(self.N)
+        # Rnom = Rfun(self.Nnom)
+
+        # print(f"R = \n{R}")
+        # print(f"Rnom = \n{Rnom}")
+
+        # eigR = np.sort(np.linalg.eigvals(R).real)
+
+        # print(f"R eigs = {eigR}")
+        return self.N
 
     def solve_program(self):    
 
@@ -1908,7 +1938,7 @@ class InvexProgram():
         #     pass
 
         try:
-            self.run_bilinear_opt(verbose=True)
+            self.run_bilinear_opt(verbose=False)
         except KeyboardInterrupt:
             pass
 

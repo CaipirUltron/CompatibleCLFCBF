@@ -30,8 +30,8 @@ print(kernel.det_kernel)
 #---------------------------- Define some points for fitting ---------------------------
 ''' Box-shaped obstacle (convex) '''
 center = [ 0.0, -0.0 ]
-box_angle = -30
-box_height, box_width = 5, 5
+box_angle = 0
+box_height, box_width = 3, 5
 boundary_pts = box( center=center, height=box_height, width=box_width, angle=box_angle, spacing=0.4 )
 
 ''' U-shaped obstacle (non-convex) '''
