@@ -1393,10 +1393,10 @@ class InvexProgram():
     def _init_geometry(self):
         ''' Computes the initial invex geometry '''
         
-        tol = 2e-1
+        tol = 1e-0
 
         pts = [ pt['point'] for pt in self.points_to_fit ]
-        H, center = min_vol_ellipsoid( pts )
+        H, center = stationary_volume_ellipsoid( pts, mode='max' )
         eigH, eigvecH = np.linalg.eig( tol*H )
         Pnom = kernel_quadratic(eigen=eigH, R=eigvecH.T, center=center, kernel_dim=self.p)
         self.Nnom, lowrank_error = NN_decomposition(Pnom, self.n)
@@ -1832,14 +1832,14 @@ class InvexProgram():
 
         constrs = [ center_constr, invexity_constr ]
 
-        init_var = self.vec(self.N)
-        show_message(init_var, verbose=True, initial_message='Initial')
+        # init_var = self.vec(self.N)
+        # show_message(init_var, verbose=True, initial_message='Initial')
 
-        sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=jac,
-                        callback=lambda var: show_message(var, verbose), 
-                        options={"disp": True, 'maxiter': 800, 'ftol': 1e-12} )
-        self.N = self.mat( sol.x )
-        show_message( sol.x, verbose=True, initial_message='Final' )
+        # sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=jac,
+        #                 callback=lambda var: show_message(var, verbose), 
+        #                 options={"disp": True, 'maxiter': 800, 'ftol': 1e-12} )
+        # self.N = self.mat( sol.x )
+        # show_message( sol.x, verbose=True, initial_message='Final' )
 
         return self.N
 

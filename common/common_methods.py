@@ -768,23 +768,38 @@ def min_bounding_rect( points: list ):
 
     return new_bbox
 
-def min_vol_ellipsoid( points, n=2, verbose=False ):
+def stationary_volume_ellipsoid( points, n=2, mode='min', verbose=False ):
     '''
-    Computes the minimum volume ellipsoid (in n dimensions) bounding a given list of points.
+    Computes the minimum/maximum volume ellipsoid (in n dimensions) bounding/bounded by a given list of points.
+    In case of the maximum volume, the algorithm uses the convex hull of the given set of points first.
     Returns: the ellipsoid Hessian matrix and center.
     '''
     import cvxpy as cvx
-    A = cvx.Variable( (n,n), symmetric=True )
-    b = cvx.Variable( n )
+    B = cvx.Variable( (n,n), symmetric=True )
+    d = cvx.Variable( n )
 
-    obj = cvx.Maximize(cvx.log_det(A))
-    constraints = [ cvx.norm( A @ np.array(pt) + b ) <= 1.0 for pt in points ]
+    if mode == 'min':
+        obj = cvx.Maximize( cvx.log_det(B) )
+        constraints = [ cvx.norm( B @ np.array(pt) + d ) <= 1.0 for pt in points ]
+    if mode == 'max':
+        hull = ConvexHull(points)
+        A, b = hull.equations[:,0:n], hull.equations[:,n]
+
+        obj = cvx.Minimize( -cvx.log_det(B) )
+        constraints = []
+        for ai, bi in zip(A, b):
+            constraints += [ cvx.norm( B @ ai ) + ai @ d + bi <= 0 ]
+ 
     prob = cvx.Problem(obj, constraints)
 
     try:
         prob.solve(verbose=verbose)
-        Hessian = A.value.T @ A.value
-        center = - np.linalg.inv(Hessian) @ A.value @ b.value
+        if mode == 'min':
+            Hessian = B.value.T @ B.value
+            center = - np.linalg.inv(Hessian) @ B.value @ d.value
+        if mode == 'max':
+            Hessian = np.linalg.inv( B.value @ B.value.T )
+            center = d.value
         return Hessian, center
     except ValueError as error:
         print('Optimization error: ' + error)
