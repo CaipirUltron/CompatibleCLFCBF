@@ -1552,8 +1552,9 @@ class InvexProgram():
         ''' 
         Total fitting cost: c(N) = Σ_i ci(N)
         '''
-        # cost, cost_diff = self.comparison_cost()
         cost, cost_diff = 0.0, np.zeros(self.state_shape)
+        # cost, cost_diff = self.trace_cost()
+        # cost, cost_diff = self.comparison_cost()
 
         for point in self.points_to_fit:
 
@@ -1590,6 +1591,22 @@ class InvexProgram():
         N = len(self.points_to_fit)
         cost *= 1/N
         cost_diff *= 1/N
+
+        return cost, cost_diff
+
+    def trace_cost(self):
+        ''' 
+        Cost tr(P) cost. 
+        Based on the heuristic that minimizing tr(P) will often lead to a low rank solution for P.
+        '''
+        P = self.N.T @ self.N
+        cost = np.trace(P)
+        cost_diff = np.zeros(self.state_shape)
+        EYEn = np.eye(self.n)
+        EYEp = np.eye(self.p)
+        for (i,j) in itertools.product( range(self.n), range(self.p) ):
+            eij = np.outer( EYEn[:,i], EYEp[:,j] )
+            cost_diff[i,j] = np.trace( self.N.T @ eij + eij.T @ self.N )
 
         return cost, cost_diff
 
@@ -1832,14 +1849,14 @@ class InvexProgram():
 
         constrs = [ center_constr, invexity_constr ]
 
-        # init_var = self.vec(self.N)
-        # show_message(init_var, verbose=True, initial_message='Initial')
+        init_var = self.vec(self.N)
+        show_message(init_var, verbose=True, initial_message='Initial')
 
-        # sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=jac,
-        #                 callback=lambda var: show_message(var, verbose), 
-        #                 options={"disp": True, 'maxiter': 800, 'ftol': 1e-12} )
-        # self.N = self.mat( sol.x )
-        # show_message( sol.x, verbose=True, initial_message='Final' )
+        sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=jac,
+                        callback=lambda var: show_message(var, verbose), 
+                        options={"disp": True, 'maxiter': 1000, 'ftol': 1e-12} )
+        self.N = self.mat( sol.x )
+        show_message( sol.x, verbose=True, initial_message='Final' )
 
         return self.N
 
