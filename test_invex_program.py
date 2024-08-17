@@ -27,8 +27,8 @@ p = kernel._num_monomials
 
 #-------------------------------- Define some points for fitting ----------------------------
 ''' Box-shaped obstacle (convex) '''
-center = [ -3, 2 ]
-box_angle = -30
+center = [ 5, -3 ]
+box_angle = 30
 box_height, box_width = 4, 8
 boundary_pts = box( center=center, height=box_height, width=box_width, angle=box_angle, spacing=0.4 )
 

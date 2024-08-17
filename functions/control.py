@@ -1326,6 +1326,7 @@ class InvexProgram():
         # ---------------------------- Decision variables ---------------------------
         self.U = cp.Variable( self.state_shape )
         self.slack = cp.Variable(1)
+        self.P = cp.Variable( (self.p, self.p), PSD=True )
 
         ''' 
         Define invexity constraint 
@@ -1623,7 +1624,7 @@ class InvexProgram():
 
         return cost, cost_diff
 
-    def level_cost(self, point, level):
+    def level_cost(self, point, level, mode='normal'):
         '''
         Cost for fitting a point to a particular level set.
         c(N) = 0.5 ( m(x)' N'N m(x) - lvl )²
@@ -1634,16 +1635,19 @@ class InvexProgram():
         if self.fit_to == 'cbf': const = 2*level + 1
 
         m = self.kernel.function(point)
-        error = 0.5 * ( m.T @ self.N.T @ self.N @ m - const )
+        
+        if mode == 'normal':
+            error = 0.5 * ( m.T @ self.N.T @ self.N @ m - const )
+            cost = 0.5 * error**2
+            cost_diff = np.zeros(self.state_shape)
+            for (i,j) in itertools.product( range(self.n), range(self.p) ):
+                Nm = self.N @ m
+                cost_diff[i,j] = error * Nm[i] * m[j]
+            return cost, cost_diff
 
-        cost = 0.5 * error**2
-
-        cost_diff = np.zeros(self.state_shape)
-        for (i,j) in itertools.product( range(self.n), range(self.p) ):
-            Nm = self.N @ m
-            cost_diff[i,j] = error * Nm[i] * m[j]
-
-        return cost, cost_diff
+        if mode == 'cvxpy':
+            cost = cp.norm(  m.T @ self.P @ m - const )
+            return cost
 
     def gradient_cost(self, point, direction, grad_norm=1.0):
         '''
@@ -1849,14 +1853,74 @@ class InvexProgram():
 
         constrs = [ center_constr, invexity_constr ]
 
-        init_var = self.vec(self.N)
-        show_message(init_var, verbose=True, initial_message='Initial')
+        # init_var = self.vec(self.N)
+        # show_message(init_var, verbose=True, initial_message='Initial')
 
-        sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=jac,
-                        callback=lambda var: show_message(var, verbose), 
-                        options={"disp": True, 'maxiter': 1000, 'ftol': 1e-12} )
-        self.N = self.mat( sol.x )
-        show_message( sol.x, verbose=True, initial_message='Final' )
+        # sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=jac,
+        #                 callback=lambda var: show_message(var, verbose), 
+        #                 options={"disp": True, 'maxiter': 1000, 'ftol': 1e-12} )
+        # self.N = self.mat( sol.x )
+        # show_message( sol.x, verbose=True, initial_message='Final' )
+
+        return self.N
+
+    def run_sdp_opt(self, verbose=False):
+
+        mcenter = np.array( self.kernel.function(self.center) )
+        A_list = self.kernel.get_A_matrices()
+        r = self.kernel._jacobian_dim
+
+        ''' CVXPY function for cost '''
+        def cost_fun():
+
+            cost = 0.0
+            for point in self.points_to_fit:
+
+                keys = point.keys()
+                if "point" not in keys: 
+                    raise Exception("Point coordinates must be specified.")
+                pt = point["point"]
+                
+                if "level" in keys:
+                    level = point["level"]
+                    cost += self.level_cost(pt, level, mode='cvxpy')
+            
+            return cost
+
+        def R_blocks():
+            R_blocks = [[ Ai.T @ self.P @ Aj for Aj in A_list ] for Ai in A_list ]
+
+            return R_blocks
+
+        def Rfun():
+            S = np.vstack([ np.eye(r), np.zeros((self.p-r,r))])
+            R_blks = R_blocks()
+            R = [[ None for _ in range(self.n) ] for _ in range(self.n) ]
+            for i in range(self.n):
+                for j in range(self.n):
+                    R_blk = R_blks[i][j]
+                    vec = cp.hstack([ mcenter.T @ R_blk @ mcenter ] + [ 0.0 for _ in range(r-1) ])
+                    R[i][j] = S.T @ R_blk @ S - cp.diag(vec)
+            return cp.bmat(R)
+
+        ''' Invexity constraint '''
+        constraints = [ Rfun() >> 0 ]
+
+        ''' Upperbound constraint '''
+        pts = [ pt["point"] for pt in self.points_to_fit ]
+        H, center = stationary_volume_ellipsoid( pts, mode='max' )
+        eigH, eigvecH = np.linalg.eig( H )
+        Pnom = kernel_quadratic(eigen=eigH, R=eigvecH.T, center=center, kernel_dim=self.p)
+        Nnom, lowrank_error = NN_decomposition(Pnom, self.n)
+        constraints += [ self.P << Nnom.T @ Nnom ]
+
+        prob = cp.Problem( cp.Minimize( cost_fun() + cp.trace(self.P) ), constraints=constraints )
+        try:
+            prob.solve(verbose=verbose, solver=cp.CLARABEL)
+        except cp.SolverError as error:
+            print(error)
+
+        self.N, lowrank_error = NN_decomposition(self.P.value, self.n)
 
         return self.N
 
@@ -1865,8 +1929,13 @@ class InvexProgram():
         BEST RESULT SO FAR!!! Forcing ∇Φ(x)' ∇Φ(x) - ∇Φ(xc)' ∇Φ(xc) >> 0 for all x !!! 
         (OMG IT ACTUALLY WORKS I'M SO FUCKING HAPPY)
         '''
+        # try:
+        #     self.run_bilinear_opt(verbose=False, jac=False)
+        # except KeyboardInterrupt:
+        #     pass
+
         try:
-            self.run_bilinear_opt(verbose=False, jac=False)
+            self.run_sdp_opt(verbose=True)
         except KeyboardInterrupt:
             pass
 
