@@ -1394,10 +1394,10 @@ class InvexProgram():
     def _init_geometry(self):
         ''' Computes the initial invex geometry '''
         
-        tol = 1e-0
+        tol = 2e-1
 
         pts = [ pt['point'] for pt in self.points_to_fit ]
-        H, center = stationary_volume_ellipsoid( pts, mode='max' )
+        H, center = stationary_volume_ellipsoid( pts, mode='min' )
         eigH, eigvecH = np.linalg.eig( tol*H )
         Pnom = kernel_quadratic(eigen=eigH, R=eigvecH.T, center=center, kernel_dim=self.p)
         self.Nnom, lowrank_error = NN_decomposition(Pnom, self.n)
@@ -1853,22 +1853,31 @@ class InvexProgram():
 
         constrs = [ center_constr, invexity_constr ]
 
-        # init_var = self.vec(self.N)
-        # show_message(init_var, verbose=True, initial_message='Initial')
+        init_var = self.vec(self.N)
+        show_message(init_var, verbose=True, initial_message='Initial')
 
-        # sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=jac,
-        #                 callback=lambda var: show_message(var, verbose), 
-        #                 options={"disp": True, 'maxiter': 1000, 'ftol': 1e-12} )
-        # self.N = self.mat( sol.x )
-        # show_message( sol.x, verbose=True, initial_message='Final' )
+        sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=jac,
+                        callback=lambda var: show_message(var, verbose), 
+                        options={"disp": True, 'maxiter': 400, 'ftol': 1e-12} )
+        self.N = self.mat( sol.x )
+        show_message( sol.x, verbose=True, initial_message='Final' )
+
+        # P = self.N.T @ self.N
+        # eigsP = np.linalg.eigvals(P).real
+        # print(f"Eigs of P = {np.sort(eigsP)}")
+        # eigsNN = np.linalg.eigvals(self.Nnom.T @ self.Nnom).real
+        # print(f"Eigs of N'N = {np.sort(eigsNN)}")
 
         return self.N
 
-    def run_sdp_opt(self, verbose=False):
+    def run_sdp_opt(self, Pinit=None, verbose=False):
 
-        mcenter = np.array( self.kernel.function(self.center) )
+        center = self.kernel.function(self.center)
+        mcenter = np.array(center)
         A_list = self.kernel.get_A_matrices()
         r = self.kernel._jacobian_dim
+
+        # self.P.value = self.Nnom.T @ self.Nnom
 
         ''' CVXPY function for cost '''
         def cost_fun():
@@ -1903,8 +1912,7 @@ class InvexProgram():
                     R[i][j] = S.T @ R_blk @ S - cp.diag(vec)
             return cp.bmat(R)
 
-        ''' Invexity constraint '''
-        constraints = [ Rfun() >> 0 ]
+        constraints = []
 
         ''' Upperbound constraint '''
         pts = [ pt["point"] for pt in self.points_to_fit ]
@@ -1912,30 +1920,41 @@ class InvexProgram():
         eigH, eigvecH = np.linalg.eig( H )
         Pnom = kernel_quadratic(eigen=eigH, R=eigvecH.T, center=center, kernel_dim=self.p)
         Nnom, lowrank_error = NN_decomposition(Pnom, self.n)
-        constraints += [ self.P << Nnom.T @ Nnom ]
 
-        prob = cp.Problem( cp.Minimize( cost_fun() + cp.trace(self.P) ), constraints=constraints )
+        ''' Invexity constraints '''
+        # if np.all(Pinit != None):
+        #     self.P.value = Pinit
+
+        constraints += [ Rfun() >> 0 ]
+        constraints += [ self.P @ mcenter == 0 ]
+        constraints += [ self.P << Nnom.T @ Nnom ]
+        # constraints += [ cp.lambda_max(self.P) <= 1.0 ]
+            
+        cost = cost_fun()
+        prob = cp.Problem( cp.Minimize(cost), constraints=constraints )
         try:
-            prob.solve(verbose=verbose, solver=cp.CLARABEL)
+            prob.solve(verbose=verbose, solver=cp.MOSEK)
         except cp.SolverError as error:
             print(error)
 
-        self.N, lowrank_error = NN_decomposition(self.P.value, self.n)
+        P = self.P.value
+        eigsP = np.linalg.eigvals( P )
+        eigsNN = np.linalg.eigvals( Nnom.T @ Nnom )
+
+        self.N, lowrank_error = NN_decomposition(P, self.n)
+        print(f"Cost = {cost.value}")
+        print(f"N'N = {np.sort(eigsNN)}")
+        print(f"P = {np.sort(eigsP)}")
 
         return self.N
 
     def solve_program(self):
         ''' 
-        BEST RESULT SO FAR!!! Forcing ∇Φ(x)' ∇Φ(x) - ∇Φ(xc)' ∇Φ(xc) >> 0 for all x !!! 
-        (OMG IT ACTUALLY WORKS I'M SO FUCKING HAPPY)
+        BEST RESULT SO FAR!!! Forcing ∇Φ(x)' ∇Φ(x) - ∇Φ(x_c)' ∇Φ(x_c) >> 0 for all x !!! 
         '''
-        # try:
-        #     self.run_bilinear_opt(verbose=False, jac=False)
-        # except KeyboardInterrupt:
-        #     pass
-
         try:
-            self.run_sdp_opt(verbose=True)
+            self.run_sdp_opt( verbose=True )
+            # self.run_bilinear_opt( verbose=False )
         except KeyboardInterrupt:
             pass
 

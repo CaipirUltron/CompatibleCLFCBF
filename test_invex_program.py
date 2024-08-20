@@ -1,10 +1,8 @@
 import numpy as np
-import scipy as sp
 import matplotlib.pyplot as plt
 
 from common import box, polygon, kernel_quadratic, stationary_volume_ellipsoid
 from functions import Kernel, InvexProgram, KernelBarrier
-from shapely import LineString
 
 # np.set_printoptions(precision=3, suppress=True)
 limits = 12*np.array((-1,1,-1,1))
@@ -27,9 +25,9 @@ p = kernel._num_monomials
 
 #-------------------------------- Define some points for fitting ----------------------------
 ''' Box-shaped obstacle (convex) '''
-center = [ 5, -3 ]
-box_angle = 30
-box_height, box_width = 4, 8
+center = [ -5, 3 ]
+box_angle = -30
+box_height, box_width = 4, 4
 boundary_pts = box( center=center, height=box_height, width=box_width, angle=box_angle, spacing=0.4 )
 
 ''' U-shaped obstacle (non-convex) '''
