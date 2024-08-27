@@ -415,3 +415,58 @@ class KernelAffineSystem(AffineSystem):
         text += "with kernel function as \n"
         text += self.kernel.__str__()
         return text
+
+class KernelAffineSystem2(AffineSystem):
+    '''
+    Class for affine nonlinear systems of the type xdot = f(x) + g(x) u, where:
+    - f(x), g(x) are given component-wise by kernel quadratic forms, respectively as fi(x) = m(x)' Fi m(x) and gij(x) = Gij' m(x)
+    where m(x) is a kernel function and F is a suitable matrix of the kernel dimension.
+    '''
+    def __init__(self, initial_state, initial_control, kernel, F, g_method):
+
+        # Initialize kernel function
+        from functions import Kernel
+        if type(kernel) != Kernel:
+            raise Exception("Argument must be a valid Kernel function.")
+        self.kernel = kernel
+        self.kernel_dim = self.kernel._num_monomials
+
+        # Initialize F matrix
+        if np.shape(F) != (self.kernel_dim, self.kernel_dim):
+            raise Exception('F must be a matrix of the same dimension as the kernel.')
+        self.F = F
+
+        # Initialize g method
+        self.g_method = g_method
+      
+        super().__init__(initial_state, initial_control)
+        self.f()
+
+    def get_g(self, x):
+        return self.g_method(x)
+
+    def get_fc(self, x):
+        m = self.kernel.function(x)
+        Jac = self.kernel.jacobian(x)
+        return Jac.T @ self.F @ m
+
+    def get_f(self, x):
+        g = self.get_g(x)
+        G = g @ g.T
+        return G @ self.get_fc(x)
+
+    def get_F(self):
+        return self.F
+
+    def f(self):
+        self._f = self.get_f(self._state)
+
+    def g(self):
+        self._g = self.get_g(self._state)
+
+    def __str__(self):
+        text = "Conservative affine nonlinear system of the type dx = f(x) + g(x) u ,\n"
+        text += "where f(x) = g(x) g'(x) d( m'(x) F m(x) )/dx, \n"
+        text += "with kernel function as \n"
+        text += self.kernel.__str__()
+        return text
