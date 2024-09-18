@@ -16,7 +16,7 @@ ax.set_xlim(limits[0], limits[1])
 ax.set_ylim(limits[2], limits[3])
 
 # ------------------------------------ Define kernel -----------------------------------
-n, d = 2, 3
+n, d = 2, 2
 kernel = Kernel(dim=n, degree=d)
 print(kernel)
 kernel_dim = kernel._num_monomials
@@ -28,17 +28,25 @@ print(kernel.det_kernel)
 #-------------------------------------- Define pencil ----------------------------------
 A = np.random.randn(n,p)
 B = np.random.randn(n,p)
-AA, BB, alpha, beta, Q, Z = sp.linalg.ordqz( A.T @ A, A.T @ B, output='real' )
+AA, BB, alpha, beta, Q, Z = sp.linalg.ordqz( A @ A.T, B @ A.T , output='real' )
 
 print(f"AA = {AA}")
 print(f"BB = {BB}")
-print(f"unitary error of Q = {np.linalg.norm(np.eye(p) - Q.T @ Q)}")
-print(f"unitary error of Z = {np.linalg.norm(np.eye(p) - Z.T @ Z)}")
+print(f"unitary error of Q = {np.linalg.norm(np.eye(n) - Q.T @ Q)}")
+print(f"unitary error of Z = {np.linalg.norm(np.eye(n) - Z.T @ Z)}")
 
-print(f"(A - Q AA Z') error = {np.linalg.norm( A.T @ A - Q @ AA @ Z.T)}")
-print(f"(B - Q BB Z') error = {np.linalg.norm( A.T @ B - Q @ BB @ Z.T)}")
+print(f"(A - Q AA Z') error = {np.linalg.norm( A @ A.T - Q @ AA @ Z.T)}")
+print(f"(B - Q BB Z') error = {np.linalg.norm( B @ A.T - Q @ BB @ Z.T)}")
 
 print(f"alpha = {alpha.real}")
 print(f"beta = {beta}")
 
-# print(f"eigenvalues = {beta/alpha.real}")
+lamb = np.random.randn()
+P = lamb * A - B
+NULLright = sp.linalg.null_space(P)
+print(f"NULLSPACE = {NULLright}")
+
+# for k in range(n):
+#     P = alpha[k].real * (A @ A.T) - beta[k] * (B @ A.T)
+#     NULLright = sp.linalg.null_space(P)
+#     print(f"(alpha A - beta B) NULLright = \n{ P @ NULLright }")

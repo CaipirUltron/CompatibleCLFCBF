@@ -224,7 +224,7 @@ def hat(omega):
 
 def rot2D(theta):
     '''
-    Standard 2D rotation matrix.
+    Standard 2D rotation matrix (theta is given in radians)
     '''
     c, s = np.cos(theta), np.sin(theta)
     R = np.array(((c,-s),(s,c)))
