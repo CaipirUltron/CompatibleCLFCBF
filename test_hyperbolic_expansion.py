@@ -10,7 +10,7 @@ from numpy.polynomial import Polynomial as Poly
 from scipy.interpolate import approximate_taylor_polynomial
 
 # np.set_printoptions(precision=3, suppress=True)
-limits = 50*np.array((-1,1,-1,1))
+limits = 14*np.array((-1,1,-1,1))
 
 fig = plt.figure(constrained_layout=True)
 ax = fig.add_subplot(111)
@@ -73,11 +73,26 @@ t_list = np.linspace(0, 100, N)
 # plt.show()
 
 # ---------------- Function for invariant set estimation ---------------
-def fit_invariant(A, B, kernel, order, Pinit):
+def trim(poly):
+    ''' Trims rational polynomial'''
+
+    if np.all(poly == 0.0): return poly
+
+    to_return = np.array([ True for _ in range(len(poly)) ])
+    for up, down in zip(range(0, len(poly), +1), range(len(poly)-1, -1, -1)):
+        if poly[up] == 0.0 and poly[down] == 0.0:
+            to_return[up] = False
+            to_return[down] = False
+        else:
+            break
+    
+    return poly[to_return]
+
+def fit_invariant(A, B, kernel, order, Pinit, powers='+'):
     '''
     This function fits the parameters of a polynomial of the type xi = Σ [pi]_k t**k,
-    of maximum order order, in order to solve the equation (t A - B) m(x) = 0, where
-    m(x) is the kernel function of x.
+    of maximum order order (positive and negative coefficients), in order to solve the equation 
+    (t A - B) m(x) = 0, where m(x) is the kernel function of x.
     '''
     if A.shape != B.shape:
         raise Exception("Matrix sizes are not compatible.")
@@ -103,24 +118,61 @@ def fit_invariant(A, B, kernel, order, Pinit):
         ''' List of polynomials representing the solution for each state '''
         x_poly = [ Poly(P[i,:]) for i in range(n) ]
 
-        f = np.zeros(n*(max_degree+1))
-        # f = np.zeros(0)
+        num_powers_of_lambda = max_degree+1
+        f = np.zeros(n*num_powers_of_lambda)
         for i in range(n):
             poly_line = Poly(0.0)
-            for j, alpha in enumerate(kernel):        
+            for j, alpha in enumerate(kernel):
                 mj_poly = np.prod([ x_poly[dim]**alpha[dim] for dim in range(n) ])
                 poly_line += polyAB[i][j] * mj_poly
             poly_line.coef = np.hstack([ poly_line.coef, np.zeros( max_degree - poly_line.degree() ) ])
-            f[(max_degree+1)*i:(max_degree+1)*(i+1)] = poly_line.coef
-            # f = np.hstack([ f, poly_line.coef ])
+            f[num_powers_of_lambda*i:num_powers_of_lambda*(i+1)] = poly_line.coef
+
+        return f
+
+    polyAB_neg = [[ [ 0.0, -B[i,j], A[i,j] ] for j in range(p) ] for i in range(n) ]
+
+    def f_neg(params):
+        ''' Objective function '''
+        P = params.reshape((n, 2*order+1))
+    
+        ''' List of polynomials representing the solution for each state '''
+        x_poly = [ P[i,:] for i in range(n) ]
+
+        num_powers_of_lambda = 2*max_degree+1
+        f = np.zeros(n*num_powers_of_lambda)
+        for i in range(n):
+            poly_line = np.zeros(num_powers_of_lambda)
+            for j, alpha in enumerate(kernel):
+                
+                partials = [ np.array([ 1.0 ])  for _ in range(n) ]
+                for dim in range(n):
+                    for _ in range(alpha[dim]):
+                        partials[dim] = trim( np.convolve(x_poly[dim], partials[dim]) )
+
+                mj_poly = np.array([ 1.0 ])
+                for dim in range(n): 
+                    mj_poly = trim( np.convolve(partials[dim], mj_poly) )
+
+                poly_line_term = trim( np.convolve(polyAB_neg[i][j], mj_poly) )
+                remaining_zeros = np.zeros(int(max_degree - (len(poly_line_term)-1)/2))
+                poly_line += np.hstack([ remaining_zeros, poly_line_term, remaining_zeros ])
+
+                f[num_powers_of_lambda*i:num_powers_of_lambda*(i+1)] = poly_line
 
         return f
 
     param_init = Pinit.flatten()
-    sol = least_squares( f, param_init )
-    print(sol)
+    
+    if powers == '+': 
+        sol = least_squares( f, param_init )
+        print(sol)
+        return sol.x.reshape((n, order+1))
 
-    return sol.x.reshape((n, order+1))
+    if powers == '-': 
+        sol = least_squares( f_neg, param_init )
+        print(sol)
+        return sol.x.reshape((n, 2*order+1))
 
 # ------------------------------------ Test invariant fitting -----------------------------------
 n, d = 2, 1
@@ -130,14 +182,14 @@ kernel_powers = kernel._powers
 p = len(kernel_powers)
 
 clf_eigen = [6, 1]
-clf_angle = 30
+clf_angle = 20
 clf_center = np.array([0.0, 0.0]).reshape((2,1))
 Rv = rot2D( np.deg2rad(clf_angle) )
 Hv = Rv.T @ np.diag(clf_eigen) @ Rv
 B = Hv @ np.hstack([ -clf_center, np.eye(n) ])
 clf = KernelLyapunov(kernel=kernel, P=kernel_quadratic(clf_eigen, Rv, clf_center, p), limits=limits, spacing=0.1 )
 
-cbf_eigen = [1, 1]
+cbf_eigen = [3, 1]
 cbf_angle = 0
 cbf_center = np.array([0.0, 4]).reshape((2,1))
 Rh = rot2D( np.deg2rad(cbf_angle) )
@@ -157,10 +209,10 @@ kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs,
 
 # ------------------------------------ Plotting -----------------------------------
 cbf.plot_levels(ax=ax, levels=[0.0])
-kerneltriplet.plot_invariant(ax, 0)
+kerneltriplet.plot_invariant(ax, cbf_index=0)
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
-invariant_plot, = ax.plot([],[],'r--')
+invariant_plot, = ax.plot([],[],'r.-')
 
 while True:
     pt = plt.ginput(1, timeout=0)
@@ -172,16 +224,17 @@ while True:
             coll.remove()
         del clf_contour
 
-    order = 10
-    Pinit = 10*np.random.randn(n, order+1)
-    P = fit_invariant(A, B, kernel_powers, order, Pinit)
-    # P = Pinit
+    order = 12
+    max_degree = order+1
+    # max_degree = 2*order+1
+    Pinit = np.random.randn(n, max_degree)
+    P = fit_invariant(A, B, kernel_powers, order, Pinit, powers='+')
 
-    x_list = [ np.sum([ P[0,i] * (t**i) for i in range(order+1) ]) for t in t_list ]
-    y_list = [ np.sum([ P[1,i] * (t**i) for i in range(order+1) ]) for t in t_list ]
+    x_list = [ np.sum([ P[0,i] * (t**i) for i in range(order+1-max_degree, order+1) ]) for t in t_list ]
+    y_list = [ np.sum([ P[1,i] * (t**i) for i in range(order+1-max_degree, order+1) ]) for t in t_list ]
     invariant_plot.set_data(x_list, y_list)
 
-    l = kerneltriplet.lambda_fun(init_x, 0)
+    l = kerneltriplet.lambda_fun(init_x, cbf_index = 0)
     print(f"Lambda = {l}")
 
     V = clf.function(init_x)
