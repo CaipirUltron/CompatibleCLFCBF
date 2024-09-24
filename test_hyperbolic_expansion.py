@@ -2,19 +2,22 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 
+from dynamic_systems import KernelAffineSystem
 from scipy.optimize import fsolve, least_squares
-from common import rot2D
-from functions import Kernel
+from common import rot2D, kernel_quadratic
+from functions import Kernel, KernelLyapunov, KernelBarrier, KernelFamily
 from numpy.polynomial import Polynomial as Poly
+from scipy.interpolate import approximate_taylor_polynomial
 
 # np.set_printoptions(precision=3, suppress=True)
+limits = 50*np.array((-1,1,-1,1))
 
 fig = plt.figure(constrained_layout=True)
 ax = fig.add_subplot(111)
 ax.set_title("Hyperbolic Expansion")
 ax.set_aspect('equal', adjustable='box')
-ax.set_xlim(-10, 10)
-ax.set_ylim(-10, 10)
+ax.set_xlim(limits[0], limits[1])
+ax.set_ylim(limits[2], limits[3])
 
 N = 1000
 t_list = np.linspace(0, 100, N)
@@ -70,7 +73,7 @@ t_list = np.linspace(0, 100, N)
 # plt.show()
 
 # ---------------- Function for invariant set estimation ---------------
-def fit_invariant(A, B, kernel, order):
+def fit_invariant(A, B, kernel, order, Pinit):
     '''
     This function fits the parameters of a polynomial of the type xi = Σ [pi]_k t**k,
     of maximum order order, in order to solve the equation (t A - B) m(x) = 0, where
@@ -101,6 +104,7 @@ def fit_invariant(A, B, kernel, order):
         x_poly = [ Poly(P[i,:]) for i in range(n) ]
 
         f = np.zeros(n*(max_degree+1))
+        # f = np.zeros(0)
         for i in range(n):
             poly_line = Poly(0.0)
             for j, alpha in enumerate(kernel):        
@@ -108,48 +112,79 @@ def fit_invariant(A, B, kernel, order):
                 poly_line += polyAB[i][j] * mj_poly
             poly_line.coef = np.hstack([ poly_line.coef, np.zeros( max_degree - poly_line.degree() ) ])
             f[(max_degree+1)*i:(max_degree+1)*(i+1)] = poly_line.coef
+            # f = np.hstack([ f, poly_line.coef ])
 
         return f
 
-    P0 = np.random.randn(n, order+1)
-    param0 = P0.flatten()
-    param = least_squares( f, param0 )
-    print(param)
-    P = param.x.reshape((n, order+1))
+    param_init = Pinit.flatten()
+    sol = least_squares( f, param_init )
+    print(sol)
 
-    return P
+    return sol.x.reshape((n, order+1))
 
 # ------------------------------------ Test invariant fitting -----------------------------------
 n, d = 2, 1
 kernel = Kernel(dim=n, degree=d)
 print(kernel)
 kernel_powers = kernel._powers
-print(kernel_powers)
+p = len(kernel_powers)
 
-clf_eigen = [1, 1]
-clf_angle = 20
-clf_center = np.array([0.1, 0.1]).reshape((2,1))
+clf_eigen = [6, 1]
+clf_angle = 30
+clf_center = np.array([0.0, 0.0]).reshape((2,1))
+Rv = rot2D( np.deg2rad(clf_angle) )
+Hv = Rv.T @ np.diag(clf_eigen) @ Rv
+B = Hv @ np.hstack([ -clf_center, np.eye(n) ])
+clf = KernelLyapunov(kernel=kernel, P=kernel_quadratic(clf_eigen, Rv, clf_center, p), limits=limits, spacing=0.1 )
 
 cbf_eigen = [1, 1]
-cbf_angle = 40
-cbf_center = np.array([0.1, 4]).reshape((2,1))
-
-Rv = rot2D( np.deg2rad(clf_angle) )
-Hv = Rv @ np.diag(clf_eigen) @ Rv.T
-B = Hv @ np.hstack([ -clf_center, np.eye(n) ])
-
+cbf_angle = 0
+cbf_center = np.array([0.0, 4]).reshape((2,1))
 Rh = rot2D( np.deg2rad(cbf_angle) )
-Hh = Rh @ np.diag(cbf_eigen) @ Rh.T
+Hh = Rh.T @ np.diag(cbf_eigen) @ Rh
 A = Hh @ np.hstack([ -cbf_center, np.eye(n) ])
+cbf = KernelBarrier(kernel=kernel, Q=kernel_quadratic(cbf_eigen, Rh, cbf_center, p), limits=limits, spacing=0.1 )
+cbfs = [cbf]
 
-order = 4
-P = fit_invariant(A, B, kernel_powers, order=order)
+fx, fy = 0.0, 0.0                       # constant force with fx, fy components
+F = np.zeros([p,p])
+F[1,0], F[2,0] = fx, fy
+def g(state):
+    return np.eye(2)
+plant = KernelAffineSystem(initial_state=[0.0,0.0], initial_control=[0.0, 0.0], kernel=kernel, F=F, g_method=g)
+kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, 
+                               params={"slack_gain": 1.0, "clf_gain": 1.0, "cbf_gain": 1.0}, limits=limits, spacing=0.2 )
 
-print(P)
+# ------------------------------------ Plotting -----------------------------------
+cbf.plot_levels(ax=ax, levels=[0.0])
+kerneltriplet.plot_invariant(ax, 0)
 
-x_list = np.sum([ P[0,i] * (t_list**i) for i in range(order+1) ])
-y_list = np.sum([ P[1,i] * (t_list**i) for i in range(order+1) ])
+init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
+invariant_plot, = ax.plot([],[],'r--')
 
-ax.plot(x_list, y_list, 'r--')
+while True:
+    pt = plt.ginput(1, timeout=0)
+    init_x = [ pt[0][0], pt[0][1] ]
+    init_x_plot.set_data([init_x[0]], [init_x[1]])
 
-plt.show()
+    if "clf_contour" in locals():
+        for coll in clf_contour:
+            coll.remove()
+        del clf_contour
+
+    order = 10
+    Pinit = 10*np.random.randn(n, order+1)
+    P = fit_invariant(A, B, kernel_powers, order, Pinit)
+    # P = Pinit
+
+    x_list = [ np.sum([ P[0,i] * (t**i) for i in range(order+1) ]) for t in t_list ]
+    y_list = [ np.sum([ P[1,i] * (t**i) for i in range(order+1) ]) for t in t_list ]
+    invariant_plot.set_data(x_list, y_list)
+
+    l = kerneltriplet.lambda_fun(init_x, 0)
+    print(f"Lambda = {l}")
+
+    V = clf.function(init_x)
+    clf_contour = clf.plot_levels(ax=ax, levels=[V])
+
+    plt.pause(0.001)

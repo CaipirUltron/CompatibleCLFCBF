@@ -303,7 +303,7 @@ class KernelFamily():
         self.limits = [ [-1, +1] for _ in range(2) ]
         self.spacing = 0.1
         self.invariant_color = mcolors.BASE_COLORS["k"]
-        self.invariant_complete = True
+        self.invariant_complete = False
         self.interior_eq_threshold = 1e-1
         self.max_P_eig = 100
         self.plotted_attrs = {}
