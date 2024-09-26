@@ -2,6 +2,7 @@ import scipy as sp
 import numpy as np
 import matplotlib.pyplot as plt
 
+from guptri_py import *
 from dynamic_systems import KernelAffineSystem
 from scipy.optimize import fsolve, least_squares
 from common import rot2D, kernel_quadratic
@@ -221,7 +222,7 @@ clf_angle = 45
 clf_center = np.array([0.0, 0.0]).reshape((2,1))
 Rv = rot2D( np.deg2rad(clf_angle) )
 Hv = Rv.T @ np.diag(clf_eigen) @ Rv
-B = 1.0 * Hv @ np.hstack([ -clf_center, np.eye(n) ])
+B = Hv @ np.hstack([ -clf_center, np.eye(n) ])
 clf = KernelLyapunov(kernel=kernel, P=kernel_quadratic(clf_eigen, Rv, clf_center, p), limits=limits, spacing=0.1 )
 
 cbf_eigen = [ 1, 1 ]
@@ -231,9 +232,24 @@ Rh = rot2D( np.deg2rad(cbf_angle) )
 Hh = Rh.T @ np.diag(cbf_eigen) @ Rh
 A = Hh @ np.hstack([ -cbf_center, np.eye(n) ])
 cbf = KernelBarrier(kernel=kernel, Q=kernel_quadratic(cbf_eigen, Rh, cbf_center, p), limits=limits, spacing=0.1 )
-cbfs = [cbf]
+cbfs = [ cbf ]
 
 print(f"A = {A}\nB = {B}")
+
+S, T, P, Q, kstr = guptri(-B, -A)
+AA = -T
+BB = -S
+print(f"AA = \n{AA}")
+print(f"BB = \n{BB}")
+print(f" AA - P' A Q = { np.linalg.norm( AA - P.T @ A @ Q ) }")
+print(f" BB - P' B Q = { np.linalg.norm( BB - P.T @ B @ Q ) }")
+print(f"Kronecker structure = \n{ kcf_blocks(kstr) }")
+
+Hh = Hh[:,[1,0]]
+Hv = Hv[:,[1,0]]
+
+AA, BB, alpha, beta, Q, Z = sp.linalg.ordqz(Hv, Hh)
+print(f"Eigenvalues = {alpha/beta}")
 
 fx, fy = 0.0, 0.0                       # constant force with fx, fy components
 F = np.zeros([p,p])
@@ -262,13 +278,13 @@ while True:
 
     order = 12
 
-    # mode = '+'
-    # max_degree = order+1
-    # init_params = np.random.randn( n*order )
+    mode = '+'
+    max_degree = order+1
+    init_params = np.random.randn( n*order )
 
-    mode = '-'
-    max_degree = 2*order+1
-    init_params = np.random.randn( n*max_degree )
+    # mode = '-'
+    # max_degree = 2*order+1
+    # init_params = np.random.randn( n*max_degree )
 
     P = fit_invariant(A, B, kernel_powers, order, init_params, powers=mode)
 
