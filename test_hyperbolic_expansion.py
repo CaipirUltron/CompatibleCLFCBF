@@ -1,8 +1,8 @@
+import itertools
 import scipy as sp
 import numpy as np
 import matplotlib.pyplot as plt
 
-from guptri_py import *
 from dynamic_systems import KernelAffineSystem
 from scipy.optimize import fsolve, least_squares
 from common import rot2D, kernel_quadratic
@@ -176,7 +176,7 @@ def fit_invariant(A, B, kernel, order, init_params, powers='+'):
         print(sol)
         return sol.x.reshape((n, 2*order+1))
 
-def fit_invariant_lstsqr(A, B, kernel, order, init_params, lambda_samples):
+def fit_invariant_lstsqr(A, B, kernel, order, init_params):
 
     if A.shape != B.shape:
         raise Exception("Matrix sizes are not compatible.")
@@ -185,6 +185,29 @@ def fit_invariant_lstsqr(A, B, kernel, order, init_params, lambda_samples):
     if len(kernel) != p:
         raise Exception("Kernel and matrix sizes are not compatible.")
     
+    ''' Computes the positive lambda singular values '''
+    kernel_degrees = [ sum(alpha) for alpha in kernel ]
+    max_indexes = np.argwhere(kernel_degrees == np.amax(kernel_degrees)).flatten().tolist()
+    max_degree = order*max(kernel_degrees) + 1
+
+    singular_lambdas = []
+    for comb in itertools.combinations(max_indexes, n):
+        pencilA, pencilB = A[:,comb], B[:,comb]
+        AA, BB, alpha, beta, Q, Z = sp.linalg.ordqz(pencilB, pencilA)
+        eigen = alpha/beta
+        for eig in eigen:
+            if np.abs( eig.imag ) <= 1e-12 and eig.real >= 0:
+                singular_lambdas.append( eig.real )
+
+    singular_lambdas = np.sort(singular_lambdas)
+    
+    '''
+    Lambda = 0 to first singular value
+    '''
+    N = 100
+    lambda_samples = np.linspace(0, singular_lambdas[0],N)
+    lambda_samples = np.delete( lambda_samples, -1 )
+
     x_null_B, errorB = fit_nullspace(kernel, B)
     def param2P(params):
         ''' Converts from parameter vector to P matrix '''
@@ -197,18 +220,20 @@ def fit_invariant_lstsqr(A, B, kernel, order, init_params, lambda_samples):
             P[:,k] = params[ (k-1)*n : k*n ]
         return P
 
-    kernel_degrees = [ sum(alpha) for alpha in kernel ]
-    max_degree = order*max(kernel_degrees) + 1
-
     def cost(param):
 
         P = param2P(param)
+        f = np.zeros(n*len(lambda_samples))
+        for k, l_sample in enumerate(lambda_samples):
+            lambda_vec = ((l_sample - singular_lambdas[0])**(-1)) * np.array([ l_sample**i for i in range(order+1)])
+            f[ k*n : (k+1)*n ] = ( l_sample * A - B ) @  kernel_fun( P @ lambda_vec, kernel )
+        
+        return f
 
-        f = []
-        for l_sample in lambda_samples:
-            lambda_vec = np.array([ l_sample**i for i in range(max_degree + 1)])
-            f.append( ( l_sample * A - B ) @  kernel_fun(P @ lambda_vec, kernel) )
+    sol = least_squares( cost, init_params, method='dogbox' )
+    P = param2P(sol.x)
 
+    return P, singular_lambdas
 
 # ------------------------------------ Test invariant fitting -----------------------------------
 n, d = 2, 1
@@ -235,21 +260,6 @@ cbf = KernelBarrier(kernel=kernel, Q=kernel_quadratic(cbf_eigen, Rh, cbf_center,
 cbfs = [ cbf ]
 
 print(f"A = {A}\nB = {B}")
-
-S, T, P, Q, kstr = guptri(-B, -A)
-AA = -T
-BB = -S
-print(f"AA = \n{AA}")
-print(f"BB = \n{BB}")
-print(f" AA - P' A Q = { np.linalg.norm( AA - P.T @ A @ Q ) }")
-print(f" BB - P' B Q = { np.linalg.norm( BB - P.T @ B @ Q ) }")
-print(f"Kronecker structure = \n{ kcf_blocks(kstr) }")
-
-Hh = Hh[:,[1,0]]
-Hv = Hv[:,[1,0]]
-
-AA, BB, alpha, beta, Q, Z = sp.linalg.ordqz(Hv, Hh)
-print(f"Eigenvalues = {alpha/beta}")
 
 fx, fy = 0.0, 0.0                       # constant force with fx, fy components
 F = np.zeros([p,p])
@@ -286,10 +296,10 @@ while True:
     # max_degree = 2*order+1
     # init_params = np.random.randn( n*max_degree )
 
-    P = fit_invariant(A, B, kernel_powers, order, init_params, powers=mode)
+    P, singular_lambdas = fit_invariant_lstsqr(A, B, kernel_powers, order, init_params)
 
-    x_list = [ np.sum([ P[0,i] * (t**i) for i in range(order+1-max_degree, order+1) ]) for t in t_list ]
-    y_list = [ np.sum([ P[1,i] * (t**i) for i in range(order+1-max_degree, order+1) ]) for t in t_list ]
+    x_list = [ ((t-singular_lambdas[0])**(-1)) * np.sum([ P[0,i] * (t**i) for i in range(order+1-max_degree, order+1) ]) for t in t_list ]
+    y_list = [ ((t-singular_lambdas[0])**(-1)) * np.sum([ P[1,i] * (t**i) for i in range(order+1-max_degree, order+1) ]) for t in t_list ]
     invariant_plot.set_data(x_list, y_list)
 
     l = kerneltriplet.lambda_fun(init_x, cbf_index = 0)
