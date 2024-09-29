@@ -416,57 +416,90 @@ class KernelAffineSystem(AffineSystem):
         text += self.kernel.__str__()
         return text
 
-class KernelAffineSystem2(AffineSystem):
+class PolyAffineSystem(AffineSystem):
     '''
     Class for affine nonlinear systems of the type xdot = f(x) + g(x) u, where:
-    - f(x), g(x) are given component-wise by kernel quadratic forms, respectively as fi(x) = m(x)' Fi m(x) and gij(x) = Gij' m(x)
+    - f(x), g(x) are polynomial functions, given as f(x) = F m(x) and gij(x) = Gij' m(x)
     where m(x) is a kernel function and F is a suitable matrix of the kernel dimension.
     '''
-    def __init__(self, initial_state, initial_control, kernel, F, g_method):
+    def __init__(self, initial_state, initial_control, f, g):
+        super().__init__(initial_state, initial_control)
 
         # Initialize kernel function
         from functions import Kernel
-        if type(kernel) != Kernel:
-            raise Exception("Argument must be a valid Kernel function.")
-        self.kernel = kernel
-        self.kernel_dim = self.kernel._num_monomials
 
-        # Initialize F matrix
-        if np.shape(F) != (self.kernel_dim, self.kernel_dim):
-            raise Exception('F must be a matrix of the same dimension as the kernel.')
-        self.F = F
+        self.f_poly = f
+        self.g_poly = g
 
-        # Initialize g method
-        self.g_method = g_method
-      
-        super().__init__(initial_state, initial_control)
+        self.f_kernel = Kernel(dim=self.n, monomials = f.kernel)
+        self.g_kernel = Kernel(dim=self.n, monomials = g.kernel)
+
+        pf = self.f_kernel._kernel_dim
+        self.Af_list = self.f_kernel.get_A_matrices()
+        self.Bf_list = [ np.array([ A[k,:].tolist() for A in self.Af_list ]) for k in range(pf) ]
+        self.Ag_list = self.g_kernel.get_A_matrices()
+
         self.f()
-
-    def get_g(self, x):
-        return self.g_method(x)
-
-    def get_fc(self, x):
-        m = self.kernel.function(x)
-        Jac = self.kernel.jacobian(x)
-        return Jac.T @ self.F @ m
+        self.g()
 
     def get_f(self, x):
-        g = self.get_g(x)
-        G = g @ g.T
-        return G @ self.get_fc(x)
+        ''' Gets f(x) for a given x '''
+        m = self.f_kernel.function(x)
+        f = np.sum([ coeff * m[k] for k, coeff in enumerate(self.f_poly.coeffs) ])
+        return f
 
-    def get_F(self):
-        return self.F
+    def get_g(self, x):
+        ''' Gets g(x) for a given x '''
+        m = self.g_kernel.function(x)
+        g = np.sum([ coeff * m[k] for k, coeff in enumerate(self.g_poly.coeffs) ])
+        return g
+    
+    def get_G(self, x):
+        g = self.get_g(x)
+        return g @ (g.T)
+
+    def get_Jf(self, x):
+        ''' Gets the Jacobian matrix of f for a given x '''
+
+        m = self.f_kernel.function(x)
+        Jf = np.zeros((self.n, self.n))
+        for i in range(self.n):
+            partialf = np.sum([ coeff * ( self.Af_list[i][k,:] @ m ) for k, coeff in enumerate(self.f_poly.coeffs) ])
+            Jf[:,i] = partialf
+
+        return Jf
+
+    def get_Jg_list(self, x):
+        ''' Gets the n partial derivatives of g for a given x '''
+
+        m = self.f_kernel.function(x)
+        Jg_list = []
+        for i in range(self.n):
+            Jg = np.sum([ coeff * (self.Ag_list[i][k,:] @ m) for k, coeff in enumerate(self.g_poly.coeffs) ])
+            Jg_list.append(Jg)
+
+        return Jg_list
+
+    def get_JG_list(self, x):
+        ''' Gets the n partial derivatives of G for a given x '''
+        
+        g = self.get_g(x)
+        JG_list = []
+        for Jg in self.get_Jg_list(x):
+            JG = Jg @ g.T + g @ Jg.T
+            JG_list.append(JG)
+
+        return JG_list
 
     def f(self):
-        self._f = self.get_f(self._state)
-
+        return self.get_f(self._state)
+    
     def g(self):
-        self._g = self.get_g(self._state)
-
+        return self.get_g(self._state)
+   
     def __str__(self):
-        text = "Conservative affine nonlinear system of the type dx = f(x) + g(x) u ,\n"
-        text += "where f(x) = g(x) g'(x) d( m'(x) F m(x) )/dx, \n"
-        text += "with kernel function as \n"
+        text = "Kernel-based affine nonlinear system dx = f(x) + g(x) u ,\n"
+        text += "where f(x) = F m(x) and g(x) = [ G1 m(x) ... Gm m(x) ], \n"
+        text += "with kernel function \n"
         text += self.kernel.__str__()
         return text

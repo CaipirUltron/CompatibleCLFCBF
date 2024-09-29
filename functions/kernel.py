@@ -13,6 +13,18 @@ import scipy as sp
 import cvxpy as cp
 import sympy as sym
 
+def are_all_type( element_list, set_of_types ):
+    ''' 
+    Tests if all elements of element_list are of the types on set_of_types.
+    Raises an error if it detects two or more elements of different type.
+    '''
+    elem_types_insertance = [ isinstance(elem, set_of_types) for elem in element_list ]
+
+    all_are_of_set_of_types = np.all(elem_types_insertance)
+    if (not all_are_of_set_of_types) and np.any(elem_types_insertance):
+        raise Exception("Coefficients are not all of the same type.")
+    return all_are_of_set_of_types
+
 class Kernel():
     '''
     Class for kernel functions m(x) of maximum degree 2*d, where m(x) is a vector of (n+d,d) known monomials.
@@ -1316,4 +1328,8 @@ class KernelQuadratic(Function):
         '''
         self.dynamics.set_control(param_ctrl)
         self.dynamics.actuate(dt)
-        self.set_params( coefficients = self.dynamics.get_state() )   
+        self.set_params( coefficients = self.dynamics.get_state() )
+
+    def poly_function(self):
+        ''' Computes the corresponding MultiPoly function '''
+        pass

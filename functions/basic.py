@@ -15,18 +15,6 @@ from dataclasses import dataclass
 from common import *
 from dynamic_systems import Integrator
 
-def are_all_type( element_list, set_of_types ):
-    ''' 
-    Tests if all elements of element_list are of the types on set_of_types.
-    Raises an error if it detects two or more elements of different type.
-    '''
-    elem_types_insertance = [ isinstance(elem, set_of_types) for elem in element_list ]
-
-    all_are_of_set_of_types = np.all(elem_types_insertance)
-    if (not all_are_of_set_of_types) and np.any(elem_types_insertance):
-        raise Exception("Coefficients are not all of the same type.")
-    return all_are_of_set_of_types
-
 def commutation_matrix(n):
     '''
     Generate commutation matrix K relating the vectorization of a matrix n x n matrix A with the vectorization of its transpose A', as
@@ -744,7 +732,7 @@ class MultiPoly:
             if mon in possible_curr_combinations: 
                 continue
 
-            if len(possible_curr_combinations) == 0: 
+            if len(possible_curr_combinations) == 0:
                 sos_kernel.append(mon)
                 continue
 

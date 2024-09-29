@@ -23,8 +23,8 @@ if data_type == "scalar": args = []
 elif data_type == "vector": args = [size]
 elif data_type == "matrix": args = [size, size]
 
-coeffs1 = [ np.random.randn(*args) for _ in range(p) ]
-coeffs2 = [ np.random.randn(*args) for _ in range(p) ]
+coeffs1 = [ np.random.randn(size) for _ in range(p) ]
+coeffs2 = [ np.random.randn() for _ in range(p) ]
 
 # coeffs1 = [ np.random.randint(low=-4, high=4, size=args) for _ in range(p) ]
 # coeffs2 = [ np.random.randint(low=-4, high=4, size=args) for _ in range(p) ]
@@ -34,6 +34,8 @@ coeffs2 = [ np.random.randn(*args) for _ in range(p) ]
 
 p1 = MultiPoly(kernel=kernel._powers, coeffs=coeffs1)
 p2 = MultiPoly(kernel=kernel._powers, coeffs=coeffs2)
+
+print( p1.sos_kernel() )
 
 linear1 = KernelLinear.from_poly(p1)
 linear2 = KernelLinear.from_poly(p2)

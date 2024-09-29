@@ -181,68 +181,67 @@ class KernelLyapunov(KernelQuadratic):
     def __str__(self):
         return "Polynominal kernel-based CLF V(x) = √ k(x)' P k(x)"
 
-    def _fun(self, x, shape_matrix):
+    # def _fun(self, x, shape_matrix):
 
-        if isinstance(shape_matrix, cp.expressions.variable.Variable):
-            print("Yes")
-            return super()._fun(x, shape_matrix)
+    #     if isinstance(shape_matrix, cp.expressions.variable.Variable):
+    #         print("Yes")
+    #         return super()._fun(x, shape_matrix)
 
-        V_old = super()._fun(x, shape_matrix)
-        return np.sqrt( 2 * V_old )
+    #     V_old = super()._fun(x, shape_matrix)
+    #     return np.sqrt( 2 * V_old )
     
-    def _grad(self, x, shape_matrix):
+    # def _grad(self, x, shape_matrix):
 
-        if isinstance(shape_matrix, cp.expressions.variable.Variable): 
-            return super()._grad(x, shape_matrix)
+    #     if isinstance(shape_matrix, cp.expressions.variable.Variable): 
+    #         return super()._grad(x, shape_matrix)
         
-        V = self._fun(x, shape_matrix)
-        gradV_old = super()._grad(x, shape_matrix)
-        return (1/V)*gradV_old
+    #     V = self._fun(x, shape_matrix)
+    #     gradV_old = super()._grad(x, shape_matrix)
+    #     return (1/V)*gradV_old
 
-    def _hess(self, x, shape_matrix):
+    # def _hess(self, x, shape_matrix):
 
-        if isinstance(shape_matrix, cp.expressions.variable.Variable): 
-            return super()._hess(x, shape_matrix)
+    #     if isinstance(shape_matrix, cp.expressions.variable.Variable): 
+    #         return super()._hess(x, shape_matrix)
 
-        V = self._fun(x, shape_matrix)
-        gradV = self._grad(x, shape_matrix)
-        hessianV_old = super()._hess(x, shape_matrix)
-        return (1/V)*( hessianV_old - np.outer(gradV, gradV) )
+    #     V = self._fun(x, shape_matrix)
+    #     gradV = self._grad(x, shape_matrix)
+    #     hessianV_old = super()._hess(x, shape_matrix)
+    #     return (1/V)*( hessianV_old - np.outer(gradV, gradV) )
 
-    def _function(self, point: np.ndarray) -> np.ndarray:
-        '''
-        Computes FUNCTION ½ V**2 = ½ k(x)' P k(x)
-        '''
-        return self._fun(self._validate(point), self.P)
+    # def _function(self, point: np.ndarray) -> np.ndarray:
+    #     '''
+    #     Computes FUNCTION ½ V**2 = ½ k(x)' P k(x)
+    #     '''
+    #     return self._fun(self._validate(point), self.P)
 
-    def _gradient(self, point: np.ndarray) -> np.ndarray:
-        '''
-        Computes GRADIENT ∇V = 1/V Jm(x)' P m(x)
-        '''
-        return self._grad(self._validate(point), self.P)
+    # def _gradient(self, point: np.ndarray) -> np.ndarray:
+    #     '''
+    #     Computes GRADIENT ∇V = 1/V Jm(x)' P m(x)
+    #     '''
+    #     return self._grad(self._validate(point), self.P)
 
-    def _hessian(self, point: np.ndarray) -> np.ndarray:
-        '''
-        Computes HESSIAN ∇x∇(V) = 1/V ( ∇x∇( ½ V**2 ) - ∇V ∇V' )
-        '''
-        return self._hess(self._validate(point), self.P)
+    # def _hessian(self, point: np.ndarray) -> np.ndarray:
+    #     '''
+    #     Computes HESSIAN ∇x∇(V) = 1/V ( ∇x∇( ½ V**2 ) - ∇V ∇V' )
+    #     '''
+    #     return self._hess(self._validate(point), self.P)
 
     def function_from_P(self, x, P):
         '''
         Computes FUNCTION ½ V**2 = ½ k(x)' P k(x)
         '''
         m = self.kernel.function(x)
-        V = m.T @ P @ m
-        return np.sqrt(V)
+        V = 0.5 * m.T @ P @ m
+        return V
 
     def gradient_from_P(self, x, P):
         '''
-        Computes GRADIENT ∇V = 1/V Jm(x)' P m(x)
+        Computes GRADIENT ∇V = Jm(x)' P m(x)
         '''
         m = self.kernel.function(x)
         Jm = self.kernel.jacobian(x)
-        V = self.function_from_P(x, P)
-        gradV = (1/V) * Jm.T @ P @ m
+        gradV = Jm.T @ P @ m
         return gradV
 
     def set_params(self, **kwargs):
@@ -344,6 +343,9 @@ class KernelFamily():
 
         self.stability_pressures = np.zeros(self.num_cbfs)
         self.measures = np.zeros(self.num_cbfs)
+
+    def get_full_pencil(self):
+        pass
 
     def compute_cbf_boundary(self, cbf_index):
         '''Compute CBF boundary'''
@@ -477,16 +479,28 @@ class KernelFamily():
 
     def vecQ_fun(self, pt: np.ndarray, cbf_index: int) -> np.ndarray:
         '''
-        Returns the vector vQ = ∇h
+        Returns the vector vQ = G ∇h
         '''
-        Qi = self.Q[cbf_index]
-        return vecQ(pt, self.kernel, Qi)
+        f = self.plant.get_f(pt)
+        G = self.plant.get_G(pt)
+
+        nablah = self.cbfs[cbf_index].gradient(pt)
+        return G @ nablah
     
     def vecP_fun(self, pt: np.ndarray) -> np.ndarray:
         '''
-        Returns the vector vP = p gamma V(x, self.P) ∇V - fc with self P matrix
+        Returns the vector vP = p gamma G(x) V(x,P) ∇V - f(x) with CLF shape matrix P
         '''
-        return vecP(pt, self.kernel, self.P, self.F, self.params)
+        p = self.params["slack_gain"]
+        gamma = self.params["clf_gain"]
+
+        f = self.plant.get_f(pt)
+        G = self.plant.get_G(pt)
+
+        V = self.clf_fun(pt)
+        nablaV = self.clf_gradient(pt)
+
+        return p * gamma * V * ( G @ nablaV ) - f
 
     def clf_fun(self, pt: np.ndarray) -> float:
         '''
@@ -504,35 +518,63 @@ class KernelFamily():
         '''
         Given a point x in an invariant set, compute its corresponding lambda scalar.
         '''
+        nablah = self.cbfs[cbf_index].gradient(pt)
         vQ = self.vecQ_fun(pt, cbf_index)
         vP = self.vecP_fun(pt)
-        return (vQ.T @ vP) / np.linalg.norm(vQ)**2
+        return (nablah.T @ vP) / ( nablah.T @ vQ )
 
-    def L_fun(self, l, P, cbf_index: int = -1):
-        '''
-        Returns pencil L = F + l Q - p gamma P
-        '''
+    # def L_fun(self, l, P, cbf_index: int = -1):
+    #     '''
+    #     Returns pencil L = F + l Q - p gamma P
+    #     '''
+    #     if cbf_index >= 0:
+    #         Qi = self.Q[cbf_index]
+    #         return L(l, P, Qi, self.F, self.params)
+    #     else:
+    #         Qi = np.zeros(self.P.shape)
+    #         return L(0, P, Qi, self.F, self.params)
+
+    # def invariant_equation(self, pt: np.ndarray, l, P, cbf_index: int = -1):
+    #     '''
+    #     Returns invariant equation l vQ - vP for a given pt, l and P
+    #     '''
+    #     m = self.kernel.function(pt)
+    #     Jm = self.kernel.jacobian(pt)
+    #     return Jm.T @ self.L_fun(l, P, cbf_index) @ m
+
+    def invariant_Jacobian(self, pt: np.ndarray, cbf_index: int = -1) -> np.ndarray:
+        ''' Computes the invariant Jacobian to determine the stability of equilibrium points '''
+
+        G = self.plant.get_f(pt)
+        Jf = self.plant.get_Jf(pt)
+        JG_list = self.plant.get_JG_list(pt)
+
+        V = self.clf_fun(pt)
+        nablaV = self.clf_gradient(pt)
+        Hv = self.clf_hessian(pt)
+
         if cbf_index >= 0:
-            Qi = self.Q[cbf_index]
-            return L(l, P, Qi, self.F, self.params)
+            nablah = self.cbfs[cbf_index].gradient(pt)
+            Hh = self.cbfs[cbf_index].hessian(pt)
+            l = self.lambda_fun(pt, cbf_index)
         else:
-            Qi = np.zeros(self.P.shape)
-            return L(0, P, Qi, self.F, self.params)
+            nablah = np.zeros(self.n)
+            Hh = np.zeros((self.n,self.n))
+            l = 0.0
 
-    def invariant_equation(self, pt: np.ndarray, l, P, cbf_index: int = -1):
-        '''
-        Returns invariant equation l vQ - vP for a given pt, l and P
-        '''
-        m = self.kernel.function(pt)
-        Jm = self.kernel.jacobian(pt)
-        return Jm.T @ self.L_fun(l, P, cbf_index) @ m
+        p = self.params["slack_gain"]
+        gamma = self.params["clf_gain"]        
+
+        pencil = l * nablah - p * gamma * V * nablaV
+        Hpencil = l * Hh - p * gamma * V * Hv
+        JG_term = np.array([ JG @ pencil for JG in JG_list ])
+
+        return Jf + JG_term + G @ ( Hpencil - p * np.outer(nablaV, nablaV) )
 
     def S_fun(self, pt: np.ndarray, cbf_index: int = -1) -> np.ndarray:
         '''
         Returns stability matrix.
         '''
-        # x, kernel, l, P, Q, F, params
-
         if cbf_index >= 0:
             Qi = self.Q[cbf_index]
             l = self.lambda_fun(pt, cbf_index)
@@ -586,11 +628,11 @@ class KernelFamily():
         nablaV = self.clf_gradient(x_eq)
         nablah = self.cbfs[cbf_index].gradient(x_eq)
 
-        g = self.plant.get_g(x_eq)
-        G = g @ g.T
-        z1 = nablah / np.linalg.norm(nablah)
+        p = self.params["slack_gain"]
+        G = self.plant.get_G(x_eq)
+        z1 = nablah / np.sqrt(nablah.T @ G @ nablah)
         z2 = nablaV - nablaV.T @ G @ z1 * z1
-        eta = 1/(1 + self.params["slack_gain"] * z2.T @ G @ z2 )
+        eta = 1/(1 + p * z2.T @ G @ z2 )
         return eta
 
     def update_determinant_grid(self):
@@ -604,14 +646,14 @@ class KernelFamily():
 
         for pt in self.grid_pts:
 
-            vP = self.vecP_fun(pt)
+            vP = self.vecP_fun(pt).reshape(-1,1)
             for cbf_index in range(self.num_cbfs):
-                vQ = self.vecQ_fun(pt, cbf_index)
+                vQ = self.vecQ_fun(pt, cbf_index).reshape(-1,1)
                 
-                W = np.hstack([vQ.reshape(self.n,1), vP.reshape(self.n,1)])
+                W = np.hstack([vQ, vP])
                 W_list[cbf_index].append(W)
 
-                l = (vQ.T @ vP) / np.linalg.norm(vQ)**2
+                l = self.lambda_fun(pt, cbf_index)
                 lambda_grid[cbf_index].append( l )
 
                 h = self.cbfs[cbf_index].function(pt)

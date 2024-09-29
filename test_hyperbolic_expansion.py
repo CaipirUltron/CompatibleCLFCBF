@@ -3,12 +3,12 @@ import scipy as sp
 import numpy as np
 import matplotlib.pyplot as plt
 
-from dynamic_systems import KernelAffineSystem
+from warnings import warn
 from scipy.optimize import fsolve, least_squares
 from common import rot2D, kernel_quadratic
-from functions import Kernel, KernelLyapunov, KernelBarrier, KernelFamily
+from functions import Kernel, KernelLyapunov, KernelBarrier, KernelFamily, MultiPoly
+from dynamic_systems import PolyAffineSystem
 from numpy.polynomial import Polynomial as Poly
-from scipy.interpolate import approximate_taylor_polynomial
 
 # np.set_printoptions(precision=3, suppress=True)
 limits = 14*np.array((-1,1,-1,1))
@@ -176,7 +176,21 @@ def fit_invariant(A, B, kernel, order, init_params, powers='+'):
         print(sol)
         return sol.x.reshape((n, 2*order+1))
 
-def fit_invariant_lstsqr(A, B, kernel, order, init_params):
+def branch_coords(poles: list, parameters: np.ndarray):
+    '''
+    Function to compute the branches of the invariant set (l A - B) m(x) = 0
+    '''
+    if len(poles) != 2: raise Exception("Each branch must have exactly two poles")
+
+    poles = np.array(poles)
+    if poles[0] >= poles[1]: 
+        warn("Poles must be in ascending order.")
+        poles = np.sort(poles)
+
+    if poles[0] == 0.0:
+        pass
+
+def fit_invariant2(A, B, kernel, order, init_params):
 
     if A.shape != B.shape:
         raise Exception("Matrix sizes are not compatible.")
@@ -261,17 +275,15 @@ cbfs = [ cbf ]
 
 print(f"A = {A}\nB = {B}")
 
-fx, fy = 0.0, 0.0                       # constant force with fx, fy components
-F = np.zeros([p,p])
-F[1,0], F[2,0] = fx, fy
-def g(state):
-    return np.eye(2)
-plant = KernelAffineSystem(initial_state=[0.0,0.0], initial_control=[0.0, 0.0], kernel=kernel, F=F, g_method=g)
-kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, params={"slack_gain": 1.0, "clf_gain": 1.0, "cbf_gain": 1.0}, limits=limits, spacing=0.2 )
+f = MultiPoly(kernel=kernel_powers, coeffs = [ np.zeros(2), np.zeros(2), np.zeros(2) ])
+g = MultiPoly(kernel=kernel_powers, coeffs = [ np.eye(n), np.zeros((n,n)), np.zeros((n,n)) ])
+plant = PolyAffineSystem(initial_state=np.zeros(n), initial_control=np.zeros(n), f=f, g=g)
+
+# kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, params={"slack_gain": 1.0, "clf_gain": 1.0, "cbf_gain": 1.0}, limits=limits, spacing=0.2 )
 
 # ------------------------------------ Plotting -----------------------------------
 cbf.plot_levels(ax=ax, levels=[0.0])
-kerneltriplet.plot_invariant(ax, cbf_index=0)
+# kerneltriplet.plot_invariant(ax, cbf_index=0)
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 invariant_plot, = ax.plot([],[],'r.-')
@@ -296,14 +308,14 @@ while True:
     # max_degree = 2*order+1
     # init_params = np.random.randn( n*max_degree )
 
-    P, singular_lambdas = fit_invariant_lstsqr(A, B, kernel_powers, order, init_params)
+    # P, singular_lambdas = fit_invariant2(A, B, kernel_powers, order, init_params)
 
-    x_list = [ ((t-singular_lambdas[0])**(-1)) * np.sum([ P[0,i] * (t**i) for i in range(order+1-max_degree, order+1) ]) for t in t_list ]
-    y_list = [ ((t-singular_lambdas[0])**(-1)) * np.sum([ P[1,i] * (t**i) for i in range(order+1-max_degree, order+1) ]) for t in t_list ]
-    invariant_plot.set_data(x_list, y_list)
+    # x_list = [ ((t-singular_lambdas[0])**(-1)) * np.sum([ P[0,i] * (t**i) for i in range(order+1-max_degree, order+1) ]) for t in t_list ]
+    # y_list = [ ((t-singular_lambdas[0])**(-1)) * np.sum([ P[1,i] * (t**i) for i in range(order+1-max_degree, order+1) ]) for t in t_list ]
+    # invariant_plot.set_data(x_list, y_list)
 
-    l = kerneltriplet.lambda_fun(init_x, cbf_index = 0)
-    print(f"Lambda = {l}")
+    # l = kerneltriplet.lambda_fun(init_x, cbf_index = 0)
+    # print(f"Lambda = {l}")
 
     V = clf.function(init_x)
     clf_contour = clf.plot_levels(ax=ax, levels=[V])
