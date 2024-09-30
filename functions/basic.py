@@ -433,6 +433,7 @@ class MultiPoly:
 
         self.kernel = powers
         self.coeffs = coeffs
+        self.n = len(self.kernel[0])
 
     def _verify_op(poly1, poly2):
         ''' Checks if aritmetic operations can be executed '''
@@ -617,6 +618,40 @@ class MultiPoly:
     def __str__(self):
         ''' Printing for MultiPoly '''
         return self.__repr__()
+
+    def polyder(self):
+        ''' Get the polynomial derivatives with respect to all variables '''
+
+        poly_diffs = []
+        EYE = np.eye(self.n, dtype=int)
+        for i in range(self.n):
+            diff_coeffs = []
+            diff_kernel = []
+            for k, mon in enumerate(self.kernel):
+                coeff = self.coeffs[k]
+                new_mon = np.array(mon) - EYE[i,:]
+                if new_mon[i] >= 0:
+                    if tuple(new_mon) not in diff_kernel:
+                        diff_kernel.append( tuple(new_mon) )
+                        diff_coeffs.append( coeff * mon[i] )
+                    else:
+                        id = diff_kernel.index( tuple(new_mon) )
+                        diff_coeffs[id] += coeff * mon[i]
+            poly_diffs.append( MultiPoly(kernel=diff_kernel, coeffs=diff_coeffs) )
+
+        return poly_diffs
+
+    def polyval(self, x):
+        ''' Computes polynomial value '''
+
+        if len(x) != self.n:
+            raise Exception("Input has incorrect dimensions.")
+
+        s = np.zeros(self.shape)
+        for mon, coeff in zip(self.kernel, self.coeffs):
+            s += coeff * np.prod([ x[i]**power for i, power in enumerate(mon) ])
+
+        return s
 
     def filter(self):
         ''' Returns a new multipoly without zero coefficient terms '''
@@ -851,6 +886,17 @@ class MultiPoly:
         for var in new_variables: print(var)
         print(f"Transformation matrix = \n{matrix}")
         # print( np.linalg.lstsq( matrix, np.array([ 1.0 if k == 0 else 0.0 for k in range(ncoeffs) ]), rcond=None ) )
+
+    @property
+    def T(self):
+        ''' Transpose operation, defined for array-like coefficients '''
+
+        if self.ndim == 2:
+            transposed_coeffs = [ coeff.T for coeff in self.coeffs ]
+        if self.ndim == 0 or self.ndim == 1:
+            transposed_coeffs = self.coeffs
+
+        return MultiPoly( kernel=self.kernel, coeffs=transposed_coeffs )
 
     @classmethod
     def empty(cls):

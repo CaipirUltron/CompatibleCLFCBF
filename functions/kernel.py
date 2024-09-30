@@ -109,7 +109,6 @@ class Kernel():
         self._lambda_jacobian_monomials = sym.lambdify( list(self._symbols), self._sym_jacobian_monomials )
         self._lambda_hessian_monomials = sym.lambdify( list(self._symbols), self._hessian_monomials )
 
-
         '''
         Obtained the formula for the dimension of the inner blocks of the lowerbound matrix 
         by studying its internal structure. Therefore, self._find_partition(), self._get_block_dependencies(), 
@@ -1186,142 +1185,6 @@ class KernelQuadratic(Function):
         else:
             raise Exception("Problem is " + fit_problem.status + ".")
 
-    def reshape(self, var: np.ndarray):
-        ''' Converts from array var to tuple of matrices N and G '''
-        n = self._dim
-        p = self.kernel_dim
-
-        N_arr = var[0:n*p]
-        sqG_arr = var[n*p:]
-
-        N = N_arr.reshape((n,p))
-        sqG = sqG_arr.reshape((n,n))
-        G = sqG.T @ sqG
-
-        return N, G
-
-    def flatten(self, N, G):
-        ''' Converts from N, G to var array '''
-
-        N_arr = N.flatten()
-        sqG = sp.linalg.sqrtm(G)
-        sqG_arr = sqG.flatten()
-        var = np.hstack([N_arr, sqG_arr])
-
-        return var
-
-    def invex_fitting(self):
-        ''' 
-        Nonconvex optimization problem for fitting an invex function to point-like constraints.
-        Must be correctly initialized by an invex function.
-        Returns: an invex P shape
-        '''
-        initial_shape = self.fit_options["initial_shape"]
-        Ninit, Ginit, _ = NGN_decomposition(self._dim, initial_shape)
-        init_eigs = np.linalg.eigvals(Ginit)
-        eig_upperbound, eig_lowerbound = np.max(init_eigs), np.min(init_eigs)
-
-        print(f"Initial eigenvalues = {init_eigs}")
-
-        if not np.all( np.linalg.eigvals(Ginit) >= 0):
-            raise Exception("Initial P must be psd.")
-
-        Dinit = self.kernel.D(Ninit)
-        dist_to_psd = np.linalg.norm( PSD_closest(Dinit) - Dinit )
-        dist_to_nsd = np.linalg.norm( NSD_closest(Dinit) - Dinit )
-
-        if dist_to_psd <= dist_to_nsd: 
-            cone = +1
-            print(f"D(Ninit) closer to PSD cone.")
-        else: 
-            cone = -1
-            print(f"D(Ninit) closer to NSD cone.")
-
-        def objective(var: np.ndarray) -> float:
-
-            N, G = self.reshape(var)
-            
-            cost = 0.0
-            # cost += invexity_constr(var)
-            cost += sum([ cost_fun(N,G) for cost_fun in self.cost_functions ])
-            return cost
-
-        def eq_constr(var: np.ndarray) -> list[float]:
-
-            N, G = self.reshape(var)
-            return [ fun(N,G) for fun in self.eq_constraint_functions ]
-
-        def ineq_constr(var: np.ndarray) -> list[float]:
-
-            N, G = self.reshape(var)
-            return [ fun(N,G) for fun in self.ineq_constraint_functions ]
-
-        def invexity_constr(var: np.ndarray) -> float:
-
-            N, G = self.reshape(var)            
-            D = self.kernel.D(N)
-
-            if cone == +1:
-                ProjD = PSD_closest(D-self.Tol)
-            if cone == -1:
-                ProjD = NSD_closest(D+self.Tol)
-
-            return np.linalg.norm(D - ProjD)
-
-        def orthonormality_constr(var: np.ndarray) -> float:
-            ''' Keeps N orthonormal '''
-
-            N, G = self.reshape(var)
-            return np.linalg.norm( N @ N.T - np.eye(self._dim) )
-
-        def eig_bounds_constr(var: np.ndarray) -> list[float]:
-            ''' Keeps eigenvalues of P well-behaved '''
-
-            N, G = self.reshape(var)
-            eigs = np.diag(G)
-
-            # eig_upperbound, eig_lowerbound = np.max(init_eigs), np.min(init_eigs)
-            eig_upperbound, eig_lowerbound = 10.0, 0.0
-            eig_bounds = np.array([ eig_upperbound - max(eigs), min(eigs) - eig_lowerbound ])
-
-            return np.hstack([eig_bounds])
-
-        def intermediate(res):
-            
-            N, G = self.reshape(res)
-            print(F"N = {N}")
-            print(F"G = {G}")
-
-        constraints = []
-        constraints += [ {"type": "ineq", "fun": eig_bounds_constr} ]
-        constraints += [ {"type": "eq", "fun": eq_constr} ]
-        constraints += [ {"type": "ineq", "fun": ineq_constr} ]
-
-        constraints += [ {"type": "eq", "fun": orthonormality_constr} ]
-        # if self.fit_options["invex_constraint"]:
-        #     constraints += [ {"type": "eq", "fun": invexity_constr} ]
-
-        init_var = self.flatten(Ninit, Ginit)
-        sol = minimize( objective, init_var, constraints=constraints, options={"disp": True, "maxiter": 1000} )
-        print(sol.message)
-
-        Nsol, Gsol =  self.reshape(sol.x)
-        Psol = Nsol.T @ Gsol @ Nsol
-        
-        total_cost = objective(sol.x)
-        print(f"Total cost = {total_cost}")
-        print(f"Invex cost = {invexity_constr(sol.x)}")
-
-        invexity = np.linalg.eigvals( self.kernel.D(Nsol) )
-        print(f"Fitting invexity = {invexity}")
-
-        eigs = np.linalg.eigvals( Gsol )
-        print(f"Fitting eigenvalues = {eigs}")
-
-        print(f"Orthonormality of N = {orthonormality_constr(sol.x)}")
-
-        return Psol
-
     def update(self, param_ctrl, dt):
         '''
         Integrates and updates parameters
@@ -1330,6 +1193,196 @@ class KernelQuadratic(Function):
         self.dynamics.actuate(dt)
         self.set_params( coefficients = self.dynamics.get_state() )
 
-    def poly_function(self):
-        ''' Computes the corresponding MultiPoly function '''
-        pass
+    def to_multipoly(self):
+        ''' Computes the corresponding MultiPoly function, gradient and Hessian '''
+        
+        n = self._dim
+        p = self.kernel_dim
+        powers = self.kernel._powers
+
+        '''---------Multipoly version of ½ m(x)' P m(x) + constant--------- '''
+        kernel, coeffs = [], []
+        for (i,j) in itertools.product( range(p), range(p) ):
+            Pij = self.shape_matrix[i,j]
+            mon = tuple(np.array(powers[i]) + np.array(powers[j]))
+
+            if mon == (0, 0):
+                kernel.append( mon )
+                coeffs.append( -self.constant )
+
+            if mon not in kernel:
+                kernel.append( mon )
+                coeffs.append( 0.5*Pij )
+            else:
+                id = kernel.index(mon)
+                coeffs[id] += 0.5*Pij
+
+        poly = MultiPoly(kernel=kernel, coeffs=coeffs)
+
+        ''' ------------------------ Gradient ---------------------------- '''
+        diff_polys = poly.polyder()
+
+        kernel = list( set.union(*[ set(diff_poly.kernel) for diff_poly in diff_polys ]) )
+        kernel_size = len(kernel)
+
+        coeff_list = [ np.zeros(n) for _ in range(kernel_size) ]
+        for i, diff_poly in enumerate(diff_polys):
+            for mon, coeff in zip(diff_poly.kernel, diff_poly.coeffs):
+                id = kernel.index(mon)
+                coeff_list[id][i] += coeff
+
+        grad_poly = MultiPoly( kernel=kernel, coeffs=coeff_list )
+
+        ''' ------------------------ Hessian ---------------------------- '''
+        diff2_polys = grad_poly.polyder()
+
+        kernel = list( set.union(*[ set(diff2_poly.kernel) for diff2_poly in diff2_polys ]) )
+        kernel_size = len(kernel)
+
+        coeff_list = [ np.zeros((n, n)) for _ in range(kernel_size) ]
+        for i in range(n):
+            for j, diff2_poly in enumerate(diff2_polys):
+                for mon, coeff in zip(diff2_poly.kernel, diff2_poly.coeffs):
+                    id = kernel.index(mon)
+                    coeff_list[id][i,j] += coeff[i]
+
+        hessian_poly = MultiPoly( kernel=kernel, coeffs=coeff_list )
+
+        return poly, grad_poly, hessian_poly
+        
+    # def reshape(self, var: np.ndarray):
+    #     ''' Converts from array var to tuple of matrices N and G '''
+        
+    #     n = self._dim
+    #     p = self.kernel_dim
+
+    #     N_arr = var[0:n*p]
+    #     sqG_arr = var[n*p:]
+
+    #     N = N_arr.reshape((n,p))
+    #     sqG = sqG_arr.reshape((n,n))
+    #     G = sqG.T @ sqG
+
+    #     return N, G
+
+    # def flatten(self, N, G):
+    #     ''' Converts from N, G to var array '''
+
+    #     N_arr = N.flatten()
+    #     sqG = sp.linalg.sqrtm(G)
+    #     sqG_arr = sqG.flatten()
+    #     var = np.hstack([N_arr, sqG_arr])
+
+    #     return var
+
+    # def invex_fitting(self):
+    #     ''' 
+    #     Nonconvex optimization problem for fitting an invex function to point-like constraints.
+    #     Must be correctly initialized by an invex function.
+    #     Returns: an invex P shape
+    #     '''
+    #     initial_shape = self.fit_options["initial_shape"]
+    #     Ninit, Ginit, _ = NGN_decomposition(self._dim, initial_shape)
+    #     init_eigs = np.linalg.eigvals(Ginit)
+    #     eig_upperbound, eig_lowerbound = np.max(init_eigs), np.min(init_eigs)
+
+    #     print(f"Initial eigenvalues = {init_eigs}")
+
+    #     if not np.all( np.linalg.eigvals(Ginit) >= 0):
+    #         raise Exception("Initial P must be psd.")
+
+    #     Dinit = self.kernel.D(Ninit)
+    #     dist_to_psd = np.linalg.norm( PSD_closest(Dinit) - Dinit )
+    #     dist_to_nsd = np.linalg.norm( NSD_closest(Dinit) - Dinit )
+
+    #     if dist_to_psd <= dist_to_nsd: 
+    #         cone = +1
+    #         print(f"D(Ninit) closer to PSD cone.")
+    #     else: 
+    #         cone = -1
+    #         print(f"D(Ninit) closer to NSD cone.")
+
+    #     def objective(var: np.ndarray) -> float:
+
+    #         N, G = self.reshape(var)
+            
+    #         cost = 0.0
+    #         # cost += invexity_constr(var)
+    #         cost += sum([ cost_fun(N,G) for cost_fun in self.cost_functions ])
+    #         return cost
+
+    #     def eq_constr(var: np.ndarray) -> list[float]:
+
+    #         N, G = self.reshape(var)
+    #         return [ fun(N,G) for fun in self.eq_constraint_functions ]
+
+    #     def ineq_constr(var: np.ndarray) -> list[float]:
+
+    #         N, G = self.reshape(var)
+    #         return [ fun(N,G) for fun in self.ineq_constraint_functions ]
+
+    #     def invexity_constr(var: np.ndarray) -> float:
+
+    #         N, G = self.reshape(var)            
+    #         D = self.kernel.D(N)
+
+    #         if cone == +1:
+    #             ProjD = PSD_closest(D-self.Tol)
+    #         if cone == -1:
+    #             ProjD = NSD_closest(D+self.Tol)
+
+    #         return np.linalg.norm(D - ProjD)
+
+    #     def orthonormality_constr(var: np.ndarray) -> float:
+    #         ''' Keeps N orthonormal '''
+
+    #         N, G = self.reshape(var)
+    #         return np.linalg.norm( N @ N.T - np.eye(self._dim) )
+
+    #     def eig_bounds_constr(var: np.ndarray) -> list[float]:
+    #         ''' Keeps eigenvalues of P well-behaved '''
+
+    #         N, G = self.reshape(var)
+    #         eigs = np.diag(G)
+
+    #         # eig_upperbound, eig_lowerbound = np.max(init_eigs), np.min(init_eigs)
+    #         eig_upperbound, eig_lowerbound = 10.0, 0.0
+    #         eig_bounds = np.array([ eig_upperbound - max(eigs), min(eigs) - eig_lowerbound ])
+
+    #         return np.hstack([eig_bounds])
+
+    #     def intermediate(res):
+            
+    #         N, G = self.reshape(res)
+    #         print(F"N = {N}")
+    #         print(F"G = {G}")
+
+    #     constraints = []
+    #     constraints += [ {"type": "ineq", "fun": eig_bounds_constr} ]
+    #     constraints += [ {"type": "eq", "fun": eq_constr} ]
+    #     constraints += [ {"type": "ineq", "fun": ineq_constr} ]
+
+    #     constraints += [ {"type": "eq", "fun": orthonormality_constr} ]
+    #     # if self.fit_options["invex_constraint"]:
+    #     #     constraints += [ {"type": "eq", "fun": invexity_constr} ]
+
+    #     init_var = self.flatten(Ninit, Ginit)
+    #     sol = minimize( objective, init_var, constraints=constraints, options={"disp": True, "maxiter": 1000} )
+    #     print(sol.message)
+
+    #     Nsol, Gsol =  self.reshape(sol.x)
+    #     Psol = Nsol.T @ Gsol @ Nsol
+        
+    #     total_cost = objective(sol.x)
+    #     print(f"Total cost = {total_cost}")
+    #     print(f"Invex cost = {invexity_constr(sol.x)}")
+
+    #     invexity = np.linalg.eigvals( self.kernel.D(Nsol) )
+    #     print(f"Fitting invexity = {invexity}")
+
+    #     eigs = np.linalg.eigvals( Gsol )
+    #     print(f"Fitting eigenvalues = {eigs}")
+
+    #     print(f"Orthonormality of N = {orthonormality_constr(sol.x)}")
+
+    #     return Psol

@@ -279,6 +279,10 @@ f = MultiPoly(kernel=kernel_powers, coeffs = [ np.zeros(2), np.zeros(2), np.zero
 g = MultiPoly(kernel=kernel_powers, coeffs = [ np.eye(n), np.zeros((n,n)), np.zeros((n,n)) ])
 plant = PolyAffineSystem(initial_state=np.zeros(n), initial_control=np.zeros(n), f=f, g=g)
 
+print(f"f(x) = \n{plant.get_fpoly()}")
+print(f"g(x) = \n{plant.get_gpoly()}")
+print(f"G(x) = \n{plant.get_Gpoly()}")
+
 # kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, params={"slack_gain": 1.0, "clf_gain": 1.0, "cbf_gain": 1.0}, limits=limits, spacing=0.2 )
 
 # ------------------------------------ Plotting -----------------------------------

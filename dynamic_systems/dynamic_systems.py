@@ -430,17 +430,28 @@ class PolyAffineSystem(AffineSystem):
 
         self.f_poly = f
         self.g_poly = g
+        self.G_poly = g @ (g.T)
 
         self.f_kernel = Kernel(dim=self.n, monomials = f.kernel)
         self.g_kernel = Kernel(dim=self.n, monomials = g.kernel)
 
-        pf = self.f_kernel._kernel_dim
         self.Af_list = self.f_kernel.get_A_matrices()
-        self.Bf_list = [ np.array([ A[k,:].tolist() for A in self.Af_list ]) for k in range(pf) ]
         self.Ag_list = self.g_kernel.get_A_matrices()
 
         self.f()
         self.g()
+
+    def get_fpoly(self):
+        ''' Gets the multipoly f(x) '''
+        return self.f_poly
+
+    def get_gpoly(self):
+        ''' Gets the multipoly g(x) '''
+        return self.g_poly
+
+    def get_Gpoly(self):
+        ''' Gets the multipoly G(x) = g(x) g(x)' '''
+        return self.G_poly
 
     def get_f(self, x):
         ''' Gets f(x) for a given x '''
