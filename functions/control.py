@@ -168,9 +168,7 @@ class QuadraticBarrier(Quadratic):
 class KernelLyapunov(KernelQuadratic):
     '''
     Class for kernel-based Lyapunov functions.
-    Derived from KernelQuadratic, comprises CLFs V(x) satisfying 
-    (i) int^{V(x)}_0 γ(t) dt = ½ m(x)' P m(x)
-    (ii) γ(V(x)) ∇V = Jm(x)' P m(x)
+    Derived from KernelQuadratic, comprises CLF V(x) = ½ m(x)' P m(x),
     where P is the shape matrix.
     Receives a polynomial class K gamma function
     '''
@@ -187,7 +185,7 @@ class KernelLyapunov(KernelQuadratic):
         super().__init__(**kwargs)
 
     def __str__(self):
-        return "Polynominal kernel-based CLF V(x) = √ k(x)' P k(x)"
+        return "Polynominal kernel-based CLF V(x) = ½ m(x)' P m(x)"
 
     def _fun(self, x, shape_matrix):
 
@@ -432,16 +430,20 @@ class KernelFamily():
                     if key == "slack_gain":
                         self.params["slack_gain"] = params["slack_gain"]
                         update_invariant = True
+                        continue
                     if key == "gamma":
                         if not isinstance(params["gamma"], Poly):
                             raise Exception("Passed gamma is not a numpy polynomial.")
                         self.params["gamma"] = params["gamma"]
                         update_invariant = True
+                        continue
                     if key == "alpha":
                         if not isinstance(params["alpha"], Poly):
                             raise Exception("Passed alpha is not a numpy polynomial.")
                         self.params["alpha"] = params["alpha"]
                         update_invariant = True
+                        continue
+                continue
 
         # Initialize grids used for invariant set computation
         if hasattr(self, "limits") and hasattr(self, "spacing"):
@@ -882,7 +884,7 @@ class KernelFamily():
 
         # from this point on, len(attr) = len(self.plotted_attrs[attr_name])
         for k in range(len(attr)):
-            self.plotted_attrs[attr_name][k].set_data( attr[k]["x"][0], attr[k]["x"][1] )
+            self.plotted_attrs[attr_name][k].set_data( [attr[k]["x"][0]], [attr[k]["x"][1]] )
 
     ''' -------------------------------------------- COMPATIBILIZATION CODE ------------------------------------------------- '''
     # def seg_stability_pressure(self, seg_dict: dict[str,]):

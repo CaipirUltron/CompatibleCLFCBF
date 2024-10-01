@@ -5,7 +5,7 @@ from functions import Kernel, KernelLyapunov, KernelBarrier, KernelFamily, Multi
 from controllers import NominalQP
 from common import kernel_quadratic, rot2D, load_compatible
 
-initial_state = [0.2, 6.0]
+initial_state = [-5.0, 6.0]
 initial_control = [0.0, 0.0]
 n = len(initial_state)
 m = len(initial_control)
@@ -20,7 +20,8 @@ print(kernel)
 
 # -------------------------------------------------- Define system ---------------------------------------------------------
 EYE, ZEROS = np.eye(n), np.zeros((n,n))
-f = MultiPoly( kernel=powers, coeffs=[ np.zeros(n), EYE[0,:], EYE[1,:] ] )
+f = MultiPoly( kernel=powers, coeffs=[ np.zeros(n), np.zeros(n), np.zeros(n) ] )
+# f = MultiPoly( kernel=powers, coeffs=[ np.zeros(n), EYE[0,:], EYE[1,:] ] )
 g = MultiPoly( kernel=powers, coeffs=[ np.eye(n), ZEROS, ZEROS ] )
 plant = PolyAffineSystem(initial_state=initial_state, initial_control=initial_control, f=f, g=g)
 
@@ -36,7 +37,7 @@ clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
 # --------------------------------------------- Define CBF (quadratic) -----------------------------------------------------
 cbf_eig = 0.2*np.array([ 0.2, 1.2 ])
 cbf_center = [0.0, 3.0]
-cbf_angle = np.deg2rad(5)
+cbf_angle = np.deg2rad(30)
 
 Qquadratic = kernel_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
 cbf = KernelBarrier(kernel=kernel, Q=Qquadratic, limits=limits)
@@ -51,8 +52,19 @@ T = 12
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 plot_config = {
-    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits,
-    "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": False
+    "figsize": (5,5), 
+    "gridspec": (1,1,1), 
+    "widthratios": [1], 
+    "heightratios": [1], 
+    "limits": limits,
+    "path_length": 10, 
+    "numpoints": 1000, 
+    "drawlevel": True, 
+    "resolution": 50, 
+    "fps":30, "pad":2.0, 
+    "invariant": True, 
+    "equilibria": True, 
+    "arrows": False,
 }
 
 logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": [ cbf.Q.tolist() for cbf in cbfs ] }

@@ -1171,6 +1171,14 @@ class KernelQuadratic(Function):
             self.add_center_constraints(point_list=segment)
             self.add_continuity_constraints(segment, increasing=True)
 
+    def find_center(self, x0 = None):
+        ''' 
+        Computes the function center point through optimization
+        '''
+        if x0 == None: x0 = np.random.randn(self._dim)
+        res = minimize( lambda x : self.function(x), x0 )
+        return res.x
+
     def convex_fitting(self):
         ''' 
         Convex optimization problem for fitting the coefficient matrix to the current cost and constraints.

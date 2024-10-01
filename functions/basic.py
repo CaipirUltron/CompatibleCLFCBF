@@ -59,6 +59,7 @@ class Function(ABC):
         self._output_dim = 1
         self.color = mcolors.BASE_COLORS["k"]
         self.linestyle = "solid"
+        self.alpha = 1.0
         self.limits = (-1,1,-1,1)
         self.spacing = 0.1
 
@@ -166,6 +167,7 @@ class Function(ABC):
         
         color = self.color
         linestyle = self.linestyle
+        alpha = self.alpha
         for key in kwargs.keys():
             key = key.lower()
             if key == "color":
@@ -174,11 +176,14 @@ class Function(ABC):
             if key == "linestyle":
                 linestyle = kwargs["linestyle"]
                 continue
+            if key == "alpha":
+                alpha = kwargs["alpha"]
+                continue
 
         collections = []
         for level in self.get_levels(levels):
             for segment in level:
-                line2D = ax.plot( segment[:,0], segment[:,1], color=color, linestyle=linestyle )
+                line2D = ax.plot( segment[:,0], segment[:,1], color=color, linestyle=linestyle, alpha=alpha )
                 collections.append(line2D[0])
         return collections
 

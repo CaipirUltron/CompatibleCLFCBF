@@ -10,7 +10,7 @@ class Plot2DSimulation():
     '''
     Class for matplotlib-based simulation of a point-like 2D dynamical system.
     '''
-    def __init__(self, logs, robot, clf, cbfs, **kwargs):
+    def __init__(self, logs, triplet, **kwargs):
         
         self.plot_config = {
             "figsize": (5,5),
@@ -22,18 +22,24 @@ class Plot2DSimulation():
             "resolution": 50,
             "fps":50,
             "pad":2.0,
-            "invariants": False,
+            "invariant": False,
             "equilibria": False,
-            "arrows": False
-        }
+            "arrows": False        
+            }
+        
         if "plot_config" in kwargs.keys():
             self.plot_config = kwargs["plot_config"]
         
         self.logs = logs
-        self.robot = robot
-        self.clf, self.cbfs = clf, cbfs
+        self.triplet = triplet
+        self.robot = triplet.plant
+        self.clf = triplet.clf
+        self.cbfs = triplet.cbfs
+        self.n_cbfs = len(self.cbfs)
+        
+        # self.fig = plt.figure(figsize = self.plot_config["figsize"], constrained_layout=True)
+        self.fig = plt.figure(figsize = self.plot_config["figsize"])
 
-        self.fig = plt.figure(figsize = self.plot_config["figsize"], constrained_layout=True)
         self.configure()
         
         # self.fig.tight_layout(pad=plot_config["pad"])
@@ -51,9 +57,7 @@ class Plot2DSimulation():
         # Specify main ax
         main_ax = self.plot_config["gridspec"][-1]
 
-        '''
-        I honestly don't know wtf is this
-        '''
+        ''' honestly I don't know wtf is this '''
         def order2indexes(k, m):
             i = int((k-1)/m)
             j = int(np.mod(k-1, m))
@@ -92,7 +96,7 @@ class Plot2DSimulation():
 
         self.main_ax.set_xlim(*self.x_lim)
         self.main_ax.set_ylim(*self.y_lim)
-        self.main_ax.set_title("", fontsize=18)
+        self.main_ax.set_title("CLF-CBF QP-Control Simulation", fontsize=12)
         self.main_ax.set_aspect('equal', adjustable='box')
 
         self.draw_level = self.plot_config["drawlevel"]
@@ -113,9 +117,7 @@ class Plot2DSimulation():
             self.clf_log = self.logs["clf_log"]
             self.clf_param_dim = np.shape(np.array(self.clf_log))[0]
 
-        # self.mode_log = self.logs["mode"]
-        self.boundary_equilibria = self.logs["boundary_equilibria"]
-        self.interior_equilibria = self.logs["interior_equilibria"]
+        self.equilibria = self.logs["equilibria"]
 
         self.num_steps = len(self.state_log[0])
         self.anim_step = (self.num_steps/self.time[-1])/self.fps
@@ -127,11 +129,17 @@ class Plot2DSimulation():
         # Initalize some graphical objects
         self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str("Time = "), fontsize=14)
         self.trajectory, = self.main_ax.plot([],[],lw=2)
-        self.init_state, = self.main_ax.plot([],[],'bo',lw=2)
-        self.actual_state, = self.main_ax.plot([],[],'bo',lw=1,alpha=0.5)
+        # self.init_state, = self.main_ax.plot([],[],'bo', lw=2, alpha=0.5)
+        # self.actual_state, = self.main_ax.plot([],[],'bo', lw=1.2, alpha=0.5)
 
-        self.boundary_equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color='r', linestyle="None")
-        self.interior_equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color='b', linestyle="None")
+        eq_x_coors, eq_y_coors, eq_colors = [], [], []
+        for eq in self.equilibria:
+            eq_pt = eq["x"]
+            eq_x_coors.append(eq_pt[0])
+            eq_y_coors.append(eq_pt[1])
+            if eq["equilibrium"] == "stable": eq_colors.append("red")
+            if eq["equilibrium"] == "unstable": eq_colors.append("green")
+        self.equilibria_plot = self.main_ax.scatter( eq_x_coors, eq_y_coors, c=eq_colors, alpha=0.8 )
 
         self.clf_grad_arrow, = self.main_ax.plot([],[],'b',lw=0.8)
         self.cbf_grad_arrow, = self.main_ax.plot([],[],'r',lw=0.8)
@@ -143,41 +151,35 @@ class Plot2DSimulation():
         self.clf_contours = self.clf.plot_levels(levels=[0.0], colors=self.clf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], spacing=0.5)
         self.cbf_contours = []
 
+        self.invariant_lines = []
+
     def init(self):
 
         self.runs = True
 
         self.time_text.text = str("Time = ")
-        # self.mode_text.text = ""
         self.trajectory.set_data([],[])
 
-        x_init, y_init = self.state_log[0][0], self.state_log[1][0]
-        self.init_state.set_data([x_init], [y_init])
+        # x_init, y_init = self.state_log[0][0], self.state_log[1][0]
+        # self.init_state.set_data([x_init], [y_init])
 
-        if self.plot_config["equilibria"]:
-
-            x_eq = np.array([ eq["x"][0] for eq in self.boundary_equilibria ])
-            y_eq = np.array([ eq["x"][1] for eq in self.boundary_equilibria ])
-            self.boundary_equilibria_plot.set_data(x_eq, y_eq)
-
-            x_eq = np.array([ eq["x"][0] for eq in self.interior_equilibria ])
-            y_eq = np.array([ eq["x"][1] for eq in self.interior_equilibria ])
-            self.interior_equilibria_plot.set_data(x_eq, y_eq)
-
-        for cbf in self.cbfs:
-            self.cbf_contours.append( cbf.plot_levels(levels=[-0.1*k for k in range(4,-1,-1)], colors=self.cbf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], spacing=0.1) )
+        for cbf_index, cbf in enumerate(self.cbfs):
+            self.cbf_contours.append( cbf.plot_levels(levels=[-0.1*k for k in range(4,-1,-1)], colors=self.cbf_contour_color, alpha=0.5, ax=self.main_ax, limits=self.plot_config["limits"], spacing=0.1) )
+            if self.plot_config["invariant"]:
+                self.triplet.plot_invariant( self.main_ax, cbf_index )
+                self.invariant_lines += self.triplet.invariant_lines_plot[cbf_index]
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
         graphical_elements.append(self.trajectory)
-        graphical_elements.append(self.init_state)
-        graphical_elements.append(self.actual_state)
-        graphical_elements.append(self.boundary_equilibria_plot)
-        graphical_elements.append(self.interior_equilibria_plot)
+        # graphical_elements.append(self.init_state)
+        # graphical_elements.append(self.actual_state)
+        if self.plot_config["equilibria"]: graphical_elements.append(self.equilibria_plot)
         graphical_elements.append(self.clf_grad_arrow)
         graphical_elements.append(self.cbf_grad_arrow)
         graphical_elements.append(self.f_arrow)
         graphical_elements += self.clf_contours
+        graphical_elements += self.invariant_lines
         for cbf_countour in self.cbf_contours:
             graphical_elements += cbf_countour
 
@@ -189,8 +191,8 @@ class Plot2DSimulation():
 
             xdata, ydata = self.state_log[0][0:i], self.state_log[1][0:i]
             self.trajectory.set_data(xdata, ydata)
-            if len(xdata) > 0:
-                self.actual_state.set_data([xdata[-1]], [ydata[-1]])
+
+            # if len(xdata) > 0: self.actual_state.set_data([xdata[-1]], [ydata[-1]])
 
             current_time = np.around(self.time[i], decimals = 2)
             current_state = [ self.state_log[0][i], self.state_log[1][i] ]
@@ -225,8 +227,6 @@ class Plot2DSimulation():
                 for coll in self.clf_contours:
                     coll.remove()
 
-                # perimeter = 4*abs(current_state[0]) + 4*abs(current_state[1])
-                # self.clf_contours = self.clf.plot_levels(levels=[V], colors=self.clf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], spacing=0.005*perimeter+0.1)
                 self.clf_contours = self.clf.plot_levels(levels=[V], colors=self.clf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], spacing=0.5)
 
         else:
@@ -236,14 +236,14 @@ class Plot2DSimulation():
         graphical_elements = []
         graphical_elements.append(self.time_text)
         graphical_elements.append(self.trajectory)
-        graphical_elements.append(self.init_state)
-        graphical_elements.append(self.actual_state)
-        graphical_elements.append(self.boundary_equilibria_plot)
-        graphical_elements.append(self.interior_equilibria_plot)
+        # graphical_elements.append(self.init_state)
+        # graphical_elements.append(self.actual_state)
+        if self.plot_config["equilibria"]: graphical_elements.append(self.equilibria_plot)
         graphical_elements.append(self.clf_grad_arrow)
         graphical_elements.append(self.cbf_grad_arrow)
         graphical_elements.append(self.f_arrow)
         graphical_elements += self.clf_contours
+        graphical_elements += self.invariant_lines
         for cbf_countour in self.cbf_contours:
             graphical_elements += cbf_countour
 

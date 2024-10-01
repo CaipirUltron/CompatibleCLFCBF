@@ -72,7 +72,6 @@ cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, skeleton=skeleton_segs
 cbf.is_bounded_by(cbf_leading.shape, verbose=True)
 
 eigQ = np.linalg.eigvals(cbf.Q)
-print(f"Eigs Q = {eigQ}")
 
 cbfs = [ cbf ]
 # ------------------------------------------------- Define controller ------------------------------------------------------
@@ -89,8 +88,20 @@ controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 15
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
-plot_config = {
-    "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits,
-    "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": False
-}
 logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": [ cbf.Q.tolist() for cbf in cbfs ] }
+
+plot_config = {
+    "figsize": (5,5), 
+    "gridspec": (1,1,1), 
+    "widthratios": [1], 
+    "heightratios": [1], 
+    "limits": limits,
+    "path_length": 10, 
+    "numpoints": 1000, 
+    "drawlevel": True, 
+    "resolution": 50, 
+    "fps":30, "pad":2.0, 
+    "invariant": True, 
+    "equilibria": True, 
+    "arrows": False,
+}
