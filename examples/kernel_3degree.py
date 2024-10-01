@@ -23,7 +23,8 @@ print(kernel)
 
 # -------------------------------------------------- Define system ---------------------------------------------------------
 EYE, ZEROS = np.eye(n), np.zeros((n,n))
-f = MultiPoly( kernel=powers, coeffs=[ np.zeros(n), EYE[0,:], EYE[1,:] ] )
+f = MultiPoly( kernel=powers, coeffs=[ np.zeros(n), np.zeros(n), np.zeros(n) ] )
+# f = MultiPoly( kernel=powers, coeffs=[ np.zeros(n), EYE[0,:], EYE[1,:] ] )
 g = MultiPoly( kernel=powers, coeffs=[ np.eye(n), ZEROS, ZEROS ] )
 plant = PolyAffineSystem(initial_state=initial_state, initial_control=initial_control, f=f, g=g)
 
@@ -35,7 +36,7 @@ points = []
 points.append({ "coords": [ 0.0,  1.0], "gradient": [ 0.0, 1.0], "curvature": -15.0 })
 # points.append({ "coords": [ -1.0,  1.0], "gradient": [ 0.0, 1.0], "curvature": 3.0 })
 
-clf_eig = np.array([ 8.0, 1.0 ])
+clf_eig = 0.1*np.array([ 8.0, 1.0 ])
 clf_angle = np.deg2rad(0)
 Pquadratic = kernel_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
 clf_leading = LeadingShape(Pquadratic,approximate=True)

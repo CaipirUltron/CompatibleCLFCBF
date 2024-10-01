@@ -20,7 +20,8 @@ print(kernel)
 
 # -------------------------------------------------- Define system ---------------------------------------------------------
 EYE, ZEROS = np.eye(n), np.zeros((n,n))
-f = MultiPoly( kernel=powers, coeffs=[ np.zeros(n), EYE[0,:], EYE[1,:] ] )
+f = MultiPoly( kernel=powers, coeffs=[ np.zeros(n), np.zeros(n), np.zeros(n) ] )
+# f = MultiPoly( kernel=powers, coeffs=[ np.zeros(n), EYE[0,:], EYE[1,:] ] )
 g = MultiPoly( kernel=powers, coeffs=[ np.eye(n), ZEROS, ZEROS ] )
 plant = PolyAffineSystem(initial_state=initial_state, initial_control=initial_control, f=f, g=g)
 

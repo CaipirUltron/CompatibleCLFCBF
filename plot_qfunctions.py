@@ -32,11 +32,11 @@ for cbf_index, cbf in enumerate(sim.cbfs):
         norm_lambdas += seg["normalized_lambdas"]
         cbf_values += seg["cbf_values"]
 
-    ax1.set_xlim(0.0, max(lambdas) )
-    ax1.set_ylim(min(cbf_values), max(cbf_values))
+    ax1.set_xlim( 0.0, max(lambdas) )
+    ax1.set_ylim( min(cbf_values), max(cbf_values) )
 
-    ax2.set_xlim(0.0, max(norm_lambdas) )
-    ax2.set_ylim(min(cbf_values), max(cbf_values))
+    ax2.set_xlim( 0.0, max(norm_lambdas) )
+    ax2.set_ylim( min(cbf_values), max(cbf_values) )
 
     ax1.legend(loc="upper right")
     ax2.legend(loc="upper right")

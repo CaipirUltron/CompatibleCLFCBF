@@ -9,6 +9,7 @@ import contourpy as ctp
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
+from copy import deepcopy
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -416,8 +417,7 @@ class MultiPoly:
         zipped = list(zip(self.kernel, self.coeffs))
         zipped.sort(key=degree_order)
 
-        powers_by_degree = {}
-        coeffs_by_degree = {}
+        powers_by_degree, coeffs_by_degree = {}, {}
         for key, zipped_group in itertools.groupby(zipped, degree_order):
             powers_by_degree[key] = []
             coeffs_by_degree[key] = []
@@ -460,9 +460,12 @@ class MultiPoly:
         res_coeffs = []
         for mon in res_kernel:
 
+            new_c1 = np.zeros(poly1.shape)
+            new_c2 = np.zeros(poly2.shape)
+
             if mon in poly1.kernel:
                 i = poly1.kernel.index( mon )
-                new_c1 = poly1.coeffs[i]
+                new_c1 = poly1.coeffs[i]                
 
             if mon in poly2.kernel:
                 i = poly2.kernel.index( mon )
@@ -574,6 +577,28 @@ class MultiPoly:
     __sub__, __rsub__, __isub__ = _operator_fallbacks(_sub, operator.sub)
     __mul__, __rmul__, __imul__ = _operator_fallbacks(_mul, operator.mul)
     __matmul__, __rmatmul__, __imatmul__ = _operator_fallbacks(_matmul, operator.matmul)
+
+    def __pow__(self, power):
+        ''' Polynomial exponentiation (integer exponents only) '''
+
+        if not isinstance(power, int):
+            raise NotImplementedError("Only raise a matrix to an integer power")
+        
+        if ( self.ndim == 1 and self.shape != (1,) ) or ( self.ndim == 2 and self.shape[0] != self.shape[1] ):
+            raise NotImplementedError("Can only raise a polynomial to a power if is a scalar or square matrix.")
+
+        if self.ndim == 0:
+            new_poly = MultiPoly(kernel=[ tuple( 0 for _ in range(self.n) ) ], coeffs = [ 1.0 ])
+        if self.ndim == 1:
+            new_poly = MultiPoly(kernel=[ tuple( 0 for _ in range(self.n) ) ], coeffs = [ np.ones(self.shape) ])
+        if self.ndim == 2:
+            new_poly = MultiPoly(kernel=[ tuple( 0 for _ in range(self.n) ) ], coeffs = [ np.eye(self.shape[0]) ])
+
+        for _ in range(power):
+            if self.ndim != 2: new_poly = new_poly * self
+            else: new_poly = new_poly @ self
+
+        return new_poly
 
     def __pos__(self):
         return self

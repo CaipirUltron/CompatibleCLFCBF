@@ -493,20 +493,23 @@ class KernelFamily():
         V, nablaV, Hv = self.clf.to_multipoly()
         h, nablah, Hh = self.cbfs[cbf_index].to_multipoly()
 
-        gammaV = MultiPoly(kernel = [( 0 for _ in range(self.n))], coeffs = 0.0)
-        for k, coef in enumerate(gamma.coefs):
+        gammaV = MultiPoly(kernel = [ tuple(0 for _ in range(self.n)) ], coeffs = [ 0.0 ] )
+        for k, coef in enumerate(gamma.coef):
             gammaV += coef * (V**k)
 
         vecQ_poly = G @ nablah
         vecP_poly = p * gammaV * ( G @ nablaV ) - f
         
-        A = vecQ_poly + 0 * vecP_poly
-        B = 0 * vecQ_poly + vecP_poly
+        A_poly = vecQ_poly + 0 * vecP_poly
+        B_poly = 0 * vecQ_poly + vecP_poly
 
-        if A.kernel != B.kernel:
+        if A_poly.kernel != B_poly.kernel:
             raise Exception("Kernels are not the same. This should not happen.")
         
-        return (A, B), A.kernel
+        A = np.array([ cA.tolist() for cA in A_poly.coeffs ]).T
+        B = np.array([ cB.tolist() for cB in B_poly.coeffs ]).T
+
+        return A, B, A_poly.kernel
 
     def vecQ_fun(self, pt: np.ndarray, cbf_index: int) -> np.ndarray:
         '''
