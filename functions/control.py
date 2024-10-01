@@ -6,6 +6,7 @@ from time import perf_counter
 from scipy.optimize import minimize, LinearConstraint, NonlinearConstraint
 from shapely import geometry, intersection
 
+from numpy.polynomial.polynomial import polyder
 from numpy.polynomial import Polynomial as Poly
 from dynamic_systems import Integrator, PolyAffineSystem
 
@@ -302,7 +303,8 @@ class KernelFamily():
         # Default QP parameters. Gamma and alpha functions are identity polynomials
         self.params = { "slack_gain": 1.0, 
                         "gamma": Poly([0.0, 1.0]), 
-                        "alpha": Poly([0.0, 1.0]) } 
+                        "alpha": Poly([0.0, 1.0]) }
+        self.params["dgamma"] = Poly( polyder(self.params["gamma"].coef) )
 
         # Invariant set computation and equilibria parameters
         self.limits = [ [-1, +1] for _ in range(2) ]
@@ -333,6 +335,8 @@ class KernelFamily():
 
         # Defines main adjustable class attributes
         self.set_param(**kwargs)
+
+
 
         # Initialize cost and constraints for scipy.optimize computation
         # self.cost = 0.0
@@ -435,6 +439,7 @@ class KernelFamily():
                         if not isinstance(params["gamma"], Poly):
                             raise Exception("Passed gamma is not a numpy polynomial.")
                         self.params["gamma"] = params["gamma"]
+                        self.params["dgamma"] = Poly( polyder(self.params["gamma"].coef) )
                         update_invariant = True
                         continue
                     if key == "alpha":
@@ -552,7 +557,7 @@ class KernelFamily():
     def invariant_Jacobian(self, pt: np.ndarray, cbf_index: int = -1) -> np.ndarray:
         ''' Computes the invariant Jacobian to determine the stability of equilibrium points '''
 
-        G = self.plant.get_f(pt)
+        G = self.plant.get_G(pt)
         Jf = self.plant.get_Jf(pt)
         JG_list = self.plant.get_JG_list(pt)
 
@@ -571,12 +576,15 @@ class KernelFamily():
 
         p = self.params["slack_gain"]
         gamma = self.params["gamma"]
+        dgamma = self.params["dgamma"]
 
         pencil = l * nablah - p * gamma(V) * nablaV
         Hpencil = l * Hh - p * gamma(V) * Hv
         JG_term = np.array([ JG @ pencil for JG in JG_list ])
 
-        return Jf + JG_term + G @ ( Hpencil - p * np.outer(nablaV, nablaV) )
+        Jfi = Jf + JG_term + G @ ( Hpencil - p * dgamma(V) * np.outer(nablaV, nablaV) )
+
+        return Jfi
 
     def stability_fun(self, x_eq, type_eq, cbf_index: int = -1): 
         '''
@@ -592,6 +600,7 @@ class KernelFamily():
             unit_nablah = nablah/norm_nablah
 
         Jfi = self.invariant_Jacobian(x_eq, cbf_index)
+
         if type_eq == "boundary":
             curvatures, basis_for_TpS = compute_curvatures( Jfi, unit_nablah )
             max_index = np.argmax(curvatures)
