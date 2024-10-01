@@ -39,10 +39,6 @@ class Plot2DSimulation():
         # self.fig.tight_layout(pad=plot_config["pad"])
         self.animation = None
 
-        # print("Equilibrium pts: ")
-        # for eq in self.equilibria:
-        #     print(eq)
-
     def configure(self):
         '''
         Configure axes.
@@ -118,7 +114,9 @@ class Plot2DSimulation():
             self.clf_param_dim = np.shape(np.array(self.clf_log))[0]
 
         # self.mode_log = self.logs["mode"]
-        self.equilibria = self.logs["equilibria"]
+        self.boundary_equilibria = self.logs["boundary_equilibria"]
+        self.interior_equilibria = self.logs["interior_equilibria"]
+
         self.num_steps = len(self.state_log[0])
         self.anim_step = (self.num_steps/self.time[-1])/self.fps
         self.current_step = 0
@@ -131,11 +129,13 @@ class Plot2DSimulation():
         self.trajectory, = self.main_ax.plot([],[],lw=2)
         self.init_state, = self.main_ax.plot([],[],'bo',lw=2)
         self.actual_state, = self.main_ax.plot([],[],'bo',lw=1,alpha=0.5)
-        self.equilibria_plot, = self.main_ax.plot([],[], marker='*', mfc='none', lw=2, color='k', linestyle="None")
-        # self.equilibria_plot, = self.main_ax.plot([],[], marker='o', color='r',lw=2)
+
+        self.boundary_equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color='r', linestyle="None")
+        self.interior_equilibria_plot, = self.main_ax.plot([],[], marker='o', mfc='none', lw=2, color='b', linestyle="None")
+
         self.clf_grad_arrow, = self.main_ax.plot([],[],'b',lw=0.8)
         self.cbf_grad_arrow, = self.main_ax.plot([],[],'r',lw=0.8)
-        self.fc_arrow, = self.main_ax.plot([],[],'r',lw=0.8)
+        self.f_arrow, = self.main_ax.plot([],[],'r',lw=0.8)
 
         self.clf_contour_color = mcolors.TABLEAU_COLORS['tab:blue']
         self.cbf_contour_color = mcolors.TABLEAU_COLORS['tab:red']
@@ -152,14 +152,17 @@ class Plot2DSimulation():
         self.trajectory.set_data([],[])
 
         x_init, y_init = self.state_log[0][0], self.state_log[1][0]
-        self.init_state.set_data(x_init, y_init)
+        self.init_state.set_data([x_init], [y_init])
 
         if self.plot_config["equilibria"]:
-            num_eq = len(self.equilibria)
-            x_eq, y_eq = np.zeros(num_eq), np.zeros(num_eq)
-            for k in range(num_eq):
-                x_eq[k], y_eq[k] = self.equilibria[k]["x"][0], self.equilibria[k]["x"][1]
-            self.equilibria_plot.set_data(x_eq, y_eq)
+
+            x_eq = np.array([ eq["x"][0] for eq in self.boundary_equilibria ])
+            y_eq = np.array([ eq["x"][1] for eq in self.boundary_equilibria ])
+            self.boundary_equilibria_plot.set_data(x_eq, y_eq)
+
+            x_eq = np.array([ eq["x"][0] for eq in self.interior_equilibria ])
+            y_eq = np.array([ eq["x"][1] for eq in self.interior_equilibria ])
+            self.interior_equilibria_plot.set_data(x_eq, y_eq)
 
         for cbf in self.cbfs:
             self.cbf_contours.append( cbf.plot_levels(levels=[-0.1*k for k in range(4,-1,-1)], colors=self.cbf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], spacing=0.1) )
@@ -169,10 +172,11 @@ class Plot2DSimulation():
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
         graphical_elements.append(self.actual_state)
-        graphical_elements.append(self.equilibria_plot)
+        graphical_elements.append(self.boundary_equilibria_plot)
+        graphical_elements.append(self.interior_equilibria_plot)
         graphical_elements.append(self.clf_grad_arrow)
         graphical_elements.append(self.cbf_grad_arrow)
-        graphical_elements.append(self.fc_arrow)
+        graphical_elements.append(self.f_arrow)
         graphical_elements += self.clf_contours
         for cbf_countour in self.cbf_contours:
             graphical_elements += cbf_countour
@@ -186,7 +190,7 @@ class Plot2DSimulation():
             xdata, ydata = self.state_log[0][0:i], self.state_log[1][0:i]
             self.trajectory.set_data(xdata, ydata)
             if len(xdata) > 0:
-                self.actual_state.set_data(xdata[-1], ydata[-1])
+                self.actual_state.set_data([xdata[-1]], [ydata[-1]])
 
             current_time = np.around(self.time[i], decimals = 2)
             current_state = [ self.state_log[0][i], self.state_log[1][i] ]
@@ -204,22 +208,17 @@ class Plot2DSimulation():
                     [ current_state[0], current_state[0] + nablah_norm[0] ], 
                     [ current_state[1], current_state[1] + nablah_norm[1] ] )
 
-                F = self.robot.get_F()
-                fc = np.array([F[1,0], F[2,0]])
-                fc_norm = fc/np.linalg.norm(fc)
-                self.fc_arrow.set_data( 
-                    [ current_state[0], current_state[0] + fc_norm[0] ], 
-                    [ current_state[1], current_state[1] + fc_norm[1] ] )
+                f = self.robot.get_f(current_state)
+                f_norm = f/np.linalg.norm(f)
+                self.f_arrow.set_data( 
+                    [ current_state[0], current_state[0] + f_norm[0] ], 
+                    [ current_state[1], current_state[1] + f_norm[1] ] )
             
             if hasattr(self, 'clf_log'):
                 current_piv_state = [ self.clf_log[k][i] for k in range(self.clf_param_dim) ]
                 self.clf.set_params( P=current_piv_state )
 
             self.time_text.set_text("Time = " + str(current_time) + "s")
-
-            # if len(self.equilibria) != 0 and self.equilibria[i] != None:
-            #     x_eq, y_eq = self.equilibria[i][0], self.equilibria[i][1]
-            #     self.equilibria_plot.set_data(x_eq, y_eq)
 
             if self.draw_level:
                 V = self.clf.function(current_state)
@@ -239,10 +238,11 @@ class Plot2DSimulation():
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.init_state)
         graphical_elements.append(self.actual_state)
-        graphical_elements.append(self.equilibria_plot)
+        graphical_elements.append(self.boundary_equilibria_plot)
+        graphical_elements.append(self.interior_equilibria_plot)
         graphical_elements.append(self.clf_grad_arrow)
         graphical_elements.append(self.cbf_grad_arrow)
-        graphical_elements.append(self.fc_arrow)
+        graphical_elements.append(self.f_arrow)
         graphical_elements += self.clf_contours
         for cbf_countour in self.cbf_contours:
             graphical_elements += cbf_countour

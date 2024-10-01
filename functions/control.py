@@ -7,7 +7,6 @@ from scipy.optimize import minimize, LinearConstraint, NonlinearConstraint
 from shapely import geometry, intersection
 
 from numpy.polynomial import Polynomial as Poly
-from contourpy.util.mpl_renderer import MplRenderer as Renderer
 from dynamic_systems import Integrator, PolyAffineSystem
 
 import warnings
@@ -16,7 +15,6 @@ import numpy as np
 import scipy as sp
 import cvxpy as cp
 import contourpy as ctp
-import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import platform, os
 
@@ -339,20 +337,20 @@ class KernelFamily():
         self.set_param(**kwargs)
 
         # Initialize cost and constraints for scipy.optimize computation
-        self.cost = 0.0
-        self.invexity = 0.0
-        self.centering = 0.0
-        self.max_eig_constr = 0.0
-        self.counter = 0
+        # self.cost = 0.0
+        # self.invexity = 0.0
+        # self.centering = 0.0
+        # self.max_eig_constr = 0.0
+        # self.counter = 0
 
-        tol = self.comp_process_params["invex_tol"]
-        dim_D = self.kernel.dim_det_kernel
-        self.Tol = np.zeros((dim_D,dim_D))
-        self.Tol[0,0] = 1
-        self.Tol = tol*self.Tol
+        # tol = self.comp_process_params["invex_tol"]
+        # dim_D = self.kernel.dim_det_kernel
+        # self.Tol = np.zeros((dim_D,dim_D))
+        # self.Tol[0,0] = 1
+        # self.Tol = tol*self.Tol
 
-        self.stability_pressures = np.zeros(self.num_cbfs)
-        self.measures = np.zeros(self.num_cbfs)
+        # self.stability_pressures = np.zeros(self.num_cbfs)
+        # self.measures = np.zeros(self.num_cbfs)
 
     def compute_cbf_boundary(self, cbf_index):
         '''Compute CBF boundary'''
@@ -431,15 +429,15 @@ class KernelFamily():
             if key == "params":
                 params = kwargs["params"]
                 for key in params.keys():
-                    if "slack_gain":
+                    if key == "slack_gain":
                         self.params["slack_gain"] = params["slack_gain"]
                         update_invariant = True
-                    if "gamma":
+                    if key == "gamma":
                         if not isinstance(params["gamma"], Poly):
                             raise Exception("Passed gamma is not a numpy polynomial.")
                         self.params["gamma"] = params["gamma"]
                         update_invariant = True
-                    if "alpha":
+                    if key == "alpha":
                         if not isinstance(params["alpha"], Poly):
                             raise Exception("Passed alpha is not a numpy polynomial.")
                         self.params["alpha"] = params["alpha"]
@@ -458,32 +456,22 @@ class KernelFamily():
             self.area_function = [ np.empty(self.grid_shape, dtype=float) for _ in self.cbfs ]
 
         self.verify_kernels()
-        if update_invariant: self.update_invariant_set(verbose=True)
+        if update_invariant: 
+            self.update_invariant_set(verbose=True)
 
     def verify_kernels(self):
         '''
         Verifies if the kernel pair is consistent and fully defined
         '''
-        try:            
-            equal_kernel_dims = [ self.plant.kernel._dim == self.clf.kernel._dim ]
-            equal_kernel_dims += [ self.clf.kernel._dim == cbf.kernel._dim for cbf in self.cbfs ]
-            if not all(equal_kernel_dims):
-                raise Exception("Plant, CBF and CBF kernels do not share the same dimension.")
-            self.n = self.plant.kernel._dim
-            
-            
-            self.p = self.kernel._num_monomials
-            self.P = self.clf.P
-
-            # self.Q = []
-            # self.ATQ_matrices = []
-            # for cbf in self.cbfs:
-            #     self.Q.append(cbf.Q)
-                # self.ATQ_matrices.append([ A.T @ cbf.Q for A in self.A_matrices ])
-            
-        except Exception as error:
-            print(error)
-            return False
+        equal_kernel_dims = [ self.plant.f_kernel._dim == self.plant.g_kernel._dim ]
+        equal_kernel_dims += [ self.plant.g_kernel._dim == self.clf.kernel._dim ]
+        equal_kernel_dims += [ self.clf.kernel._dim == cbf.kernel._dim for cbf in self.cbfs ]
+        if not all(equal_kernel_dims):
+            raise Exception("Plant, CBF and CBF kernels do not share the same dimension.")
+        
+        self.n = self.plant.f_kernel._dim
+        # self.p = self.plant.kernel._num_monomials
+        self.P = self.clf.P
 
     def invariant_pencil(self, cbf_index: int):
         ''' 
@@ -535,9 +523,8 @@ class KernelFamily():
 
         V = self.clf_fun(pt)
         nablaV = self.clf_gradient(pt)
-        gammaV = np.polyval(gamma, V)
 
-        return p * gammaV * ( G @ nablaV ) - f
+        return p * gamma(V) * ( G @ nablaV ) - f
 
     def clf_fun(self, pt: np.ndarray) -> float:
         ''' Returns the CLF value using self P matrix '''
@@ -545,11 +532,11 @@ class KernelFamily():
 
     def clf_gradient(self, pt: np.ndarray) -> np.ndarray:
         ''' Returns the CLF gradient using self P matrix '''  
-        return self.clf.gradient_from_P(pt, self.P)
+        return np.array( self.clf.gradient_from_P(pt, self.P) )
 
     def clf_hessian(self, pt: np.ndarray) -> np.ndarray:
         ''' Returns the CLF hessian using self P matrix '''  
-        return self.clf.hessian_from_P(pt, self.P)
+        return np.array( self.clf.hessian_from_P(pt, self.P) )
 
     def lambda_fun(self, pt: np.ndarray, cbf_index: int) -> float:
         '''
@@ -559,25 +546,6 @@ class KernelFamily():
         vQ = self.vecQ_fun(pt, cbf_index)
         vP = self.vecP_fun(pt)
         return (nablah.T @ vP) / ( nablah.T @ vQ )
-
-    # def L_fun(self, l, P, cbf_index: int = -1):
-    #     '''
-    #     Returns pencil L = F + l Q - p gamma P
-    #     '''
-    #     if cbf_index >= 0:
-    #         Qi = self.Q[cbf_index]
-    #         return L(l, P, Qi, self.F, self.params)
-    #     else:
-    #         Qi = np.zeros(self.P.shape)
-    #         return L(0, P, Qi, self.F, self.params)
-
-    # def invariant_equation(self, pt: np.ndarray, l, P, cbf_index: int = -1):
-    #     '''
-    #     Returns invariant equation l vQ - vP for a given pt, l and P
-    #     '''
-    #     m = self.kernel.function(pt)
-    #     Jm = self.kernel.jacobian(pt)
-    #     return Jm.T @ self.L_fun(l, P, cbf_index) @ m
 
     def invariant_Jacobian(self, pt: np.ndarray, cbf_index: int = -1) -> np.ndarray:
         ''' Computes the invariant Jacobian to determine the stability of equilibrium points '''
@@ -600,24 +568,13 @@ class KernelFamily():
             l = 0.0
 
         p = self.params["slack_gain"]
-        gamma = self.params["clf_gain"]        
+        gamma = self.params["gamma"]
 
-        pencil = l * nablah - p * gamma * V * nablaV
-        Hpencil = l * Hh - p * gamma * V * Hv
+        pencil = l * nablah - p * gamma(V) * nablaV
+        Hpencil = l * Hh - p * gamma(V) * Hv
         JG_term = np.array([ JG @ pencil for JG in JG_list ])
 
         return Jf + JG_term + G @ ( Hpencil - p * np.outer(nablaV, nablaV) )
-
-    def S_fun(self, pt: np.ndarray, cbf_index: int = -1) -> np.ndarray:
-        '''
-        Returns stability matrix.
-        '''
-        if cbf_index >= 0:
-            Qi = self.Q[cbf_index]
-            l = self.lambda_fun(pt, cbf_index)
-            return S(pt, self.kernel, l, self.P, Qi, self.F, self.params)
-        else:
-            return S(pt, self.kernel, 0, self.P, Qi, self.F, self.params)
 
     def stability_fun(self, x_eq, type_eq, cbf_index: int = -1): 
         '''
@@ -632,14 +589,15 @@ class KernelFamily():
             norm_nablah = np.linalg.norm(nablah)
             unit_nablah = nablah/norm_nablah
 
-        S = self.S_fun(x_eq, cbf_index)
+        Jfi = self.invariant_Jacobian(x_eq, cbf_index)
         if type_eq == "boundary":
-            curvatures, basis_for_TpS = compute_curvatures( S, unit_nablah )
+            curvatures, basis_for_TpS = compute_curvatures( Jfi, unit_nablah )
             max_index = np.argmax(curvatures)
-            stability_number = curvatures[max_index] / ( self.params["slack_gain"] * self.params["clf_gain"] * norm_nablaV )
+            # stability_number = curvatures[max_index] / ( self.params["slack_gain"] * self.params["clf_gain"] * norm_nablaV )
+            stability_number = curvatures[max_index] / norm_nablaV
 
         if type_eq == "interior":
-            stability_number = np.max( np.linalg.eigvals(S) )
+            stability_number = np.max( np.linalg.eigvals( Jfi ) )
 
         '''
         If the CLF-CBF gradients are collinear, then the stability_number is equivalent to the diff. btw CBF and CLF curvatures at the equilibrium point:
@@ -755,8 +713,8 @@ class KernelFamily():
             # ----- Computes the corresponding equilibrium points and critical segment values
             self.seg_boundary_equilibria(seg_dict)
             self.seg_interior_equilibria(seg_dict)
-            self.seg_stability_pressure(seg_dict)
-            self.seg_removable_measure(seg_dict)
+            # self.seg_stability_pressure(seg_dict)
+            # self.seg_removable_measure(seg_dict)
 
             # ----- Adds the segment dicts and equilibrium points to corresponding data structures
             self.invariant_segs[cbf_index].append(seg_dict)
@@ -815,7 +773,7 @@ class KernelFamily():
                 seg_boundary_equilibrium["cbf_index"] = cbf_index
                 seg_boundary_equilibrium["lambda"] = lambda_pt
                 seg_boundary_equilibrium["h"] = self.cbfs[cbf_index].function(pt)
-                seg_boundary_equilibrium["nablah"] = self.cbfs[cbf_index].gradient(pt)
+                seg_boundary_equilibrium["nablah"] = self.cbfs[cbf_index].gradient(pt).tolist()
 
                 stability, eta = self.stability_fun(pt, "boundary", cbf_index)
                 seg_boundary_equilibrium["eta"], seg_boundary_equilibrium["stability"] = eta, stability
@@ -831,15 +789,16 @@ class KernelFamily():
         seg_dict["interior_equilibria"] = []
         seg_data = seg_dict["points"]
 
-        slk_gain = self.params["slack_gain"]
-        clf_gain = self.params["clf_gain"]
+        p = self.params["slack_gain"]
+        gamma = self.params["gamma"]
 
         # Computes the costs along the whole segment
         costs = []
         for k, (V, nablaV) in enumerate(zip(seg_dict["clf_values"], seg_dict["clf_gradients"])):
             pt = seg_data[k]
-            fc = self.plant.get_fc(pt)
-            costs.append( np.linalg.norm( fc - slk_gain * clf_gain * V * nablaV ) )
+            f = self.plant.get_f(pt)
+            G = self.plant.get_G(pt)
+            costs.append( np.linalg.norm( f - p * gamma(V) * G @ nablaV ) )
 
         # Finds separate groups of points with costs below a certain threshold... interior equilibria are computed by extracting the argmin of the cost for each group
         for flag, group in itertools.groupby(zip(seg_data, costs), lambda x: x[1] <= self.interior_eq_threshold):
@@ -847,12 +806,13 @@ class KernelFamily():
                 group = list(group)
                 group_pts = [ ele[0] for ele in group ]
                 group_costs = [ ele[1] for ele in group ]
-                new_eq = group_pts[np.argmin(group_costs)]
+                new_eq = group_pts[np.argmin(group_costs)].tolist()
                 seg_dict["interior_equilibria"].append({"x": new_eq,
                                                         "cbf_index": cbf_index,
                                                         "lambda": self.lambda_fun(new_eq, cbf_index), 
                                                         "h": self.cbfs[cbf_index].function(new_eq), 
-                                                        "nablah": self.cbfs[cbf_index].gradient(new_eq)})
+                                                        "nablah": self.cbfs[cbf_index].gradient(new_eq).tolist()
+                                                        })
 
         # Computes the equilibrium stability
         for eq in seg_dict["interior_equilibria"]:

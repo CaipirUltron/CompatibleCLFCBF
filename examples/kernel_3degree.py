@@ -3,8 +3,8 @@ import numpy as np
 from shapely import LineString, LinearRing, Polygon
 
 from controllers import NominalQP
-from dynamic_systems import KernelAffineSystem
-from functions import LeadingShape, Kernel, KernelLyapunov, KernelBarrier, KernelFamily
+from dynamic_systems import PolyAffineSystem
+from functions import LeadingShape, Kernel, KernelLyapunov, KernelBarrier, KernelFamily, MultiPoly
 from common import kernel_quadratic, circular_boundary_shape, rot2D, polygon, load_compatible, discretize, segmentize, enclosing_circle
 
 initial_state = [0.2, 6.5]
@@ -18,16 +18,14 @@ limits = 12*np.array((-1,1,-1,1))
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 kernel = Kernel(dim=n, degree=3)
 kernel_dim = kernel._num_monomials
+powers = kernel._powers
 print(kernel)
 
 # -------------------------------------------------- Define system ---------------------------------------------------------
-fx, fy = 0.0, 0.0                       # constant force with fx, fy components
-F = np.zeros([kernel_dim,kernel_dim])
-F[1,0], F[2,0] = fx, fy
-
-def g(state): return np.eye(m)
-
-plant = KernelAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
+EYE, ZEROS = np.eye(n), np.zeros((n,n))
+f = MultiPoly( kernel=powers, coeffs=[ np.zeros(n), EYE[0,:], EYE[1,:] ] )
+g = MultiPoly( kernel=powers, coeffs=[ np.eye(n), ZEROS, ZEROS ] )
+plant = PolyAffineSystem(initial_state=initial_state, initial_control=initial_control, f=f, g=g)
 
 # ---------------------------------------------------- Define CLF ----------------------------------------------------------
 clf_center = [0.0, -5.0]
@@ -79,10 +77,8 @@ print(f"Eigs Q = {eigQ}")
 cbfs = [ cbf ]
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .005
-p, alpha, beta = 1.0, 1.0, 1.0
-kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs,
-                              params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta},
-                              limits=limits.tolist(), spacing=0.2)
+p = 1.0
+kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, params={ "slack_gain": p }, limits=limits, spacing=0.2 )
 
 # invex_P = kerneltriplet.compute_invex( P=clf.P, center=clf_center, points=points)
 # clf.set_params(P=invex_P)
@@ -95,6 +91,6 @@ T = 15
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 plot_config = {
     "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits,
-    "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": True
+    "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": False
 }
 logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": [ cbf.Q.tolist() for cbf in cbfs ] }

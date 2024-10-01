@@ -1,9 +1,9 @@
 import numpy as np
 
-from dynamic_systems import KernelAffineSystem
-from functions import LeadingShape, Kernel, KernelQuadratic, KernelLyapunov, KernelBarrier, KernelFamily
+from dynamic_systems import PolyAffineSystem
+from functions import LeadingShape, Kernel, KernelQuadratic, KernelLyapunov, KernelBarrier, KernelFamily, MultiPoly
 from controllers import NominalQP
-from common import kernel_quadratic, rot2D, box, load_compatible, NGN_decomposition, PSD_closest, NSD_closest
+from common import kernel_quadratic, rot2D, box, load_compatible, PSD_closest, NSD_closest
 
 initial_state = [-5.0, 9.38]
 initial_control = [0.0, 0.0]
@@ -15,16 +15,14 @@ limits = 12*np.array((-1,1,-1,1))
 # ---------------------------------------------- Define kernel function ----------------------------------------------------
 kernel = Kernel(dim=n, degree=2)
 kernel_dim = kernel._num_monomials
+powers = kernel._powers
 print(kernel)
 
 # -------------------------------------------------- Define system ---------------------------------------------------------
-fx, fy = 0.0, 0.0                       # constant force with fx, fy components
-F = np.zeros([kernel_dim,kernel_dim])
-F[1,0], F[2,0] = fx, fy
-
-def g(state):
-    return np.eye(m)
-plant = KernelAffineSystem(initial_state=initial_state, initial_control=initial_control, kernel=kernel, F=F, g_method=g)
+EYE, ZEROS = np.eye(n), np.zeros((n,n))
+f = MultiPoly( kernel=powers, coeffs=[ np.zeros(n), EYE[0,:], EYE[1,:] ] )
+g = MultiPoly( kernel=powers, coeffs=[ np.eye(n), ZEROS, ZEROS ] )
+plant = PolyAffineSystem(initial_state=initial_state, initial_control=initial_control, f=f, g=g)
 
 # ---------------------------------------------------- Define CLF ----------------------------------------------------------
 clf_center = [0.0, -3.0]
@@ -81,18 +79,15 @@ cbf = KernelBarrier(kernel=kernel, boundary=boundary_pts, centers=[box_center], 
 cbfs = [ cbf ]
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .005
-p, alpha, beta = 1.0, 1.0, 1.0
-kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, 
-                               params={"slack_gain": p, "clf_gain": alpha, "cbf_gain": beta}, 
-                               limits=limits, spacing=0.2 )
-
+p = 1.0
+kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, params={ "slack_gain": p }, limits=limits, spacing=0.2 )
 controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 15
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 plot_config = {
     "figsize": (5,5), "gridspec": (1,1,1), "widthratios": [1], "heightratios": [1], "limits": limits,
-    "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": True
+    "path_length": 10, "numpoints": 1000, "drawlevel": True, "resolution": 50, "fps":30, "pad":2.0, "invariants": True, "equilibria": True, "arrows": False
 }
 
 logs = { "sample_time": sample_time, "P": clf.P.tolist(), "Q": [ cbf.Q.tolist() for cbf in cbfs ] }

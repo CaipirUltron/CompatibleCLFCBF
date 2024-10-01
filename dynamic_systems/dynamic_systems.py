@@ -425,18 +425,15 @@ class PolyAffineSystem(AffineSystem):
     def __init__(self, initial_state, initial_control, f, g):
         super().__init__(initial_state, initial_control)
 
-        # Initialize kernel function
-        from functions import Kernel
-
         self.f_poly = f
         self.g_poly = g
         self.G_poly = g @ (g.T)
 
+        from functions import Kernel
         self.f_kernel = Kernel(dim=self.n, monomials = f.kernel)
         self.g_kernel = Kernel(dim=self.n, monomials = g.kernel)
 
-        self.Af_list = self.f_kernel.get_A_matrices()
-        self.Ag_list = self.g_kernel.get_A_matrices()
+        self.poly_derivatives()
 
         self.f()
         self.g()
@@ -455,58 +452,62 @@ class PolyAffineSystem(AffineSystem):
 
     def get_f(self, x):
         ''' Gets f(x) for a given x '''
-        m = self.f_kernel.function(x)
-        f = np.sum([ coeff * m[k] for k, coeff in enumerate(self.f_poly.coeffs) ])
-        return f
+        return self.f_poly.polyval(x)
 
     def get_g(self, x):
         ''' Gets g(x) for a given x '''
-        m = self.g_kernel.function(x)
-        g = np.sum([ coeff * m[k] for k, coeff in enumerate(self.g_poly.coeffs) ])
-        return g
+        return self.g_poly.polyval(x)
     
     def get_G(self, x):
         g = self.get_g(x)
         return g @ (g.T)
 
-    def get_Jf(self, x):
-        ''' Gets the Jacobian matrix of f for a given x '''
+    def poly_derivatives(self):
+        ''' Compute polynomial derivatives of f(x) ang g(x) '''
 
-        m = self.f_kernel.function(x)
-        Jf = np.zeros((self.n, self.n))
+        from functions import MultiPoly
+
+        ''' --------------------- Jacobian of f(x) -------------------- '''
+
+        diff_f_polys = self.f_poly.polyder()
+
+        kernel = list( set.union(*[ set(diff_f_poly.kernel) for diff_f_poly in diff_f_polys ]) )
+        kernel_size = len(kernel)
+
+        coeff_list = [ np.zeros((self.n, self.n)) for _ in range(kernel_size) ]
         for i in range(self.n):
-            partialf = np.sum([ coeff * ( self.Af_list[i][k,:] @ m ) for k, coeff in enumerate(self.f_poly.coeffs) ])
-            Jf[:,i] = partialf
+            for j, diff_f_poly in enumerate(diff_f_polys):
+                for mon, coeff in zip(diff_f_poly.kernel, diff_f_poly.coeffs):
+                    id = kernel.index(mon)
+                    coeff_list[id][i,j] += coeff[i]
 
-        return Jf
+        self.Jf_poly = MultiPoly( kernel=kernel, coeffs=coeff_list )
+
+        ''' --------------- Derivatives of g(x) and G(x) -------------- '''
+
+        self.Jg_list_poly = self.g_poly.polyder()
+        self.JG_list_poly = self.G_poly.polyder()
+
+    def get_Jf(self, x):
+
+        ''' Gets the Jacobian matrix of f for a given x '''
+        return self.Jf_poly.polyval(x)
 
     def get_Jg_list(self, x):
         ''' Gets the n partial derivatives of g for a given x '''
 
-        m = self.f_kernel.function(x)
-        Jg_list = []
-        for i in range(self.n):
-            Jg = np.sum([ coeff * (self.Ag_list[i][k,:] @ m) for k, coeff in enumerate(self.g_poly.coeffs) ])
-            Jg_list.append(Jg)
-
-        return Jg_list
+        return [ Jg_poly.polyval(x) for Jg_poly in self.Jg_list_poly ]
 
     def get_JG_list(self, x):
         ''' Gets the n partial derivatives of G for a given x '''
-        
-        g = self.get_g(x)
-        JG_list = []
-        for Jg in self.get_Jg_list(x):
-            JG = Jg @ g.T + g @ Jg.T
-            JG_list.append(JG)
 
-        return JG_list
+        return [ JG_poly.polyval(x) for JG_poly in self.JG_list_poly ]
 
     def f(self):
-        return self.get_f(self._state)
+        self._f = self.get_f(self._state)
     
     def g(self):
-        return self.get_g(self._state)
+        self._g = self.get_g(self._state)
    
     def __str__(self):
         text = "Kernel-based affine nonlinear system dx = f(x) + g(x) u ,\n"

@@ -106,11 +106,13 @@ class NominalQP():
 
         # Init compatibility parameters
         self.eq_dt = 0.1
+        
+        # self.equilibria = []
         # self.min_curvature = 0.1
         # self.tilt = 0.3
 
         # self.Pref = self.clf.P
-        # self.equilibria = []
+        
         # self.pivot_pt = None
         # self.tracking_pt = None
         # self.needs_update = False
@@ -123,7 +125,7 @@ class NominalQP():
         # self.l_pivot = cp.Variable()
         # self.tracking_grad_norm = cp.Variable()
 
-        self.objective = cp.Minimize( cp.norm( self.Pnew - self.Pnom, p='fro' ) )
+        # self.objective = cp.Minimize( cp.norm( self.Pnew - self.Pnom, p='fro' ) )
         # self.constraints = { "psd": [ self.Pnew >> 0.0 ], 
         #                      "no_local_minima": [ A.T @ self.Pnew >> 0 for A in self.A_list ],
         #                      "pivot": [],
@@ -156,6 +158,77 @@ class NominalQP():
             self.last_eq_t = self.timer
 
         return control
+
+    def get_clf_control(self):
+        '''
+        For now, the controller will not modify the CLF.
+        '''
+        return np.zeros(len(self.clf.param))
+    
+    def get_clf_constraint(self):
+        '''
+        Sets the Lyapunov constraint.
+        '''
+        # Affine plant dynamics
+        state = self.plant.get_state()
+
+        f = self.plant.get_f(state)
+        g = self.plant.get_g(state)
+
+        # Lyapunov function and gradient
+        V = self.clf.function(state)
+        nablaV = self.clf.gradient(state)
+
+        # Lie derivatives
+        LfV = nablaV.dot(f)
+        LgV = g.T.dot(nablaV)
+
+        # CLF contraint for the QP
+        a_clf = np.hstack( [ LgV, -1.0 ])
+        b_clf = - self.gamma(V) - LfV
+
+        return a_clf, b_clf
+
+    def get_cbf_constraint(self):
+        '''
+        Sets the barrier constraints.
+        '''
+        state = self.plant.get_state()
+
+        f = self.plant.get_f(state)
+        g = self.plant.get_g(state)
+
+        # Barrier functions and gradients
+        a_cbf = np.zeros([len(self.cbfs), self.QP_dim])
+        b_cbf = np.zeros(len(self.cbfs))
+        for i, cbf in enumerate(self.cbfs):
+            h = cbf.function(state)
+            nablah = cbf.gradient(state)
+
+            Lfh = nablah.dot(f)
+            Lgh = g.T @ nablah
+
+            # CBF contraint for the QP
+            a_cbf[i,:] = -np.hstack([ Lgh, 0.0 ])
+            b_cbf[i] = self.alpha(h) + Lfh
+
+        return a_cbf, b_cbf
+
+    def update_clf_dynamics(self, piv_ctrl):
+        ''' Integrates the dynamic system for the CLF Hessian matrix '''
+        
+        self.clf.update(piv_ctrl, self.ctrl_dt)
+
+    def update_timer(self, method):
+        '''
+        Updates built-in timer
+        '''
+        if self.last_updated_by == method.__name__:
+            self.updated_timer = False
+        if not self.updated_timer:
+            self.timer += self.ctrl_dt
+            self.updated_timer = True
+            self.last_updated_by = method.__name__
 
     # def update_clf(self):
     #     '''
@@ -339,77 +412,6 @@ class NominalQP():
     #     self.constraints["pivot"] = []
     #     self.constraints["pivot"] += self.equilibrium_constrs(pivot_pt)
     #     self.constraints["pivot"].append( self.curvature_constr(pivot_pt, c_lim=self.min_curvature) )
-
-    def get_clf_control(self):
-        '''
-        For now, the controller will not modify the CLF.
-        '''
-        return np.zeros(len(self.clf.param))
-    
-    def get_clf_constraint(self):
-        '''
-        Sets the Lyapunov constraint.
-        '''
-        # Affine plant dynamics
-        state = self.plant.get_state()
-
-        f = self.plant.get_f(state)
-        g = self.plant.get_g(state)
-
-        # Lyapunov function and gradient
-        V = self.clf.function(state)
-        nablaV = self.clf.gradient(state)
-
-        # Lie derivatives
-        LfV = nablaV.dot(f)
-        LgV = g.T.dot(nablaV)
-
-        # CLF contraint for the QP
-        a_clf = np.hstack( [ LgV, -1.0 ])
-        b_clf = - np.polyval( self.gamma, V ) - LfV
-
-        return a_clf, b_clf
-
-    def get_cbf_constraint(self):
-        '''
-        Sets the barrier constraints.
-        '''
-        state = self.plant.get_state()
-
-        f = self.plant.get_f(state)
-        g = self.plant.get_g(state)
-
-        # Barrier functions and gradients
-        a_cbf = np.zeros([len(self.cbfs), self.QP_dim])
-        b_cbf = np.zeros(len(self.cbfs))
-        for i, cbf in enumerate(self.cbfs):
-            h = cbf.function(state)
-            nablah = cbf.gradient(state)
-
-            Lfh = nablah.dot(f)
-            Lgh = g.T @ nablah
-
-            # CBF contraint for the QP
-            a_cbf[i,:] = -np.hstack([ Lgh, 0.0 ])
-            b_cbf[i] = np.polyval( self.alpha, h ) + Lfh
-
-        return a_cbf, b_cbf
-
-    def update_clf_dynamics(self, piv_ctrl):
-        ''' Integrates the dynamic system for the CLF Hessian matrix '''
-        
-        self.clf.update(piv_ctrl, self.ctrl_dt)
-
-    def update_timer(self, method):
-        '''
-        Updates built-in timer
-        '''
-        if self.last_updated_by == method.__name__:
-            self.updated_timer = False
-        if not self.updated_timer:
-            self.timer += self.ctrl_dt
-            self.updated_timer = True
-            self.last_updated_by = method.__name__
 
 class NominalQuadraticQP():
     '''

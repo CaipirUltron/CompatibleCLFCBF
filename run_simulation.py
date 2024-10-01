@@ -1,5 +1,6 @@
-import platform, os, sys, json, time
 import importlib
+import numpy as np
+import platform, os, sys, json, time
 
 simulation_config = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples."+simulation_config, package=None)
@@ -34,7 +35,8 @@ sim.logs["time"] = time_list
 sim.logs["state"] = sim.plant.state_log
 sim.logs["control"] = sim.plant.control_log
 # sim.logs["clf_log"] = sim.controller.clf.dynamics.state_log
-sim.logs["equilibria"] = sim.controller.equilibria
+sim.logs["boundary_equilibria"] = sim.kerneltriplet.boundary_equilibria
+sim.logs["interior_equilibria"] = sim.kerneltriplet.interior_equilibria
 sim.logs["tracking"] = None
 
 if hasattr(sim, 'path'):
