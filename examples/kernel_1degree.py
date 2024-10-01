@@ -35,9 +35,9 @@ Pquadratic = kernel_quadratic( eigen=clf_eig, R=rot2D(np.deg2rad(clf_angle)), ce
 clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
 
 # --------------------------------------------- Define CBF (quadratic) -----------------------------------------------------
-cbf_eig = 0.2*np.array([ 0.2, 1.2 ])
+cbf_eig = 1*np.array([ 0.2, 1.2 ])
 cbf_center = [0.0, 3.0]
-cbf_angle = np.deg2rad(30)
+cbf_angle = np.deg2rad(0)
 
 Qquadratic = kernel_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
 cbf = KernelBarrier(kernel=kernel, Q=Qquadratic, limits=limits)

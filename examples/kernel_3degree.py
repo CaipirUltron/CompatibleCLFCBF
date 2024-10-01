@@ -77,7 +77,7 @@ cbfs = [ cbf ]
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .005
 p = 1.0
-kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, params={ "slack_gain": p }, limits=limits, spacing=0.2 )
+kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, params={ "slack_gain": p }, limits=limits, spacing=0.1 )
 
 # invex_P = kerneltriplet.compute_invex( P=clf.P, center=clf_center, points=points)
 # clf.set_params(P=invex_P)

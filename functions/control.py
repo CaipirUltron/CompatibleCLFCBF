@@ -336,8 +336,6 @@ class KernelFamily():
         # Defines main adjustable class attributes
         self.set_param(**kwargs)
 
-
-
         # Initialize cost and constraints for scipy.optimize computation
         # self.cost = 0.0
         # self.invexity = 0.0
@@ -520,7 +518,7 @@ class KernelFamily():
     
     def vecP_fun(self, pt: np.ndarray) -> np.ndarray:
         '''
-        Returns the vector vP = p gamma G(x) V(x,P) ∇V - f(x) with CLF shape matrix P
+        Returns the vector vP = p γ(V(x,P)) G(x) ∇V(x) - f(x) with CLF shape matrix P
         '''
         p = self.params["slack_gain"]
         gamma = self.params["gamma"]
@@ -552,7 +550,9 @@ class KernelFamily():
         nablah = self.cbfs[cbf_index].gradient(pt)
         vQ = self.vecQ_fun(pt, cbf_index)
         vP = self.vecP_fun(pt)
-        return (nablah.T @ vP) / ( nablah.T @ vQ )
+        # return (nablah.T @ vP) / ( nablah.T @ vQ )
+
+        return (vQ.T @ vP) / ( vQ.T @ vQ )
 
     def invariant_Jacobian(self, pt: np.ndarray, cbf_index: int = -1) -> np.ndarray:
         ''' Computes the invariant Jacobian to determine the stability of equilibrium points '''
@@ -700,6 +700,9 @@ class KernelFamily():
         invariant_contour = ctp.contour_generator( x=self.xg, y=self.yg, z=self.determinant_grid[cbf_index] )  # creates new contour_generator object
         self.invariant_lines[cbf_index] = invariant_contour.lines(0.0)                                         # returns the 0-valued contour lines
 
+        p = self.params["slack_gain"]
+        gamma = self.params["gamma"]
+
         boundary_eqs, interior_eqs = [], []
         stable_eqs, unstable_eqs = [], []
         for segment_points in self.invariant_lines[cbf_index]:
@@ -720,6 +723,8 @@ class KernelFamily():
 
             seg_dict["cbf_index"] = cbf_index
             seg_dict["cbf_values"] = [ self.cbfs[cbf_index].function(pt) for pt in segment_points ]
+
+            seg_dict["normalized_lambdas"] = [ l / ( p * gamma(seg_dict["clf_values"][k]) ) for k, l in enumerate( seg_dict["lambdas"] ) ]
 
             # ----- Computes the corresponding equilibrium points and critical segment values
             self.seg_boundary_equilibria(seg_dict)
