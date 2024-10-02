@@ -37,13 +37,13 @@ clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
 # --------------------------------------------- Define CBF (quadratic) -----------------------------------------------------
 cbf_eig = 1*np.array([ 0.2, 1.2 ])
 cbf_center = [0.0, 3.0]
-cbf_angle = np.deg2rad(0)
+cbf_angle = np.deg2rad(30)
 
 Qquadratic = kernel_quadratic(eigen=cbf_eig, R=rot2D(cbf_angle), center=cbf_center, kernel_dim=kernel_dim)
 cbf = KernelBarrier(kernel=kernel, Q=Qquadratic, limits=limits)
 
 cbfs = [ cbf ]
-# -------------------------------------------Define triplet and controller -------------------------------------------------
+# ----------------------------------------- Define triplet and controller --------------------------------------------------
 sample_time = .005
 p = 1.0
 kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, params={ "slack_gain": p }, limits=limits, spacing=0.2 )

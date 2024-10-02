@@ -1185,7 +1185,7 @@ class KernelQuadratic(Function):
         Returns: the optimization results.
         '''
         fit_problem = cp.Problem( cp.Minimize( self.cost ), self.constraints )
-        fit_problem.solve(verbose=False, max_iters = 100000)
+        fit_problem.solve(solver = 'SCS', verbose=False, max_iters = 100000)
 
         if "optimal" in fit_problem.status:
             print("Fitting was successful with final cost = " + str(fit_problem.value) + " and message: " + str(fit_problem.status))

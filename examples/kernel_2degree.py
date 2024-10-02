@@ -52,7 +52,7 @@ clf.is_SOS_convex(verbose=True)
 # Fits CBF to a box-shaped obstacle
 
 box_center = [ 0.0, 2.0 ]
-box_angle = 0
+box_angle = 2
 box_height, box_width = 5, 5
 
 init_eig = [ 0.2/box_height, 0.2/box_width ]

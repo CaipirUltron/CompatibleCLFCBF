@@ -37,9 +37,10 @@ for cbf_index in range(len(sim.cbfs)):
     cbf_segments = sim.kerneltriplet.invariant_segs[cbf_index]
     segment_errors[cbf_index] = [ 0.0 for _ in range(len(cbf_segments)) ]
     for seg_index, seg in enumerate(cbf_segments):
+        n_pts = len(seg["points"])
         for l, pt in zip(seg["lambdas"], seg["points"]):
             invariant_vec = ( l * A - B ) @ kernel.function(pt)
-            segment_errors[cbf_index][seg_index] += np.linalg.norm( invariant_vec )
+            segment_errors[cbf_index][seg_index] += (1/n_pts) * np.linalg.norm( invariant_vec )
 
 ''' -------------------- Print results ------------------------- '''
 
