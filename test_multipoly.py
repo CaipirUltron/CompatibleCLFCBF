@@ -3,7 +3,8 @@ import numpy as np
 import sympy as sym
 import matplotlib.pyplot as plt
 
-from functions import Kernel, KernelLinear, MultiPoly, KernelQuadratic
+from common import generate_monomials
+from functions.multipoly import MultiPoly as Poly
 
 np.set_printoptions(precision=3, suppress=True)
 limits = 14*np.array((-1,1,-1,1))
@@ -17,23 +18,21 @@ limits = 14*np.array((-1,1,-1,1))
 
 # ------------------------------------ Define kernel -----------------------------------
 n = 2
-d = [2,2]
-kernel = Kernel(dim=n, degree=2)
+powers = generate_monomials(n, max_degree=[2,2])
+print(f"Powers = {powers}")
+p = len(powers)
 
-p = kernel._num_monomials
-print(kernel)
-
-# data_type = "scalar"
+data_type = "scalar"
 # data_type = "vector"
-data_type = "matrix"
+# data_type = "matrix"
 
 size = 2
 if data_type == "scalar": args = []
 elif data_type == "vector": args = [size]
 elif data_type == "matrix": args = [size, size]
 
-coeffs1 = [ np.random.randn(size) for _ in range(p) ]
-coeffs2 = [ np.random.randn() for _ in range(p) ]
+coeffs1 = [ np.random.randn(*args) for _ in range(p) ]
+coeffs2 = [ np.random.randn(*args) for _ in range(p) ]
 
 # coeffs1 = [ np.random.randint(low=-4, high=4, size=args) for _ in range(p) ]
 # coeffs2 = [ np.random.randint(low=-4, high=4, size=args) for _ in range(p) ]
@@ -41,47 +40,54 @@ coeffs2 = [ np.random.randn() for _ in range(p) ]
 # coeffs1 = [ np.eye(size) for _ in range(p) ]
 # coeffs2 = [ np.eye(size) for _ in range(p) ]
 
-p1 = MultiPoly(kernel=kernel._powers, coeffs=coeffs1)
-p2 = MultiPoly(kernel=kernel._powers, coeffs=coeffs2)
+powers=[(1,0),(0,0),(2,1),(2,2),(0,1),(1,2),(1,1),(0,2),(2,0)]
+p1 = Poly(kernel=powers, coeffs= [ k for k in range(9) ])
+print(f"p1 = \n{p1}")
+
+p1.sort_kernel()
+print(f"p1 after sorting = \n{p1}")
+
+p1.filter()
+print(f"p1 after filtering = \n{p1}")
+
+p1 = Poly(kernel=powers, coeffs=coeffs1)
+p2 = Poly(kernel=powers, coeffs=coeffs2)
+
+zero_poly = Poly.zeros(kernel=powers)
+print(zero_poly)
 
 # print(f"p1 = \n{p1}")
+# print(f"p2 = \n{p2}")
 
 # for k, p in enumerate(p1.polyder()):
 #     print(f"{k+1}-th derivative of p1 = \n{p}")
-
-linear1 = KernelLinear.from_poly(p1)
-linear2 = KernelLinear.from_poly(p2)
 
 def test_op(op, N):
     ''' Performs N tests on operation op '''
 
     op_poly = op(p1, p2)
-    linear_res = KernelLinear.from_poly( op_poly )
 
     error = 0.0
     for _ in range(N):
 
         x = np.random.rand(n)
 
-        res_p1 = linear1.function(x)
-        res_p2 = linear2.function(x)
-
-        res_p1p2 = op(res_p1, res_p2)
-        res = linear_res.function(x)
+        res_p1p2 = op(p1(x), p2(x))
+        res = op_poly(x)
         error += np.linalg.norm( res - res_p1p2 )
 
     print(f"Total error in {op.__name__} operation: {error}\n")
 
 # -------------------------------- Run numeric tests -----------------------------------
-# N = 100
+N = 1000
 
-# print(f"Running {N} random numeric tests with {data_type}-valued polynomials.\n")
-# test_op(operator.add, N)
-# test_op(operator.sub, N)
-# test_op(operator.mul, N)
-# if data_type != "scalar": test_op(operator.matmul, N)
+print(f"Running {N} random numeric tests with {data_type}-valued polynomials.\n")
+test_op(operator.add, N)
+test_op(operator.sub, N)
+test_op(operator.mul, N)
+if data_type != "scalar": test_op(operator.matmul, N)
+test_op(operator.pow, N)
 
-# print( p1.determinant() )
 
 # -------------------------------- Run symbolic tests -----------------------------------
 
@@ -102,11 +108,11 @@ def test_op(op, N):
 
 # shape_fun = sym.lambdify( coeffs, shape_matrix )
 
-clf = KernelQuadratic(kernel=kernel, coefficients=np.random.randn(6,6), limits=limits, spacing=0.1 )
-print(f"CLF = \n{clf}")
-print(f"CLF params = \n{clf.shape_matrix}")
+# clf = KernelQuadratic(kernel=kernel, coefficients=np.random.randn(6,6), limits=limits, spacing=0.1 )
+# print(f"CLF = \n{clf}")
+# print(f"CLF params = \n{clf.shape_matrix}")
 
-poly, grad_poly, hessian_poly = clf.to_multipoly()
-print(f"CLF with equiv MultiPoly = {poly}")
-print(f"CLF gradient with equiv MultiPoly = {grad_poly}")
-print(f"CLF hessian with equiv MultiPoly = {hessian_poly}")
+# poly, grad_poly, hessian_poly = clf.to_multipoly()
+# print(f"CLF with equiv MultiPoly = {poly}")
+# print(f"CLF gradient with equiv MultiPoly = {grad_poly}")
+# print(f"CLF hessian with equiv MultiPoly = {hessian_poly}")

@@ -1,15 +1,14 @@
 import time
 import math
 import json
-from itertools import product, combinations
-
 import numpy as np
 
+from itertools import product, combinations
 from functools import wraps
 from scipy.spatial import ConvexHull
 from scipy.optimize import fsolve, minimize
 from shapely.geometry import LineString, LinearRing, Polygon
-from shapely.ops import unary_union, split
+from shapely.ops import unary_union
 from shapely import is_geometry
 
 class Op():
@@ -330,7 +329,8 @@ def generate_monomials(n, max_degree):
         for term in k_th_degree_terms: 
             alpha.append(tuple(term.tolist()))
 
-    return alpha, powers_by_degree
+    # return alpha, powers_by_degree
+    return alpha
 
 def generate_monomial_symbols(symbol_list, alpha):
     ''' 
