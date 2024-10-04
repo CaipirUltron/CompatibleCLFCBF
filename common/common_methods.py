@@ -329,8 +329,7 @@ def generate_monomials(n, max_degree):
         for term in k_th_degree_terms: 
             alpha.append(tuple(term.tolist()))
 
-    # return alpha, powers_by_degree
-    return alpha
+    return alpha, powers_by_degree
 
 def generate_monomial_symbols(symbol_list, alpha):
     ''' 

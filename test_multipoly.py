@@ -1,24 +1,13 @@
 import operator
 import numpy as np
 import sympy as sym
-import matplotlib.pyplot as plt
 
 from common import generate_monomials
-from functions.multipoly import MultiPoly as Poly
-
-np.set_printoptions(precision=3, suppress=True)
-limits = 14*np.array((-1,1,-1,1))
-
-# fig = plt.figure(constrained_layout=True)
-# ax = fig.add_subplot(111)
-# ax.set_title("Hyperbolic Expansion")
-# ax.set_aspect('equal', adjustable='box')
-# ax.set_xlim(limits[0], limits[1])
-# ax.set_ylim(limits[2], limits[3])
+from functions import MultiPoly as Poly
 
 # ------------------------------------ Define kernel -----------------------------------
 n = 2
-powers = generate_monomials(n, max_degree=[2,2])
+powers, _ = generate_monomials(n, max_degree=[2,2])
 print(f"Powers = {powers}")
 p = len(powers)
 
@@ -26,53 +15,58 @@ data_type = "scalar"
 # data_type = "vector"
 # data_type = "matrix"
 
-size = 2
 if data_type == "scalar": args = []
-elif data_type == "vector": args = [size]
-elif data_type == "matrix": args = [size, size]
+elif data_type == "vector": args = [2]
+elif data_type == "matrix": args = [2,2]
 
 coeffs1 = [ np.random.randn(*args) for _ in range(p) ]
 coeffs2 = [ np.random.randn(*args) for _ in range(p) ]
 
-# coeffs1 = [ np.random.randint(low=-4, high=4, size=args) for _ in range(p) ]
-# coeffs2 = [ np.random.randint(low=-4, high=4, size=args) for _ in range(p) ]
-
-# coeffs1 = [ np.eye(size) for _ in range(p) ]
-# coeffs2 = [ np.eye(size) for _ in range(p) ]
-
-powers=[(1,0),(0,0),(2,1),(2,2),(0,1),(1,2),(1,1),(0,2),(2,0)]
-p1 = Poly(kernel=powers, coeffs= [ k for k in range(9) ])
-print(f"p1 = \n{p1}")
-
-p1.sort_kernel()
-print(f"p1 after sorting = \n{p1}")
-
-p1.filter()
-print(f"p1 after filtering = \n{p1}")
-
 p1 = Poly(kernel=powers, coeffs=coeffs1)
 p2 = Poly(kernel=powers, coeffs=coeffs2)
 
+print(f"p1 = {p1}")
+print(f"p2 = {p2}")
+
+p1.sort_kernel()
+
+print("p1 after sorting = \n")
+print(p1)
+
+p1.filter()
+
+print(f"p1 after filtering = \n")
+print(p1)
+
 zero_poly = Poly.zeros(kernel=powers)
-print(zero_poly)
+print(f"Zero polynomial = \n{zero_poly}")
 
-# print(f"p1 = \n{p1}")
-# print(f"p2 = \n{p2}")
-
-# for k, p in enumerate(p1.polyder()):
-#     print(f"{k+1}-th derivative of p1 = \n{p}")
+for k, p in enumerate(p1.polyder()):
+    print(f"{k+1}-th derivative of p1 = \n{p}")
 
 def test_op(op, N):
     ''' Performs N tests on operation op '''
 
-    op_poly = op(p1, p2)
+    exponent = np.random.randint(0,10)
+
+    if op != operator.pow:
+        op_poly = op(p1, p2)
+    else:
+        op_poly = p1**exponent
 
     error = 0.0
     for _ in range(N):
 
         x = np.random.rand(n)
 
-        res_p1p2 = op(p1(x), p2(x))
+        if op != operator.pow:
+            res_p1p2 = op(p1(x), p2(x))
+        else:
+            if p1.ndim != 2:
+                res_p1p2 = p1(x)**exponent
+            else:
+                res_p1p2 = np.linalg.matrix_power(p1(x), exponent)
+
         res = op_poly(x)
         error += np.linalg.norm( res - res_p1p2 )
 
@@ -87,7 +81,6 @@ test_op(operator.sub, N)
 test_op(operator.mul, N)
 if data_type != "scalar": test_op(operator.matmul, N)
 test_op(operator.pow, N)
-
 
 # -------------------------------- Run symbolic tests -----------------------------------
 

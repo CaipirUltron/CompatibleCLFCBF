@@ -39,6 +39,9 @@ for cbf_index, cbf in enumerate(sim.cbfs):
 
         ax1.plot( seg["lambdas"], seg["cbf_values"], '-', lw=1, label=f"s{k+1}" )
         ax2.plot( seg["normalized_lambdas"], seg["cbf_values"], '-', lw=1, label=f"s{k+1}" )
+        
+        ax1.plot( seg["lambdas"], [ 0.0 for _ in seg["cbf_values"] ], 'g--', lw=1.5 )
+        ax2.plot( seg["normalized_lambdas"], [ 0.0 for _ in seg["cbf_values"] ], 'g--', lw=1.5 )
 
         x = [ pt[0] for pt in seg["points"] ]
         y = [ pt[1] for pt in seg["points"] ]

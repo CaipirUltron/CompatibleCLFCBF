@@ -1,5 +1,6 @@
 from common import *
-from .basic import Quadratic, MultiPoly
+from .basic import Quadratic
+from .multipoly import MultiPoly
 from .kernel import Kernel, KernelQuadratic
 
 from time import perf_counter

@@ -3,7 +3,8 @@ from scipy.optimize import minimize
 
 from common import *
 from dynamic_systems import Integrator
-from .basic import Function, MultiPoly, LeadingShape, commutation_matrix, mat
+from .basic import Function, LeadingShape, commutation_matrix, mat
+from .multipoly import MultiPoly
 
 import logging
 import warnings
@@ -102,7 +103,7 @@ class Kernel():
         # Compute numeric A and N matrices
         self._compute_A()
         self._compute_N()
-        self._compute_D()
+        # self._compute_D()
 
         # Lambda functions
         self._lambda_monomials = sym.lambdify( list(self._symbols), self._monomials )
@@ -772,11 +773,11 @@ class KernelQuadratic(Function):
         init_shape = np.zeros((self.kernel_dim, self.kernel_dim))
         self.fit_options["initial_shape"] = init_shape.T @ init_shape
         
-        tol = 0e-2
-        q = self.kernel.dim_det_kernel
-        self.Tol = np.zeros((q,q))
-        self.Tol[0,0] = 1
-        self.Tol = tol*self.Tol
+        # tol = 0e-2
+        # q = self.kernel.dim_det_kernel
+        # self.Tol = np.zeros((q,q))
+        # self.Tol[0,0] = 1
+        # self.Tol = tol*self.Tol
 
         self.reset_optimization()
 

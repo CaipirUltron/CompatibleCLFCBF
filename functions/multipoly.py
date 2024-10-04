@@ -7,11 +7,20 @@ import operator
 from copy import deepcopy
 from common import *
 
+'''
+TODOs: 
+i) transfer all functionality of KernelQuadratic to MultiPoly, including fitting.
+To achieve this, it is necessary to convert the linear representation of MultiPoly into SOS representation (and vice-versa).
+Since this is computationally expensive, put the functionality inside a callable method 
+(the methods sos_kernel, sos_index_matrix and shape_matrix already have all the needed logic)
+ii) make MultiPoly a child of Function (specially to use get_levels)
+''' 
+
 class MultiPoly:
     '''
     Class representing multivariable polynomials.
     To be used as a tool for the Kernel, KernelLinear and KernelQuadratic classes,
-    simply to represent polynomial data and perform operations between polynomials.
+    representing polynomial data and performing operations between polynomials of any dimension/degree.
     Implementation: coefficients are ALWAYS float/np.ndarray (internally, they can be numeric or symbolic)
     '''
     def __init__(self, kernel: list, coeffs: list):
