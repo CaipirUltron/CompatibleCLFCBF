@@ -356,17 +356,18 @@ class MultiPoly:
     def __getitem__(self, items):
         ''' Subscritable method '''
 
-        if not isinstance(items, (int, tuple)):
-            raise IndexError
+        if not isinstance(items, tuple):
+            items = tuple([items])
 
-        if isinstance(items[0], slice):
-            if items[0].start == items[0].stop or items[0].start == self.shape[0]:
-                return MultiPoly.empty()
-            
-        if isinstance(items[1], slice):
-            if items[1].start == items[1].stop or items[1].start == self.shape[1]:
-                return MultiPoly.empty()
+        for k, item in enumerate(items):
 
+            if not isinstance(item, (int, slice)):
+                raise IndexError
+
+            if isinstance(item, slice):
+                if item.start == item.stop or item.start == self.shape[k]:
+                    return MultiPoly.empty()
+                
         index_coeffs = [ c[items] for c in self.coeffs ]
         return MultiPoly(self.kernel, index_coeffs)
 
@@ -395,11 +396,16 @@ class MultiPoly:
     def __call__(self, x):
         ''' Computes polynomial value '''
 
-        if len(x) != self.n:
+        if isinstance(x, (list, tuple, np.ndarray)) and len(x) != self.n:
+            raise TypeError("Input has incorrect dimensions.")
+
+        correct_dims = x.shape == (self.n,) or x.shape == (self.n,1) or x.shape == (1,self.n)
+        if isinstance(x, MultiPoly) and not correct_dims:
             raise TypeError("Input has incorrect dimensions.")
 
         s = np.zeros(self.shape)
         for mon, coeff in zip(self.kernel, self.coeffs):
+            
             s += coeff * np.prod([ x[i]**power for i, power in enumerate(mon) ])
 
         return s
