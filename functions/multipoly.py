@@ -407,13 +407,17 @@ class MultiPoly:
     def __call__(self, x):
         ''' Computes polynomial value '''
 
-        if isinstance(x, (list, tuple, np.ndarray)): 
+        if isinstance(x, (list, np.ndarray)): 
             if len(x) != self.n:
                 raise TypeError("Input has incorrect dimensions.")
-            s = np.zeros(self.n)
+            s = np.zeros(self.shape)
 
-        correct_dims = x.shape == (self.n,) or x.shape == (self.n,1) or x.shape == (1,self.n)
+        if isinstance(x, tuple):
+            x = np.array(x)
+            s = np.zeros(self.shape)
+
         if isinstance(x, MultiPoly):
+            correct_dims = x.shape == (self.n,) or x.shape == (self.n,1) or x.shape == (1,self.n)
             if not correct_dims:
                 raise TypeError("Input has incorrect dimensions.")
             s = MultiPoly.zeros(dim = self.n, shape = (self.shape))
@@ -554,9 +558,13 @@ class MultiPoly:
     def sos_kernel(self):
         ''' Function for computing the corresponding polynomial SOS kernel '''
 
+        # Initialize sos_kernel
         sos_kernel = []
+
         for mon in self.kernel:
-            possible_curr_combinations = set([ tuple(np.array(mon1)+np.array(mon2)) for mon1,mon2 in itertools.combinations(sos_kernel, 2) ])
+
+            # Compute the set of all possible combinations of sums of 2 monomials in sos_kernel
+            possible_curr_combinations = set([ tuple(np.array(mon1) + np.array(mon2)) for mon1, mon2 in itertools.combinations(sos_kernel, 2) ])
 
             if mon in possible_curr_combinations: 
                 continue

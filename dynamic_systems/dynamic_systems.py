@@ -452,11 +452,11 @@ class PolyAffineSystem(AffineSystem):
 
     def get_f(self, x):
         ''' Gets f(x) for a given x '''
-        return self.f_poly.polyval(x)
+        return self.f_poly(x)
 
     def get_g(self, x):
         ''' Gets g(x) for a given x '''
-        return self.g_poly.polyval(x)
+        return self.g_poly(x)
     
     def get_G(self, x):
         g = self.get_g(x)
@@ -491,17 +491,17 @@ class PolyAffineSystem(AffineSystem):
     def get_Jf(self, x):
 
         ''' Gets the Jacobian matrix of f for a given x '''
-        return self.Jf_poly.polyval(x)
+        return self.Jf_poly(x)
 
     def get_Jg_list(self, x):
         ''' Gets the n partial derivatives of g for a given x '''
 
-        return [ Jg_poly.polyval(x) for Jg_poly in self.Jg_list_poly ]
+        return [ Jg_poly(x) for Jg_poly in self.Jg_list_poly ]
 
     def get_JG_list(self, x):
         ''' Gets the n partial derivatives of G for a given x '''
 
-        return [ JG_poly.polyval(x) for JG_poly in self.JG_list_poly ]
+        return [ JG_poly(x) for JG_poly in self.JG_list_poly ]
 
     def f(self):
         self._f = self.get_f(self._state)

@@ -4,15 +4,16 @@ import sympy as sym
 
 from common import generate_monomials
 from functions import MultiPoly as Poly
+from functions import Kernel, KernelQuadratic
 
 # ------------------------------------ Define kernel -----------------------------------
 n = 2
-powers, _ = generate_monomials(n, max_degree=[2,2])
+powers, _ = generate_monomials(n, max_degree=4)
 print(f"Powers = {powers}")
 p = len(powers)
 
-# data_type = "scalar"
-data_type = "vector"
+data_type = "scalar"
+# data_type = "vector"
 # data_type = "matrix"
 
 if data_type == "scalar": args = []
@@ -80,22 +81,38 @@ print(f"Running {N} random numeric tests with {data_type}-valued polynomials.\n"
 test_op(operator.add, N)
 test_op(operator.sub, N)
 test_op(operator.mul, N)
+
 if data_type != "scalar": 
     test_op(operator.matmul, N)
+
 if data_type in ("scalar", "matrix"):
     test_op(operator.pow, N)
 
-p_comp = p1(p2)
-error = 0.0
-for _ in range(N):
+if data_type == 'vector':
+    p_comp = p1(p2)
+    error = 0.0
+    for _ in range(N):
 
-    x = np.random.rand(n)
+        x = np.random.rand(n)
 
-    res = p1(p2(x))
-    res_pcomp = p_comp(x)
-    error += np.linalg.norm( res - res_pcomp )
+        res = p1(p2(x))
+        res_pcomp = p_comp(x)
+        error += np.linalg.norm( res - res_pcomp )
 
-print(f"Total error in composition operation: {error}\n")
+    print(f"Total error in composition operation: {error}\n")
+
+sos_kernel = p1.sos_kernel()
+index_matrix = p1.sos_index_matrix( sos_kernel )
+shape = p1.shape_matrix( sos_kernel, index_matrix )
+eig_shape = np.linalg.eigvals(shape)
+
+print(f"SOS kernel = {sos_kernel}")
+print(f"index matrix = \n{index_matrix}")
+print(f"P = \n{np.array(shape)}")
+print(f"eigsP = \n{eig_shape}")
+
+kernel = Kernel(dim=2, monomials=sos_kernel)
+print(kernel)
 
 # -------------------------------- Run symbolic tests -----------------------------------
 
