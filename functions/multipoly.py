@@ -252,18 +252,24 @@ class MultiPoly:
     def _operator_fallbacks(operation, op_name):
         ''' Implementation of forward, reverse and inplace operations for MultiPoly '''
 
-        def not_multipoly(self, other):
+        def not_multipoly(self, other, op):
             ''' What to do if the second operand is not a MultiPoly object '''
 
-            new_poly = deepcopy(self)
-            
             if op_name == operator.add or op_name == operator.sub:
+
+                new_poly = deepcopy(self)
                 curr_const_coef = self.get_coef( (0,0) )
                 new_poly.set_coef( (0,0), op_name(curr_const_coef, other) )
 
             if op_name == operator.mul or op_name == operator.matmul:
-                new_poly.set_coef( new_poly.kernel, [ op_name(coef, other) for coef in new_poly.coeffs ] )
-            
+
+                if op == 'forward' or 'inplace':
+                    new_poly = MultiPoly(kernel=self.kernel, coeffs=[ op_name(coef, other) for coef in self.coeffs ])
+                elif op == 'reverse':
+                    new_poly = MultiPoly(kernel=self.kernel, coeffs=[ op_name(other, coef) for coef in self.coeffs ])
+                else:
+                    new_poly = NotImplemented
+                
             return new_poly
 
         def forward(self, other):
@@ -274,7 +280,7 @@ class MultiPoly:
             
             elif isinstance(other, (int, float, np.ndarray)):
                 ''' Forward operation when right term is not a MultiPoly '''
-                return not_multipoly(self, other)
+                return not_multipoly(self, other, op='forward')
                             
             else: return NotImplemented
             
@@ -288,9 +294,8 @@ class MultiPoly:
                 return operation(other, self)
             
             elif isinstance(other, (int, float, np.ndarray)):
-                print('AHA')
                 ''' Reverse operation when right term is not a MultiPoly '''
-                return not_multipoly(self, other)
+                return not_multipoly(self, other, op='reverse')
             
             else: return NotImplemented
             
@@ -305,7 +310,7 @@ class MultiPoly:
             
             elif isinstance(other, (int, float, np.ndarray)):
                 ''' Inplace operation when right term is not a MultiPoly '''
-                return not_multipoly(self, other)
+                return not_multipoly(self, other, op='inplace')
             
             else: return NotImplemented
             
@@ -365,11 +370,17 @@ class MultiPoly:
                 raise IndexError
 
             if isinstance(item, slice):
+
                 if item.start == item.stop or item.start == self.shape[k]:
                     return MultiPoly.empty()
                 
-        index_coeffs = [ c[items] for c in self.coeffs ]
-        return MultiPoly(self.kernel, index_coeffs)
+                index_coeffs = [ c[item] for c in self.coeffs ]
+                return MultiPoly(self.kernel, index_coeffs)
+            
+            if isinstance(item, int):
+
+                index_coeffs = [ np.array([c[item]]) for c in self.coeffs ]
+                return MultiPoly(self.kernel, index_coeffs)
 
     def __repr__(self):
         ''' Representation of MultiPoly '''
@@ -396,17 +407,19 @@ class MultiPoly:
     def __call__(self, x):
         ''' Computes polynomial value '''
 
-        if isinstance(x, (list, tuple, np.ndarray)) and len(x) != self.n:
-            raise TypeError("Input has incorrect dimensions.")
+        if isinstance(x, (list, tuple, np.ndarray)): 
+            if len(x) != self.n:
+                raise TypeError("Input has incorrect dimensions.")
+            s = np.zeros(self.n)
 
         correct_dims = x.shape == (self.n,) or x.shape == (self.n,1) or x.shape == (1,self.n)
-        if isinstance(x, MultiPoly) and not correct_dims:
-            raise TypeError("Input has incorrect dimensions.")
+        if isinstance(x, MultiPoly):
+            if not correct_dims:
+                raise TypeError("Input has incorrect dimensions.")
+            s = MultiPoly.zeros(dim = self.n, shape = (self.shape))
 
-        s = np.zeros(self.shape)
         for mon, coeff in zip(self.kernel, self.coeffs):
-            
-            s += coeff * np.prod([ x[i]**power for i, power in enumerate(mon) ])
+            s += np.prod([ x[i]**power for i, power in enumerate(mon) ]) * coeff
 
         return s
 

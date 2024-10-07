@@ -11,8 +11,8 @@ powers, _ = generate_monomials(n, max_degree=[2,2])
 print(f"Powers = {powers}")
 p = len(powers)
 
-data_type = "scalar"
-# data_type = "vector"
+# data_type = "scalar"
+data_type = "vector"
 # data_type = "matrix"
 
 if data_type == "scalar": args = []
@@ -68,6 +68,7 @@ def test_op(op, N):
                 res_p1p2 = np.linalg.matrix_power(p1(x), exponent)
 
         res = op_poly(x)
+
         error += np.linalg.norm( res - res_p1p2 )
 
     print(f"Total error in {op.__name__} operation: {error}\n")
@@ -79,8 +80,22 @@ print(f"Running {N} random numeric tests with {data_type}-valued polynomials.\n"
 test_op(operator.add, N)
 test_op(operator.sub, N)
 test_op(operator.mul, N)
-if data_type != "scalar": test_op(operator.matmul, N)
-test_op(operator.pow, N)
+if data_type != "scalar": 
+    test_op(operator.matmul, N)
+if data_type in ("scalar", "matrix"):
+    test_op(operator.pow, N)
+
+p_comp = p1(p2)
+error = 0.0
+for _ in range(N):
+
+    x = np.random.rand(n)
+
+    res = p1(p2(x))
+    res_pcomp = p_comp(x)
+    error += np.linalg.norm( res - res_pcomp )
+
+print(f"Total error in composition operation: {error}\n")
 
 # -------------------------------- Run symbolic tests -----------------------------------
 
