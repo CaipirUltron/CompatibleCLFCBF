@@ -258,7 +258,11 @@ class MultiPoly:
             if op_name == operator.add or op_name == operator.sub:
 
                 new_poly = deepcopy(self)
+
                 curr_const_coef = self.get_coef( (0,0) )
+                if curr_const_coef == None:
+                        curr_const_coef = np.zeros(self.shape)
+
                 new_poly.set_coef( (0,0), op_name(curr_const_coef, other) )
 
             if op_name == operator.mul or op_name == operator.matmul:
@@ -688,6 +692,27 @@ class MultiPoly:
         for var in new_variables: print(var)
         print(f"Transformation matrix = \n{matrix}")
         # print( np.linalg.lstsq( matrix, np.array([ 1.0 if k == 0 else 0.0 for k in range(ncoeffs) ]), rcond=None ) )
+
+    def frame_transform(self, translation: np.ndarray, rotation: np.ndarray):
+        '''
+        Performs a rigid-body transformation x = t + R(theta) x' to the polynomial variables.
+        Returns a new polynomial in the coordinates of the new frame.
+        '''
+        if isinstance(translation, (list, np.ndarray, tuple)) and len(translation) != self.n:
+            raise Exception("Length has incorrect dimensions.")
+        
+        if not isinstance(rotation, np.ndarray) or rotation.shape != (self.n, self.n) or np.linalg.det(rotation) - 1.0 > 1e-3:
+            raise Exception("Rotation must be an SO(n) matrix.")
+
+        EYE = np.eye(self.n, dtype='int')
+        x_newframe = MultiPoly(kernel=[ tuple(EYE[k,:]) for k in range(self.n) ], 
+                               coeffs=[ np.array(EYE[k,:], dtype='float') for k in range(self.n) ])
+        
+        translation = np.array(translation)
+        rotation_poly = MultiPoly(kernel=[(0,0)], coeffs=[rotation])
+        x = rotation_poly @ x_newframe + translation
+        
+        return self(x)
 
     @property
     def T(self):

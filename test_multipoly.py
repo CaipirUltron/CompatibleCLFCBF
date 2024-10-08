@@ -2,7 +2,7 @@ import operator
 import numpy as np
 import sympy as sym
 
-from common import generate_monomials
+from common import generate_monomials, rot2D
 from functions import MultiPoly as Poly
 from functions import Kernel, KernelQuadratic
 
@@ -12,8 +12,8 @@ powers, _ = generate_monomials(n, max_degree=4)
 print(f"Powers = {powers}")
 p = len(powers)
 
-data_type = "scalar"
-# data_type = "vector"
+# data_type = "scalar"
+data_type = "vector"
 # data_type = "matrix"
 
 if data_type == "scalar": args = []
@@ -90,29 +90,42 @@ if data_type in ("scalar", "matrix"):
 
 if data_type == 'vector':
     p_comp = p1(p2)
-    error = 0.0
+
+    t = np.random.randn(n)
+    R = rot2D(np.deg2rad( np.random.randint(-180, 180) ))
+    p1_transform = p1.frame_transform(t, R)
+
+    comp_error = 0.0
+    rigid_error = 0.0
+
     for _ in range(N):
 
         x = np.random.rand(n)
 
-        res = p1(p2(x))
-        res_pcomp = p_comp(x)
-        error += np.linalg.norm( res - res_pcomp )
+        res_pcomp1 = p1(p2(x))
+        res_pcomp2 = p_comp(x)
+        comp_error += np.linalg.norm( res_pcomp1 - res_pcomp2 )
 
-    print(f"Total error in composition operation: {error}\n")
+        x_new = t + R @ x
+        res_ptransf1 = p1(x_new)
+        res_ptransf2 = p1_transform(x)
+        rigid_error += np.linalg.norm( res_ptransf1 - res_ptransf2 )
 
-sos_kernel = p1.sos_kernel()
-index_matrix = p1.sos_index_matrix( sos_kernel )
-shape = p1.shape_matrix( sos_kernel, index_matrix )
-eig_shape = np.linalg.eigvals(shape)
+    print(f"Total error in composition operation: {comp_error}\n")
+    print(f"Total error in rigid-body transformation: {rigid_error}\n")
 
-print(f"SOS kernel = {sos_kernel}")
-print(f"index matrix = \n{index_matrix}")
-print(f"P = \n{np.array(shape)}")
-print(f"eigsP = \n{eig_shape}")
+# sos_kernel = p1.sos_kernel()
+# index_matrix = p1.sos_index_matrix( sos_kernel )
+# shape = p1.shape_matrix( sos_kernel, index_matrix )
+# eig_shape = np.linalg.eigvals(shape)
 
-kernel = Kernel(dim=2, monomials=sos_kernel)
-print(kernel)
+# print(f"SOS kernel = {sos_kernel}")
+# print(f"index matrix = \n{index_matrix}")
+# print(f"P = \n{np.array(shape)}")
+# print(f"eigsP = \n{eig_shape}")
+
+# kernel = Kernel(dim=2, monomials=sos_kernel)
+# print(kernel)
 
 # -------------------------------- Run symbolic tests -----------------------------------
 
