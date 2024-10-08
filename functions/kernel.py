@@ -1209,7 +1209,7 @@ class KernelQuadratic(Function):
         p = self.kernel_dim
         powers = self.kernel._powers
 
-        '''---------Multipoly version of ½ m(x)' P m(x) + constant--------- '''
+        '''---------Multipoly version of ½ m(x)' P m(x) + constant --------- '''
         kernel, coeffs = [], []
         for (i,j) in itertools.product( range(p), range(p) ):
             Pij = self.shape_matrix[i,j]
@@ -1258,7 +1258,32 @@ class KernelQuadratic(Function):
         hessian_poly = MultiPoly( kernel=kernel, coeffs=coeff_list )
 
         return poly, grad_poly, hessian_poly
+
+    def _from_multipoly(poly: MultiPoly, cls=None):
+        ''' Loads KernelQuadratic from a polynomial object. '''
+
+        pass
+
+    @classmethod
+    def from_multipoly(cls, poly: MultiPoly):
+        ''' Loads KernelQuadratic from a polynomial object. '''
+
+        if not isinstance(poly, MultiPoly):
+            raise TypeError("Input must be a MultiPoly.")
         
+        if poly.SOSkernel is None:
+            poly.sos_index_matrix()
+
+        kernel = Kernel(dim=poly.n, monomials=poly.SOSkernel)
+
+        if cls is None:
+            coeffs = 2 * poly.shape_matrix()
+            constant = 0.0
+
+        if cls == :
+
+        return kernel, coeffs, constant
+
     # def reshape(self, var: np.ndarray):
     #     ''' Converts from array var to tuple of matrices N and G '''
         

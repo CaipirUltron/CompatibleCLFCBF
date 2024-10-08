@@ -12,8 +12,8 @@ powers, _ = generate_monomials(n, max_degree=4)
 print(f"Powers = {powers}")
 p = len(powers)
 
-# data_type = "scalar"
-data_type = "vector"
+data_type = "scalar"
+# data_type = "vector"
 # data_type = "matrix"
 
 if data_type == "scalar": args = []
@@ -114,15 +114,17 @@ if data_type == 'vector':
     print(f"Total error in composition operation: {comp_error}\n")
     print(f"Total error in rigid-body transformation: {rigid_error}\n")
 
-# sos_kernel = p1.sos_kernel()
-# index_matrix = p1.sos_index_matrix( sos_kernel )
-# shape = p1.shape_matrix( sos_kernel, index_matrix )
-# eig_shape = np.linalg.eigvals(shape)
+shape = p1.shape_matrix()
+eig_shape = np.linalg.eigvals(shape)
 
-# print(f"SOS kernel = {sos_kernel}")
-# print(f"index matrix = \n{index_matrix}")
-# print(f"P = \n{np.array(shape)}")
-# print(f"eigsP = \n{eig_shape}")
+p1.save("poly1")
+p3 = Poly.load("poly1")
+
+quad = KernelQuadratic.from_multipoly(p3)
+
+x = np.random.randn(2)
+print(f"value of p3(x) = {p3(x)}")
+print(f"value of quad(x) = {quad.function(x)}")
 
 # kernel = Kernel(dim=2, monomials=sos_kernel)
 # print(kernel)

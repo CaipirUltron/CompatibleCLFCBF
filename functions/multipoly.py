@@ -42,6 +42,8 @@ class MultiPoly:
 
         self.kernel = kernel
         self.coeffs = coeffs
+        self.SOSkernel = None
+        self.SOSindexes = None
 
         # Classify number of dimensions and shape according to coefficients
         s_coef = self.coeffs[0]
@@ -559,22 +561,24 @@ class MultiPoly:
 
         return det.scalar()
 
-    def sos_kernel(self):
-        ''' Function for computing the corresponding polynomial SOS kernel '''
+    def _sos_kernel(self):
+        '''
+        Function for computing the corresponding polynomial SOS kernel.
+        '''
 
         # Initialize sos_kernel
-        sos_kernel = []
+        self.SOSkernel = []
 
         for mon in self.kernel:
 
             # Compute the set of all possible combinations of sums of 2 monomials in sos_kernel
-            possible_curr_combinations = set([ tuple(np.array(mon1) + np.array(mon2)) for mon1, mon2 in itertools.combinations(sos_kernel, 2) ])
+            possible_curr_combinations = set([ tuple(np.array(mon1) + np.array(mon2)) for mon1, mon2 in itertools.combinations(self.SOSkernel, 2) ])
 
             if mon in possible_curr_combinations: 
                 continue
 
             if len(possible_curr_combinations) == 0:
-                sos_kernel.append(mon)
+                self.SOSkernel.append(mon)
                 continue
 
             # If mon is not on possible with current combinations, check if its possible to create it from them...
@@ -585,27 +589,28 @@ class MultiPoly:
                 possibilities.append( tuple([int(exp/2) for exp in mon]) )
 
             # Checks if mon can be created from the combination of monomials already in self._sos_monomials and another
-            for sos_mon in sos_kernel:
+            for sos_mon in self.SOSkernel:
                 pos = np.array(mon) - np.array(sos_mon)
                 if np.all(pos >= 0): 
                     possibilities.append( tuple([ int(exp) for exp in pos ]) )
 
             index = np.argmin([ np.linalg.norm(pos) for pos in possibilities ])
             new_sos_mon = possibilities[index]
-            if new_sos_mon not in sos_kernel:
-                sos_kernel.append(new_sos_mon)
+            if new_sos_mon not in self.SOSkernel:
+                self.SOSkernel.append(new_sos_mon)
 
-        return sos_kernel
-
-    def sos_index_matrix(self, sos_kernel):
+    def sos_index_matrix(self):
         '''
         Computes the index matrix representing the rule for placing the coefficients in the correct places on the 
         shape matrix of the SOS representation. Algorithm gives preference for putting the elements of coeffs 
         closer to the main diagonal of the SOS matrix.
-        '''     
-        sos_kernel_dim = len(sos_kernel)
-        index_matrix = -np.ones([sos_kernel_dim, sos_kernel_dim], dtype='int')
+        '''
 
+        # Compute SOS kernel first
+        self._sos_kernel()
+        sos_kernel_dim = len(self.SOSkernel)
+
+        self.SOSindexes = -np.ones([sos_kernel_dim, sos_kernel_dim], dtype='int')
         for k in range(len(self.kernel)):
 
             mon = self.kernel[k]
@@ -614,7 +619,7 @@ class MultiPoly:
             possible_places = []
             for (i,j) in itertools.product(range(sos_kernel_dim),range(sos_kernel_dim)):
                 if i > j: continue
-                sos_mon_i, sos_mon_j = np.array(sos_kernel[i]), np.array(sos_kernel[j])
+                sos_mon_i, sos_mon_j = np.array(self.SOSkernel[i]), np.array(self.SOSkernel[j])
 
                 if mon == tuple(sum([sos_mon_i, sos_mon_j])):
                     possible_places.append( (i,j) )
@@ -623,30 +628,34 @@ class MultiPoly:
             distances_from_diag = np.array([ np.abs(place[0] - place[1]) for place in possible_places ])
             i,j = possible_places[np.argmin(distances_from_diag)]
 
-            index_matrix[i,j] = k
+            self.SOSindexes[i,j] = k
 
-        return index_matrix
-
-    def shape_matrix(self, sos_kernel, sos_index_matrix):
+    def shape_matrix(self):
         '''
-        Using the index matrix, returns the SOS shape matrix correctly populated by the coefficients.
+        Using the SOS kernel and index matrix, returns the SOS shape matrix correctly populated by the coefficients.
         '''
+        if self.ndim != 0:
+            raise NotImplementedError("Currently, the shape matrix can only be compute for scalar polynomials.")
+        
         if len(self.coeffs) != len(self.kernel):
             raise Exception("The number of coefficients must be equal to the kernel dimension.")
         
-        sos_kernel_dim = len(sos_kernel)
-        shape_matrix = np.zeros([sos_kernel_dim, sos_kernel_dim]).tolist()
+        if self.SOSindexes is None:
+            self.sos_index_matrix()
+
+        sos_kernel_dim = len(self.SOSkernel)
+        shape_matrix = np.zeros([sos_kernel_dim, sos_kernel_dim])
 
         for (i,j) in itertools.product(range(sos_kernel_dim),range(sos_kernel_dim)):
             if i > j: continue
 
-            k = sos_index_matrix[i,j]
+            k = self.SOSindexes[i,j]
             if k >= 0:
                 if i == j:
-                    shape_matrix[i][j] = self.coeffs[k]
+                    shape_matrix[i,j] = self.coeffs[k]
                 else:
-                    shape_matrix[i][j] = 0.5 * self.coeffs[k]
-                    shape_matrix[j][i] = 0.5 * self.coeffs[k]
+                    shape_matrix[i,j] = 0.5 * self.coeffs[k]
+                    shape_matrix[j,i] = 0.5 * self.coeffs[k]
 
         return shape_matrix
 
@@ -714,6 +723,19 @@ class MultiPoly:
         
         return self(x)
 
+    def save(self, filename):
+        ''' Saves object into a file '''
+        multipoly_log = {"kernel": self.kernel,
+                         "coeffs": [ coef.tolist() if isinstance(coef, np.ndarray) else coef for coef in self.coeffs ],
+                         "sos_kernel": self.SOSkernel,
+                         "sos_indexes": self.SOSindexes.tolist() }
+        try:
+            with open("polynomials/" + filename + ".json", "w") as file:
+                print("Saving MultiPoly data...")
+                json.dump(multipoly_log, file)
+        except IOError:
+            print("Couldn't save polynomial." + IOError)
+
     @property
     def T(self):
         ''' Transpose operation, defined for array-like coefficients '''
@@ -723,6 +745,30 @@ class MultiPoly:
             transposed_coeffs = [ coeff.T for coeff in self.coeffs ]            
 
         return MultiPoly( kernel=self.kernel, coeffs=transposed_coeffs )
+
+    @classmethod
+    def load(cls, filename):
+        ''' Loads a multipoly file '''
+
+        try:
+            with open("polynomials/" + filename + ".json") as file:
+                print("Loading graphical simulation with " + filename + ".json")
+                multipoly_log = json.load(file)
+
+                kernel = [ tuple(mon) for mon in multipoly_log["kernel"] ]
+                coeffs = [ np.array(coef) for coef in multipoly_log["coeffs"] ]
+                poly = cls(kernel=kernel, coeffs=coeffs)
+
+                if multipoly_log["sos_kernel"] != None:
+                    poly.SOSkernel = [ tuple(mon) for mon in multipoly_log["sos_kernel"] ]
+
+                if multipoly_log["sos_indexes"] != None:
+                    poly.SOSindexes = np.array(multipoly_log["sos_indexes"])
+
+                return poly
+
+        except IOError:
+            print("Couldn't locate polynomial file" + filename + ".json")
 
     @classmethod
     def empty(cls):
