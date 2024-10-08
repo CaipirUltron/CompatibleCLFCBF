@@ -4,7 +4,7 @@ import sympy as sym
 
 from common import generate_monomials, rot2D
 from functions import MultiPoly as Poly
-from functions import Kernel, KernelQuadratic
+from functions import Kernel, KernelQuadratic, KernelLyapunov, KernelBarrier
 
 # ------------------------------------ Define kernel -----------------------------------
 n = 2
@@ -106,7 +106,7 @@ if data_type == 'vector':
         res_pcomp2 = p_comp(x)
         comp_error += np.linalg.norm( res_pcomp1 - res_pcomp2 )
 
-        x_new = t + R @ x
+        x_new = R @ x - t
         res_ptransf1 = p1(x_new)
         res_ptransf2 = p1_transform(x)
         rigid_error += np.linalg.norm( res_ptransf1 - res_ptransf2 )
@@ -114,20 +114,14 @@ if data_type == 'vector':
     print(f"Total error in composition operation: {comp_error}\n")
     print(f"Total error in rigid-body transformation: {rigid_error}\n")
 
-shape = p1.shape_matrix()
-eig_shape = np.linalg.eigvals(shape)
+if data_type == "scalar":
 
-p1.save("poly1")
-p3 = Poly.load("poly1")
+    shape = p1.shape_matrix()
+    p1_grad = p1.poly_grad()
+    p1_hess = p1.poly_hess()
 
-quad = KernelQuadratic.from_multipoly(p3)
-
-x = np.random.randn(2)
-print(f"value of p3(x) = {p3(x)}")
-print(f"value of quad(x) = {quad.function(x)}")
-
-# kernel = Kernel(dim=2, monomials=sos_kernel)
-# print(kernel)
+    print(f"gradient = {p1_grad}")
+    print(f"hessian = {p1_hess}")
 
 # -------------------------------- Run symbolic tests -----------------------------------
 

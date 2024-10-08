@@ -73,10 +73,10 @@ class NominalQP():
         # self.A_list = kernel_family.A_matrices
 
         if len(self.cbfs) > 0:
-            equal_kernels = [ self.clf.kernel == cbf.kernel for cbf in self.cbfs ]
+            # equal_kernels = [ self.clf.kernel == cbf.kernel for cbf in self.cbfs ]
             equal_dims = [ self.clf._dim == cbf._dim for cbf in self.cbfs ]
-            if not all(equal_kernels):
-                raise Exception("CLF and CBF must be based on the same kernel.")
+            # if not all(equal_kernels):
+            #     raise Exception("CLF and CBF must be based on the same kernel.")
             if not all(equal_dims):
                 raise Exception("CLF and CBF dimensions are not equal.")
 

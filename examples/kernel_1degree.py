@@ -34,8 +34,8 @@ clf_angle = 0
 clf_center = [0.0, -2.0]
 Pquadratic = kernel_quadratic( eigen=clf_eig, R=rot2D(np.deg2rad(clf_angle)), center=clf_center, kernel_dim=kernel_dim )
 
-# clf = KernelLyapunov(kernel=kernel, P=load_compatible( __file__, Pquadratic, load_compatible = True ), limits=limits )
 clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
+# clf = KernelLyapunov(kernel=kernel, P=load_compatible( __file__, Pquadratic, load_compatible = True ), limits=limits )
 
 # --------------------------------------------- Define CBF (quadratic) -----------------------------------------------------
 cbf_eig = 1*np.array([ 0.2, 1.2 ])

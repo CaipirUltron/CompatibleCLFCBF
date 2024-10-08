@@ -175,7 +175,7 @@ class KernelLyapunov(KernelQuadratic):
     Receives a polynomial class K gamma function
     '''
     def __init__(self, **kwargs):
-        
+
         kwargs["color"] = mcolors.TABLEAU_COLORS['tab:blue'] # Standard CLF color is blue; however, this can be overwritten
         kwargs["constant"] = 0.0                             # Standard constant for CLF is 0.0 (cannot be overwritten)
 
@@ -197,12 +197,12 @@ class KernelLyapunov(KernelQuadratic):
         barV = super()._fun(x, shape_matrix)
         # return np.sqrt( 2 * barV )
         return barV
-      
+
     def _grad(self, x, shape_matrix):
 
         if isinstance(shape_matrix, cp.expressions.variable.Variable):
             return super()._grad(x, shape_matrix)
-        
+
         # V = self._fun(x, shape_matrix)
         grad_barV = super()._grad(x, shape_matrix)
         # return (1/V)*grad_barV
@@ -210,7 +210,7 @@ class KernelLyapunov(KernelQuadratic):
 
     def _hess(self, x, shape_matrix):
 
-        if isinstance(shape_matrix, cp.expressions.variable.Variable): 
+        if isinstance(shape_matrix, cp.expressions.variable.Variable):
             return super()._hess(x, shape_matrix)
 
         # V = self._fun(x, shape_matrix)
@@ -254,7 +254,7 @@ class KernelLyapunov(KernelQuadratic):
         Set the parameters of the Kernel Lyapunov function.
         Optional: pass a vector of parameters representing the vectorization of matrix P
         '''
-        if "P" in kwargs.keys(): 
+        if "P" in kwargs.keys():
             kwargs["coefficients"] = kwargs.pop("P") # Standard name for CLF shape matrix is P
 
         super().set_params(**kwargs)
@@ -268,7 +268,7 @@ class KernelBarrier(KernelQuadratic):
 
         kwargs["color"] = mcolors.TABLEAU_COLORS['tab:red'] # Standard CBF color is red; however, this can be overwritten
         kwargs["constant"] = 0.5                            # Standard constant for CBF is 0.5 (cannot be overwritten)
-        
+
         super().__init__(**kwargs)
 
     def __str__(self):
@@ -278,7 +278,7 @@ class KernelBarrier(KernelQuadratic):
         ''' Set the parameters of the Kernel Barrier function.
         Optional: pass a vector of parameters representing the vectorization of matrix Q '''
 
-        if "Q" in kwargs.keys(): 
+        if "Q" in kwargs.keys():
             kwargs["coefficients"] = kwargs.pop("Q") # Standard name for CBF shape matrix is Q
 
         super().set_params(**kwargs)
@@ -288,12 +288,12 @@ class KernelBarrier(KernelQuadratic):
         ''' Computes the boundary level set '''
         return self.get_levels(levels=[0.0])[0]
 
-    @classmethod
-    def from_multipoly(cls, poly: MultiPoly):
-        ''' Loads KernelBarrier from a polynomial object. '''
+    # @classmethod
+    # def from_multipoly(cls, poly: MultiPoly):
+    #     ''' Loads KernelBarrier from a polynomial object. '''
 
-        kernel_quadratic = super().from_multipoly(poly)
-        kernel_quadratic.
+    #     kernel_quadratic = super().from_multipoly(poly)
+    #     kernel_quadratic.
 
 class KernelFamily():
     '''
@@ -303,14 +303,14 @@ class KernelFamily():
     The variable self.P is used for online computations with the CLF shape.
     '''
     def __init__(self, **kwargs):
-        
+
         self.plant = None
         self.clf = None
         self.cbfs = []
 
         # Default QP parameters. Gamma and alpha functions are identity polynomials
-        self.params = { "slack_gain": 1.0, 
-                        "gamma": Poly([0.0, 1.0]), 
+        self.params = { "slack_gain": 1.0,
+                        "gamma": Poly([0.0, 1.0]),
                         "alpha": Poly([0.0, 1.0]) }
         self.params["dgamma"] = Poly( polyder(self.params["gamma"].coef) )
 
@@ -324,16 +324,16 @@ class KernelFamily():
         self.plotted_attrs = {}
 
         # Dict of compatibilization process parameters
-        self.comp_process_params = { "stability_threshold": 0.1, 
+        self.comp_process_params = { "stability_threshold": 0.1,
                                      "measure_threshold": 0.01,
                                      "G": hessian_2Dquadratic(eigen=[1, 1], angle=np.deg2rad(45)),
                                      "invex_tol": 1e-0,
                                      "max_P_eigenvalue": 10 }
-        
+
         # Dict for storing compatibilization process data
-        self.comp_process_data = {"step": 0, 
-                                  "start_time": 0.0, 
-                                  "execution_time": 0.0, 
+        self.comp_process_data = {"step": 0,
+                                  "start_time": 0.0,
+                                  "execution_time": 0.0,
                                   "gui_eventloop_time": 0.3 }
 
         # Dict for storing compatibilization graphics data
@@ -369,7 +369,7 @@ class KernelFamily():
             self.boundary_lines[cbf_index].append(boundary_lines)
 
             # unsafe_set = unsafe_set | geometry.Polygon(boundary_seg)
-        
+
         # self.safe_sets[cbf_index] = self.world_polygon.difference(unsafe_set)
         # self.unsafe_sets[cbf_index] = unsafe_set
 
@@ -391,7 +391,7 @@ class KernelFamily():
             self.spacing = kwargs["spacing"]
 
         for key in kwargs.keys():
-            
+
             if key in ("limits", "spacing"): # already dealt with
                 continue
 
@@ -421,7 +421,7 @@ class KernelFamily():
                 for cbf in kwargs["cbfs"]:
                     if not isinstance(cbf, KernelBarrier):
                         raise Exception("CBF is not a Kernel polynomial function.")
-                    
+
                 self.cbfs: list[Poly] = kwargs["cbfs"]
                 self.num_cbfs = len(self.cbfs)
                 self.boundary_lines = [ [] for _ in self.cbfs ]
@@ -429,7 +429,7 @@ class KernelFamily():
                 self.unsafe_sets = [ geometry.Polygon() for _ in self.cbfs ]
                 self.invariant_lines_plot = [ [] for _ in self.cbfs ]
                 self.comp_process_data["invariant_segs_log"] = [ [] for _ in self.cbfs ]
-                for cbf_index in range(self.num_cbfs): 
+                for cbf_index in range(self.num_cbfs):
                     self.compute_cbf_boundary(cbf_index)
                 update_invariant = True
                 continue
@@ -469,7 +469,7 @@ class KernelFamily():
             self.area_function = [ np.empty(self.grid_shape, dtype=float) for _ in self.cbfs ]
 
         self.verify_kernels()
-        if update_invariant: 
+        if update_invariant:
             self.update_invariant_set(verbose=True)
 
     def verify_kernels(self):
@@ -481,14 +481,14 @@ class KernelFamily():
         equal_kernel_dims += [ self.clf.kernel._dim == cbf.kernel._dim for cbf in self.cbfs ]
         if not all(equal_kernel_dims):
             raise Exception("Plant, CBF and CBF kernels do not share the same dimension.")
-        
+
         self.n = self.plant.f_kernel._dim
         # self.p = self.plant.kernel._num_monomials
         self.P = self.clf.P
 
     def invariant_pencil(self, cbf_index: int):
-        ''' 
-        Computes the invariant equation 
+        '''
+        Computes the invariant equation
         f(x) + λ G(x) ∇h(x) - p γ(V(x)) G(x) ∇V(x) = (λ A - B) m(x)
         in singular pencil format, that is, the matrix pencil (A, B) with a corresponding kernel function m(x).
         '''
@@ -507,13 +507,13 @@ class KernelFamily():
 
         vecQ_poly = G @ nablah
         vecP_poly = p * gammaV * ( G @ nablaV ) - f
-        
+
         A_poly = vecQ_poly + 0 * vecP_poly
         B_poly = 0 * vecQ_poly + vecP_poly
 
         if A_poly.kernel != B_poly.kernel:
             raise Exception("Kernels are not the same. This should not happen.")
-        
+
         A = np.array([ cA.tolist() for cA in A_poly.coeffs ]).T
         B = np.array([ cB.tolist() for cB in B_poly.coeffs ]).T
 
@@ -526,7 +526,7 @@ class KernelFamily():
         G = self.plant.get_G(pt)
         nablah = self.cbfs[cbf_index].gradient(pt)
         return G @ nablah
-    
+
     def vecP_fun(self, pt: np.ndarray) -> np.ndarray:
         '''
         Returns the vector vP = p γ(V(x,P)) G(x) ∇V(x) - f(x) with CLF shape matrix P
@@ -547,11 +547,11 @@ class KernelFamily():
         return self.clf.function_from_P(pt, self.P)
 
     def clf_gradient(self, pt: np.ndarray) -> np.ndarray:
-        ''' Returns the CLF gradient using self P matrix '''  
+        ''' Returns the CLF gradient using self P matrix '''
         return np.array( self.clf.gradient_from_P(pt, self.P) )
 
     def clf_hessian(self, pt: np.ndarray) -> np.ndarray:
-        ''' Returns the CLF hessian using self P matrix '''  
+        ''' Returns the CLF hessian using self P matrix '''
         return np.array( self.clf.hessian_from_P(pt, self.P) )
 
     def lambda_fun(self, pt: np.ndarray, cbf_index: int) -> float:
@@ -597,7 +597,7 @@ class KernelFamily():
 
         return Jfi
 
-    def stability_fun(self, x_eq, type_eq, cbf_index: int = -1): 
+    def stability_fun(self, x_eq, type_eq, cbf_index: int = -1):
         '''
         Compute the stability number for a given equilibrium point
         '''
@@ -658,7 +658,7 @@ class KernelFamily():
             vP = self.vecP_fun(pt).reshape(-1,1)
             for cbf_index in range(self.num_cbfs):
                 vQ = self.vecQ_fun(pt, cbf_index).reshape(-1,1)
-                
+
                 W = np.hstack([vQ, vP])
                 W_list[cbf_index].append(W)
 
@@ -675,7 +675,7 @@ class KernelFamily():
             # Eliminate the negative lambda part
             if not self.invariant_complete:
                 for k, l in enumerate(lambda_grid[cbf_index]):
-                    if l < 0.0: 
+                    if l < 0.0:
                         determinant_list[k] = np.inf
 
             self.determinant_grid[cbf_index] = determinant_list.reshape(self.grid_shape)
@@ -688,15 +688,15 @@ class KernelFamily():
         if self.n > 2:
             warnings.warn("Currently, the computation of the invariant set is not available for dimensions higher than 2.")
             return
-        
+
         self.update_determinant_grid()                                       # updates the grid with new determinant values
-        
+
         self.boundary_equilibria, self.interior_equilibria = [], []
         self.stable_equilibria, self.unstable_equilibria = [], []
 
         self.invariant_lines = [ None for _ in self.cbfs ]
         self.invariant_segs = [ [] for _ in self.cbfs ]
-        for cbf_index in range(self.num_cbfs):                                                                       
+        for cbf_index in range(self.num_cbfs):
             self.invariant_set_analysis(cbf_index)                           # run through each branch of the invariant set of the given CBF
 
         if verbose:
@@ -781,7 +781,7 @@ class KernelFamily():
                     new_candidates += [ [x[k], y[k]] for k in range(len(x)) ]
 
             intersection_pts += new_candidates
-        
+
         return intersection_pts
 
     def seg_boundary_equilibria(self, seg_dict: dict[str,]):
@@ -836,8 +836,8 @@ class KernelFamily():
                 new_eq = group_pts[np.argmin(group_costs)].tolist()
                 seg_dict["interior_equilibria"].append({"x": new_eq,
                                                         "cbf_index": cbf_index,
-                                                        "lambda": self.lambda_fun(new_eq, cbf_index), 
-                                                        "h": self.cbfs[cbf_index].function(new_eq), 
+                                                        "lambda": self.lambda_fun(new_eq, cbf_index),
+                                                        "h": self.cbfs[cbf_index].function(new_eq),
                                                         "nablah": self.cbfs[cbf_index].gradient(new_eq).tolist()
                                                         })
 
@@ -866,7 +866,7 @@ class KernelFamily():
             num_segs_to_plot = len(args)
             segs_to_plot = list(args)
 
-        # Adds or removes lines according to the total number of segments to be plotted 
+        # Adds or removes lines according to the total number of segments to be plotted
         if num_segs_to_plot >= len(self.invariant_lines_plot[cbf_index]):
             for _ in range(num_segs_to_plot - len(self.invariant_lines_plot[cbf_index])):
                 line2D, = ax.plot([],[], color=np.random.rand(3), linestyle='dashed', linewidth=1.2 )
@@ -892,7 +892,7 @@ class KernelFamily():
         attr = getattr(self, attr_name)
         if type(attr) != list:
             raise Exception("Passed attribute name is not a list.")
-        
+
         # If the passed attribute name was not already initialized, initialize it.
         if attr_name not in self.plotted_attrs.keys():
             self.plotted_attrs[attr_name] = []
@@ -918,7 +918,7 @@ class KernelFamily():
     #     '''
     #     cbf_index = seg_dict["cbf_index"]
     #     seg_data = seg_dict["points"]
-        
+
     #     # Integrate the segment stability pressure
     #     pressure_integral = 0.0
     #     segment_length = 0.0
@@ -947,29 +947,29 @@ class KernelFamily():
 
     #     # segment is not removable until proven otherwise
     #     seg_dict["removable_measure"] = +np.inf
-    #     if len(seg_dict["boundary_equilibria"]) == 0: 
+    #     if len(seg_dict["boundary_equilibria"]) == 0:
     #         return
-        
+
     #     # If segment starts AND ends completely outside/inside the unsafe set, it's removable
     #     if barrier_vals[0] * barrier_vals[-1] > 0:
 
     #         # removable from outside
-    #         if barrier_vals[0] > 0:                                     
+    #         if barrier_vals[0] > 0:
     #             seg_dict["removable_measure"] = min(barrier_vals) - self.comp_process_params["measure_threshold"]
 
     #         # removable from inside
-    #         if barrier_vals[0] < 0:                                     
+    #         if barrier_vals[0] < 0:
     #             seg_dict["removable_measure"] = - max(barrier_vals) - self.comp_process_params["measure_threshold"]
 
     #     # If segment starts/ends inside and ends/starts outside, it's not removable (crosses boundary at least once)
     #     else:
 
     #         # starts inside (cbf values must be strictly increasing)
-    #         if barrier_vals[0] < 0:                                     
+    #         if barrier_vals[0] < 0:
     #             seg_dict["removable_measure"] = min(grad_barrier_vals)
 
     #         # starts outside (cbf values must be strictly decreasing)
-    #         if barrier_vals[0] > 0:                                     
+    #         if barrier_vals[0] > 0:
     #             seg_dict["removable_measure"] = - max(grad_barrier_vals)
 
     # def is_compatible(self) -> bool:
@@ -980,8 +980,8 @@ class KernelFamily():
     #     for boundary_eq in self.boundary_equilibria:
     #         if boundary_eq["equilibrium"] == "stable":
     #             return False
-            
-    #     # Checks if more than one stable interior equilibria exist 
+
+    #     # Checks if more than one stable interior equilibria exist
     #     stable_interior_counter = 0
     #     for interior_eq in self.interior_equilibria:
     #         if interior_eq["equilibrium"] == "stable": stable_interior_counter += 1
@@ -1019,7 +1019,7 @@ class KernelFamily():
     #             cone = -1
     #             print(f"D(N) in nsd cone")
     #     else:
-    #         if D_eig >= 0: 
+    #         if D_eig >= 0:
     #             cone = +1
     #             print(f"D(N) in psd cone")
     #         else:
@@ -1034,7 +1034,7 @@ class KernelFamily():
 
     #         cost = 0.0
     #         for pt in points:
-                
+
     #             # Add clf value
     #             if "level" in pt.keys():
     #                 clf_value = self.clf._fun(pt["coords"], P)
@@ -1055,7 +1055,7 @@ class KernelFamily():
     #                 v = rot2D(np.pi/2) @ normalized
     #                 Hv = self.clf._hess(pt["coords"], P)
     #                 cost += ( v.T @ Hv @ v - pt["curvature"] )**2
-            
+
     #         Pinit = Ninit.T @ G @ Ninit
     #         return np.linalg.norm( P - Pinit )**2 + cost
 
@@ -1086,7 +1086,7 @@ class KernelFamily():
     #     sol2 = minimize( objective, init_var2, constraints=constrs, options={"disp": False, "maxiter":1000} )
     #     invex_N =  self.var_to_N( sol2.x )
     #     invex_P = invex_N.T @ G @ invex_N
-        
+
     #     total_cost = objective(sol2.x)
     #     center_cost = center_constr(sol2.x)
     #     print(f"Total cost = {total_cost}")
@@ -1100,7 +1100,7 @@ class KernelFamily():
     #     This function computes a new CLF geometry that is completely compatible with the original CBF.
 
     #     The algorithm uses the following ingredients:
-    #      1) stability pressure along the invariant sets 
+    #      1) stability pressure along the invariant sets
     #      2) removable measures between the invariant sets and safe set boundaries
     #      3) parametric invex CLF
 
@@ -1110,17 +1110,17 @@ class KernelFamily():
     #     (i) unbounded branch: goes to infinity from both sides
     #     (ii) bounded branch: ends either in an interior equilibrium point or in ||∇h|| = 0 point; the other side goes → ∞
 
-    #     Equilibrium points can occur in: 
+    #     Equilibrium points can occur in:
     #     (i) stable/unstable pairs, connected through the same invariant set branch;
     #     (ii) singletons, occuring in a bounded branch.
 
     #     In the case of stable/unstable pairs, the associated branch of the invariant set will have an associated removable area connecting the two equilibria:
     #     namely the area of a minimal surface connecting the interval of the invariant set between the two equilibria with a geodesic on the safe set boundary connecting the two equilibria.
 
-    #     In the case of singletons equilibria, one can campute the integral of a function defined over the invariant set, called the "stability pressure": 
+    #     In the case of singletons equilibria, one can campute the integral of a function defined over the invariant set, called the "stability pressure":
     #     it will be positive/negative if the singleton is an unstable/stable boundary equilibria, and zero if the invariant branch does not intersect the safe set boundary; in this case, the removable area is also zero.
 
-    #     This method implements a constrained optimization problem searching to find an invex CLF of the form V = √ m(x)' P m(x), P = N' G N 
+    #     This method implements a constrained optimization problem searching to find an invex CLF of the form V = √ m(x)' P m(x), P = N' G N
     #     that makes both the (i) removable areas and (ii) stability pressure non-negative for all branchs of the CLF-CBF pair branches, thus compatibilizing the CLF-CBF families.
 
     #     PS: the algorithm decision variable is N, a n x p matrix defining the CLF geometry through P = N' G N, where G > 0 is a n x n parameter matrix.
@@ -1133,10 +1133,10 @@ class KernelFamily():
     #     Dinit = np.array(self.sos_factorized(Ninit))
     #     D_eig = np.linalg.eigvals( Dinit)
     #     D_eig_bounds = [ min(D_eig), max(D_eig) ]
-        
+
     #     print(f"Dinit bounds = {D_eig_bounds}")
 
-    #     # Initialize CLF geometry 
+    #     # Initialize CLF geometry
     #     self.P = Pinit
     #     self.update_invariant_set()
     #     is_original_compatible = self.is_compatible()
@@ -1185,10 +1185,10 @@ class KernelFamily():
 
     #     def compatibilization_constr(var: np.ndarray) -> list[float]:
     #         ''' Forces stability pressure + removable measures to be positive in every branch, for every CBF '''
-            
+
     #         N = self.var_to_N(var)
     #         self.P = N.T @ G @ N
-            
+
     #         self.update_invariant_set()      # The invariant set must be updated to get the current state of the optimization
 
     #         self.stability_pressures, self.measures = np.zeros(self.num_cbfs), np.zeros(self.num_cbfs)
@@ -1212,7 +1212,7 @@ class KernelFamily():
     #         ax.set_ylim(self.limits[2], self.limits[3])
     #         self.init_comp_plot(ax)
     #         plt.pause(self.comp_process_data["gui_eventloop_time"])
-        
+
     #     def intermediate_callback(res: np.ndarray):
     #         '''
     #         Callback for visualization of intermediate results (verbose or by animation).
@@ -1220,7 +1220,7 @@ class KernelFamily():
     #         # print(f"Status = {status}")
     #         self.comp_process_data["execution_time"] += time.perf_counter() - self.comp_process_data["start_time"]
     #         self.comp_process_data["step"] += 1
-            
+
     #         # for later json serialization...
     #         for cbf_index in range(self.num_cbfs):
     #             self.comp_process_data["invariant_segs_log"][cbf_index].append( [ seg.tolist() for seg in self.invariant_lines[cbf_index] ] )
@@ -1235,7 +1235,7 @@ class KernelFamily():
     #             print( f"Removable measures = {self.measures}")
     #             print(self.comp_process_data["execution_time"], "seconds have passed...")
 
-    #         if animate: 
+    #         if animate:
     #             self.update_comp_plot(ax)
     #             plt.pause(self.comp_process_data["gui_eventloop_time"])
 
@@ -1272,8 +1272,8 @@ class KernelFamily():
 
     #     if animate: plt.pause(2)
 
-    #     comp_result = { 
-    #                     # "opt_message": sol.message, 
+    #     comp_result = {
+    #                     # "opt_message": sol.message,
     #                     "kernel_dimension": self.kernel._num_monomials,
     #                     "P_original": Pinit.tolist(),
     #                     "P_processed": self.P.tolist(),
@@ -1281,9 +1281,9 @@ class KernelFamily():
     #                     "is_processed_compatible": is_processed_compatible,
     #                     "execution_time": self.comp_process_data["execution_time"],
     #                     "num_steps": self.comp_process_data["step"],
-    #                     "invariant_set_log": self.comp_process_data["invariant_segs_log"] 
+    #                     "invariant_set_log": self.comp_process_data["invariant_segs_log"]
     #                 }
-    
+
     #     return comp_result
 
     # def plot_removable_areas(self, ax, cbf_index):
@@ -1307,7 +1307,7 @@ class KernelFamily():
 
     # def update_comp_plot(self, ax):
     #     ''' Update compatibilization animation plot '''
-        
+
     #     step = self.comp_process_data["step"]
     #     self.comp_graphics["text"].set_text(f"Optimization step = {step}")
 
@@ -1345,7 +1345,7 @@ class InvexProgram():
         self.points_to_fit = []
         '''
         self.points_to_fit should be a list of dicts of the form:
-        { "point": [...], "level": lvl, "gradient": [...], "curvature": curv } 
+        { "point": [...], "level": lvl, "gradient": [...], "curvature": curv }
         '''
         for sdp_param in ('slack_gain', 'invex_gain', 'cost_gain'):
             self.sdp_params_cvxpy[sdp_param].value = 1.0
@@ -1378,8 +1378,8 @@ class InvexProgram():
         ''' Define cvxpy variables/parameters '''
 
         # ---------------------------- Overall parameters ---------------------------
-        self.sdp_params_cvxpy = { "slack_gain": cp.Parameter(nonneg=True), 
-                                  "invex_gain": cp.Parameter(nonneg=True), 
+        self.sdp_params_cvxpy = { "slack_gain": cp.Parameter(nonneg=True),
+                                  "invex_gain": cp.Parameter(nonneg=True),
                                   "cost_gain":  cp.Parameter(nonneg=True) }
 
         # ---------------------------- Decision variables ---------------------------
@@ -1387,10 +1387,10 @@ class InvexProgram():
         self.slack = cp.Variable(1)
         self.P = cp.Variable( (self.p, self.p), PSD=True )
 
-        ''' 
-        Define invexity constraint 
+        '''
+        Define invexity constraint
         (either a Matrix Barrier Function or regular barrier with the eigenvalues)
-        -> This constraint is the STAR of the party! 
+        -> This constraint is the STAR of the party!
         If it works, it will allow for a search in the space of invex functions.
         '''
         invex_gain = self.sdp_params_cvxpy["invex_gain"]
@@ -1428,12 +1428,12 @@ class InvexProgram():
         self.m_center = cp.Parameter( self.p )
         self.center_constraint = self.U @ self.m_center == 0
 
-        ''' 
-        Define scalar constraint for minimization of total cost 
-        (Control Lyapunov Function). This constraint allows for 
+        '''
+        Define scalar constraint for minimization of total cost
+        (Control Lyapunov Function). This constraint allows for
         a search in the space of geometries that minimize the sums of psd costs.
         '''
-        self.tcost = cp.Parameter()                                                            
+        self.tcost = cp.Parameter()
         self.tcost_diff = cp.Parameter(self.state_shape)
 
         tcost_dot = 0
@@ -1452,7 +1452,7 @@ class InvexProgram():
 
     def _init_geometry(self):
         ''' Computes the initial invex geometry '''
-        
+
         tol = 2e-1
 
         pts = [ pt['point'] for pt in self.points_to_fit ]
@@ -1470,7 +1470,7 @@ class InvexProgram():
         self.geo_dynamics.set_state( self.vec( self.N ) )
 
     def set_param(self, **kwargs):
-        
+
         for key in kwargs.keys():
             key = key.lower()
             if key == 'fit_to':
@@ -1568,7 +1568,7 @@ class InvexProgram():
                 self.lambdaD_diff[i][j].value = lambdaD_diff[i][j]
 
         '''
-        Updates c(N) and ∇c(N) (for fitting many points) 
+        Updates c(N) and ∇c(N) (for fitting many points)
         For now, only level fitting is fully implemented.
         '''
         self.tcost.value, self.tcost_diff.value = self.fitting_cost()
@@ -1582,10 +1582,10 @@ class InvexProgram():
         D = self.kernel.D(self.N)
         D_diff = self.kernel.D_diff(self.N)
 
-        if self.invex_mode == 'matrix': 
+        if self.invex_mode == 'matrix':
             return D, D_diff
 
-        if self.invex_mode == 'eigen': 
+        if self.invex_mode == 'eigen':
             eigvals, eigvecs = np.linalg.eig(D)
             lambdaD = np.zeros(self.q)
             lambdaD_diff = [ [ np.zeros(self.q) for _ in range(self.p) ] for _ in range(self.n) ]
@@ -1595,9 +1595,9 @@ class InvexProgram():
                 for i,j in itertools.product( range(self.n), range(self.p) ):
                     lambdaD_diff[i][j][k] = v.T @ D_diff[i][j] @ v
             return lambdaD, lambdaD_diff
-        
+
         ''' STILL NOT FULLY IMPLEMENTED '''
-        if self.invex_mode == 'scalar':   
+        if self.invex_mode == 'scalar':
             eigvals, eigvecs = np.linalg.eig(D)
             index = np.argmin(eigvals)
             lambdaD = eigvals[index]
@@ -1605,11 +1605,11 @@ class InvexProgram():
             v = eigvecs[:,index]
             for i,j in itertools.product( range(self.n), range(self.p) ):
                 lambdaD_diff[i,j] = v.T @ D_diff[i][j] @ v
-            
+
             return lambdaD, lambdaD_diff
 
     def fitting_cost(self):
-        ''' 
+        '''
         Total fitting cost: c(N) = Σ_i ci(N)
         '''
         cost, cost_diff = 0.0, np.zeros(self.state_shape)
@@ -1620,7 +1620,7 @@ class InvexProgram():
 
             keys = point.keys()
 
-            if "point" not in keys: 
+            if "point" not in keys:
                 raise Exception("Point coordinates must be specified.")
 
             pt = point["point"]
@@ -1640,14 +1640,14 @@ class InvexProgram():
                     pt_cost, pt_cost_diff = self.gradient_cost(pt, direction)
                 cost += pt_cost
                 cost_diff += pt_cost_diff
-            
+
             if "curvature" in keys:
                 direction = point["gradient"]
                 curvature = point["curvature"]
                 pt_cost, pt_cost_diff = self.curvature_cost(pt, direction, curvature)
                 cost += pt_cost
                 cost_diff += pt_cost_diff
- 
+
         N = len(self.points_to_fit)
         cost *= 1/N
         cost_diff *= 1/N
@@ -1655,8 +1655,8 @@ class InvexProgram():
         return cost, cost_diff
 
     def trace_cost(self):
-        ''' 
-        Cost tr(P) cost. 
+        '''
+        Cost tr(P) cost.
         Based on the heuristic that minimizing tr(P) will often lead to a low rank solution for P.
         '''
         P = self.N.T @ self.N
@@ -1694,7 +1694,7 @@ class InvexProgram():
         if self.fit_to == 'cbf': const = 2*level + 1
 
         m = self.kernel.function(point)
-        
+
         if mode == 'normal':
             error = 0.5 * ( m.T @ self.N.T @ self.N @ m - const )
             cost = 0.5 * error**2
@@ -1729,7 +1729,7 @@ class InvexProgram():
 
     def curvature_cost(self, point, gradient, curv):
         '''
-        Cost for fitting the value of the directional curvature on a point along a 
+        Cost for fitting the value of the directional curvature on a point along a
         particular perpendicular direction to the gradient.
         c(N) = ( m(x)' S(N,v) m(x) - curv )²    ( fit CLF/CBF curvature 'curv' at direction 'v' to point x )
         TO BE IMPLEMENTED
@@ -1757,7 +1757,7 @@ class InvexProgram():
                 self.problem.solve(verbose=False, solver=cp.CLARABEL)
             except cp.SolverError as error:
                 print(error)
-            
+
             ''' Main integration step (update N state with computed U control) '''
             Uflatten = self.U.value.flatten()
             self.geo_dynamics.set_control( Uflatten )
@@ -1766,7 +1766,7 @@ class InvexProgram():
             self.N = self.mat( self.geo_dynamics.get_state() )
 
             ''' If is optimal, ends optimization '''
-            if self.is_optimal(verbose=verbose): 
+            if self.is_optimal(verbose=verbose):
                 self.running = False
 
         return self.best_result["N"]
@@ -1783,7 +1783,7 @@ class InvexProgram():
 
             cost, cost_diff = self.fitting_cost()
             return (cost, cost_diff)
-        
+
         def invexity_barrier(var):
             self.N = self.mat(var)
 
@@ -1799,9 +1799,9 @@ class InvexProgram():
             barrier_jac = self.cone.value * lambdaD_jac
 
             return barrier_jac
-        
-        ''' 
-        This method computes the matrix A(xc) for the linear constraint 
+
+        '''
+        This method computes the matrix A(xc) for the linear constraint
         A(xc) vec(N) == 0, equivalent to N m(xc) = 0 (the center constraint)'''
         def get_A(center):
             mc = np.array(self.kernel.function(center))
@@ -1828,7 +1828,7 @@ class InvexProgram():
         constrs = [ center_constr, invexity_constr ]
 
         init_var = self.vec(self.N)
-        sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=True, callback=show_message, 
+        sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=True, callback=show_message,
                         options={"disp": True, 'ftol': 1e-6, 'maxiter': 1000} )
         N = self.mat( sol.x )
         show_message(sol.x)
@@ -1862,7 +1862,7 @@ class InvexProgram():
 
         def eigRfun(var):
             self.N = self.mat(var)
-            
+
             R = Rfun(self.N)
             eigR = np.sort( np.linalg.eigvals( R ).real )
 
@@ -1874,7 +1874,7 @@ class InvexProgram():
             cost, cost_diff = self.fitting_cost()
             if jac: return (cost, cost_diff)
             return cost
-    
+
         max_lambda = 10.0
         def lambda_max(var):
             ''' Computes the lambda max constraint '''
@@ -1898,7 +1898,7 @@ class InvexProgram():
 
             if platform.system().lower() != 'windows':
                 os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
-            
+
             if jac: cost_val, _ = cost(var)
             else: cost_val = cost(var)
             eigRvals = eigRfun(var)
@@ -1916,7 +1916,7 @@ class InvexProgram():
         show_message(init_var, verbose=True, initial_message='Initial')
 
         sol = minimize( cost, init_var, constraints=constrs, method='SLSQP', jac=jac,
-                        callback=lambda var: show_message(var, verbose), 
+                        callback=lambda var: show_message(var, verbose),
                         options={"disp": True, 'maxiter': 400, 'ftol': 1e-12} )
         self.N = self.mat( sol.x )
         show_message( sol.x, verbose=True, initial_message='Final' )
@@ -1945,14 +1945,14 @@ class InvexProgram():
             for point in self.points_to_fit:
 
                 keys = point.keys()
-                if "point" not in keys: 
+                if "point" not in keys:
                     raise Exception("Point coordinates must be specified.")
                 pt = point["point"]
-                
+
                 if "level" in keys:
                     level = point["level"]
                     cost += self.level_cost(pt, level, mode='cvxpy')
-            
+
             return cost
 
         def R_blocks():
@@ -1988,7 +1988,7 @@ class InvexProgram():
         constraints += [ self.P @ mcenter == 0 ]
         constraints += [ self.P << Nnom.T @ Nnom ]
         # constraints += [ cp.lambda_max(self.P) <= 1.0 ]
-            
+
         cost = cost_fun()
         prob = cp.Problem( cp.Minimize(cost), constraints=constraints )
         try:
@@ -2008,8 +2008,8 @@ class InvexProgram():
         return self.N
 
     def solve_program(self):
-        ''' 
-        BEST RESULT SO FAR!!! Forcing ∇Φ(x)' ∇Φ(x) - ∇Φ(x_c)' ∇Φ(x_c) >> 0 for all x !!! 
+        '''
+        BEST RESULT SO FAR!!! Forcing ∇Φ(x)' ∇Φ(x) - ∇Φ(x_c)' ∇Φ(x_c) >> 0 for all x !!!
         '''
         try:
             self.run_sdp_opt( verbose=True )
@@ -2043,7 +2043,7 @@ class InvexProgram():
         if curr_ctrl_energy < self.best_result["control_energy"]:
             self.best_result["control_energy"] = curr_ctrl_energy
 
-        if all((cost_decreased, invex_gap_decreased)): 
+        if all((cost_decreased, invex_gap_decreased)):
             self.best_result["N"] = self.N
 
         dt = perf_counter() - self.clock
@@ -2051,7 +2051,7 @@ class InvexProgram():
         best_cost = self.best_result["cost"]
         best_invex_gap = self.best_result["invex_gap"]
         min_control_energy = self.best_result["control_energy"]
-        
+
         if verbose:
             if platform.system().lower() != 'windows':
                 os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
@@ -2071,14 +2071,14 @@ class InvexProgram():
 
     def save(self, file_name=''):
         ''' Method for saving the computed shape into a file '''
-        
+
         pass
 
     def standard_cost(self, fun, collection: list[dict]):
         '''
         Standard scalar psd cost (to be minimized), given by the general expression
 
-        c(N) = 0.5 * Σ_i ei(N)' @ Mi @ ei(N) >= 0 , 
+        c(N) = 0.5 * Σ_i ei(N)' @ Mi @ ei(N) >= 0 ,
         ei(N) = F(N) @ vi - Mi^-1 @ wi      , with the following parameters:
 
         - vi     -> vector / scalar parameter with dimension vi.dim / -
@@ -2087,12 +2087,12 @@ class InvexProgram():
         - F(N)   -> matrix / vector function of N with dimension (wi.dim, vi.dim) / vi.dim
 
         The ei(N) are vector / scalar error functions, since the minimum of c(N) occurs at ei(N) = 0, i = 0, 1, ...
-        
-        This expression allows for many cost expressions, 
+
+        This expression allows for many cost expressions,
         ranging from Frobenius norms of matrices to gradient collinearity costs.
 
         Three distinct types are possible, depending on the shape of F(N):
-            i)  contravariant vector - F(N) is column vector: vi is a scalar, Mi is matrix / 
+            i)  contravariant vector - F(N) is column vector: vi is a scalar, Mi is matrix /
             ii) covariant vector     - F(N) is row vector
             iii) tensor              - F(N) is a matrix
         The correct dimensions for each case are as indicated above.
@@ -2119,28 +2119,28 @@ class InvexProgram():
                 error_k = sqMk @ ( F @ vk - np.linalg.inv(Mk) @ wk )
             else:
                 error_k = sqMk @ F @ vk
-            
+
             cost += 0.5 * float( ( error_k.T @ Mk @ error_k ).reshape(1,) )
-            
+
             for (i,j) in itertools.product( range(self.n), range(self.p) ):
                 cost_diff[i,j] += ( error_k.T @ Mk @ F_diff[i,j] ) @ vk
 
         return cost, cost_diff
 
-        ''' 
+        '''
         F(N) and ∇F(N) matrix / vector valued function used in standard cost expression.
-        The following types of cost functions are supported 
+        The following types of cost functions are supported
         and have suitable parametrizations using the standard_cost.
-        
+
         1) c(N) = || F(N) - F₀ ||²                 ( minimize Frobenius norm distance from matrix F(N) to 'F₀' )
         2) c(N) = ( m(x)' N'N m(x) - lvl )²        ( fit CLF/CBF level set 'lvl' to point x )
-        3) c(N) = || ∇f ||² - ( ∇f' n )² ,             
+        3) c(N) = || ∇f ||² - ( ∇f' n )² ,
               f = m(x)' N'N m(x)                   ( fit CLF/CBF gradient direction 'n' to point x )
         4) c(N) = ( m(x)' S(N,v) m(x) - curv )²    ( fit CLF/CBF curvature 'curv' at direction 'v' to point x )
 
         ... among others.
         '''
-    
+
 class CLBF(KernelQuadratic):
     '''
     Class for kernel-based Control Lyapunov Barrier Functions.

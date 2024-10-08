@@ -1205,7 +1205,6 @@ class KernelQuadratic(Function):
     def to_multipoly(self):
         ''' Computes the corresponding MultiPoly function, gradient and Hessian '''
         
-        n = self._dim
         p = self.kernel_dim
         powers = self.kernel._powers
 
@@ -1213,9 +1212,9 @@ class KernelQuadratic(Function):
         kernel, coeffs = [], []
         for (i,j) in itertools.product( range(p), range(p) ):
             Pij = self.shape_matrix[i,j]
-            mon = tuple(np.array(powers[i]) + np.array(powers[j]))
+            mon = tuple(( np.array(powers[i]) + np.array(powers[j]) ).tolist())
 
-            if mon == (0, 0):
+            if mon == (0,0):
                 kernel.append( mon )
                 coeffs.append( -self.constant )
 
@@ -1226,63 +1225,34 @@ class KernelQuadratic(Function):
                 id = kernel.index(mon)
                 coeffs[id] += 0.5*Pij
 
-        poly = MultiPoly(kernel=kernel, coeffs=coeffs)
-
-        ''' ------------------------ Gradient ---------------------------- '''
-        diff_polys = poly.polyder()
-
-        kernel = list( set.union(*[ set(diff_poly.kernel) for diff_poly in diff_polys ]) )
-        kernel_size = len(kernel)
-
-        coeff_list = [ np.zeros(n) for _ in range(kernel_size) ]
-        for i, diff_poly in enumerate(diff_polys):
-            for mon, coeff in zip(diff_poly.kernel, diff_poly.coeffs):
-                id = kernel.index(mon)
-                coeff_list[id][i] += coeff
-
-        grad_poly = MultiPoly( kernel=kernel, coeffs=coeff_list )
-
-        ''' ------------------------ Hessian ---------------------------- '''
-        diff2_polys = grad_poly.polyder()
-
-        kernel = list( set.union(*[ set(diff2_poly.kernel) for diff2_poly in diff2_polys ]) )
-        kernel_size = len(kernel)
-
-        coeff_list = [ np.zeros((n, n)) for _ in range(kernel_size) ]
-        for i in range(n):
-            for j, diff2_poly in enumerate(diff2_polys):
-                for mon, coeff in zip(diff2_poly.kernel, diff2_poly.coeffs):
-                    id = kernel.index(mon)
-                    coeff_list[id][i,j] += coeff[i]
-
-        hessian_poly = MultiPoly( kernel=kernel, coeffs=coeff_list )
-
-        return poly, grad_poly, hessian_poly
-
-    def _from_multipoly(poly: MultiPoly, cls=None):
-        ''' Loads KernelQuadratic from a polynomial object. '''
-
-        pass
-
+        return MultiPoly(kernel=kernel, coeffs=coeffs)
+    
     @classmethod
-    def from_multipoly(cls, poly: MultiPoly):
+    def from_multipoly(cls, poly: MultiPoly, **kwargs):
         ''' Loads KernelQuadratic from a polynomial object. '''
 
         if not isinstance(poly, MultiPoly):
             raise TypeError("Input must be a MultiPoly.")
         
+        poly.sort_kernel()
         if poly.SOSkernel is None:
             poly.sos_index_matrix()
 
-        kernel = Kernel(dim=poly.n, monomials=poly.SOSkernel)
+        sos_kernel = Kernel(dim=poly.n, monomials=poly.SOSkernel )
 
-        if cls is None:
+        from functions import KernelLyapunov, KernelBarrier
+        if cls is KernelLyapunov:
+            P = 2 * poly.shape_matrix()
+            config = { "P": P }
+        elif cls is KernelBarrier:
+            barQ = poly.shape_matrix()
+            barQ[0,0] += 0.5
+            config = { "Q": 2 * barQ }
+        else:
             coeffs = 2 * poly.shape_matrix()
-            constant = 0.0
+            config = { "coefficients": coeffs, "constant": 0.0 }
 
-        if cls == :
-
-        return kernel, coeffs, constant
+        return cls(dim=poly.n, kernel=sos_kernel, **config, **kwargs)
 
     # def reshape(self, var: np.ndarray):
     #     ''' Converts from array var to tuple of matrices N and G '''

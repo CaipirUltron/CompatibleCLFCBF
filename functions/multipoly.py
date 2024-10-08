@@ -42,6 +42,10 @@ class MultiPoly:
 
         self.kernel = kernel
         self.coeffs = coeffs
+
+        self._poly_grad = None
+        self._poly_hess = None
+
         self.SOSkernel = None
         self.SOSindexes = None
 
@@ -385,7 +389,9 @@ class MultiPoly:
             
             if isinstance(item, int):
 
-                index_coeffs = [ np.array([c[item]]) for c in self.coeffs ]
+                # index_coeffs = [ np.array([c[item]]) for c in self.coeffs ]
+                index_coeffs = [ c[item] for c in self.coeffs ]
+
                 return MultiPoly(self.kernel, index_coeffs)
 
     def __repr__(self):
@@ -429,7 +435,8 @@ class MultiPoly:
             s = MultiPoly.zeros(dim = self.n, shape = (self.shape))
 
         for mon, coeff in zip(self.kernel, self.coeffs):
-            s += np.prod([ x[i]**power for i, power in enumerate(mon) ]) * coeff
+            res_mon = np.prod([ x[i]**power for i, power in enumerate(mon) ])
+            s += res_mon * coeff
 
         return s
 
@@ -454,6 +461,49 @@ class MultiPoly:
             poly_diffs.append( MultiPoly(kernel=diff_kernel, coeffs=diff_coeffs) )
 
         return poly_diffs
+
+    def poly_grad(self):
+        ''' Compute gradient polynomial. For scalar polynomials only. '''
+
+        if self.ndim != 0 and self.shape != (1,) and self.shape != ():
+            raise NotImplementedError("Gradient is not implemented for non-scalar polynomials.")
+
+        diff_polys = self.polyder()
+
+        kernel = list( set.union(*[ set(diff_poly.kernel) for diff_poly in diff_polys ]) )
+        kernel_size = len(kernel)
+
+        coeff_list = [ np.zeros(self.n) for _ in range(kernel_size) ]
+        for i, diff_poly in enumerate(diff_polys):
+            for mon, coeff in zip(diff_poly.kernel, diff_poly.coeffs):
+                id = kernel.index(mon)
+                coeff_list[id][i] += coeff
+
+        self._poly_grad = MultiPoly( kernel=kernel, coeffs=coeff_list )
+        return self._poly_grad
+
+    def poly_hess(self):
+
+        if self.ndim != 0 and self.shape != (1,) and self.shape != ():
+            raise NotImplementedError("Hessian is not implemented for non-scalar polynomials.")
+
+        if self._poly_grad is None:
+            self.poly_grad()
+
+        diff2_polys = self._poly_grad.polyder()
+
+        kernel = list( set.union(*[ set(diff2_poly.kernel) for diff2_poly in diff2_polys ]) )
+        kernel_size = len(kernel)
+
+        coeff_list = [ np.zeros((self.n, self.n)) for _ in range(kernel_size) ]
+        for i in range(self.n):
+            for j, diff2_poly in enumerate(diff2_polys):
+                for mon, coeff in zip(diff2_poly.kernel, diff2_poly.coeffs):
+                    id = kernel.index(mon)
+                    coeff_list[id][i,j] += coeff[i]
+
+        self._poly_hess = MultiPoly( kernel=kernel, coeffs=coeff_list )
+        return self._poly_hess
 
     def polyval(self, x):
         return self.__call__(x)
@@ -565,10 +615,7 @@ class MultiPoly:
         '''
         Function for computing the corresponding polynomial SOS kernel.
         '''
-
-        # Initialize sos_kernel
         self.SOSkernel = []
-
         for mon in self.kernel:
 
             # Compute the set of all possible combinations of sums of 2 monomials in sos_kernel
@@ -719,20 +766,25 @@ class MultiPoly:
         
         translation = np.array(translation)
         rotation_poly = MultiPoly(kernel=[(0,0)], coeffs=[rotation])
-        x = rotation_poly @ x_newframe + translation
+        x = rotation_poly @ x_newframe - translation
         
         return self(x)
 
     def save(self, filename):
         ''' Saves object into a file '''
+
         multipoly_log = {"kernel": self.kernel,
                          "coeffs": [ coef.tolist() if isinstance(coef, np.ndarray) else coef for coef in self.coeffs ],
                          "sos_kernel": self.SOSkernel,
-                         "sos_indexes": self.SOSindexes.tolist() }
+                         "sos_indexes": None }
+        
+        if self.SOSindexes is not None:
+            multipoly_log["sos_indexes"] = self.SOSindexes.tolist()
+
         try:
             with open("polynomials/" + filename + ".json", "w") as file:
                 print("Saving MultiPoly data...")
-                json.dump(multipoly_log, file)
+                json.dump(multipoly_log, file, indent=0)
         except IOError:
             print("Couldn't save polynomial." + IOError)
 
@@ -752,7 +804,7 @@ class MultiPoly:
 
         try:
             with open("polynomials/" + filename + ".json") as file:
-                print("Loading graphical simulation with " + filename + ".json")
+                print("Loading shape file: " + filename + ".json")
                 multipoly_log = json.load(file)
 
                 kernel = [ tuple(mon) for mon in multipoly_log["kernel"] ]
