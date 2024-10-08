@@ -4,6 +4,7 @@ import sympy as sym
 
 from common import generate_monomials, rot2D
 from functions import MultiPoly as Poly
+from functions import Poly as Poly2
 from functions import Kernel, KernelQuadratic, KernelLyapunov, KernelBarrier
 
 # ------------------------------------ Define kernel -----------------------------------
@@ -122,6 +123,10 @@ if data_type == "scalar":
 
     print(f"gradient = {p1_grad}")
     print(f"hessian = {p1_hess}")
+
+    gamma = Poly2([0.0, 1.0, 2.0])
+    newp = gamma(p1)
+    print(newp)
 
 # -------------------------------- Run symbolic tests -----------------------------------
 

@@ -6,6 +6,7 @@ import operator
 
 from copy import deepcopy
 from common import *
+from numpy.polynomial import Polynomial
 
 '''
 TODOs: 
@@ -15,6 +16,26 @@ Since this is computationally expensive, put the functionality inside a callable
 (the methods sos_kernel, sos_index_matrix and shape_matrix already have all the needed logic)
 ii) make MultiPoly a child of Function (specially to use get_levels)
 ''' 
+
+class Poly(Polynomial):
+    '''
+    Child of Polynomial with alternate call method for MultiPolys
+    '''
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+    def __call__(self, arg):
+        '''
+        Modified call method to return a MultiPoly if arg is a MultiPoly
+        '''
+        if not isinstance(arg, MultiPoly):
+            return super().__call__(arg)
+        
+        poly = MultiPoly.zeros(dim = arg.n, shape = (arg.shape))
+        for k, c in enumerate(self.coef):
+            poly += ( arg**k ) * c
+
+        return poly
 
 class MultiPoly:
     '''

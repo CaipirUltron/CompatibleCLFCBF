@@ -1,14 +1,13 @@
 from common import *
 from .basic import Quadratic
-from .multipoly import MultiPoly
+from .multipoly import MultiPoly, Poly
 from .kernel import Kernel, KernelQuadratic
 
 from time import perf_counter
 from scipy.optimize import minimize, LinearConstraint, NonlinearConstraint
 from shapely import geometry, intersection
 
-from numpy.polynomial.polynomial import polyder
-from numpy.polynomial import Polynomial as Poly
+from numpy.polynomial.polynomial import polyder, polyint
 from dynamic_systems import Integrator, PolyAffineSystem
 
 import warnings
@@ -313,6 +312,7 @@ class KernelFamily():
                         "gamma": Poly([0.0, 1.0]),
                         "alpha": Poly([0.0, 1.0]) }
         self.params["dgamma"] = Poly( polyder(self.params["gamma"].coef) )
+        self.params["intgamma"] = Poly( polyint(self.params["gamma"].coef) )
 
         # Invariant set computation and equilibria parameters
         self.limits = [ [-1, +1] for _ in range(2) ]
