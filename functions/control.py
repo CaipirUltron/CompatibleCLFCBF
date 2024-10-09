@@ -310,13 +310,6 @@ class KernelBarrier(KernelQuadratic):
         ''' Computes the boundary level set '''
         return self.get_levels(levels=[0.0])[0]
 
-    # @classmethod
-    # def from_multipoly(cls, poly: MultiPoly):
-    #     ''' Loads KernelBarrier from a polynomial object. '''
-
-    #     kernel_quadratic = super().from_multipoly(poly)
-    #     kernel_quadratic.
-
 class KernelFamily():
     '''
     Class for kernel-based family of: plant, CLF and any number of CBFs.

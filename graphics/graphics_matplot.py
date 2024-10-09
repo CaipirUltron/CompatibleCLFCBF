@@ -5,6 +5,7 @@ import matplotlib.colors as mcolors
 
 from matplotlib import gridspec
 from matplotlib.patches import Rectangle
+from functions import KernelLyapunov
 
 class Plot2DSimulation():
     '''
@@ -33,9 +34,20 @@ class Plot2DSimulation():
         self.logs = logs
         self.triplet = triplet
         self.robot = triplet.plant
-        self.clf = triplet.clf
+
+        contour_spacing = 0.5
+        if triplet.tclf is not None:
+            self.clf = KernelLyapunov.from_multipoly( triplet.tclf, limits=self.plot_config["limits"], spacing=contour_spacing )
+        elif triplet.clf is not None:
+            self.clf = triplet.clf
+            self.clf.set_params( limits=self.plot_config["limits"], spacing=contour_spacing )
+        else:
+            raise NotImplementedError("Triplet must have a valid CLF or transformed CLF.")
+
         self.cbfs = triplet.cbfs
         self.n_cbfs = len(self.cbfs)
+        for cbf in self.cbfs:
+            cbf.set_params( limits=self.plot_config["limits"], spacing=contour_spacing )
         
         # self.fig = plt.figure(figsize = self.plot_config["figsize"], constrained_layout=True)
         self.fig = plt.figure(figsize = self.plot_config["figsize"])
@@ -148,10 +160,7 @@ class Plot2DSimulation():
         self.clf_contour_color = mcolors.TABLEAU_COLORS['tab:blue']
         self.cbf_contour_color = mcolors.TABLEAU_COLORS['tab:red']
 
-        self.clf_contours = []
-        if self.clf is not None:
-            self.clf_contours = self.clf.plot_levels(levels=[0.0], colors=self.clf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], spacing=0.5)
-        
+        self.clf_contours = self.clf.plot_levels(ax=self.main_ax, levels=[0.0], colors=self.clf_contour_color)
         self.cbf_contours = []
 
         self.invariant_lines = []
@@ -167,7 +176,7 @@ class Plot2DSimulation():
         # self.init_state.set_data([x_init], [y_init])
 
         for cbf_index, cbf in enumerate(self.cbfs):
-            self.cbf_contours.append( cbf.plot_levels(levels=[-0.1*k for k in range(4,-1,-1)], colors=self.cbf_contour_color, alpha=0.5, ax=self.main_ax, limits=self.plot_config["limits"], spacing=0.1) )
+            self.cbf_contours.append( cbf.plot_levels(ax=self.main_ax, levels=[-0.1*k for k in range(4,-1,-1)], colors=self.cbf_contour_color, alpha=0.5) )
             if self.plot_config["invariant"]:
                 self.triplet.plot_invariant( self.main_ax, cbf_index )
                 self.invariant_lines += self.triplet.invariant_lines_plot[cbf_index]
@@ -177,7 +186,8 @@ class Plot2DSimulation():
         graphical_elements.append(self.trajectory)
         # graphical_elements.append(self.init_state)
         # graphical_elements.append(self.actual_state)
-        if self.plot_config["equilibria"]: graphical_elements.append(self.equilibria_plot)
+        if self.plot_config["equilibria"]: 
+            graphical_elements.append(self.equilibria_plot)
         graphical_elements.append(self.clf_grad_arrow)
         graphical_elements.append(self.cbf_grad_arrow)
         graphical_elements.append(self.f_arrow)
@@ -219,13 +229,13 @@ class Plot2DSimulation():
                     [ current_state[0], current_state[0] + f_norm[0] ], 
                     [ current_state[1], current_state[1] + f_norm[1] ] )
             
-            if hasattr(self, 'clf_log') and self.clf is not None:
+            if hasattr(self, 'clf_log'):
                 current_piv_state = [ self.clf_log[k][i] for k in range(self.clf_param_dim) ]
                 self.clf.set_params( P=current_piv_state )
 
             self.time_text.set_text("Time = " + str(current_time) + "s")
 
-            if self.draw_level and self.clf is not None:
+            if self.draw_level:
                 V = self.clf.function(current_state)
                 for coll in self.clf_contours:
                     coll.remove()
