@@ -5,17 +5,11 @@ import sympy as sym
 import operator
 
 from copy import deepcopy
+from scipy.optimize import least_squares
+
 from common import *
 from numpy.polynomial import Polynomial
-
-'''
-TODOs: 
-i) transfer all functionality of KernelQuadratic to MultiPoly, including fitting.
-To achieve this, it is necessary to convert the linear representation of MultiPoly into SOS representation (and vice-versa).
-Since this is computationally expensive, put the functionality inside a callable method 
-(the methods sos_kernel, sos_index_matrix and shape_matrix already have all the needed logic)
-ii) make MultiPoly a child of Function (specially to use get_levels)
-''' 
+from numpy.polynomial.polynomial import polyder, polyint
 
 class Poly(Polynomial):
     '''
@@ -231,13 +225,16 @@ class MultiPoly:
     def _multiply(poly1, poly2, op):
         '''
         Polynomial multiplication (term by term or matrix-like).
-        op = +1 for term-by-term, op = -1 for matrix-like
+        op = +1 for term-by-term, 
+        op = -1 for matrix-like
+        op = 0 for outer product
         '''
-        if np.abs(op) != 1:
-            raise ValueError("\"op\" argument should be +1 or -1")
+        if op not in (-1, 0, 1):
+            raise ValueError("\"op\" argument should be -1, 0 or +1")
 
         if op > 0: sample_term = poly1.coeffs[0] * poly2.coeffs[0]
         if op < 0: sample_term = poly1.coeffs[0] @ poly2.coeffs[0]
+        if op == 0: sample_term = np.outer( poly1.coeffs[0], poly2.coeffs[0] )
         
         if hasattr(sample_term, "ndim") and sample_term.ndim == 0: 
             sample_term = float(sample_term)
@@ -262,9 +259,11 @@ class MultiPoly:
             index = res_kernel.index( mon )
 
             if op > 0: 
-                res_coeffs[index] += coeff1 * coeff2       # scalar multiplication
+                res_coeffs[index] += coeff1 * coeff2                # scalar multiplication
             if op < 0: 
-                res_coeffs[index] += coeff1 @ coeff2       # matrix multiplication
+                res_coeffs[index] += coeff1 @ coeff2                # matrix multiplication
+            if op == 0:
+                res_coeffs[index] += np.outer( coeff1, coeff2 )     # outer product
 
         return MultiPoly(kernel=res_kernel, coeffs=res_coeffs)
 
@@ -593,6 +592,17 @@ class MultiPoly:
 
         return MultiPoly(poly1.kernel, index_coeffs)
 
+    def outer(poly1, poly2):
+        ''' Outer product between polynomials '''
+
+        if not isinstance( poly1, MultiPoly ) or not isinstance( poly2, MultiPoly ):
+            raise TypeError("Polynomials must be instances of the MultiPoly class")
+        
+        if poly1.ndim != 1 or poly2.ndim != 1:
+            raise TypeError("Polynomials must be vectors.")
+        
+        return MultiPoly._multiply(poly1, poly2, op = 0)
+
     def minor(self, index: tuple):
         ''' Returns the cofactor of index '''
 
@@ -790,6 +800,49 @@ class MultiPoly:
         x = rotation_poly @ x_newframe - translation
         
         return self(x)
+
+    def inverse_gamma_transform(self, x: np.ndarray, gamma: Poly):
+        '''
+        Assuming the MultiPoly was obtained by a gamma transformation, 
+        get the inverse transformation, gradient and Hessian, computed at point x.
+        
+        Input:    - point array
+                  - K infinity gamma polynomial
+        Returns:  (i) V(x), (ii) ∇V(x), (iii) Hv(x)
+        '''
+        if not isinstance(gamma, Poly):
+            raise TypeError("Gamma function is not a polynomial.")
+        
+        gamma_der = Poly( polyder(gamma.coef) )
+        gamma_int = Poly( polyint(gamma.coef) )
+        
+        ''' Compute V(x) '''
+        barV = self(x)
+
+        V0 = 100*np.random.rand()
+        sol = least_squares( lambda V: barV - gamma_int( V ), V0 )
+        V = sol.x
+
+        if sol.fun >= 1e-10:
+            raise ValueError("Optimization did not converge.")
+
+        ''' Compute ∇V(x) '''
+        if self._poly_grad is None:
+            self.poly_grad()
+        
+        gammaV = gamma(V)
+        bar_gradV = self._poly_grad(x)
+        gradV = bar_gradV / gammaV
+
+        ''' Compute Hv(x) '''
+        if self._poly_hess is None:
+            self.poly_hess()
+
+        gammaderV = gamma_der(V)
+        bar_Hv = self._poly_hess(x)
+        Hv = ( 1/gammaV ) * ( bar_Hv - gammaderV * np.outer( gradV,gradV ) )
+
+        return V, gradV, Hv
 
     def save(self, filename):
         ''' Saves object into a file '''

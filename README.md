@@ -2,11 +2,9 @@
 
 This project contains controller implementations for safety-critical systems using compatible CBF-CBF pairs.
 The main objetive is to design controllers capable of achieving global asymptotic stabilization of the origin 
-while maintaining positive invariance of a given connected set, by using Control Lyapunov and Barrier functions.
+while maintaining positive invariance of the safe set, by using Control Lyapunov and Barrier functions.
 
-Such systems are known to generate undesirable equilibria that can be stable. 
-Compatibility in a CLF-CBF pair is a property that ensures that the given combination of CLF and CBF does not generate 
-stable equilibria other than the origin on the closed-loop system formed by a min-norm QP-based controller.
+Such systems are known to generate undesirable equilibria that can be stable. Compatibility in a CLF-CBF pair is a property that ensures that the given combination of CLF and CBF does not generate stable equilibria other than the origin on the closed-loop system formed by a min-norm QP-based controller.
 
 **Instalation instructions:**
 
@@ -26,7 +24,7 @@ This project is structured in the following way:
 
     ./controllers
 
-    ./graphical_simulation
+    ./graphics
     
     ./tests
 

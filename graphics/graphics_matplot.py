@@ -148,7 +148,10 @@ class Plot2DSimulation():
         self.clf_contour_color = mcolors.TABLEAU_COLORS['tab:blue']
         self.cbf_contour_color = mcolors.TABLEAU_COLORS['tab:red']
 
-        self.clf_contours = self.clf.plot_levels(levels=[0.0], colors=self.clf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], spacing=0.5)
+        self.clf_contours = []
+        if self.clf is not None:
+            self.clf_contours = self.clf.plot_levels(levels=[0.0], colors=self.clf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], spacing=0.5)
+        
         self.cbf_contours = []
 
         self.invariant_lines = []
@@ -216,13 +219,13 @@ class Plot2DSimulation():
                     [ current_state[0], current_state[0] + f_norm[0] ], 
                     [ current_state[1], current_state[1] + f_norm[1] ] )
             
-            if hasattr(self, 'clf_log'):
+            if hasattr(self, 'clf_log') and self.clf is not None:
                 current_piv_state = [ self.clf_log[k][i] for k in range(self.clf_param_dim) ]
                 self.clf.set_params( P=current_piv_state )
 
             self.time_text.set_text("Time = " + str(current_time) + "s")
 
-            if self.draw_level:
+            if self.draw_level and self.clf is not None:
                 V = self.clf.function(current_state)
                 for coll in self.clf_contours:
                     coll.remove()

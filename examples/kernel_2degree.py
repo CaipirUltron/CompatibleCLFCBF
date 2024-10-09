@@ -34,13 +34,14 @@ clf_eig = np.array([ 1.0, 1.0 ])
 clf_angle = np.deg2rad(-45)
 Pquadratic = kernel_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
 clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
+clf_poly = clf.to_multipoly()
 
 # clf_poly = MultiPoly.load("wierd")
 # clf = KernelLyapunov.from_multipoly(clf_poly, limits=limits, spacing=0.1)
 
 # ----------------------------------------------------- Define CBFs --------------------------------------------------------
-cbf_poly = MultiPoly.load("box_shaped")
-# cbf_poly = MultiPoly.load("rotated_box")
+# cbf_poly = MultiPoly.load("box_shaped")
+cbf_poly = MultiPoly.load("rotated_box")
 
 cbf = KernelBarrier.from_multipoly(poly=cbf_poly, limits=limits, spacing=0.1)
 cbfs = [ cbf ]

@@ -259,6 +259,29 @@ class KernelLyapunov(KernelQuadratic):
         super().set_params(**kwargs)
         self.P = self.shape_matrix
 
+    def gamma_transform(self, x: np.ndarray, gamma: Poly):
+        ''' 
+        Using a K infinity gamma polynomial, computes the values of 
+        barV(X), ∇barV(x) and H_barV(x)
+        '''
+        if not isinstance(gamma, Poly):
+            raise TypeError("Gamma function is not a polynomial.")
+        
+        gamma_der = Poly( polyder(gamma.coef) )
+        gamma_int = Poly( polyint(gamma.coef) )
+
+        V = self.function(x)
+        gradV = self.gradient(x)
+        HV = self.hessian(x)
+
+        gammaV = gamma(V)
+        gammaV_der = gamma_der(V)
+        barV = gamma_int(V)
+        bar_gradV = gammaV * gradV
+        barHv = gammaV * HV + gammaV_der * np.outer(gradV, gradV)
+
+        return barV, bar_gradV, barHv
+
 class KernelBarrier(KernelQuadratic):
     '''
     Class for kernel-based barrier functions.
@@ -305,12 +328,11 @@ class KernelFamily():
 
         self.plant = None
         self.clf = None
+        self.tclf = None
         self.cbfs = []
 
         # Default QP parameters. Gamma and alpha functions are identity polynomials
-        self.params = { "slack_gain": 1.0,
-                        "gamma": Poly([0.0, 1.0]),
-                        "alpha": Poly([0.0, 1.0]) }
+        self.params = { "slack_gain": 1.0, "gamma": Poly([0.0, 1.0]), "alpha": Poly([0.0, 1.0]) }
         self.params["dgamma"] = Poly( polyder(self.params["gamma"].coef) )
         self.params["intgamma"] = Poly( polyint(self.params["gamma"].coef) )
 
@@ -417,6 +439,23 @@ class KernelFamily():
                 update_invariant = True
                 continue
 
+            if key == "tclf":
+                if not isinstance(kwargs["tclf"], MultiPoly):
+                    raise Exception("Transformed CLF is not a polynomial.")
+                
+                self.tclf = kwargs["tclf"]
+
+                if self.tclf._poly_grad is None:
+                        self.tclf.poly_grad()
+                self.grad_tclf = self.tclf._poly_grad
+
+                if self.tclf._poly_hess is None:
+                        self.tclf.poly_hess()
+                self.hess_tclf = self.tclf._poly_hess
+
+                update_invariant = True
+                continue
+
             if key == "cbfs":
                 for cbf in kwargs["cbfs"]:
                     if not isinstance(cbf, KernelBarrier):
@@ -446,6 +485,7 @@ class KernelFamily():
                             raise Exception("Passed gamma is not a numpy polynomial.")
                         self.params["gamma"] = params["gamma"]
                         self.params["dgamma"] = Poly( polyder(self.params["gamma"].coef) )
+                        self.params["intgamma"] = Poly( polyint(self.params["gamma"].coef) )
                         update_invariant = True
                         continue
                     if key == "alpha":
@@ -455,6 +495,21 @@ class KernelFamily():
                         update_invariant = True
                         continue
                 continue
+
+        if ( self.clf is not None ) and (self.tclf is None):
+
+            clf_poly = self.clf.to_multipoly()
+            grad_clf_poly = clf_poly.poly_grad()
+            hess_clf_poly = clf_poly.poly_hess()
+
+            gamma = self.params["gamma"]
+            dgamma = self.params["dgamma"]
+            intgamma = self.params["intgamma"]
+
+            gammaV_poly = gamma(clf_poly)
+            self.tclf = intgamma(clf_poly)
+            self.grad_tclf = gammaV_poly * grad_clf_poly
+            self.hess_tclf = gammaV_poly * hess_clf_poly + dgamma(clf_poly) * MultiPoly.outer( grad_clf_poly, grad_clf_poly )
 
         # Initialize grids used for invariant set computation
         if hasattr(self, "limits") and hasattr(self, "spacing"):
@@ -477,15 +532,21 @@ class KernelFamily():
         Verifies if the kernel pair is consistent and fully defined
         '''
         equal_kernel_dims = [ self.plant.f_kernel._dim == self.plant.g_kernel._dim ]
-        equal_kernel_dims += [ self.plant.g_kernel._dim == self.clf.kernel._dim ]
-        equal_kernel_dims += [ self.clf.kernel._dim == cbf.kernel._dim for cbf in self.cbfs ]
+
+        if ( self.clf is None ) and (self.tclf is not None):
+            equal_kernel_dims += [ self.plant.g_kernel._dim == self.tclf.n ]
+            equal_kernel_dims += [ self.tclf.n == cbf.kernel._dim for cbf in self.cbfs ]
+        else:
+            equal_kernel_dims += [ self.plant.g_kernel._dim == self.clf.kernel._dim ]
+            equal_kernel_dims += [ self.clf.kernel._dim == cbf.kernel._dim for cbf in self.cbfs ]
+            self.P = self.clf.P
+
         if not all(equal_kernel_dims):
-            raise Exception("Plant, CBF and CBF kernels do not share the same dimension.")
+            raise Exception("Plant, CLF and CBF do not have the same dimension.")
 
         self.n = self.plant.f_kernel._dim
         # self.p = self.plant.kernel._num_monomials
-        self.P = self.clf.P
-
+        
     def invariant_pencil(self, cbf_index: int):
         '''
         Computes the invariant equation
@@ -493,20 +554,15 @@ class KernelFamily():
         in singular pencil format, that is, the matrix pencil (A, B) with a corresponding kernel function m(x).
         '''
         p = self.params["slack_gain"]
-        gamma = self.params["gamma"]
 
-        f = self.plant.get_fpoly()
-        G = self.plant.get_Gpoly()
+        f_poly = self.plant.get_fpoly()
+        G_poly = self.plant.get_Gpoly()
 
-        V, nablaV, Hv = self.clf.to_multipoly()
-        h, nablah, Hh = self.cbfs[cbf_index].to_multipoly()
+        # Get CBF polynomials
+        h_poly, nablah_poly, Hh_poly = self.cbfs[cbf_index].to_multipoly()
 
-        gammaV = MultiPoly(kernel = [ tuple(0 for _ in range(self.n)) ], coeffs = [ 0.0 ] )
-        for k, coef in enumerate(gamma.coef):
-            gammaV += coef * (V**k)
-
-        vecQ_poly = G @ nablah
-        vecP_poly = p * gammaV * ( G @ nablaV ) - f
+        vecQ_poly = G_poly @ nablah_poly
+        vecP_poly = p * ( G_poly @ self.grad_tclf ) - f_poly
 
         A_poly = vecQ_poly + 0 * vecP_poly
         B_poly = 0 * vecQ_poly + vecP_poly
@@ -532,33 +588,50 @@ class KernelFamily():
         Returns the vector vP = p γ(V(x,P)) G(x) ∇V(x) - f(x) with CLF shape matrix P
         '''
         p = self.params["slack_gain"]
-        gamma = self.params["gamma"]
 
         f = self.plant.get_f(pt)
         G = self.plant.get_G(pt)
 
-        V = self.clf_fun(pt)
-        nablaV = self.clf_gradient(pt)
-
-        return p * gamma(V) * ( G @ nablaV ) - f
+        return p * ( G @ self.grad_tclf(pt) ) - f
 
     def clf_fun(self, pt: np.ndarray) -> float:
-        ''' Returns the CLF value using self P matrix '''
-        return self.clf.function_from_P(pt, self.P)
+        '''
+        If a tCLF is directly specified, returns the computed CLF value from tclf and inverse_gamma_transform.
+        If only a CLF is specified, returns the CLF value using self P matrix.
+        '''
+        if (self.tclf is not None):
+            V, gradV, hessV = self.tclf.inverse_gamma_transform(pt, self.params["gamma"])
+            return V
+        else:
+            return self.clf.function_from_P(pt, self.P)
 
     def clf_gradient(self, pt: np.ndarray) -> np.ndarray:
-        ''' Returns the CLF gradient using self P matrix '''
-        return np.array( self.clf.gradient_from_P(pt, self.P) )
+        '''
+        If a tCLF is directly specified, returns the computed CLF gradient from tclf and inverse_gamma_transform.
+        If only a CLF is specified, returns the CLF gradient using self P matrix.
+        '''
+        if (self.tclf is not None):
+            V, gradV, hessV = self.tclf.inverse_gamma_transform(pt, self.params["gamma"])
+            return gradV
+        else:
+            return np.array( self.clf.gradient_from_P(pt, self.P) )
 
     def clf_hessian(self, pt: np.ndarray) -> np.ndarray:
-        ''' Returns the CLF hessian using self P matrix '''
-        return np.array( self.clf.hessian_from_P(pt, self.P) )
+        '''
+        If a tCLF is directly specified, returns the computed CLF Hessian from tclf and inverse_gamma_transform.
+        If only a CLF is specified, returns the CLF Hessian using self P matrix.
+        '''
+        if (self.tclf is not None):
+            V, gradV, hessV = self.tclf.inverse_gamma_transform(pt, self.params["gamma"])
+            return hessV
+        else:
+            return np.array( self.clf.hessian_from_P(pt, self.P) )
 
     def lambda_fun(self, pt: np.ndarray, cbf_index: int) -> float:
         '''
         Given a point x in an invariant set, compute its corresponding lambda scalar.
         '''
-        nablah = self.cbfs[cbf_index].gradient(pt)
+        # nablah = self.cbfs[cbf_index].gradient(pt)
         vQ = self.vecQ_fun(pt, cbf_index)
         vP = self.vecP_fun(pt)
         # return (nablah.T @ vP) / ( nablah.T @ vQ )
@@ -572,9 +645,8 @@ class KernelFamily():
         Jf = self.plant.get_Jf(pt)
         JG_list = self.plant.get_JG_list(pt)
 
-        V = self.clf_fun(pt)
-        nablaV = self.clf_gradient(pt)
-        Hv = self.clf_hessian(pt)
+        grad_barV = self.grad_tclf(pt)
+        hess_barV = self.hess_tclf(pt)
 
         if cbf_index >= 0:
             nablah = self.cbfs[cbf_index].gradient(pt)
@@ -586,14 +658,11 @@ class KernelFamily():
             l = 0.0
 
         p = self.params["slack_gain"]
-        gamma = self.params["gamma"]
-        dgamma = self.params["dgamma"]
-
-        pencil = l * nablah - p * gamma(V) * nablaV
-        Hpencil = l * Hh - p * gamma(V) * Hv
+        pencil = l * nablah - p * grad_barV
+        Hpencil = l * Hh - p * hess_barV
         JG_term = np.array([ JG @ pencil for JG in JG_list ])
 
-        Jfi = Jf + JG_term + G @ ( Hpencil - p * dgamma(V) * np.outer(nablaV, nablaV) )
+        Jfi = Jf + JG_term + G @ Hpencil
 
         return Jfi
 
@@ -633,13 +702,13 @@ class KernelFamily():
         '''
         if cbf_index < 0: return
 
-        nablaV = self.clf_gradient(x_eq)
-        nablah = self.cbfs[cbf_index].gradient(x_eq)
+        gradV = self.clf_gradient(x_eq)
+        gradh = self.cbfs[cbf_index].gradient(x_eq)
 
         p = self.params["slack_gain"]
         G = self.plant.get_G(x_eq)
-        z1 = nablah / np.sqrt(nablah.T @ G @ nablah)
-        z2 = nablaV - nablaV.T @ G @ z1 * z1
+        z1 = gradh / np.sqrt(gradh.T @ G @ gradh)
+        z2 = gradV - gradV.T @ G @ z1 * z1
         eta = 1/(1 + p * z2.T @ G @ z2 )
         return eta
 

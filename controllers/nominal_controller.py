@@ -1,8 +1,7 @@
 import numpy as np
 import cvxpy as cp
-import scipy as sp
 
-from numpy.polynomial import Polynomial as Poly
+from functions import Poly
 from common import kernel_quadratic, sontag_formula
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
@@ -65,24 +64,24 @@ class NominalQP():
     def __init__(self, kernel_family, dt = 0.001):
 
         # Dimensions and system model initialization
+        self.kernelfamily = kernel_family
         self.plant = kernel_family.plant
         self.clf = kernel_family.clf
+        self.tclf = kernel_family.tclf
         self.cbfs = kernel_family.cbfs
 
-        # self.kernel = kernel_family.kernel
-        # self.A_list = kernel_family.A_matrices
-
         if len(self.cbfs) > 0:
-            # equal_kernels = [ self.clf.kernel == cbf.kernel for cbf in self.cbfs ]
-            equal_dims = [ self.clf._dim == cbf._dim for cbf in self.cbfs ]
-            # if not all(equal_kernels):
-            #     raise Exception("CLF and CBF must be based on the same kernel.")
+
+            equal_dims = [ self.plant.n == cbf._dim for cbf in self.cbfs ]
+            if self.clf is not None:
+                equal_dims += [ self.clf._dim == cbf._dim for cbf in self.cbfs ]
+            if self.tclf is not None:
+                equal_dims += [ self.tclf.n == cbf._dim for cbf in self.cbfs ]
             if not all(equal_dims):
                 raise Exception("CLF and CBF dimensions are not equal.")
 
-        self.state_dim = self.clf._dim
+        self.state_dim = self.plant.n
         self.control_dim = self.plant.m
-        # self.kernel_dim = self.kernel._num_monomials
 
         # QP parameters
         self.p: float = kernel_family.params["slack_gain"]
@@ -163,7 +162,9 @@ class NominalQP():
         '''
         For now, the controller will not modify the CLF.
         '''
-        return np.zeros(len(self.clf.param))
+        if self.clf is not None:
+            return np.zeros(len(self.clf.param))
+        return 0.0
     
     def get_clf_constraint(self):
         '''
@@ -176,8 +177,8 @@ class NominalQP():
         g = self.plant.get_g(state)
 
         # Lyapunov function and gradient
-        V = self.clf.function(state)
-        nablaV = self.clf.gradient(state)
+        V = self.kernelfamily.clf_fun(state)
+        nablaV = self.kernelfamily.clf_gradient(state)
 
         # Lie derivatives
         LfV = nablaV.dot(f)
@@ -216,8 +217,9 @@ class NominalQP():
 
     def update_clf_dynamics(self, piv_ctrl):
         ''' Integrates the dynamic system for the CLF Hessian matrix '''
-        
-        self.clf.update(piv_ctrl, self.ctrl_dt)
+
+        if self.clf is not None:
+            self.clf.update(piv_ctrl, self.ctrl_dt)
 
     def update_timer(self, method):
         '''

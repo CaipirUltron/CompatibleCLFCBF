@@ -2,7 +2,9 @@ import operator
 import numpy as np
 import sympy as sym
 
-from common import generate_monomials, rot2D
+from numpy.polynomial.polynomial import polyint, polyder
+
+from common import generate_monomials, rot2D, kernel_quadratic
 from functions import MultiPoly as Poly
 from functions import Poly as Poly2
 from functions import Kernel, KernelQuadratic, KernelLyapunov, KernelBarrier
@@ -115,6 +117,9 @@ if data_type == 'vector':
     print(f"Total error in composition operation: {comp_error}\n")
     print(f"Total error in rigid-body transformation: {rigid_error}\n")
 
+    poly_outer = Poly.outer( p1, p2 )
+    print(poly_outer)
+
 if data_type == "scalar":
 
     shape = p1.shape_matrix()
@@ -124,9 +129,29 @@ if data_type == "scalar":
     print(f"gradient = {p1_grad}")
     print(f"hessian = {p1_hess}")
 
-    gamma = Poly2([0.0, 1.0, 2.0])
+    gamma = Poly2([0.0, 1.0])
+    intgamma = Poly2( polyint(gamma.coef) )
+
     newp = gamma(p1)
     print(newp)
+
+    kernel = Kernel(dim=n, degree=2)
+    kernel_dim = kernel._num_monomials
+
+    clf_center = [0.0, -3.0]
+    clf_eig = np.array([ 1.0, 1.0 ])
+    clf_angle = np.deg2rad(-45)
+    Pquadratic = kernel_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
+
+    clf_poly = KernelLyapunov(kernel=kernel, P=Pquadratic).to_multipoly()
+
+    inverse_gamma_error = 0.0
+    for i in range(N):
+        x = np.random.rand(n)
+        V, gradV, Hv = clf_poly.inverse_gamma_transform( x, gamma )
+        inverse_gamma_error += np.abs( clf_poly(x) - intgamma( V ) )
+
+    print(f"Inverse gamma error = {inverse_gamma_error}")
 
 # -------------------------------- Run symbolic tests -----------------------------------
 
