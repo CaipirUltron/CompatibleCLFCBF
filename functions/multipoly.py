@@ -12,6 +12,7 @@ from copy import deepcopy
 from scipy.optimize import least_squares
 
 from common import *
+from functions.basic import Function
 from numpy.polynomial import Polynomial
 from numpy.polynomial.polynomial import polyder, polyint
 
@@ -35,23 +36,22 @@ class Poly(Polynomial):
 
         return poly
 
-class MultiPoly:
+class MultiPoly(Function):
     '''
     Class representing multivariable polynomials.
     To be used as a tool for the Kernel, KernelLinear and KernelQuadratic classes,
     representing polynomial data and performing operations between polynomials of any dimension/degree.
     Implementation: coefficients are ALWAYS float/np.ndarray (internally, they can be numeric or symbolic)
     '''
-    def __init__(self, kernel: list, coeffs: list):
-
+    def __init__(self, kernel: list, coeffs: list, *args, **kwargs):
+        
         if len(kernel) != len(coeffs):
             raise TypeError("Kernel and coefficients must have the same length.")
         self.kernel_dim = len(kernel)
         
         if not all([ len(mon) == len(kernel[0]) for mon in kernel ]):
             raise TypeError("All monomials in kernel must have the same number of dimensions.")
-        self.n = len(kernel[0])
-
+        
         if not all([ isinstance( coef, type(coeffs[0])) for coef in coeffs ]):
             raise TypeError("Coefficients must be of the same data type.")
 
@@ -62,7 +62,9 @@ class MultiPoly:
         self.kernel = kernel
         self.coeffs = coeffs
 
+        self._poly_diff = None
         self._poly_grad = None
+        self._poly_jaco = None
         self._poly_hess = None
 
         self.SOSkernel = None
@@ -83,6 +85,16 @@ class MultiPoly:
             if isinstance(s_coef, sym.MatrixExpr):
                 self.ndim = 2
                 self.shape = s_coef.shape
+
+        super().__init__(*args, **kwargs)
+
+    def set_params(self, **kwargs):
+        super().set_params(**kwargs)
+
+        self.n = self._dim
+        self._output_dim = None
+        if self.ndim == 0:
+            self._output_dim = 1
 
     def sort_kernel(self):
         '''
@@ -440,11 +452,11 @@ class MultiPoly:
         ''' Printing for MultiPoly '''
         return self.__repr__()
 
-    def __call__(self, x):
-        ''' Computes polynomial value '''
+    def _function(self, x):
+        ''' Computes polynomial value at point x '''
 
         if isinstance(x, (list, np.ndarray)): 
-            if len(x) != self.n:
+            if len(x) != self._dim:
                 raise TypeError("Input has incorrect dimensions.")
             s = np.zeros(self.shape)
 
@@ -464,10 +476,33 @@ class MultiPoly:
 
         return s
 
-    def polyder(self):
-        ''' Get the polynomial derivatives with respect to all variables '''
+    def _gradient(self, x):
+        ''' Computes polynomial gradient at point x '''
+        if self._poly_grad is None:
+            self.poly_grad()
+        return self._poly_grad(x)
 
-        poly_diffs = []
+    def _jacobian(self, x):
+        ''' Computes polynomial Jacobian at point x '''
+        if self._poly_jaco is None:
+            self.poly_jaco()
+        return self._poly_jaco(x)
+
+    def _hessian(self, x):
+        ''' Computes polynomial Hessian at point x '''
+        if self._poly_hess is None:
+            self.poly_hess()
+        return self._poly_hess(x)
+
+    def poly_diff(self):
+        '''
+        Computes the first-order polynomial derivatives with respect to each variable.
+        OBS: can always be computed, no matter the polynomial shape. 
+        To be used by gradient, jacobian and hessian methods.
+        
+        Returns self._poly_diff, a list with all self.n first order polynomial derivatives.
+        '''
+        self._poly_diff = []
         EYE = np.eye(self.n, dtype=int)
         for i in range(self.n):
             diff_coeffs = []
@@ -482,9 +517,9 @@ class MultiPoly:
                     else:
                         id = diff_kernel.index( tuple(new_mon) )
                         diff_coeffs[id] += coeff * mon[i]
-            poly_diffs.append( MultiPoly(kernel=diff_kernel, coeffs=diff_coeffs) )
+            self._poly_diff.append( MultiPoly(kernel=diff_kernel, coeffs=diff_coeffs) )
 
-        return poly_diffs
+        return self._poly_diff
 
     def poly_grad(self):
         ''' Compute gradient polynomial. For scalar polynomials only. '''
@@ -492,19 +527,43 @@ class MultiPoly:
         if self.ndim != 0 and self.shape != (1,) and self.shape != ():
             raise NotImplementedError("Gradient is not implemented for non-scalar polynomials.")
 
-        diff_polys = self.polyder()
+        ''' If first-order derivatives are not computed yet, compute them. '''
+        if self._poly_diff is None:
+            self.poly_diff()
 
-        kernel = list( set.union(*[ set(diff_poly.kernel) for diff_poly in diff_polys ]) )
+        kernel = list( set.union(*[ set(poly.kernel) for poly in self._poly_diff ]) )
         kernel_size = len(kernel)
 
         coeff_list = [ np.zeros(self.n) for _ in range(kernel_size) ]
-        for i, diff_poly in enumerate(diff_polys):
-            for mon, coeff in zip(diff_poly.kernel, diff_poly.coeffs):
+        for i, poly in enumerate(self._poly_diff):
+            for mon, coeff in zip(poly.kernel, poly.coeffs):
                 id = kernel.index(mon)
                 coeff_list[id][i] += coeff
 
         self._poly_grad = MultiPoly( kernel=kernel, coeffs=coeff_list )
         return self._poly_grad
+
+    def poly_jaco(self):
+        ''' Compute Jacobian polynomial. For vector polynomials only. '''
+
+        if self.ndim != 1:
+            raise NotImplementedError("Jacobian is not implemented for non-vector polynomials.")
+
+        ''' If first-order derivatives are not computed yet, compute them. '''
+        if self._poly_diff is None:
+            self.poly_diff()
+
+        kernel = list( set.union(*[ set(poly.kernel) for poly in self._poly_diff ]) )
+        kernel_size = len(kernel)
+
+        coeff_list = [ np.zeros(self.shape[0], self.n) for _ in range(kernel_size) ]
+        for i, poly in enumerate(self._poly_diff):
+            for mon, coeff in zip(poly.kernel, poly.coeffs):
+                id = kernel.index(mon)
+                coeff_list[id][:,i] += coeff
+
+        self._poly_jaco = MultiPoly( kernel=kernel, coeffs=coeff_list )
+        return self._poly_jaco
 
     def poly_hess(self):
 
@@ -513,8 +572,11 @@ class MultiPoly:
 
         if self._poly_grad is None:
             self.poly_grad()
+        
+        if self._poly_grad._poly_diff is None:
+            self._poly_grad.poly_diff()
 
-        diff2_polys = self._poly_grad.polyder()
+        diff2_polys = self._poly_grad._poly_diff
 
         kernel = list( set.union(*[ set(diff2_poly.kernel) for diff2_poly in diff2_polys ]) )
         kernel_size = len(kernel)
@@ -528,9 +590,6 @@ class MultiPoly:
 
         self._poly_hess = MultiPoly( kernel=kernel, coeffs=coeff_list )
         return self._poly_hess
-
-    def polyval(self, x):
-        return self.__call__(x)
 
     def filter(self):
         '''
@@ -866,69 +925,69 @@ class MultiPoly:
         except IOError:
             print("Couldn't save polynomial." + IOError)
 
-    def generate_contour(self, limits=(-1,+1,-1,+1), spacing=0.1):
-        '''
-        Create contour generator object for the given function.
-        Parameters: limits (2x2 array) - min/max limits for x,y coords
-                    spacing - grid spacing for contour generation
-        '''        
-        if self.n != 2:
-            logging.warning("Contour plot can only be used for 2D functions.")
-            self.contour = None
-            return
+    # def generate_contour(self, limits=(-1,+1,-1,+1), spacing=0.1):
+    #     '''
+    #     Create contour generator object for the given function.
+    #     Parameters: limits (2x2 array) - min/max limits for x,y coords
+    #                 spacing - grid spacing for contour generation
+    #     '''        
+    #     if self.n != 2:
+    #         logging.warning("Contour plot can only be used for 2D functions.")
+    #         self.contour = None
+    #         return
 
-        x_min, x_max, y_min, y_max = limits
-        x = np.arange(x_min, x_max, spacing)
-        y = np.arange(y_min, y_max, spacing)
-        xg, yg = np.meshgrid(x,y)
+    #     x_min, x_max, y_min, y_max = limits
+    #     x = np.arange(x_min, x_max, spacing)
+    #     y = np.arange(y_min, y_max, spacing)
+    #     xg, yg = np.meshgrid(x,y)
         
-        fvalues = np.zeros(xg.shape)
-        for i,j in itertools.product(range(xg.shape[0]), range(xg.shape[1])):
-            pt = np.array([xg[i,j], yg[i,j]])
-            fvalues[i,j] = self(pt)
+    #     fvalues = np.zeros(xg.shape)
+    #     for i,j in itertools.product(range(xg.shape[0]), range(xg.shape[1])):
+    #         pt = np.array([xg[i,j], yg[i,j]])
+    #         fvalues[i,j] = self(pt)
         
-        self.contour = ctp.contour_generator(x=xg, y=yg, z=fvalues )
+    #     self.contour = ctp.contour_generator(x=xg, y=yg, z=fvalues )
 
-    def get_levels(self, levels=[0.0] ) -> list:
-        '''
-        Generates function level sets from the contour generator object
-        '''
-        if self.contour is None:
-            raise NotImplementedError("No 2D contour exists for the Polynomial.")
+    # def get_levels(self, levels=[0.0] ) -> list:
+    #     '''
+    #     Generates function level sets from the contour generator object
+    #     '''
+    #     if self.contour is None:
+    #         raise NotImplementedError("No 2D contour exists for the Polynomial.")
 
-        level_contours = []
-        for lvl in levels:
-            line = self.contour.lines(lvl)
-            level_contours.append(line)
-        return level_contours
+    #     level_contours = []
+    #     for lvl in levels:
+    #         line = self.contour.lines(lvl)
+    #         level_contours.append(line)
+    #     return level_contours
 
-    def plot_levels(self, ax=plt, levels=[0.0], **kwargs):
-        '''
-        Plots function level sets at the input axis ax. 
-        Additional args may be passed for color and linestyle 
-        '''
-        color = mcolors.BASE_COLORS["k"]
-        linestyle = "solid"
-        alpha = 1.0
+    # def plot_levels(self, ax=plt, levels=[0.0], **kwargs):
+    #     '''
+    #     Plots function level sets at the input axis ax. 
+    #     Additional args may be passed for color and linestyle 
+    #     '''
+    #     color = mcolors.BASE_COLORS["k"]
+    #     linestyle = "solid"
+    #     alpha = 1.0
 
-        for key in kwargs.keys():
-            key = key.lower()
-            if key == "color":
-                color = kwargs["color"]
-                continue
-            if key == "linestyle":
-                linestyle = kwargs["linestyle"]
-                continue
-            if key == "alpha":
-                alpha = kwargs["alpha"]
-                continue
+    #     for key in kwargs.keys():
+    #         key = key.lower()
+    #         if key == "color":
+    #             color = kwargs["color"]
+    #             continue
+    #         if key == "linestyle":
+    #             linestyle = kwargs["linestyle"]
+    #             continue
+    #         if key == "alpha":
+    #             alpha = kwargs["alpha"]
+    #             continue
 
-        collections = []
-        for level in self.get_levels(levels):
-            for segment in level:
-                line2D = ax.plot( segment[:,0], segment[:,1], color=color, linestyle=linestyle, alpha=alpha )
-                collections.append(line2D[0])
-        return collections
+    #     collections = []
+    #     for level in self.get_levels(levels):
+    #         for segment in level:
+    #             line2D = ax.plot( segment[:,0], segment[:,1], color=color, linestyle=linestyle, alpha=alpha )
+    #             collections.append(line2D[0])
+    #     return collections
 
     @property
     def T(self):

@@ -4,7 +4,7 @@ from shapely import LineString, LinearRing, Polygon
 
 from controllers import NominalQP
 from dynamic_systems import PolyAffineSystem
-from functions import LeadingShape, Kernel, KernelLyapunov, KernelBarrier, KernelFamily, MultiPoly
+from functions import LeadingShape, Kernel, KernelLyapunov, KernelBarrier, LyapunovBarrier, MultiPoly
 from common import kernel_quadratic, circular_boundary_shape, rot2D, polygon, load_compatible, discretize, segmentize, enclosing_circle
 
 initial_state = [0.2, 6.5]
@@ -48,7 +48,7 @@ cbfs = [ cbf ]
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .005
 p = 1.0
-kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, params={ "slack_gain": p }, limits=limits, spacing=0.4 )
+kerneltriplet = LyapunovBarrier( plant=plant, clf=clf, cbfs=cbfs, params={ "slack_gain": p }, limits=limits, spacing=0.4 )
 controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 15
 

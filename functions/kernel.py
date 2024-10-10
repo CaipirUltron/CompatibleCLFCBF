@@ -2,7 +2,6 @@ from math import comb
 from scipy.optimize import minimize
 
 from common import *
-from dynamic_systems import Integrator
 from .basic import Function, LeadingShape, commutation_matrix, mat
 from .multipoly import MultiPoly
 
@@ -757,6 +756,8 @@ class KernelQuadratic(Function):
         '''
         Given a kernel, correctly initialize function.
         '''
+        from dynamic_systems import Integrator
+
         self.kernel = kernel
         self._dim = self.kernel._dim
         self.kernel_dim = self.kernel._num_monomials
@@ -821,6 +822,9 @@ class KernelQuadratic(Function):
     def _gradient(self, point):
         ''' Returns gradient using self configuration '''
         return self._grad(point, self.shape_matrix)
+
+    def _jacobian(self, point):
+        return NotImplemented
 
     def _hessian(self, point):
         ''' Returns hessian using self configuration '''
@@ -1225,7 +1229,7 @@ class KernelQuadratic(Function):
                 id = kernel.index(mon)
                 coeffs[id] += 0.5*Pij
 
-        return MultiPoly(kernel=kernel, coeffs=coeffs)
+        return MultiPoly(kernel=kernel, coeffs=coeffs, limits=self.limits, spacing=self.spacing)
     
     @classmethod
     def from_multipoly(cls, poly: MultiPoly, **kwargs):

@@ -240,8 +240,11 @@ class Plot2DSimulation():
                 for coll in self.clf_contours:
                     coll.remove()
 
-                self.clf_contours = self.clf.plot_levels(levels=[V], colors=self.clf_contour_color, ax=self.main_ax, limits=self.plot_config["limits"], spacing=0.5)
-
+                self.clf_contours = self.clf.plot_levels(levels=[V], 
+                                                         colors=self.clf_contour_color, 
+                                                         ax=self.main_ax,
+                                                         limits=self.plot_config["limits"], 
+                                                         spacing=0.5 )
         else:
             self.runs = False
             # self.animation.event_source.stop()

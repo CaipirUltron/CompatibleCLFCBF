@@ -419,19 +419,16 @@ class KernelAffineSystem(AffineSystem):
 class PolyAffineSystem(AffineSystem):
     '''
     Class for affine nonlinear systems of the type xdot = f(x) + g(x) u, where:
-    - f(x), g(x) are polynomial functions, given as f(x) = F m(x) and gij(x) = Gij' m(x)
+    - f(x), g(x) are MultiPoly functions, given as f(x) = F m(x) and gij(x) = Gij' m(x)
     where m(x) is a kernel function and F is a suitable matrix of the kernel dimension.
     '''
-    def __init__(self, initial_state, initial_control, f, g):
+    from functions.multipoly import MultiPoly
+    def __init__(self, initial_state, initial_control, f: MultiPoly, g: MultiPoly):
         super().__init__(initial_state, initial_control)
 
         self.f_poly = f
         self.g_poly = g
         self.G_poly = g @ (g.T)
-
-        from functions import Kernel
-        self.f_kernel = Kernel(dim=self.n, monomials = f.kernel)
-        self.g_kernel = Kernel(dim=self.n, monomials = g.kernel)
 
         self.poly_derivatives()
 
@@ -465,11 +462,8 @@ class PolyAffineSystem(AffineSystem):
     def poly_derivatives(self):
         ''' Compute polynomial derivatives of f(x) ang g(x) '''
 
-        from functions import MultiPoly
-
         ''' --------------------- Jacobian of f(x) -------------------- '''
-
-        diff_f_polys = self.f_poly.polyder()
+        diff_f_polys = self.f_poly.poly_diff()
 
         kernel = list( set.union(*[ set(diff_f_poly.kernel) for diff_f_poly in diff_f_polys ]) )
         kernel_size = len(kernel)
@@ -481,12 +475,12 @@ class PolyAffineSystem(AffineSystem):
                     id = kernel.index(mon)
                     coeff_list[id][i,j] += coeff[i]
 
+        from functions import MultiPoly
         self.Jf_poly = MultiPoly( kernel=kernel, coeffs=coeff_list )
 
         ''' --------------- Derivatives of g(x) and G(x) -------------- '''
-
-        self.Jg_list_poly = self.g_poly.polyder()
-        self.JG_list_poly = self.G_poly.polyder()
+        self.Jg_list_poly = self.g_poly.poly_diff()
+        self.JG_list_poly = self.G_poly.poly_diff()
 
     def get_Jf(self, x):
 

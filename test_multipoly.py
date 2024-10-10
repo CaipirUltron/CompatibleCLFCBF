@@ -45,7 +45,8 @@ print(p1)
 zero_poly = Poly.zeros(kernel=powers)
 print(f"Zero polynomial = \n{zero_poly}")
 
-for k, p in enumerate(p1.polyder()):
+p1.poly_diff()
+for k, p in enumerate(p1._poly_diff):
     print(f"{k+1}-th derivative of p1 = \n{p}")
 
 def test_op(op, N):
@@ -123,11 +124,11 @@ if data_type == 'vector':
 if data_type == "scalar":
 
     shape = p1.shape_matrix()
-    p1_grad = p1.poly_grad()
-    p1_hess = p1.poly_hess()
+    p1.poly_grad()
+    p1.poly_hess()
 
-    print(f"gradient = {p1_grad}")
-    print(f"hessian = {p1_hess}")
+    print(f"gradient = {p1._poly_grad}")
+    print(f"hessian = {p1._poly_hess}")
 
     gamma = Poly2([0.0, 1.0])
     intgamma = Poly2( polyint(gamma.coef) )

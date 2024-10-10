@@ -1,7 +1,7 @@
 import numpy as np
 
 from dynamic_systems import PolyAffineSystem
-from functions import Kernel, KernelLyapunov, KernelBarrier, KernelFamily, MultiPoly
+from functions import Kernel, KernelLyapunov, KernelBarrier, LyapunovBarrier, MultiPoly
 from controllers import NominalQP
 from common import kernel_quadratic, rot2D, load_compatible
 
@@ -49,7 +49,7 @@ cbfs = [ cbf ]
 # ----------------------------------------- Define triplet and controller --------------------------------------------------
 sample_time = .005
 p = 1.0
-kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, params={ "slack_gain": p }, limits=limits, spacing=0.2 )
+kerneltriplet = LyapunovBarrier( plant=plant, clf=clf, cbfs=cbfs, params={ "slack_gain": p }, limits=limits, spacing=0.4 )
 controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 12
 

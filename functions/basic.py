@@ -9,7 +9,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from common import *
-from dynamic_systems import Integrator
 
 def commutation_matrix(n):
     '''
@@ -46,7 +45,8 @@ class LeadingShape:
 
 class Function(ABC):
     ''' 
-    Implementation of abstract class for scalar functions of any input dimension
+    Implementation of abstract class for scalar functions of any input dimension.
+
     '''
     def __init__(self, **kwargs):
 
@@ -61,7 +61,8 @@ class Function(ABC):
 
         self.set_params(**kwargs)
 
-        if self._output_dim == 1: self.generate_contour()
+        if self._output_dim == 1: 
+            self.generate_contour()
 
     def _validate(self, point):
         ''' Validates input data '''
@@ -72,7 +73,7 @@ class Function(ABC):
     @abstractmethod
     def _function(self, point: np.ndarray) -> np.ndarray:
         '''
-        Abstract implementation of function computation. 
+        Abstract implementation of function value. 
         Must receive point as input and return the corresponding function value.
         Overwrite on children classes.
         '''
@@ -81,7 +82,16 @@ class Function(ABC):
     @abstractmethod
     def _gradient(self, point: np.ndarray) -> np.ndarray:
         '''
-        Abstract implementation of gradient computation. 
+        Abstract implementation of gradient vector.
+        Must receive point as input and return the corresponding gradient value.
+        Overwrite on children classes.
+        '''
+        pass
+
+    @abstractmethod
+    def _jacobian(self, point: np.ndarray) -> np.ndarray:
+        '''
+        Abstract implementation of the Jacobian matrix. 
         Must receive point as input and return the corresponding gradient value.
         Overwrite on children classes.
         '''
@@ -114,15 +124,21 @@ class Function(ABC):
         fvalues = np.zeros(xg.shape)
         for i,j in itertools.product(range(xg.shape[0]), range(xg.shape[1])):
             pt = np.array([xg[i,j], yg[i,j]])
-            fvalues[i,j] = self.function(pt)
+            fvalues[i,j] = self(pt)
         
         self.contour = ctp.contour_generator(x=xg, y=yg, z=fvalues )
+
+    def __call__(self, point):
+        return self._function(self._validate(point))
 
     def function(self, point):
         return self._function(self._validate(point))
 
     def gradient(self, point):
         return self._gradient(self._validate(point))    
+
+    def jacobian(self, point):
+        return self._jacobian(self._validate(point))  
 
     def hessian(self, point):
         return self._hessian(self._validate(point))
@@ -303,7 +319,7 @@ class Gaussian(Function):
         self.epsilon = 0.0
         self.Lv = sym2triangular( self._hessian-self.epsilon*np.eye(self._dim) )
         self.param = triangular2vector( self.Lv )
-        self.dynamics = Integrator(self.param,np.zeros(len(self.param)))
+        # self.dynamics = Integrator(self.param,np.zeros(len(self.param)))
 
     def set_param(self, **kwargs):
         '''

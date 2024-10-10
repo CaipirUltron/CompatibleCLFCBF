@@ -8,7 +8,7 @@ from scipy.optimize import minimize, LinearConstraint, NonlinearConstraint
 from shapely import geometry, intersection
 
 from numpy.polynomial.polynomial import polyder, polyint
-from dynamic_systems import Integrator, PolyAffineSystem
+# from dynamic_systems import Integrator, PolyAffineSystem
 
 import warnings
 import itertools
@@ -26,6 +26,8 @@ class QuadraticLyapunov(Quadratic):
     Hv = Lv(pi_v)'Lv(pi_v) + epsilon I_n (Lv is upper triangular and epsilon is a small positive constant).
     '''
     def __init__(self, *args, **kwargs):
+
+        from dynamic_systems import Integrator
         super().__init__(*args)
         super().set_param(**kwargs)
         super().set_param(height=0.0)
@@ -98,6 +100,8 @@ class QuadraticBarrier(Quadratic):
         super().__init__(*args)
         super().set_param(**kwargs)
         super().set_param(height = -0.5)
+
+        from dynamic_systems import Integrator
 
         self.param = sym2vector(self._hessian)
         self.dynamics = Integrator(self.param,np.zeros(len(self.param)))
@@ -310,11 +314,13 @@ class KernelBarrier(KernelQuadratic):
         ''' Computes the boundary level set '''
         return self.get_levels(levels=[0.0])[0]
 
-class KernelFamily():
+class LyapunovBarrier():
     '''
-    Class for kernel-based family of: plant, CLF and any number of CBFs.
-    For simplicity, all entities share the same kernel function.
-    Defines common algorithms for CLF-CBF pair compatibility, such as computation of the invariat set, equilibrium points, and optimizations over the invariant set branches.
+    Class for safety-critical control algorithms with polynomial-based plant, CLF and CBFs (any number of them).
+    Defines common algorithms for CLF-CBF pair compatibility, such as:
+      (i) computation of the invariat set, 
+     (ii) equilibrium points,
+    (iii) optimizations over the invariant set branches.
     The variable self.P is used for online computations with the CLF shape.
     '''
     def __init__(self, **kwargs):
@@ -395,6 +401,8 @@ class KernelFamily():
                                        plant, clf, cbf, params
         '''
         update_invariant = False
+
+        from dynamic_systems import PolyAffineSystem
 
         if "limits" in kwargs.keys():
             self.limits = kwargs["limits"]
@@ -524,20 +532,20 @@ class KernelFamily():
         '''
         Verifies if the kernel pair is consistent and fully defined
         '''
-        equal_kernel_dims = [ self.plant.f_kernel._dim == self.plant.g_kernel._dim ]
+        equal_kernel_dims = [ self.plant.f_poly.n == self.plant.g_poly.n ]
 
         if ( self.clf is None ) and (self.tclf is not None):
-            equal_kernel_dims += [ self.plant.g_kernel._dim == self.tclf.n ]
+            equal_kernel_dims += [ self.plant.g_poly.n == self.tclf.n ]
             equal_kernel_dims += [ self.tclf.n == cbf.kernel._dim for cbf in self.cbfs ]
         else:
-            equal_kernel_dims += [ self.plant.g_kernel._dim == self.clf.kernel._dim ]
+            equal_kernel_dims += [ self.plant.g_poly.n == self.clf.kernel._dim ]
             equal_kernel_dims += [ self.clf.kernel._dim == cbf.kernel._dim for cbf in self.cbfs ]
             self.P = self.clf.P
 
         if not all(equal_kernel_dims):
             raise Exception("Plant, CLF and CBF do not have the same dimension.")
 
-        self.n = self.plant.f_kernel._dim
+        self.n = self.plant.f_poly.n
         # self.p = self.plant.kernel._num_monomials
         
     def invariant_pencil(self, cbf_index: int):
@@ -1435,6 +1443,8 @@ class InvexProgram():
         self.dynamics_dim = self.n * self.p
         init_state = np.zeros(self.dynamics_dim)
         init_ctrl = np.zeros(self.dynamics_dim)
+
+        from dynamic_systems import Integrator
         self.geo_dynamics = Integrator( init_state, init_ctrl )
 
         ''' Define cvxpy variables/parameters '''

@@ -1,7 +1,7 @@
 import numpy as np
 
 from dynamic_systems import PolyAffineSystem
-from functions import LeadingShape, Kernel, KernelQuadratic, KernelLyapunov, KernelBarrier, KernelFamily, MultiPoly
+from functions import LeadingShape, Kernel, KernelQuadratic, KernelLyapunov, KernelBarrier, LyapunovBarrier, MultiPoly
 from controllers import NominalQP
 from common import kernel_quadratic, rot2D, box, load_compatible, PSD_closest, NSD_closest
 
@@ -30,10 +30,10 @@ plant = PolyAffineSystem(initial_state=initial_state, initial_control=initial_co
 
 # ---------------------------------------------------- Define CLF ----------------------------------------------------------
 clf_center = [0.0, -3.0]
-clf_eig = np.array([ 1.0, 1.0 ])
+clf_eig = np.array([ 2.0, 1.0 ])
 clf_angle = np.deg2rad(-45)
 Pquadratic = kernel_quadratic(eigen=clf_eig, R=rot2D(clf_angle), center=clf_center, kernel_dim=kernel_dim)
-clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
+clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits, spacing=0.1 )
 clf_poly = clf.to_multipoly()
 
 # clf_poly = MultiPoly.load("wierd")
@@ -43,13 +43,13 @@ clf_poly = clf.to_multipoly()
 # cbf_poly = MultiPoly.load("box_shaped")
 cbf_poly = MultiPoly.load("rotated_box")
 
-cbf = KernelBarrier.from_multipoly(poly=cbf_poly, limits=limits, spacing=0.1)
+cbf = KernelBarrier.from_multipoly( poly=cbf_poly, limits=limits, spacing=0.1 )
 cbfs = [ cbf ]
 
 # ------------------------------------------------- Define controller ------------------------------------------------------
 sample_time = .005
 p = 1.0
-kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, params={ "slack_gain": p }, limits=limits, spacing=0.4 )
+kerneltriplet = LyapunovBarrier( plant=plant, tclf=clf_poly, cbfs=cbfs, params={ "slack_gain": p }, limits=limits, spacing=0.5 )
 controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 15
 
