@@ -548,7 +548,7 @@ class LyapunovBarrier():
         self.n = self.plant.f_poly.n
         # self.p = self.plant.kernel._num_monomials
         
-    def invariant_pencil(self, cbf_index: int):
+    def invariant_pencil(self, cbf_index: int = 0):
         '''
         Computes the invariant equation
         f(x) + λ G(x) ∇h(x) - p γ(V(x)) G(x) ∇V(x) = (λ A - B) m(x)
@@ -560,13 +560,20 @@ class LyapunovBarrier():
         G_poly = self.plant.get_Gpoly()
 
         # Get CBF polynomials
-        h_poly, nablah_poly, Hh_poly = self.cbfs[cbf_index].to_multipoly()
+        h_poly = self.cbfs[cbf_index].to_multipoly()
+        nablah_poly = h_poly.poly_grad()
 
         vecQ_poly = G_poly @ nablah_poly
         vecP_poly = p * ( G_poly @ self.grad_tclf ) - f_poly
 
+        vecQ_poly.filter()
+        vecP_poly.filter()
+
         A_poly = vecQ_poly + 0 * vecP_poly
         B_poly = 0 * vecQ_poly + vecP_poly
+
+        A_poly.sort_kernel()
+        B_poly.sort_kernel()
 
         if A_poly.kernel != B_poly.kernel:
             raise Exception("Kernels are not the same. This should not happen.")

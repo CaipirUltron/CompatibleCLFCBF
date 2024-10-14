@@ -595,21 +595,20 @@ class MultiPoly(Function):
         '''
         Deletes entries of self.coeffs and self.kernel with zero coefficients.
         '''
-        to_be_deleted = []
-        for i, coef in enumerate(self.coeffs):
+        filtered_kernel, filtered_coeffs = [], []
+        for mon, coef in zip(self.kernel, self.coeffs):
 
-            if isinstance(coef, sym.Expr) and coef == sym.S.Zero:
-                to_be_deleted.append(i)
+            to_delete = False
+            to_delete = to_delete or isinstance(coef, sym.Expr) and coef == sym.S.Zero
+            to_delete = to_delete or ( isinstance(coef, sym.MatrixExpr) and coef == sym.ZEROS(*coef.shape) )
+            to_delete = to_delete or ( isinstance(coef, (int, float, np.ndarray)) and np.linalg.norm(coef) < 1e-12 )
 
-            if isinstance(coef, sym.MatrixExpr) and coef == sym.ZEROS(*coef.shape):
-                to_be_deleted.append(i)
+            if not to_delete:
+                filtered_kernel.append(mon)
+                filtered_coeffs.append(coef)
 
-            if isinstance(coef, (int, np.ndarray)) and np.linalg.norm(coef) < 1e-12:
-                to_be_deleted.append(i)
-
-        for i in to_be_deleted:
-            del self.coeffs[i]
-            del self.kernel[i]
+        self.kernel = filtered_kernel
+        self.coeffs = filtered_coeffs
 
     def hstack(poly1, poly2):
         ''' Horizontally stack two polys. Is able to stack empty polynomials '''

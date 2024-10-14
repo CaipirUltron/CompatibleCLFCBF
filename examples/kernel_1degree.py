@@ -36,6 +36,9 @@ Pquadratic = kernel_quadratic( eigen=clf_eig, R=rot2D(np.deg2rad(clf_angle)), ce
 
 clf = KernelLyapunov(kernel=kernel, P=Pquadratic, limits=limits)
 # clf = KernelLyapunov(kernel=kernel, P=load_compatible( __file__, Pquadratic, load_compatible = True ), limits=limits )
+clf_poly = clf.to_multipoly()
+
+print(f"tCLF = {clf_poly}")
 
 # --------------------------------------------- Define CBF (quadratic) -----------------------------------------------------
 cbf_eig = 1*np.array([ 0.2, 1.2 ])
@@ -49,9 +52,14 @@ cbfs = [ cbf ]
 # ----------------------------------------- Define triplet and controller --------------------------------------------------
 sample_time = .005
 p = 1.0
-kerneltriplet = LyapunovBarrier( plant=plant, clf=clf, cbfs=cbfs, params={ "slack_gain": p }, limits=limits, spacing=0.4 )
+kerneltriplet = LyapunovBarrier( plant=plant, tclf=clf_poly, cbfs=cbfs, params={ "slack_gain": p }, limits=limits, spacing=0.4 )
 controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 12
+
+A, B, kernel = kerneltriplet.invariant_pencil()
+print(f"A = {A}")
+print(f"B = {B}")
+print(f"kernel = {kernel}")
 
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 plot_config = {
