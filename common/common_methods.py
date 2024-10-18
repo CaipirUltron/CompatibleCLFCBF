@@ -437,7 +437,7 @@ def kernel_quadratic(eigen, R, center, kernel_dim):
 
 def hessian_2Dquadratic(eigen: np.ndarray, angle: float):
     '''
-    Generates hessian matrix of a 2D quadratic function, from eigenvalues and angle of principal axis of inertia
+    Generates hessian matrix of a 2D quadratic function, from eigenvalues and angle (in radians) of principal axis of inertia
     '''
     if len(eigen) != 2: raise Exception("Only works for n= 2")
     if np.any(np.array(eigen) < 0): raise Exception("Eigenvalues must be non-negative.")

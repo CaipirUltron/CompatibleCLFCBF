@@ -55,11 +55,6 @@ kerneltriplet = LyapunovBarrier( plant=plant, tclf=clf_poly, cbfs=cbfs, params={
 controller = NominalQP(kerneltriplet, dt=sample_time)
 T = 15
 
-A, B, kernel = kerneltriplet.invariant_pencil()
-print(f"A = {A}")
-print(f"B = {B}")
-print(f"kernel = {kernel}")
-
 # ---------------------------------------------  Configure plot parameters -------------------------------------------------
 plot_config = {
     "figsize": (5,5), 
