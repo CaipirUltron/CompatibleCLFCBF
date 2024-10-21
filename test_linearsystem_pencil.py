@@ -7,18 +7,18 @@ import warnings
 from common import hessian_2Dquadratic
 
 n = 2
+m = 2
+
 A = np.random.randn(n,n)
-B = np.random.randn(n,n)
+B = np.random.randn(n,m)
 
 BB = (B @ B.T)
 
 real = np.random.randint(-10, -1)
-# imag = np.random.randint(0, 10)
-imag = 0.0
+imag = np.random.randint(0, 10)
+# imag = 0.0
 real_parts = np.array([ real, real ])
 imag_parts = np.array([ imag*(1j), -imag*(1j) ])
-desired_poles = real_parts + imag_parts
-print(f"Desired poles = {desired_poles}")
 
 rankC = np.linalg.matrix_rank( control.ctrb(A, B) )
 if rankC < A.shape[0]:
@@ -31,6 +31,7 @@ else:
     else:
         desired_poles = [-1, -2]
     
+    print(f"Desired poles = {desired_poles}")
     K = control.place(A, B, p=desired_poles)
     Acl = A - B @ K
     eigsAcl = np.linalg.eigvals(Acl)
@@ -49,12 +50,15 @@ CBFcenter = np.array([0.0, 5.0])
 Hh = hessian_2Dquadratic(CBFeigs, CBFangle)
 
 p = 1.0
-w = p * BB @ Hv @ ( CBFcenter - CLFcenter ) - Acl @ CBFcenter
 
 ''' ---------------------------- Compute pencil and q-function ----------------------------------- '''
 M = BB @ Hh 
 N = p * BB @ Hv - Acl
 MM, NN, alpha, beta, Q, Z = sp.linalg.ordqz(N, M)
+w = N @ CBFcenter - p * BB @ Hv @ CLFcenter
+
+print(f"MM = {MM}")
+print(f"NN = {NN}")
 
 print("Pencil is of the form λ M - N")
 print(f"Spectra of M = {np.linalg.eigvals(M)}")
@@ -120,7 +124,10 @@ def q_function(lambdas: np.ndarray):
 ''' ------------------------------------ Plot ----------------------------------- '''
 
 lambda_min = 0
-lambda_max = 5*pencil_eigs[-1]
+if pencil_eigs[-1] < np.inf:
+    lambda_max = 5*pencil_eigs[-1]
+else:
+    lambda_max = 1000
 lambda_res = 0.01
 lambdas = np.arange(lambda_min, lambda_max, lambda_res)
 
