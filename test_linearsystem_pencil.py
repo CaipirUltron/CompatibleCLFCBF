@@ -4,7 +4,9 @@ import scipy as sp
 import matplotlib.pyplot as plt
 import warnings
 
+from itertools import product
 from common import hessian_2Dquadratic
+from numpy.polynomial import Polynomial as Poly
 
 n = 2
 m = 2
@@ -15,7 +17,7 @@ B = np.random.randn(n,m)
 BB = (B @ B.T)
 
 real = np.random.randint(-10, -1)
-imag = np.random.randint(0, 10)
+imag = np.random.randint(0, 100)
 # imag = 0.0
 real_parts = np.array([ real, real ])
 imag_parts = np.array([ imag*(1j), -imag*(1j) ])
@@ -54,11 +56,11 @@ p = 1.0
 ''' ---------------------------- Compute pencil and q-function ----------------------------------- '''
 M = BB @ Hh 
 N = p * BB @ Hv - Acl
-MM, NN, alpha, beta, Q, Z = sp.linalg.ordqz(N, M)
+NN, MM, alpha, beta, Q, Z = sp.linalg.ordqz(N, M, output='complex')
 w = N @ CBFcenter - p * BB @ Hv @ CLFcenter
 
-print(f"MM = {MM}")
-print(f"NN = {NN}")
+print(f"M error = {np.linalg.norm(Q @ MM @ Z.conjugate().T - M)}")
+print(f"N error = {np.linalg.norm(Q @ NN @ Z.conjugate().T - N)}")
 
 print("Pencil is of the form λ M - N")
 print(f"Spectra of M = {np.linalg.eigvals(M)}")
@@ -78,9 +80,87 @@ else:
 
 print(f"Pencil λ M - N spectra = {pencil_eigs}")
 
+def compute_qfunction_poly(M: np.ndarray, N: np.ndarray, Hh: np.ndarray, w: np.ndarray):
+    '''
+    Returns the numerator and denominator polynomials n(λ), d(λ) of the q-function q(λ) = n(λ)/d(λ),
+    where P(λ) v(λ) = w, q(λ) = v(λ).T @ Hh v(λ).
+    '''
+    equal_dims = [ M.shape == N.shape, M.shape == Hh.shape ]
+    if not equal_dims:
+        raise TypeError("M, N and Hh must have the same dimensions.")
+    
+    if M.shape[0] != M.shape[1]:
+        raise TypeError("M, N and Hh must be a square matrices.")
+    
+    n = M.shape[0]
+    if len(w) != n:
+        raise TypeError("Vector w must have the same dimensions as the pencil λ M - N.")
+    
+    NN, MM, alpha, beta, Q, Z = sp.linalg.ordqz(N, M, output='real')
+
+    MMerror = np.linalg.norm(Q @ MM @ Z.conjugate().T - M)
+    NNerror = np.linalg.norm(Q @ NN @ Z.conjugate().T - N)
+    if MMerror > 1e-12 or NNerror > 1e-12:
+        raise Exception("QZ decomposition has failed. This should never happen.")
+    
+    # Extract block diagonals from QZ decomposition
+    blkdiagMM = np.zeros([n,n])
+    blkdiagNN = np.zeros([n,n])
+    blk_pole_polys = []
+    blk_adjs = []
+
+    for i in range(n):
+
+        # 2X2 BLOCKS OF COMPLEX CONJUGATE PENCIL EIGENVALUES
+        if i < n-1 and NN[i+1,i] != 0.0:
+            MMblock = MM[i:i+2,i:i+2]
+            NNblock = NN[i:i+2,i:i+2]
+
+            blkdiagMM[i:i+2,i:i+2] = MMblock
+            blkdiagNN[i:i+2,i:i+2] = NNblock
+
+            a = np.linalg.det(MMblock)
+            b = MMblock[0,0] * NNblock[1,1] + NNblock[0,0] * MMblock[1,1]
+            c = np.linalg.det(NNblock)
+            blk_pole_polys.append( Poly([ c, b, a ]) )
+
+            adj11 = Poly([ -NNblock[1,1],  MMblock[1,1] ])
+            adj12 = Poly([           0.0, -MMblock[0,1] ])
+            adj21 = Poly([           0.0, -MMblock[1,0] ])
+            adj22 = Poly([ -NNblock[0,0],  MMblock[0,0] ])
+            blk_adjs.append( np.array([[ adj11, adj12 ],[ adj21, adj22 ]]) )
+
+        # 1X1 BLOCKS OF REAL PENCIL EIGENVALUES
+        else:
+            MMblock = MM[i,i]
+            NNblock = NN[i,i]
+
+            blkdiagMM[i,i] = MMblock
+            blkdiagNN[i,i] = NNblock
+
+            blk_pole_polys.append( Poly([ NNblock, MMblock ]) )
+            blk_adjs.append( np.array([Poly(1.0)]) )
+
+    adjDiag = sp.linalg.block_diag(*blk_adjs)
+
+    # Extract the strictly upper triangular parts from QZ decomposition
+    upperMM = MM - blkdiagMM
+    upperNN = NN - blkdiagNN
+
+    upperPencil = np.zeros([n,n])
+    for i in range(n-1):
+        for j in range(i+1,n):
+            upperPencil[i,j] = Poly([ -upperNN[i,j], upperMM[i,j] ])
+
+    Zinv = np.linalg.inv(Z)
+    barHh = Zinv @ Hh @ (Zinv.T)
+    barw = np.linalg.inv(Q) @ w
+
+
+
 def pencil(M: np.ndarray, N: np.ndarray, l: float):
     ''' 
-    Linear matrix pencil of the form l * M - N
+    Linear matrix pencil of the form λ M - N
     '''
     if not isinstance(l, (int, float)):
         raise ValueError("The lambda value must be a real number.")
@@ -92,7 +172,7 @@ def pencil(M: np.ndarray, N: np.ndarray, l: float):
 
 def q_function(lambdas: np.ndarray):
     ''' 
-    Compute q function for a given array of lambda values 
+    Compute q function for a given array of λ values 
     '''
     q = np.zeros(len(lambdas))
     positive_interval, solutions = [], []
@@ -122,6 +202,8 @@ def q_function(lambdas: np.ndarray):
     return q, positive_interval, solutions
 
 ''' ------------------------------------ Plot ----------------------------------- '''
+
+compute_qfunction_poly(M,N)
 
 lambda_min = 0
 if pencil_eigs[-1] < np.inf:
