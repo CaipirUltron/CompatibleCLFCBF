@@ -1,12 +1,72 @@
-import scipy
+import scipy as sp
 import numpy as np
+import warnings 
 
 from scipy import signal
 from scipy.optimize import fsolve
 from scipy.linalg import null_space
 from numpy.polynomial import polynomial as poly
+from numpy.polynomial import Polynomial as Poly
 
-ZERO_ACCURACY = 0.0000000001
+ZERO_ACCURACY = 1e-9
+
+def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np.ndarray:
+    '''
+    Finds the polynomial array x(λ) that solves (λ T - S) x(λ) = b(λ), where T, S are 1x1 or 2x2
+    and b(λ) is a polynomial array of arbitrary order.
+
+    Input: - matrices T, S from linear matrix pencil (λ T - S), where T is 
+    '''
+    if isinstance(T, (int, float)): T = np.array([[T]])
+    if isinstance(S, (int, float)): S = np.array([[S]])
+
+    if T.shape != S.shape:
+        raise TypeError("T and S must have the same shape.")
+    
+    if T.shape[0] != T.shape[0]:
+        raise TypeError("T and S must be square matrices.")
+
+    blk_size = T.shape[0]
+    bshape = b_poly.shape
+    if bshape[0] != blk_size:
+        raise TypeError("Number of lines in (λ T - S) and b(λ) must be the same.")
+
+    # Extract arrays from b_poly and store in b_coefs list (variable size)
+    bsys = np.zeros((0, bshape[1]))
+    for (i,j), poly in np.ndenumerate(b_poly):
+
+        if not isinstance( poly, Poly ):
+            raise TypeError("b(λ) is not an array of polynomials.")
+        
+        # Setup bsys
+        b_order = len(poly.coef)
+        n_coefs_toadd = b_order - int(bsys.shape[0] / blk_size)
+        if n_coefs_toadd > 0:
+            bsys = np.vstack([ bsys ] + [ np.zeros((blk_size, bshape[1])) for _ in range(n_coefs_toadd) ])
+
+        for k, c in enumerate(poly.coef):
+            bsys[ k * blk_size + i, j ] = c
+
+    # Constructs the Asys and bsys matrices
+    b_order = int(bsys.shape[0] / blk_size)
+    Asys = np.zeros([ b_order*blk_size, (b_order-1)*blk_size ])
+    for i in range(b_order-1):
+        Asys[ i*blk_size:(i+1)*blk_size , i*blk_size:(i+1)*blk_size ] = -S
+        Asys[ (i+1)*blk_size:(i+2)*blk_size , i*blk_size:(i+1)*blk_size ] = T
+
+    results = np.linalg.lstsq(Asys, bsys)
+    x_coefs = results[0]
+    residue = np.linalg.norm(results[1])
+
+    if residue > 1e-12: 
+        warnings.warn(f"Large residue detected on linear system solution = {residue}")
+
+    x_poly = np.array([[ Poly([0.0 for _ in range(b_order-1) ]) for j in range(bshape[1]) ] for i in range(blk_size) ])
+    for (i,j), c in np.ndenumerate(x_coefs):
+        exp = int(i/blk_size)
+        x_poly[i%blk_size,j].coef[exp] = c
+
+    return x_poly
 
 class PolynomialCLFCBFPair():
     '''
@@ -184,218 +244,266 @@ class PolynomialCLFCBFPair():
 
         return lambdas, kappas, equilibrium_points, init_lines
 
-class LinearMatrixPencil2():
+class MatrixPencil():
     '''
-    Class for regular, symmetric linear matrix pencils of the form P(\lambda) = \lambda A - B, where A and B are p.s.d. matrices.
+    Class for Linear Matrix Pencils of the form P(λ) = λ M - N.
+    Computes generalized eigenvalues/eigenvector pairs, rational q-functions, among others.
     '''
-    def __init__(self, A, B, **kwargs):
+    def __init__(self, M: list | np.ndarray, N: list | np.ndarray):
 
-        dimA = A.shape
-        dimB = B.shape
-        if dimA != dimB:
-            raise Exception("Matrix dimensions are not equal.")
-        if (dimA[0] != dimA[1]) or (dimB[0] != dimB[1]):
+        if isinstance(M, list): M = np.array(M)
+        if isinstance(N, list): N = np.array(N)
+        
+        # Validate passed parameters.
+        if M.ndim != 2 or N.ndim != 2:
+            raise TypeError("A and B must be two dimensional arrays.")
+
+        if M.shape != N.shape:
+            raise TypeError("Matrix dimensions are not equal.")
+
+        if M.shape[0] != M.shape[1]:
             raise Exception("Matrices are not square.")
-        self._A, self._B = A, B
-        self.dim = dimA[0]
 
-        self.compute_eigen()
+        self.M, self.N = M, N
+        self.dim = M.shape[0]
+        self.eigen()
 
-    def value(self, lambda_param):
+    def eigen(self):
         '''
-        Returns pencil value.
-        '''
-        return lambda_param * self._A  - self._B
-
-    def compute_eigen(self):
-        '''
-        Computes the generalized eigenvalues and eigenvectors of the pencil.
+        Computes the generalized eigenvalues/eigenvectors of the pencil using the QZ decomposition.
+        It simultaneously decomposes the two matrices of P(λ) = λ M - N as M = Q MM Z' and N = Q NN Z',
+        where MM is block upper triangular, NN is upper triangular and Q, Z are unitary matrices.
         '''
         # Compute the pencil eigenvalues
-        schurA, schurB, _, _, _, _ = scipy.linalg.ordqz(self._B, self._A)
-        self.schurA_vec = np.diag(schurA)
-        self.schurB_vec = np.diag(schurB)
+        self.MM, self.NN, self.beta, self.alpha, self.Q, self.Z = sp.linalg.ordqz(self.M, self.N, output='real')
+        self.eigenvalues = self.alpha / self.beta
 
-        self.eigenvalues = np.zeros(self.dim)
-        for k in range(self.dim):
-            if np.abs(self.schurB_vec[k]) > ZERO_ACCURACY:
-                self.eigenvalues[k] = self.schurA_vec[k]/self.schurB_vec[k]
-            else:
-                self.eigenvalues[k] = np.sign(self.schurA_vec[k]) * np.inf
-
-        # Compute the (normalized, if possible) pencil eigenvectors
-        self.eigenvectors = np.zeros([self.dim,self.dim])
-        for k in range(len(self.eigenvalues)):
-            if np.abs(self.eigenvalues[k]) != np.inf:
-                eig, Q = np.linalg.eig( self.value( self.eigenvalues[k]) )
-            else:
-                eig, Q = np.linalg.eig( self.schurA_vec[k] * self._A - self.schurB_vec[k] * self._B )
-            for i in range(len(eig)):
-                if np.abs(eig[i]) <= ZERO_ACCURACY:
-                    self.eigenvectors[:,k] = Q[:,i]
-
-    def solve_nonlinear(self, const):
-        '''
-        Compute all the solutions for the nonlinear system: (mu1 A - mu2 B) z = 0               ,
-                                                                          mu2 = 0.5 k z.T @ B z ,
-                                                                          z \in Im(m(x))
-        '''
-        mu1_list, mu2_list, z_list = [], [], []
-        for k in range(self.dim):
-            z = self.eigenvectors[:,k]
-            if z[-1] == 1.0 and np.abs(self.eigenvalues[k]) != np.inf:
-                mu2 = 0.5 * const * (z.T @ self._B @ z)
-                mu1 = self.eigenvalues[k] * mu2
-
-                mu1_list.append( mu1 )
-                mu2_list.append( mu2 )
-                z_list.append( z.tolist() )
-
-        return np.array(mu1_list), np.array(mu2_list), np.array( z_list ).T
-
-    def __str__(self):
-        '''
-        Print the given pencil.
-        '''
-        np.set_printoptions(precision=3, suppress=True)
-        ret_str = '{}'.format(type(self).__name__) + " = \u03BB A - B \n"
-        ret_str = ret_str + 'A = ' + self._A.__str__() + '\n'
-        ret_str = ret_str + 'B = ' + self._B.__str__()
-        return ret_str
-
-class LinearMatrixPencil():
-    '''
-    Class for regular linear matrix pencils of the form P(λ) = λ A - B or P(l1,l2) = l1 A - l2 B : λ = l1/l2
-    '''
-    def __init__(self, A, B, **kwargs):
-        self._shapeA = None
-        self._shapeB = None
-        self.set_pencil(A=A, B=B)
-        self._lambda = 0.0
-        if "parameter" in kwargs.keys():
-            self._lambda = kwargs["parameter"]
-
-    def set_pencil(self, **kwargs):
-        '''
-        Sets pencil attributes and computes pencil spectra
-        '''
-        for key in kwargs.keys():
-            aux_key = key.lower()
-            if aux_key == "a":
-                self._A = kwargs[key]
-                self._shapeA = self._A.shape
-                continue
-            if aux_key == "b":
-                self._B = kwargs[key]
-                self._shapeB = self._B.shape
-                continue
+        # Compute the pencil eigenvectors
+        self.eigenvectors = []
         
-        if self._shapeA != self._shapeB:
-            raise Exception("Matrix dimensions are not equal.")
-        if (self._shapeA[0] != self._shapeA[1]) or (self._shapeB[0] != self._shapeB[1]):
-            raise Exception("Matrices are not square.")
-        self.dim = self._shapeA[0]
+        for alpha, beta in zip(self.alpha, self.beta):
+            Qs = null_space( self(alpha, beta) )
+            self.eigenvectors.append( {"eigenvalue": (alpha, beta), "eigenvectors": Qs} )
 
-        self.compute_eig()
+    def qfunction(self, H: list | np.ndarray, w: list | np.ndarray):
+        '''
+        Computes the numerator and denominator numpy polynomials n(λ), d(λ) 
+        of the q-function q(λ) = n(λ)/d(λ), where:
+        - P(λ) v(λ) = w, 
+        - q(λ) = v(λ).T @ Hh v(λ).
 
-    def value(self, lambda_param):
+        Inputs: - matrices M, N from linear matrix pencil P(λ) = λ M - N
+                - matrix Hh from q(λ) = v(λ).T @ Hh v(λ)
+                - vector w from P(λ) v(λ) = w
+        '''
+        if isinstance(H, list): H = np.array(H)
+        if isinstance(w, list): w = np.array(w)
+
+        # Validate passed parameters.
+        if H.shape != (self.dim, self.dim):
+            raise TypeError("H must have the same dimension as the pencil matrices.")
+        
+        n = self.M.shape[0]
+        if len(w) != n:
+            raise TypeError("Vector w must have the same dimensions as the pencil λ M - N.")
+
+        ''' -------------------- Computes the block dimensions, poles and adjoints (TO BE USED later) ------------------------- '''
+        blk_dims, blk_poles, blk_adjs = [], [], []
+        for i in range(n):
+
+            # 2X2 BLOCKS OF COMPLEX CONJUGATE PENCIL EIGENVALUES
+            if i < n-1 and self.MM[i+1,i] != 0.0:
+                blk_dims.append(2)
+
+                MMblock = self.MM[i:i+2,i:i+2]
+                NNblock = self.NN[i:i+2,i:i+2]
+
+                a = np.linalg.det(MMblock)
+                b = MMblock[0,0] * NNblock[1,1] + NNblock[0,0] * MMblock[1,1]
+                c = np.linalg.det(NNblock)
+                blk_poles.append( Poly([ c, b, a ]) )
+
+                adj11 = Poly([ -NNblock[1,1],  MMblock[1,1] ])
+                adj12 = Poly([           0.0, -MMblock[0,1] ])
+                adj21 = Poly([           0.0, -MMblock[1,0] ])
+                adj22 = Poly([ -NNblock[0,0],  MMblock[0,0] ])
+                blk_adjs.append( np.array([[ adj11, adj12 ],[ adj21, adj22 ]]) )
+
+            # 1X1 BLOCKS OF REAL PENCIL EIGENVALUES
+            else:
+                blk_dims.append(1)
+
+                MMblock = self.MM[i,i]
+                NNblock = self.NN[i,i]
+
+                blk_poles.append( Poly([ -NNblock, MMblock ]) )
+                blk_adjs.append( np.array([Poly(1.0)]) )
+        
+        ''' -------------------------- Computes the adjoint matrix --------------------------------- '''
+
+        num_blks = len(blk_dims)
+        adjoint = np.array([[ Poly([0.0]) for _ in range(n) ] for _ in range(n) ])
+        for i in range(num_blks-1, -1, -1):
+            blk_i_slice = slice( i*blk_dims[i], (i+1)*blk_dims[i] )
+
+            for j in range(i, num_blks):
+                blk_j_slice = slice( j*blk_dims[j], (j+1)*blk_dims[j] )
+
+                # Computes ADJOINT DIAGONAL BLOCKS
+                if j == i:
+                    poles_ij = np.array([[ np.prod([ pole for k, pole in enumerate(blk_poles) if k != i ]) ]])
+                    Lij = poles_ij * blk_adjs[j]
+
+                # Computes ADJOINT UPPER TRIANGULAR BLOCKS
+                else:
+                    Tii = self.MM[ blk_i_slice, blk_i_slice ]
+                    Sii = self.NN[ blk_i_slice, blk_i_slice ]
+
+                    b_poly = np.array([[ Poly([0.0]) for _ in range(blk_dims[j]) ] for _ in range(blk_dims[i]) ])
+                    for k in range(i+1, j+1):
+                        blk_k_slice = slice( k*blk_dims[k], (k+1)*blk_dims[k] )
+
+                        # Compute polynomial (λ Tik - Sik) and get the kj slice of adjoint
+                        Tik = self.MM[ blk_i_slice, blk_k_slice ]
+                        Sik = self. NN[ blk_i_slice, blk_k_slice ]
+                        poly_ik = np.array([[ Poly([ -Sik[a,b], Tik[a,b] ]) for b in range(Tik.shape[1]) ] for a in range(Tik.shape[0]) ])
+
+                        adjoint_kj = adjoint[ blk_k_slice, blk_j_slice ]
+
+                        b_poly -= poly_ik @ adjoint_kj
+
+                    Lij = solve_poly_linearsys( Tii, Sii, b_poly )
+
+                # Populate adjoint matrix
+                adjoint[ blk_i_slice, blk_j_slice ] = Lij
+
+        ''' ---------------- Computes q-function numerator and denominator polynomials ------------------ '''
+        Zinv = np.linalg.inv(self.Z)
+        barHh = Zinv @ H @ (Zinv.T)
+        barw = np.linalg.inv(self.Q) @ w
+
+        self.n_poly = ( barw.T @ adjoint.T @ barHh @ adjoint @ barw )
+
+        poles = np.prod([ pole for pole in blk_poles ])
+        self.d_poly = poles**2
+
+        # Trim coefficients
+        for k, c in enumerate(self.n_poly.coef):
+            if np.abs(c) < 1e-12: 
+                self.n_poly.coef[k] = 0.0
+
+        for k, c in enumerate(self.d_poly.coef):
+            if np.abs(c) < 1e-12: 
+                self.d_poly.coef[k] = 0.0
+
+        self.computed_from = {"H": H, "w": w}
+
+    def get_qfunction(self):
+        '''
+        Returns the numerator and denominator polynomials n(λ) and d(λ) 
+        of the q-function, if already computed.
+        '''
+
+        if not hasattr(self, "n_poly") or not hasattr(self, "d_poly"):
+            raise Exception("Q-function was not yet computed.")
+
+        return self.n_poly, self.d_poly
+
+    def equilibria(self):
+        ''' 
+        Assuming the q-function was already computed, 
+        boundary equilibrium solutions can be computed from 
+        the q-function by solving q(λ) = n(λ)/d(λ) = 1, or the roots of n(λ) - d(λ).
+
+        Returns: a list of dictionaries with all boundary equilibrium solutions 
+        and their stability numbers (if dim == 2, otherwise stability is None).
+        '''
+        if not hasattr(self, "n_poly") or not hasattr(self, "d_poly"):
+            raise Exception("Q-function was not yet computed.")
+
+        H = self.computed_from["H"]
+        w = self.computed_from["w"]
+
+        zeros = (self.n_poly - self.d_poly).roots()
+        real_zeros = np.array([ z.real for z in zeros if np.abs(z.imag) < 1e-12 ])
+        real_zeros.sort()
+
+        sols = [ {"lambda": z} for z in real_zeros ]
+        for sol in sols:
+            if self.dim == 2:
+                l = sol["lambda"]
+                P = self(l)
+                v = np.linalg.inv(P) @ w
+                grad_h = H @ v
+                perp = np.array([ grad_h[1], -grad_h[0] ])
+                sol["stability"] = perp.T @ P @ perp
+            else:
+                sol["stability"] = None
+
+        return sols
+
+    def plot_qfunction(self, ax, res=0.1, q_limits=(0, 100)):
+        ''' Plot q(λ) at axes ax.'''
+
+        q_min, q_max = q_limits[0], q_limits[1]
+
+        # Get real eigenvalues
+        real_eigs = []
+        for eig in self.eigenvalues:
+            if np.abs(eig.imag) < 1e-10:
+                real_eigs.append(eig.real)
+        real_eigs = np.array(real_eigs)
+        real_eigs.sort()
+
+        equilibria = []
+        sols = self.equilibria()
+        for sol in sols:
+            equilibria.append(sol["lambda"])
+
+        factor = 1.5
+        if equilibria:
+            l_min, l_max = factor*min(equilibria), factor*max(equilibria)
+        else:
+            l_min, l_max = 0.0, 1000
+
+        lambdas = np.arange(l_min, l_max, res)
+
+        # Plot real eigenvalues
+        for eig in real_eigs:
+            ax.plot( [ eig for _ in lambdas ], np.linspace(q_min, q_max, len(lambdas)), 'b--' )
+
+        # Plot the solution line
+        ax.plot( lambdas, [ 1.0 for l in lambdas ], 'r--' )
+
+        # Plot q-function
+        q_array = [ self.n_poly(l) / self.d_poly(l) for l in lambdas ]
+        ax.plot( lambdas, q_array, label='q' )
+
+        # Plots boundary equilibrium solutions
+        for sol in sols:
+            if sol["stability"] > 0: ax.plot( sol["lambda"], 1.0, 'bo' ) # stable solutions
+            if sol["stability"] < 0: ax.plot( sol["lambda"], 1.0, 'ro' ) # unstable solutions
+
+        ax.set_xlim(l_min, l_max) 
+        ax.set_ylim(q_min, q_max)
+        ax.legend()
+
+    def __call__(self, l: int | float, beta: int | float = 1.0) -> np.ndarray:
         '''
         Returns pencil value.
+        If only one argument is passed, it is interpreted as the λ value and method returns matrix P(λ) = λ M - N.
+        If two arguments are passed, they are interpreted as α, β values and method returns P(α, β) = α M - β N.
         '''
-        return self.value_double( lambda_param, 1.0 )
+        return l * self.M  - beta * self.N
 
-    def value_double(self, lambda1_param, lambda2_param):
+    def __str__(self) -> str:
         '''
-        Returns pencil value.
-        '''
-        return lambda1_param * self._A - lambda2_param * self._B
-
-    def compute_eig(self):
-        '''
-        This method solves the generalized eigenvalue problem for matrices A,B
-        '''
-        # Schur decomposition of A and B
-        schurA, schurB, _, _, Q, Z = scipy.linalg.ordqz( self._A, self._B )
-
-        # Compute the corresponding pencil eigenvalues from the Schur decomposition
-        lambda1, lambda2, pencil_eigs = [], [], []
-        k = 0
-        while k <= self.dim-1:
-            
-            if k == self.dim-1:
-                lambda1.append(schurB[k,k])
-                lambda2.append(schurA[k,k])
-                pencil_eigs.append(schurB[k,k]/schurA[k,k])
-                k+=1
-                continue
-
-            if schurA[k+1,k] != 0:
-                # Hessenberg block - compute the double roots directly
-                blockA = schurA[k:k+2,k:k+2]
-                blockB = schurB[k:k+2,k:k+2]
-
-                polynomial = poly.polysub( poly.polymul([-blockB[0,0], blockA[0,0] ], [-blockB[1,1], blockA[1,1] ]), [0.0, 0.0, blockA[1,0]*blockA[0,1] ] )
-                block_eigs = poly.polyroots(polynomial).tolist()
-                pencil_eigs += block_eigs
-                # lambda1 += [ None, None ]
-                # lambda2 += [ None, None ]
-                lambda1 += [ block_eigs[0], block_eigs[1] ]
-                lambda2 += [ 1.0, 1.0 ]
-                k+=2
-            else:
-                lambda1.append(schurB[k,k])
-                lambda2.append(schurA[k,k])
-                pencil_eigs.append(schurB[k,k]/schurA[k,k])
-                k+=1
-
-        # Finds sorting order
-        # sorted_args = np.argsort(pencil_eigs)
-
-        # Compute the corresponding pencil eigenvectors
-        pencil_eigenvectors, zQzs = [], []
-        for k in range(len(pencil_eigs)):
-
-            P = self.value_double(lambda1[k], lambda2[k])   # more accurate
-            # if np.linalg.det(P) > 1e-8:
-            #     P = self.value(pencil_eigs[k])
-
-            N = null_space(P)
-            n = N[:,0]
-
-            if np.isreal(n.T @ self._A @ n) and n.T @ self._A @ n > 1e-10:
-                n = n.real
-                normalization_const = 1.0 / np.sqrt(n.T @ self._A @ n)
-                if n[0] < 0:
-                    n = -n
-                pencil_eigenvectors.append( normalization_const * n )
-            else:
-                pencil_eigenvectors.append(n)
-            zQzs.append(pencil_eigenvectors[-1].T @ self._A @ pencil_eigenvectors[-1] )
-        
-        # Assumption: B is invertible => detB != 0
-        # detB = np.linalg.det(self._B)
-        # if detB == 0:
-        #     raise Exception("B is rank deficient.")
-
-        # Computes the pencil characteristic polynomial and denominator of f(\lambda)
-        # pencil_det = np.real(np.prod(pencil_eigs))
-        # self.characteristic_poly = ( detB/pencil_det ) * np.real(np.polynomial.polynomial.polyfromroots(pencil_eigs))
-
-        # Sorts eigenpairs
-        self.lambda1 = lambda1
-        self.lambda2 = lambda2
-        self.eigenvalues = pencil_eigs
-        self.eigenvectors = pencil_eigenvectors
-        self.zQzs = zQzs
-
-    def __str__(self):
-        '''
-        Print the given pencil.
+        Print the pencil P(λ) = λ M - N.
         '''
         np.set_printoptions(precision=3, suppress=True)
-        ret_str = '{}'.format(type(self).__name__) + " = {:.3f}".format(self._lambda) + ' A - B \n'
-        ret_str = ret_str + 'A = ' + self._A.__str__() + '\n'
-        ret_str = ret_str + 'B = ' + self._B.__str__()
+        ret_str = '{}'.format(type(self).__name__) + " = \u03BB M - N \n"
+        ret_str = ret_str + 'M = ' + self.M.__str__() + '\n'
+        ret_str = ret_str + 'N = ' + self.N.__str__()
         return ret_str
 
 class CLFCBFPair():

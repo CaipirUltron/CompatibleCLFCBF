@@ -8,7 +8,6 @@ from scipy.optimize import root, minimize, least_squares
 from scipy.linalg import null_space
 
 from common import *
-from controllers.compatibility import LinearMatrixPencil2
 
 ZERO_ACCURACY = 1e-9
 
@@ -889,161 +888,6 @@ def find_nearest_boundary(cbf, initial_point):
         print(sol.message)
         return initial_point
 
-def solve_PEP(Q, P, **kwargs):
-    '''
-    Solves the eigenproblem of the type: (\lambda * Q - \kappa * C - P) @ z = 0, z.T @ Q @ z = z.T @ C @ z = 1.0, \lambda > 0.
-    where P and Q are ( n x n ) p.s.d. matrices and C is a nilpotent matrix.
-
-    Returns: \lambda:   n-array, repeated according to its multiplicity
-             \kappa:    n-array, repeated according to its multiplicity
-             Z:         (n x n)-array, each column corresponding to the corresponding eigenvector z
-    '''
-    if np.shape(Q) != np.shape(P):
-        raise Exception("Matrix shapes are not compatible with given initial value.")
-
-    matrix_shapes = np.shape(Q)
-    if matrix_shapes[0] != matrix_shapes[1]:
-        raise Exception("Matrices are not square.")
-
-    dim = matrix_shapes[0]
-
-    C = np.zeros(matrix_shapes)
-    C[-1,-1] = 1
-
-    max_iter = 10000
-    for key in kwargs.keys():
-        aux_key = key.lower()
-        if aux_key == "initial_lines":
-            initial_lines = kwargs[key]
-            continue
-        if aux_key == "initial_points":
-            initial_points = kwargs[key]
-            continue
-        if aux_key == "max_iter":
-            max_iter = kwargs[key]
-            continue
-
-    def compute_L(lambda_p, kappa_p):
-        return lambda_p * Q - kappa_p * C - P
-
-    def compute_det_gradient(lambda_p, kappa_p):
-        L = compute_L(lambda_p, kappa_p)
-        grad_det_kappa = -np.linalg.det(L)*np.trace( np.linalg.inv(L)*C )
-        grad_det_lambda = np.linalg.det(L)*np.trace( np.linalg.inv(L)*Q )
-        return np.array([grad_det_kappa, grad_det_lambda])
-
-    def compute_det(solution):
-        L = solution[1] * Q - solution[0] * C - P
-        return np.linalg.det(L)**2
-
-    def compute_F(solution):
-        '''
-        This inner method computes the vector field F(lambda, kappa, z) and returns its value.
-        '''
-        lambda_p, kappa_p, z = solution[0], solution[1], solution[2:]
-        n = len(z)
-        F = np.zeros(n+3)
-        L = compute_L(lambda_p, kappa_p)
-        F[0:n] = L @ z
-        F[n] = 0.5 - 0.5 * z @ C @ z
-        F[n+1] = 0.5 * z @ Q @ z - 0.5
-        F[n+2] = compute_det([kappa_p, lambda_p])
-        return F
-
-    def compute_Jac(solution):
-        '''
-        This inner method computes the vector field F(lambda, kappa, z) and returns its value.
-        '''
-        lambda_p, kappa_p, z = solution[0], solution[1], solution[2:]
-        n = len(z)
-        L = compute_L(lambda_p, kappa_p)
-        Jac1 = np.vstack( [ (Q @ z).reshape(n,1), 0, 0 ] )
-        Jac2 = np.vstack( [ -(C @ z).reshape(n,1), 0, 0 ] )
-        Jac3 = np.vstack( [ L, -(C @ z).reshape(1,n), (Q @ z).reshape(1,n) ] )
-        Jac = np.hstack([ Jac1, Jac2, Jac3 ])
-        return Jac
-
-    init_lambdas = np.random.rand()
-    init_kappas = np.random.rand()
-    init_zs = np.random.rand(dim)
-
-    # Initial guess using line-based projection
-    if 'initial_lines' in locals():
-        init_kappas = np.array([], dtype=float)
-        init_lambdas = np.array([], dtype=float)
-        init_zs = np.array([], dtype=float).reshape(dim,0)
-
-        for line in initial_lines:
-            m = line["angular_coef"]
-            p = line["linear_coef"]
-
-            pencil = LinearMatrixPencil2( -m*Q + C, p*Q - P )
-            kappas = pencil.eigenvalues
-            # Remove infinite eigenvalues
-            index_inf, = np.where(np.abs(kappas) == np.inf)
-            kappas = np.delete(kappas, index_inf)
-
-            lambdas = m * kappas + p
-            Z = pencil.eigenvectors
-            Z = np.delete(Z, index_inf, axis=1)
-
-            init_kappas = np.hstack([init_kappas, kappas])
-            init_lambdas = np.hstack([init_lambdas, lambdas])
-            init_zs = np.hstack([init_zs, Z])
-
-    # Initial guess using points in the kappa x lambda plane and random initial eigenvectors
-    if 'initial_points' in locals():
-        num_points = initial_points.shape[1]
-        # init_kappas = np.array([], dtype=float)
-        # init_lambdas = np.array([], dtype=float)
-        # init_zs = np.array([], dtype=float).reshape(dim,0)
-        # for pt in initial_points.T:
-        #     res = minimize(compute_det, pt)
-        #     solution = res.x
-        #     init_kappas = np.hstack([init_kappas, solution[0]])
-        #     init_lambdas = np.hstack([init_lambdas, solution[1]])
-
-        #     L = compute_L(solution[1],solution[0])
-        #     eigens, eigenvecs = np.linalg.eig(L)
-        #     z = eigenvecs[np.where( np.abs(eigens) < ZERO_ACCURACY )]
-        #     init_zs = np.hstack([init_zs, z.reshape(dim,1)])
-
-        init_kappas = initial_points[0,:]
-        init_lambdas = initial_points[1,:]
-        init_zs = np.random.rand(dim, num_points)
-
-    init_guesses = np.vstack([ init_lambdas, init_kappas, init_zs ])
-
-    # Main loop ---------------------------------------------------------------------------------
-    num_points = len(init_lambdas)
-    lambdas = np.zeros(num_points)
-    kappas = np.zeros(num_points)
-    Z = np.zeros([matrix_shapes[0], num_points])
-    for k in range(num_points):
-        # solution = fsolve(compute_F, init_guesses[:,k], maxfev = max_iter, factor = 0.1)
-        # solution = fsolve(compute_F, init_guesses[:,k], fprime = compute_Jac, maxfev = max_iter, factor = 0.1)
-        solution = root(compute_F, init_guesses[:,k], method='lm')
-
-        lambdas[k] = solution.x[0]
-        kappas[k] = solution.x[1]
-        Z[:,k] = solution.x[2:]
-
-    # Filter bad points -------------------------------------------------------------------------
-    index_to_be_deleted = []
-    for k in range(num_points):
-        L = (lambdas[k] * Q - kappas[k] * C - P)
-        z = Z[:,k]
-        if z[-1] < 0:
-            Z[:,k] = -Z[:,k]
-        if np.linalg.norm(L @ z) > ZERO_ACCURACY or np.abs( z @ C @ z - 1 ) > ZERO_ACCURACY or np.abs( z @ Q @ z - 1 ) > ZERO_ACCURACY or lambdas[k] <= 0:
-            index_to_be_deleted.append(k)
-
-    lambdas = np.delete(lambdas, index_to_be_deleted)
-    kappas = np.delete(kappas, index_to_be_deleted)
-    Z = np.delete(Z, index_to_be_deleted, axis = 1)
-
-    return lambdas, kappas, Z, init_kappas, init_lambdas
-
 def check_invariant(x, plant, clf, cbf, params, **kwargs):
     '''
     Given a state-space point, checks if it's inside the invariant manifold.
@@ -1255,6 +1099,160 @@ def optimize_branch(plant, clf, cbf, params, **kwargs):
     return min_sol, max_sol
 
 # --------------------------------------------------------------- DEPRECATED CODE ----------------------------------------------------------
+# def solve_PEP(Q, P, **kwargs):
+#     '''
+#     Solves the eigenproblem of the type: (\lambda * Q - \kappa * C - P) @ z = 0, z.T @ Q @ z = z.T @ C @ z = 1.0, \lambda > 0.
+#     where P and Q are ( n x n ) p.s.d. matrices and C is a nilpotent matrix.
+
+#     Returns: \lambda:   n-array, repeated according to its multiplicity
+#              \kappa:    n-array, repeated according to its multiplicity
+#              Z:         (n x n)-array, each column corresponding to the corresponding eigenvector z
+#     '''
+#     if np.shape(Q) != np.shape(P):
+#         raise Exception("Matrix shapes are not compatible with given initial value.")
+
+#     matrix_shapes = np.shape(Q)
+#     if matrix_shapes[0] != matrix_shapes[1]:
+#         raise Exception("Matrices are not square.")
+
+#     dim = matrix_shapes[0]
+
+#     C = np.zeros(matrix_shapes)
+#     C[-1,-1] = 1
+
+#     max_iter = 10000
+#     for key in kwargs.keys():
+#         aux_key = key.lower()
+#         if aux_key == "initial_lines":
+#             initial_lines = kwargs[key]
+#             continue
+#         if aux_key == "initial_points":
+#             initial_points = kwargs[key]
+#             continue
+#         if aux_key == "max_iter":
+#             max_iter = kwargs[key]
+#             continue
+
+#     def compute_L(lambda_p, kappa_p):
+#         return lambda_p * Q - kappa_p * C - P
+
+#     def compute_det_gradient(lambda_p, kappa_p):
+#         L = compute_L(lambda_p, kappa_p)
+#         grad_det_kappa = -np.linalg.det(L)*np.trace( np.linalg.inv(L)*C )
+#         grad_det_lambda = np.linalg.det(L)*np.trace( np.linalg.inv(L)*Q )
+#         return np.array([grad_det_kappa, grad_det_lambda])
+
+#     def compute_det(solution):
+#         L = solution[1] * Q - solution[0] * C - P
+#         return np.linalg.det(L)**2
+
+#     def compute_F(solution):
+#         '''
+#         This inner method computes the vector field F(lambda, kappa, z) and returns its value.
+#         '''
+#         lambda_p, kappa_p, z = solution[0], solution[1], solution[2:]
+#         n = len(z)
+#         F = np.zeros(n+3)
+#         L = compute_L(lambda_p, kappa_p)
+#         F[0:n] = L @ z
+#         F[n] = 0.5 - 0.5 * z @ C @ z
+#         F[n+1] = 0.5 * z @ Q @ z - 0.5
+#         F[n+2] = compute_det([kappa_p, lambda_p])
+#         return F
+
+#     def compute_Jac(solution):
+#         '''
+#         This inner method computes the vector field F(lambda, kappa, z) and returns its value.
+#         '''
+#         lambda_p, kappa_p, z = solution[0], solution[1], solution[2:]
+#         n = len(z)
+#         L = compute_L(lambda_p, kappa_p)
+#         Jac1 = np.vstack( [ (Q @ z).reshape(n,1), 0, 0 ] )
+#         Jac2 = np.vstack( [ -(C @ z).reshape(n,1), 0, 0 ] )
+#         Jac3 = np.vstack( [ L, -(C @ z).reshape(1,n), (Q @ z).reshape(1,n) ] )
+#         Jac = np.hstack([ Jac1, Jac2, Jac3 ])
+#         return Jac
+
+#     init_lambdas = np.random.rand()
+#     init_kappas = np.random.rand()
+#     init_zs = np.random.rand(dim)
+
+#     # Initial guess using line-based projection
+#     if 'initial_lines' in locals():
+#         init_kappas = np.array([], dtype=float)
+#         init_lambdas = np.array([], dtype=float)
+#         init_zs = np.array([], dtype=float).reshape(dim,0)
+
+#         for line in initial_lines:
+#             m = line["angular_coef"]
+#             p = line["linear_coef"]
+
+#             pencil = LinearMatrixPencil2( -m*Q + C, p*Q - P )
+#             kappas = pencil.eigenvalues
+#             # Remove infinite eigenvalues
+#             index_inf, = np.where(np.abs(kappas) == np.inf)
+#             kappas = np.delete(kappas, index_inf)
+
+#             lambdas = m * kappas + p
+#             Z = pencil.eigenvectors
+#             Z = np.delete(Z, index_inf, axis=1)
+
+#             init_kappas = np.hstack([init_kappas, kappas])
+#             init_lambdas = np.hstack([init_lambdas, lambdas])
+#             init_zs = np.hstack([init_zs, Z])
+
+#     # Initial guess using points in the kappa x lambda plane and random initial eigenvectors
+#     if 'initial_points' in locals():
+#         num_points = initial_points.shape[1]
+#         # init_kappas = np.array([], dtype=float)
+#         # init_lambdas = np.array([], dtype=float)
+#         # init_zs = np.array([], dtype=float).reshape(dim,0)
+#         # for pt in initial_points.T:
+#         #     res = minimize(compute_det, pt)
+#         #     solution = res.x
+#         #     init_kappas = np.hstack([init_kappas, solution[0]])
+#         #     init_lambdas = np.hstack([init_lambdas, solution[1]])
+
+#         #     L = compute_L(solution[1],solution[0])
+#         #     eigens, eigenvecs = np.linalg.eig(L)
+#         #     z = eigenvecs[np.where( np.abs(eigens) < ZERO_ACCURACY )]
+#         #     init_zs = np.hstack([init_zs, z.reshape(dim,1)])
+
+#         init_kappas = initial_points[0,:]
+#         init_lambdas = initial_points[1,:]
+#         init_zs = np.random.rand(dim, num_points)
+
+#     init_guesses = np.vstack([ init_lambdas, init_kappas, init_zs ])
+
+#     # Main loop ---------------------------------------------------------------------------------
+#     num_points = len(init_lambdas)
+#     lambdas = np.zeros(num_points)
+#     kappas = np.zeros(num_points)
+#     Z = np.zeros([matrix_shapes[0], num_points])
+#     for k in range(num_points):
+#         # solution = fsolve(compute_F, init_guesses[:,k], maxfev = max_iter, factor = 0.1)
+#         # solution = fsolve(compute_F, init_guesses[:,k], fprime = compute_Jac, maxfev = max_iter, factor = 0.1)
+#         solution = root(compute_F, init_guesses[:,k], method='lm')
+
+#         lambdas[k] = solution.x[0]
+#         kappas[k] = solution.x[1]
+#         Z[:,k] = solution.x[2:]
+
+#     # Filter bad points -------------------------------------------------------------------------
+#     index_to_be_deleted = []
+#     for k in range(num_points):
+#         L = (lambdas[k] * Q - kappas[k] * C - P)
+#         z = Z[:,k]
+#         if z[-1] < 0:
+#             Z[:,k] = -Z[:,k]
+#         if np.linalg.norm(L @ z) > ZERO_ACCURACY or np.abs( z @ C @ z - 1 ) > ZERO_ACCURACY or np.abs( z @ Q @ z - 1 ) > ZERO_ACCURACY or lambdas[k] <= 0:
+#             index_to_be_deleted.append(k)
+
+#     lambdas = np.delete(lambdas, index_to_be_deleted)
+#     kappas = np.delete(kappas, index_to_be_deleted)
+#     Z = np.delete(Z, index_to_be_deleted, axis = 1)
+
+#     return lambdas, kappas, Z, init_kappas, init_lambdas
 
 def compute_null(plant, clf, cbf, x, KKT):
     '''

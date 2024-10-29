@@ -38,18 +38,18 @@ c = np.random.randn(n)
 
 ''' ---------------------- Find general solutions of ( l A - B ) z = c ---------------- '''
 
-# max_order = 100
-# for deg in range(0, max_order):
+max_order = 100
+for deg in range(0, max_order):
 
-#     N = np.zeros([ (deg+2)*n, (deg+1)*p ])
-#     for i in range(deg+1):
-#         N[ i*n:(i+1)*n , i*p:(i+1)*p ] = - B
-#         N[ (i+1)*n:(i+2)*n , i*p:(i+1)*p ] = + A
+    N = np.zeros([ (deg+2)*n, (deg+1)*p ])
+    for i in range(deg+1):
+        N[ i*n:(i+1)*n , i*p:(i+1)*p ] = - B
+        N[ (i+1)*n:(i+2)*n , i*p:(i+1)*p ] = + A
 
-#     Null = sp.linalg.null_space(N)
+    Null = sp.linalg.null_space(N)
 
-#     if Null.size != 0:
-#         break
+    if Null.size != 0:
+        break
 
 # print(f"nullspace polynomial degree = {deg}")
 # print(f"N shape = {N.shape}")
