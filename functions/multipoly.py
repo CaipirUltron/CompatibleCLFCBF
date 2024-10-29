@@ -924,70 +924,6 @@ class MultiPoly(Function):
         except IOError:
             print("Couldn't save polynomial." + IOError)
 
-    # def generate_contour(self, limits=(-1,+1,-1,+1), spacing=0.1):
-    #     '''
-    #     Create contour generator object for the given function.
-    #     Parameters: limits (2x2 array) - min/max limits for x,y coords
-    #                 spacing - grid spacing for contour generation
-    #     '''        
-    #     if self.n != 2:
-    #         logging.warning("Contour plot can only be used for 2D functions.")
-    #         self.contour = None
-    #         return
-
-    #     x_min, x_max, y_min, y_max = limits
-    #     x = np.arange(x_min, x_max, spacing)
-    #     y = np.arange(y_min, y_max, spacing)
-    #     xg, yg = np.meshgrid(x,y)
-        
-    #     fvalues = np.zeros(xg.shape)
-    #     for i,j in itertools.product(range(xg.shape[0]), range(xg.shape[1])):
-    #         pt = np.array([xg[i,j], yg[i,j]])
-    #         fvalues[i,j] = self(pt)
-        
-    #     self.contour = ctp.contour_generator(x=xg, y=yg, z=fvalues )
-
-    # def get_levels(self, levels=[0.0] ) -> list:
-    #     '''
-    #     Generates function level sets from the contour generator object
-    #     '''
-    #     if self.contour is None:
-    #         raise NotImplementedError("No 2D contour exists for the Polynomial.")
-
-    #     level_contours = []
-    #     for lvl in levels:
-    #         line = self.contour.lines(lvl)
-    #         level_contours.append(line)
-    #     return level_contours
-
-    # def plot_levels(self, ax=plt, levels=[0.0], **kwargs):
-    #     '''
-    #     Plots function level sets at the input axis ax. 
-    #     Additional args may be passed for color and linestyle 
-    #     '''
-    #     color = mcolors.BASE_COLORS["k"]
-    #     linestyle = "solid"
-    #     alpha = 1.0
-
-    #     for key in kwargs.keys():
-    #         key = key.lower()
-    #         if key == "color":
-    #             color = kwargs["color"]
-    #             continue
-    #         if key == "linestyle":
-    #             linestyle = kwargs["linestyle"]
-    #             continue
-    #         if key == "alpha":
-    #             alpha = kwargs["alpha"]
-    #             continue
-
-    #     collections = []
-    #     for level in self.get_levels(levels):
-    #         for segment in level:
-    #             line2D = ax.plot( segment[:,0], segment[:,1], color=color, linestyle=linestyle, alpha=alpha )
-    #             collections.append(line2D[0])
-    #     return collections
-
     @property
     def T(self):
         ''' Transpose operation, defined for array-like coefficients '''
@@ -1066,3 +1002,14 @@ class MultiPoly(Function):
     @classmethod
     def ones(cls, **kwargs):
         return MultiPoly.constant(const=1.0, **kwargs)
+    
+    @classmethod
+    def from_nppoly(cls, poly: np.polynomial.Polynomial):
+        ''' Converts a numpy polynomial into a Multipoly '''
+
+        kernel, coeffs = [], []
+        for k, c in enumerate(poly.coef):
+            kernel.append( tuple([k]) )
+            coeffs.append(c)
+
+        return cls(kernel, coeffs)

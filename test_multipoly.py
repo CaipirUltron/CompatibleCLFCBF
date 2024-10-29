@@ -2,11 +2,12 @@ import operator
 import numpy as np
 import sympy as sym
 
+from numpy.polynomial import Polynomial as npPoly
 from numpy.polynomial.polynomial import polyint, polyder
 
 from common import generate_monomials, rot2D, kernel_quadratic
-from functions import MultiPoly as Poly
-from functions import Poly as Poly2
+from functions import MultiPoly
+from functions import Poly as myPoly
 from functions import Kernel, KernelQuadratic, KernelLyapunov, KernelBarrier
 
 # ------------------------------------ Define kernel -----------------------------------
@@ -26,8 +27,8 @@ elif data_type == "matrix": args = [2,2]
 coeffs1 = [ np.random.randn(*args) for _ in range(p) ]
 coeffs2 = [ np.random.randn(*args) for _ in range(p) ]
 
-p1 = Poly(kernel=powers, coeffs=coeffs1)
-p2 = Poly(kernel=powers, coeffs=coeffs2)
+p1 = MultiPoly(kernel=powers, coeffs=coeffs1)
+p2 = MultiPoly(kernel=powers, coeffs=coeffs2)
 
 print(f"p1 = {p1}")
 print(f"p2 = {p2}")
@@ -42,7 +43,7 @@ p1.filter()
 print(f"p1 after filtering = \n")
 print(p1)
 
-zero_poly = Poly.zeros(kernel=powers)
+zero_poly = MultiPoly.zeros(kernel=powers)
 print(f"Zero polynomial = \n{zero_poly}")
 
 p1.poly_diff()
@@ -118,7 +119,7 @@ if data_type == 'vector':
     print(f"Total error in composition operation: {comp_error}\n")
     print(f"Total error in rigid-body transformation: {rigid_error}\n")
 
-    poly_outer = Poly.outer( p1, p2 )
+    poly_outer = MultiPoly.outer( p1, p2 )
     print(poly_outer)
 
 if data_type == "scalar":
@@ -130,8 +131,8 @@ if data_type == "scalar":
     print(f"gradient = {p1._poly_grad}")
     print(f"hessian = {p1._poly_hess}")
 
-    gamma = Poly2([0.0, 1.0])
-    intgamma = Poly2( polyint(gamma.coef) )
+    gamma = myPoly([0.0, 1.0])
+    intgamma = myPoly( polyint(gamma.coef) )
 
     newp = gamma(p1)
     print(newp)
@@ -153,6 +154,13 @@ if data_type == "scalar":
         inverse_gamma_error += np.abs( clf_poly(x) - intgamma( V ) )
 
     print(f"Inverse gamma error = {inverse_gamma_error}")
+
+
+p = npPoly([1, 2, 1])
+my_p = MultiPoly.from_nppoly(p)
+
+print(f"Kernel = {my_p.kernel}")
+print(f"Coeffs = {my_p.coeffs}")
 
 # -------------------------------- Run symbolic tests -----------------------------------
 
