@@ -3,10 +3,16 @@ import numpy as np
 import warnings 
 
 from scipy import signal
-from scipy.optimize import fsolve
-from scipy.linalg import null_space
+from scipy.optimize import fsolve, minimize
+from scipy.linalg import null_space, inv
+
 from numpy.polynomial import polynomial as poly
 from numpy.polynomial import Polynomial as Poly
+from numpy.polynomial.polynomial import polydiv, polymul
+
+from common import vector2sym, sym2vector
+from dynamic_systems import DynamicSystem, LinearSystem
+from functions import MultiPoly
 
 ZERO_ACCURACY = 1e-9
 
@@ -54,7 +60,7 @@ def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np
         Asys[ i*blk_size:(i+1)*blk_size , i*blk_size:(i+1)*blk_size ] = -S
         Asys[ (i+1)*blk_size:(i+2)*blk_size , i*blk_size:(i+1)*blk_size ] = T
 
-    results = np.linalg.lstsq(Asys, bsys)
+    results = np.linalg.lstsq(Asys, bsys, rcond=None)
     x_coefs = results[0]
     residue = np.linalg.norm(results[1])
 
@@ -278,9 +284,12 @@ class MatrixPencil():
         self.MM, self.NN, self.beta, self.alpha, self.Q, self.Z = sp.linalg.ordqz(self.M, self.N, output='real')
         self.eigenvalues = self.alpha / self.beta
 
+        # Compute real eigenvalues 
+        self.real_eigenvalues = np.array([ z.real for z in self.eigenvalues if np.abs(z.imag) < 1e-12 ])
+        self.real_eigenvalues.sort()
+
         # Compute the pencil eigenvectors
         self.eigenvectors = []
-        
         for alpha, beta in zip(self.alpha, self.beta):
             Qs = null_space( self(alpha, beta) )
             self.eigenvectors.append( {"eigenvalue": (alpha, beta), "eigenvectors": Qs} )
@@ -319,7 +328,7 @@ class MatrixPencil():
                 NNblock = self.NN[i:i+2,i:i+2]
 
                 a = np.linalg.det(MMblock)
-                b = MMblock[0,0] * NNblock[1,1] + NNblock[0,0] * MMblock[1,1]
+                b = -( MMblock[0,0] * NNblock[1,1] + NNblock[0,0] * MMblock[1,1] )
                 c = np.linalg.det(NNblock)
                 blk_poles.append( Poly([ c, b, a ]) )
 
@@ -383,9 +392,7 @@ class MatrixPencil():
         barw = np.linalg.inv(self.Q) @ w
 
         self.n_poly = ( barw.T @ adjoint.T @ barHh @ adjoint @ barw )
-
-        poles = np.prod([ pole for pole in blk_poles ])
-        self.d_poly = poles**2
+        self.d_poly = np.prod([ pole**2 for pole in blk_poles ])
 
         # Trim coefficients
         for k, c in enumerate(self.n_poly.coef):
@@ -398,12 +405,19 @@ class MatrixPencil():
 
         self.computed_from = {"H": H, "w": w}
 
+    def qfunction_value(self, l: float, H: list | np.ndarray, w: list | np.ndarray):
+        '''
+        Computes the q-function value q(λ) = n(λ)/d(λ) for a given λ (for DEBUG only)
+        '''
+        P = self(l)
+        v = inv(P) @ w
+        return v.T @ H @ v 
+
     def get_qfunction(self):
         '''
         Returns the numerator and denominator polynomials n(λ) and d(λ) 
         of the q-function, if already computed.
         '''
-
         if not hasattr(self, "n_poly") or not hasattr(self, "d_poly"):
             raise Exception("Q-function was not yet computed.")
 
@@ -441,6 +455,103 @@ class MatrixPencil():
                 sol["stability"] = None
 
         return sols
+
+    def compatibilize(self, plant: DynamicSystem, clf_dict: dict, cbf_dict, p = 1.0):
+        '''
+        This method computes a compatible Hessian matrix for the CLF,
+        It recomputes the pencil and its q-function many times.
+
+        clf_dict: - dict containing the function for computing the hessian matrix Hv, its degrees of freedom and its center
+        cbf_dict: - dict containing the CBF hessian matrix Hh and its center
+
+        '''
+        if isinstance(plant, LinearSystem):
+            A, B = plant._A, plant._B
+        else:
+            raise NotImplementedError("Currently, compatibilization is implemented linear systems only.")
+
+        # Stores pencil variables for latter restauration
+        auxM, auxN = self.M, self.N
+        old_n_poly, old_d_poly = self.n_poly, self.d_poly
+        old_computed_from = self.computed_from
+
+        ''' ------------------------------ Compatibilization code ------------------------------ '''
+        Hvfun = clf_dict["Hv_fun"]      # function for computing Hv
+        x0 = clf_dict["center"]         # clf center
+        Hv0 = clf_dict["Hv"]             # initial Hv
+
+        n = self.dim
+        ndof = int(n*(n+1)/2)
+
+        Hh = cbf_dict["Hh"]             # cbf Hessian
+        xi = cbf_dict["center"]         # cbf center
+
+        M = B @ B.T @ Hh
+
+        def cost(var: np.ndarray):
+            '''
+            Objective function
+            '''
+            return np.linalg.norm( Hvfun(var) - Hv0 )
+
+        def psd_constraint(var: np.ndarray):
+            '''
+            Only constraint of the problem, returns the eigenvalues of R matrix.
+            '''
+            N = B @ B.T @ Hvfun(var) - A
+
+            # Recompute pencil with new values
+            self.__init__(M,N)
+
+            # Recompute q-function
+            self.qfunction(H = Hh, w = N @ (xi - x0) )
+            zero_poly = self.n_poly - self.d_poly
+
+            if self.n_poly.trim(tol=1e-3).degree() < self.d_poly.trim(tol=1e-3).degree():
+
+                # NON-SINGULAR CASE
+                zeros = zero_poly.roots()
+                real_zeros = [ z.real for z in zeros if np.abs(z.imag) < 1e-3 ]
+
+                min_zero, max_zero = min(real_zeros), max(real_zeros)
+                real_remainder = - Poly([-min_zero, 1.0]) * Poly([-max_zero, 1.0])
+
+                # The result of the division by the real remainder is the desired-to-be psd polynomial
+                coefs, rem = polydiv(zero_poly.coef, real_remainder.coef)
+                rem_norm = np.linalg.norm(rem)
+                if rem_norm > 1e-3:
+                    warnings.warn(f"Remainder norm is too large = {rem_norm}.")
+
+                psd_poly = MultiPoly.from_nppoly( Poly(coefs.real) )
+            else:
+
+                # SINGULAR CASE
+                psd_poly = zero_poly
+
+            psd_poly.sos_decomposition()
+            eigsR = np.linalg.eigvals( psd_poly.sos_matrix )
+
+            tol = 0.1
+            return np.min(eigsR) - tol
+
+        constr = [ {"type": "ineq", "fun": psd_constraint} ]
+
+        if "Hv" in clf_dict.keys():
+            var0 = sym2vector(Hv0)
+            objective = cost
+        else:
+            var0 = np.random.randn(ndof)
+            objective = lambda var: 0.0
+
+        sol = minimize( objective, var0, constraints=constr, options={"disp": True, "maxiter": 5000} )
+        Hv = Hvfun(sol.x)
+
+        # Restores pencil variables
+        # self.M, self.N = auxM, auxN
+        # self.n_poly, self.d_poly = old_n_poly, old_d_poly
+        # self.computed_from = old_computed_from
+
+        return Hv
 
     def plot_qfunction(self, ax, res=0.1, q_limits=(0, 100)):
         ''' Plot q(λ) at axes ax.'''

@@ -2,6 +2,7 @@ import logging
 import itertools
 import operator
 
+import cvxpy as cvx
 import numpy as np
 import sympy as sym
 import contourpy as ctp
@@ -10,6 +11,7 @@ import matplotlib.colors as mcolors
 
 from copy import deepcopy
 from scipy.optimize import least_squares
+from SumOfSquares import SOSProblem, poly_opt_prob
 
 from common import *
 from functions.basic import Function
@@ -67,13 +69,14 @@ class MultiPoly(Function):
         self._poly_jaco = None
         self._poly_hess = None
 
-        self.SOSkernel = None
-        self.SOSindexes = None
+        self.sos_kernel = None
+        self.sos_indexes = None
+        self.sos_locations = None
 
         # Classify number of dimensions and shape according to coefficients
         s_coef = self.coeffs[0]
         self.coeffs_type = type(s_coef)
-        if isinstance(s_coef, (int, float)):
+        if isinstance(s_coef, int | float | complex):
             self.ndim = 0
             self.shape = None
         elif isinstance(s_coef, np.ndarray):
@@ -91,10 +94,17 @@ class MultiPoly(Function):
     def set_params(self, **kwargs):
         super().set_params(**kwargs)
 
+        # Setups output dimension
         self.n = self._dim
         self._output_dim = None
         if self.ndim == 0:
             self._output_dim = 1
+
+        # Setups symbols for SOS decomposition
+        state_symbols = ''
+        for dim in range(self._dim):
+            state_symbols += 'x'+str(dim+1)+' '
+        self.symbols = sym.symbols(state_symbols)
 
     def sort_kernel(self):
         '''
@@ -704,24 +714,32 @@ class MultiPoly(Function):
 
         return det.scalar()
 
-    def _sos_kernel(self):
+    def compute_sos_kernel(self):
         '''
-        Function for computing the corresponding polynomial SOS kernel.
+        Function for computing the minimal polynomial kernel for SOS decomposition. 
         '''
-        self.SOSkernel = []
+        # start with an empty SOS kernel
+        self.sos_kernel = []
+
+        # loop through each monomial in the polynomial kernel
         for mon in self.kernel:
 
-            # Compute the set of all possible combinations of sums of 2 monomials in sos_kernel
-            possible_curr_combinations = set([ tuple(np.array(mon1) + np.array(mon2)) for mon1, mon2 in itertools.combinations(self.SOSkernel, 2) ])
+            # Compute the set of all possible sums of 2 monomials currently in the SOS kernel
+            poss_sums = set([ tuple(np.array(mon1) + np.array(mon2)) for mon1, mon2 in itertools.combinations(self.sos_kernel, 2) ])
 
-            if mon in possible_curr_combinations: 
+            # If the current monomial can be produced by at least one of the possible sums from above, jump to next iteration
+            if mon in poss_sums: 
                 continue
 
-            if len(possible_curr_combinations) == 0:
-                self.SOSkernel.append(mon)
+            # if the SOS kernel has only one monomial, add the current monomial to the SOS kernel
+            if len(poss_sums) == 0:
+                self.sos_kernel.append(mon)
                 continue
 
-            # If mon is not on possible with current combinations, check if its possible to create it from them...
+            ''' 
+            If the current monomial cannot be formed from possible sums on the current SOS kernel, 
+            check if its possible to create it from them...
+            '''
             possibilities = []
 
             # If all exponents of mon are even, it can be created from 
@@ -729,46 +747,48 @@ class MultiPoly(Function):
                 possibilities.append( tuple([int(exp/2) for exp in mon]) )
 
             # Checks if mon can be created from the combination of monomials already in self._sos_monomials and another
-            for sos_mon in self.SOSkernel:
+            for sos_mon in self.sos_kernel:
                 pos = np.array(mon) - np.array(sos_mon)
                 if np.all(pos >= 0): 
                     possibilities.append( tuple([ int(exp) for exp in pos ]) )
 
             index = np.argmin([ np.linalg.norm(pos) for pos in possibilities ])
             new_sos_mon = possibilities[index]
-            if new_sos_mon not in self.SOSkernel:
-                self.SOSkernel.append(new_sos_mon)
+            if new_sos_mon not in self.sos_kernel:
+                self.sos_kernel.append(new_sos_mon)
 
-    def sos_index_matrix(self):
+    def compute_sos_indexes(self):
         '''
         Computes the index matrix representing the rule for placing the coefficients in the correct places on the 
         shape matrix of the SOS representation. Algorithm gives preference for putting the elements of coeffs 
         closer to the main diagonal of the SOS matrix.
         '''
-
         # Compute SOS kernel first
-        self._sos_kernel()
-        sos_kernel_dim = len(self.SOSkernel)
+        if self.sos_kernel is None: 
+            self.compute_sos_kernel()
+        sos_dim = len(self.sos_kernel)
 
-        self.SOSindexes = -np.ones([sos_kernel_dim, sos_kernel_dim], dtype='int')
+        self.sos_locations = [ [] for _ in self.kernel ]
+        self.sos_indexes = -np.ones([sos_dim, sos_dim], dtype='int')
         for k in range(len(self.kernel)):
 
             mon = self.kernel[k]
 
             # Checks the possible (i,j) locations on SOS matrix where the monomial can be put
-            possible_places = []
-            for (i,j) in itertools.product(range(sos_kernel_dim),range(sos_kernel_dim)):
+            kth_poss_places = []
+            for (i,j) in itertools.product(range(sos_dim),range(sos_dim)):
                 if i > j: continue
-                sos_mon_i, sos_mon_j = np.array(self.SOSkernel[i]), np.array(self.SOSkernel[j])
+                sos_mon_i, sos_mon_j = np.array(self.sos_kernel[i]), np.array(self.sos_kernel[j])
 
                 if mon == tuple(sum([sos_mon_i, sos_mon_j])):
-                    possible_places.append( (i,j) )
+                    kth_poss_places.append( (i,j) )
 
             # From these, chooses the place closest to SOS matrix diagonal
-            distances_from_diag = np.array([ np.abs(place[0] - place[1]) for place in possible_places ])
-            i,j = possible_places[np.argmin(distances_from_diag)]
+            distances_from_diag = np.array([ np.abs(place[0] - place[1]) for place in kth_poss_places ])
+            i,j = kth_poss_places[np.argmin(distances_from_diag)]
 
-            self.SOSindexes[i,j] = k
+            self.sos_locations[k] = kth_poss_places
+            self.sos_indexes[i,j] = k
 
     def shape_matrix(self):
         '''
@@ -780,24 +800,71 @@ class MultiPoly(Function):
         if len(self.coeffs) != len(self.kernel):
             raise Exception("The number of coefficients must be equal to the kernel dimension.")
         
-        if self.SOSindexes is None:
-            self.sos_index_matrix()
+        if self.sos_indexes is None:
+            self.compute_sos_indexes()
 
-        sos_kernel_dim = len(self.SOSkernel)
-        shape_matrix = np.zeros([sos_kernel_dim, sos_kernel_dim])
+        sos_kernel_dim = len(self.sos_kernel)
+        sos = np.zeros([sos_kernel_dim, sos_kernel_dim])
 
         for (i,j) in itertools.product(range(sos_kernel_dim),range(sos_kernel_dim)):
-            if i > j: continue
 
-            k = self.SOSindexes[i,j]
+            if i > j: 
+                continue
+
+            k = self.sos_indexes[i,j]
             if k >= 0:
                 if i == j:
-                    shape_matrix[i,j] = self.coeffs[k]
+                    sos[i,j] = self.coeffs[k]
                 else:
-                    shape_matrix[i,j] = 0.5 * self.coeffs[k]
-                    shape_matrix[j,i] = 0.5 * self.coeffs[k]
+                    sos[i,j] = 0.5 * self.coeffs[k]
+                    sos[j,i] = 0.5 * self.coeffs[k]
+        return sos
 
-        return shape_matrix
+    def sos_decomposition(self, verb=False):
+        '''
+        Returns a suitable SOS decomposition, if the polynomial is SOS. 
+        Only works for scalar polynomials.
+        '''
+        if self.sos_locations is None:
+            self.compute_sos_indexes()
+
+        sos_dim = len(self.sos_kernel)
+        SOS = cvx.Variable( (sos_dim, sos_dim), symmetric=True )
+        SOSt = cvx.Variable( (sos_dim, sos_dim), symmetric=True )
+        constraints = [ SOS >> 0 ]
+
+        norm_const = min(np.abs(self.coeffs))
+        if norm_const < 1e-3:
+            norm_const = 1.0
+
+        for locs, c in zip(self.sos_locations, self.coeffs):
+            constraints += [ sum([ SOSt[index] if index[0]==index[1] else 2*SOSt[index] for index in locs ]) == c/norm_const ]
+
+        prob = cvx.Problem( cvx.Minimize( cvx.norm( SOS - SOSt ) ), constraints )
+        prob.solve(solver = 'SCS', verbose=False)
+
+        if verb: print(f"SOS decomposition problem returned with status {prob.status}")
+
+        if "optimal" in prob.status:
+            # If SOS, multiply resulting matrix by normalization coefficient
+            self.sos_matrix = norm_const * SOSt.value
+        else:
+            self.sos_matrix = self.shape_matrix()
+
+        return self.sos_matrix
+
+    def validate_sos(self):
+        '''
+        Debug method for SOS validation.
+        '''
+        if self.sos_matrix is None: 
+            self.sos_decomposition()
+
+        errors = []
+        for locs, c in zip(self.sos_locations, self.coeffs):
+            errors += [ sum([ self.sos_matrix[index] if index[0]==index[1] else 2*self.sos_matrix[index] for index in locs ]) - c ]
+
+        return sum(np.abs(errors))
 
     def scalar(self):
         ''' Convert 1x1 matrix poly to scalar poly '''
@@ -911,11 +978,11 @@ class MultiPoly(Function):
 
         multipoly_log = {"kernel": self.kernel,
                          "coeffs": [ coef.tolist() if isinstance(coef, np.ndarray) else coef for coef in self.coeffs ],
-                         "sos_kernel": self.SOSkernel,
+                         "sos_kernel": self.sos_kernel,
                          "sos_indexes": None }
         
-        if self.SOSindexes is not None:
-            multipoly_log["sos_indexes"] = self.SOSindexes.tolist()
+        if self.sos_indexes is not None:
+            multipoly_log["sos_indexes"] = self.sos_indexes.tolist()
 
         try:
             with open("polynomials/" + filename + ".json", "w") as file:
@@ -923,6 +990,27 @@ class MultiPoly(Function):
                 json.dump(multipoly_log, file, indent=0)
         except IOError:
             print("Couldn't save polynomial." + IOError)
+
+    def kernel_value(mons: list, input: float | list) -> np.ndarray:
+        ''' 
+        Compute the kernel value for a given input.
+        Mons is an array of monomials and input is the corresponding input to be computed. 
+        Returns: array with monomial values
+        '''
+        if isinstance( input, (np.float64, np.int64, int, float)):
+            input = [input]
+
+        kern_arr = np.zeros(len(mons))
+        for k, mon in enumerate(mons):
+
+            if len(input) != len(mon):
+                raise TypeError("Input dimensions are wrong.")
+            
+            kern_arr[k] = 1.0
+            for i, power in enumerate(mon):
+                kern_arr[k] *= input[i]**power
+
+        return kern_arr
 
     @property
     def T(self):
@@ -1012,4 +1100,4 @@ class MultiPoly(Function):
             kernel.append( tuple([k]) )
             coeffs.append(c)
 
-        return cls(kernel, coeffs)
+        return cls(kernel, coeffs, dim=1)

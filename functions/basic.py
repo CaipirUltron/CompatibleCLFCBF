@@ -66,8 +66,16 @@ class Function(ABC):
 
     def _validate(self, point):
         ''' Validates input data '''
-        if not isinstance(point, (list, tuple, np.ndarray)): raise Exception("Input data point is not a numeric array.")
-        if isinstance(point, (list, tuple)): point = np.array(point)
+
+        if self._dim != 1:
+            if not isinstance(point, (list, tuple, np.ndarray)): 
+                raise Exception("Input data point is not a numeric array.")
+        else:
+            if isinstance(point, (np.int64, np.float64, float, int)):
+                point = np.array([point])
+
+        if isinstance(point, (list, tuple)): 
+            point = np.array(point)
         return point
 
     @abstractmethod
@@ -112,7 +120,7 @@ class Function(ABC):
                     spacing - grid spacing for contour generation
         '''        
         if self._dim != 2:
-            logging.warning("Contour plot can only be used for 2D functions.")
+            # logging.warning("Contour plot can only be used for 2D functions.")
             self.contour = None
             return
 
