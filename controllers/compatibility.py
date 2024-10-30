@@ -494,10 +494,8 @@ class MatrixPencil():
             '''
             return np.linalg.norm( Hvfun(var) - Hv0 )
 
-        def psd_constraint(var: np.ndarray):
-            '''
-            Only constraint of the problem, returns the eigenvalues of R matrix.
-            '''
+        def psd_constr(var: np.ndarray):
+            ''' Returns the eigenvalues of R matrix. '''
             N = B @ B.T @ Hvfun(var) - A
 
             # Recompute pencil with new values
@@ -526,15 +524,29 @@ class MatrixPencil():
             else:
 
                 # SINGULAR CASE
-                psd_poly = zero_poly
+                psd_poly = MultiPoly.from_nppoly( zero_poly )
 
             psd_poly.sos_decomposition()
-            eigsR = np.linalg.eigvals( psd_poly.sos_matrix )
+            R = psd_poly.sos_matrix
+            eigsR = np.linalg.eigvals( R )
 
             tol = 0.1
-            return np.min(eigsR) - tol
+            return np.linalg.eigvals(R - tol*np.eye(R.shape[0])) 
 
-        constr = [ {"type": "ineq", "fun": psd_constraint} ]
+        def den_constr(var: np.ndarray):
+            ''' Returns the error between the d polynomials '''
+            N = B @ B.T @ Hvfun(var) - A
+
+            # Recompute pencil with new values
+            self.__init__(M,N)
+
+            # Recompute q-function
+            self.qfunction(H = Hh, w = N @ (xi - x0) )
+
+            return np.linalg.norm( old_n_poly.coef - self.n_poly.coef )
+
+        constr = [ {"type": "ineq", "fun": psd_constr} ]
+        # constr += [ {"type": "eq", "fun": den_constr} ]
 
         if "Hv" in clf_dict.keys():
             var0 = sym2vector(Hv0)

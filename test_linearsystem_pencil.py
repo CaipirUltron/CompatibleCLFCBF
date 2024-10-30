@@ -80,20 +80,22 @@ clf_dict = {"Hv_fun": Hvfun, "center": CLFcenter, "Hv": Hv }
 cbf_dict = {"Hh": Hh, "center": CBFcenter }
 
 ''' ------------------------------------ Plot ----------------------------------- '''
-# n_poly, d_poly = pencil.get_qfunction()
+n_poly, d_poly = pencil.get_qfunction()
+zero_poly = n_poly - d_poly
 
-# n_poly = MultiPoly.from_nppoly( n_poly )
-# d_poly = MultiPoly.from_nppoly( d_poly )
+print(f"n(λ) = {n_poly}")
+print(f"d(λ) = {d_poly}")
+print(f"n(λ) - d(λ) = {n_poly - d_poly}")
 
-# print(f"n(λ) = {n_poly}")
-# print(f"d(λ) = {d_poly}")
-# print(f"n(λ) - d(λ) = {n_poly - d_poly}")
+n_poly = MultiPoly.from_nppoly( n_poly )
+d_poly = MultiPoly.from_nppoly( d_poly )
+zero_poly = MultiPoly.from_nppoly( zero_poly ) 
 
-# N = n_poly.sos_decomposition(verb=True)
-# D = d_poly.sos_decomposition(verb=True)
+N = n_poly.sos_decomposition(verb=True)
+D = d_poly.sos_decomposition(verb=True)
 
-# print(f"Error on SOS decomposition of n(λ) {n_poly.validate_sos()}")
-# print(f"Error on SOS decomposition of d(λ) {d_poly.validate_sos()}")
+print(f"Error on SOS decomposition of n(λ) {n_poly.validate_sos()}")
+print(f"Error on SOS decomposition of d(λ) {d_poly.validate_sos()}")
 
 # eigN = eigs(N)
 # if np.all(eigN > -1e-2): 
@@ -110,7 +112,7 @@ cbf_dict = {"Hh": Hh, "center": CBFcenter }
 # print(f"D = \n{D}, \nEIG(D) = {eigD}")
 
 fig, ax = plt.subplots(ncols=2, nrows=1, figsize=(10.0, 5.0), layout="constrained")
-fig.suptitle('Test Linear System Pencil')
+fig.suptitle('Compatibilization of Linear System')
 
 pencil.plot_qfunction(ax[0], res=0.1)
 
