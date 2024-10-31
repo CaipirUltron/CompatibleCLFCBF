@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from warnings import warn
 from scipy.optimize import fsolve, least_squares
 from common import rot2D, kernel_quadratic
-from functions import Kernel, KernelLyapunov, KernelBarrier, KernelFamily, MultiPoly
+from functions import Kernel, KernelLyapunov, KernelBarrier, LyapunovBarrier, MultiPoly
 from dynamic_systems import PolyAffineSystem
 from numpy.polynomial import Polynomial as Poly
 
@@ -283,11 +283,11 @@ print(f"f(x) = \n{plant.get_fpoly()}")
 print(f"g(x) = \n{plant.get_gpoly()}")
 print(f"G(x) = \n{plant.get_Gpoly()}")
 
-# kerneltriplet = KernelFamily( plant=plant, clf=clf, cbfs=cbfs, params={"slack_gain": 1.0, "clf_gain": 1.0, "cbf_gain": 1.0}, limits=limits, spacing=0.2 )
+kerneltriplet = LyapunovBarrier( plant=plant, clf=clf, cbfs=cbfs, params={"slack_gain": 1.0, "clf_gain": 1.0, "cbf_gain": 1.0}, limits=limits, spacing=0.2 )
 
 # ------------------------------------ Plotting -----------------------------------
 cbf.plot_levels(ax=ax, levels=[0.0])
-# kerneltriplet.plot_invariant(ax, cbf_index=0)
+kerneltriplet.plot_invariant(ax, cbf_index=0)
 
 init_x_plot, = ax.plot([],[],'ob', alpha=0.5)
 invariant_plot, = ax.plot([],[],'r.-')
@@ -308,18 +308,18 @@ while True:
     max_degree = order+1
     init_params = np.random.randn( n*order )
 
-    # mode = '-'
-    # max_degree = 2*order+1
-    # init_params = np.random.randn( n*max_degree )
+    mode = '-'
+    max_degree = 2*order+1
+    init_params = np.random.randn( n*max_degree )
 
-    # P, singular_lambdas = fit_invariant2(A, B, kernel_powers, order, init_params)
+    P, singular_lambdas = fit_invariant2(A, B, kernel_powers, order, init_params)
 
-    # x_list = [ ((t-singular_lambdas[0])**(-1)) * np.sum([ P[0,i] * (t**i) for i in range(order+1-max_degree, order+1) ]) for t in t_list ]
-    # y_list = [ ((t-singular_lambdas[0])**(-1)) * np.sum([ P[1,i] * (t**i) for i in range(order+1-max_degree, order+1) ]) for t in t_list ]
-    # invariant_plot.set_data(x_list, y_list)
+    x_list = [ ((t-singular_lambdas[0])**(-1)) * np.sum([ P[0,i] * (t**i) for i in range(order+1-max_degree, order+1) ]) for t in t_list ]
+    y_list = [ ((t-singular_lambdas[0])**(-1)) * np.sum([ P[1,i] * (t**i) for i in range(order+1-max_degree, order+1) ]) for t in t_list ]
+    invariant_plot.set_data(x_list, y_list)
 
-    # l = kerneltriplet.lambda_fun(init_x, cbf_index = 0)
-    # print(f"Lambda = {l}")
+    l = kerneltriplet.lambda_fun(init_x, cbf_index = 0)
+    print(f"Lambda = {l}")
 
     V = clf.function(init_x)
     clf_contour = clf.plot_levels(ax=ax, levels=[V])

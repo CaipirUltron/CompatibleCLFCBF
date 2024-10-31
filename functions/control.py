@@ -8,7 +8,6 @@ from scipy.optimize import minimize, LinearConstraint, NonlinearConstraint
 from shapely import geometry, intersection
 
 from numpy.polynomial.polynomial import polyder, polyint
-from dynamic_systems import LinearSystem
 
 import warnings
 import itertools

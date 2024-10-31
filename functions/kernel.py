@@ -1239,10 +1239,10 @@ class KernelQuadratic(Function):
             raise TypeError("Input must be a MultiPoly.")
         
         poly.sort_kernel()
-        if poly.SOSkernel is None:
-            poly.sos_index_matrix()
+        if poly.sos_kernel is None:
+            poly.compute_sos_indexes()
 
-        sos_kernel = Kernel(dim=poly.n, monomials=poly.SOSkernel )
+        sos_kernel = Kernel(dim=poly.n, monomials=poly.sos_kernel )
 
         from functions import KernelLyapunov, KernelBarrier
         if cls is KernelLyapunov:
