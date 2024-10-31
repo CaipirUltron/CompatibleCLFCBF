@@ -294,29 +294,14 @@ class MatrixPencil():
             Qs = null_space( self(alpha, beta) )
             self.eigenvectors.append( {"eigenvalue": (alpha, beta), "eigenvectors": Qs} )
 
-    def qfunction(self, H: list | np.ndarray, w: list | np.ndarray):
+    def inverse(self):
         '''
-        Computes the numerator and denominator numpy polynomials n(λ), d(λ) 
-        of the q-function q(λ) = n(λ)/d(λ), where:
-        - P(λ) v(λ) = w, 
-        - q(λ) = v(λ).T @ Hh v(λ).
-
-        Inputs: - matrices M, N from linear matrix pencil P(λ) = λ M - N
-                - matrix Hh from q(λ) = v(λ).T @ Hh v(λ)
-                - vector w from P(λ) v(λ) = w
-        '''
-        if isinstance(H, list): H = np.array(H)
-        if isinstance(w, list): w = np.array(w)
-
-        # Validate passed parameters.
-        if H.shape != (self.dim, self.dim):
-            raise TypeError("H must have the same dimension as the pencil matrices.")
-        
+        Computes the pencil adjoint polynomial matrix adj(λ) and polynomial determinant det(λ).
+        The pencil inverse is then given by P^(-1)(λ) = 1/det(λ) adj(λ).
+        '''        
         n = self.M.shape[0]
-        if len(w) != n:
-            raise TypeError("Vector w must have the same dimensions as the pencil λ M - N.")
 
-        ''' -------------------- Computes the block dimensions, poles and adjoints (TO BE USED later) ------------------------- '''
+        ''' Computes the pencil determinant polynomial expression '''
         blk_dims, blk_poles, blk_adjs = [], [], []
         for i in range(n):
 
@@ -348,10 +333,11 @@ class MatrixPencil():
                 blk_poles.append( Poly([ -NNblock, MMblock ]) )
                 blk_adjs.append( np.array([Poly(1.0)]) )
         
-        ''' -------------------------- Computes the adjoint matrix --------------------------------- '''
+        self.determinant = np.prod([ pole for pole in blk_poles ])
 
+        ''' Computes the pencil adjoint matrix '''
         num_blks = len(blk_dims)
-        adjoint = np.array([[ Poly([0.0]) for _ in range(n) ] for _ in range(n) ])
+        self.adjoint = np.array([[ Poly([0.0]) for _ in range(n) ] for _ in range(n) ])
         for i in range(num_blks-1, -1, -1):
             blk_i_slice = slice( i*blk_dims[i], (i+1)*blk_dims[i] )
 
@@ -377,22 +363,45 @@ class MatrixPencil():
                         Sik = self. NN[ blk_i_slice, blk_k_slice ]
                         poly_ik = np.array([[ Poly([ -Sik[a,b], Tik[a,b] ]) for b in range(Tik.shape[1]) ] for a in range(Tik.shape[0]) ])
 
-                        adjoint_kj = adjoint[ blk_k_slice, blk_j_slice ]
+                        adjoint_kj = self.adjoint[ blk_k_slice, blk_j_slice ]
 
                         b_poly -= poly_ik @ adjoint_kj
 
                     Lij = solve_poly_linearsys( Tii, Sii, b_poly )
 
                 # Populate adjoint matrix
-                adjoint[ blk_i_slice, blk_j_slice ] = Lij
+                self.adjoint[ blk_i_slice, blk_j_slice ] = Lij
 
-        ''' ---------------- Computes q-function numerator and denominator polynomials ------------------ '''
+    def qfunction(self, H: list | np.ndarray, w: list | np.ndarray):
+        '''
+        Computes the numerator and denominator numpy polynomials n(λ), d(λ) 
+        of the q-function q(λ) = n(λ)/d(λ) from the previously computed pencil adjoint and determinant.
+        In summary, the q-function is the solution to the following problem:
+        - P(λ) v(λ) = w, 
+        - q(λ) = v(λ).T @ Hh v(λ).
+
+        Inputs: - matrix Hh from q(λ) = v(λ).T @ Hh v(λ)
+                - vector w from P(λ) v(λ) = w
+        '''
+        if not hasattr(self, "determinant") or not hasattr(self, "adjoint"):
+            self.inverse()
+
+        if isinstance(H, list): H = np.array(H)
+        if isinstance(w, list): w = np.array(w)
+
+        # Validate passed parameters.
+        if H.shape != (self.dim, self.dim):
+            raise TypeError("H must have the same dimension as the pencil matrices.")
+
+        if len(w) != self.M.shape[0]:
+            raise TypeError("Vector w must have the same dimensions as the pencil λ M - N.")
+
         Zinv = np.linalg.inv(self.Z)
         barHh = Zinv @ H @ (Zinv.T)
         barw = np.linalg.inv(self.Q) @ w
 
-        self.n_poly = ( barw.T @ adjoint.T @ barHh @ adjoint @ barw )
-        self.d_poly = np.prod([ pole**2 for pole in blk_poles ])
+        self.n_poly = ( barw.T @ self.adjoint.T @ barHh @ self.adjoint @ barw )
+        self.d_poly = self.determinant**2
 
         # Trim coefficients
         for k, c in enumerate(self.n_poly.coef):

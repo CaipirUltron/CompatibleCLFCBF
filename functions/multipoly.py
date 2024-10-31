@@ -11,7 +11,6 @@ import matplotlib.colors as mcolors
 
 from copy import deepcopy
 from scipy.optimize import least_squares
-from SumOfSquares import SOSProblem, poly_opt_prob
 
 from common import *
 from functions.basic import Function
