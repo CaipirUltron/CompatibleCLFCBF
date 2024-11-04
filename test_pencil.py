@@ -49,7 +49,10 @@ print(f"Null space Λ(λ) Z = \n{null_poly}")
 # print(f"Error (λ M - N) Λ(λ) Z = \n{pencil_poly @ null_poly}")
 print(f"Shape of Λ(λ) Z = {null_poly.shape}")
 
-pencil.orthogonal_nullspace(H)
+ortho_poly = pencil.orthogonal_nullspace(H)
+print(ortho_poly)
+
+print( ortho_poly @ H @ null_poly )
 
 # ------------------------------------ Plot -----------------------------------
 # fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(5.0, 5.0), layout="constrained")

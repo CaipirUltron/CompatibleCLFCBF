@@ -291,12 +291,11 @@ class MatrixPencil():
 
         self.n_poly = None
         self.d_poly = None
-        self.computed_from = None
+        self.computed_from = {"H": None, "w": None}
 
         self.needs_update = {"eigen": True, 
                              "nullspace": True,
-                             "inverse": True, 
-                             "orthogonal": True,
+                             "inverse": True,
                               }
 
     def set(self, M, N):
@@ -484,7 +483,9 @@ class MatrixPencil():
 
         self.needs_update["inverse"] = False
 
-    def qfunction(self, H: list | np.ndarray, w: list | np.ndarray):
+    def qfunction(self, 
+                  H: list | np.ndarray = None, 
+                  w: list | np.ndarray = None):
         '''
         Computes the numerator and denominator numpy polynomials n(λ), d(λ) 
         of the q-function q(λ) = n(λ)/d(λ) from the previously computed pencil adjoint and determinant.
@@ -495,12 +496,18 @@ class MatrixPencil():
         Inputs: - matrix Hh from q(λ) = v(λ).T @ Hh v(λ)
                 - vector w from P(λ) v(λ) = w
         '''
+        if H is None and self.computed_from["H"] is None:
+            raise TypeError("H must be passed to compute the q-function.")
+
+        if w is None and self.computed_from["w"] is None:
+            raise TypeError("w must be passed to compute the q-function.")
+
         if isinstance(H, list): H = np.array(H)
         if isinstance(w, list): w = np.array(w)
 
-        if self.computed_from != None:
-            if np.all(H == self.computed_from["H"]) and np.all(w == self.computed_from["w"]):
-                return
+        no_need_recompute = np.all(H == self.computed_from["H"])
+        no_need_recompute = no_need_recompute and np.all(w == self.computed_from["w"])
+        if no_need_recompute: return
 
         # Validate passed parameters.
         n, p = self.shape[0], self.shape[1]
@@ -532,7 +539,7 @@ class MatrixPencil():
             if np.abs(c) < 1e-12: 
                 self.d_poly.coef[k] = 0.0
 
-    def qfunction_value(self, l: float, H: list | np.ndarray, w: list | np.ndarray):
+    def qfunction_value(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
         '''
         Computes the q-function value q(λ) = n(λ)/d(λ) for a given λ (for DEBUG only)
         '''
@@ -540,7 +547,7 @@ class MatrixPencil():
         v = inv(P) @ w
         return v.T @ H @ v 
 
-    def equilibria(self, H: list | np.ndarray = None, w: list | np.ndarray = None):
+    def equilibria(self) -> list[dict]:
         ''' 
         Boundary equilibrium solutions can be computed from 
         the q-function by solving q(λ) = n(λ)/d(λ) = 1, or the roots of n(λ) - d(λ).
@@ -548,25 +555,6 @@ class MatrixPencil():
         Returns: a list of dictionaries with all boundary equilibrium solutions 
         and their stability numbers (if dim == 2, otherwise stability is None).
         '''
-        error_flag = H and self.computed_from["H"] == None
-        error_flag = error_flag or ( w and self.computed_from["w"] == None )
-
-        if error_flag: raise Exception("Q-function was not computed.")
-
-        needs_update = False
-
-        if H == None: 
-            H = self.computed_from["H"]
-        else: needs_update = True
-            
-        if w == None: 
-            w = self.computed_from["w"]
-        else: needs_update = True
-
-        # Updates qfunction if needed be
-        if needs_update:
-            self.qfunction(H, w)
-
         real_zero_tol = 1e-12
         zeros = (self.n_poly - self.d_poly).roots()
         real_zeros = np.array([ z.real for z in zeros if np.abs(z.imag) < real_zero_tol ])
@@ -586,37 +574,39 @@ class MatrixPencil():
 
         return sols
 
-    def orthogonal_nullspace(self, H):
+    def orthogonal_nullspace(self, H: list | np.ndarray):
         ''' 
         Computes the matrix polynomial O(λ) orthogonal to the nullspace polynomial Λ(λ) Z,
         that is, O(λ) H Λ(λ) Z = 0 
         '''
-        if not self.needs_update["orthogonal"]: return
+        if isinstance(H, list): H = np.array(H)
 
         n, p = self.shape[0], self.shape[1]
         if H.shape != (p, p): 
             raise TypeError(f"Passed H must be ({p},{p})")
 
-        if self.needs_update["nullspace"]: self.nullspace()
-
-        Zs = self.nullspace_poly.coeffs
-        numZs = len(self.nullspace_poly.coeffs)
-        eps = numZs-1
+        self.nullspace()
         zdim = self.nullspace_poly.shape[1]
+        Zcoefs = self.nullspace_poly.coeffs
+
+        numZcoefs = len(self.nullspace_poly.coeffs)
 
         for deg in range(0, self.max_order):
-            Coef = np.zeros(( (deg+1)*p, (eps+1)*zdim ))
-            print(Coef.shape)
 
-            for i in range(0, eps-deg):
-                aux = H @ np.hstack([ Zs[k] for k in range(0, numZs - i) ])
+            Coef = np.zeros(( (deg+1)*p, numZcoefs*zdim ))
+
+            for i in range(0, numZcoefs-deg):
+                aux = H @ np.hstack([ Zcoefs[k] for k in range(0, numZcoefs - i) ])
                 Coef[ i*p:(i+1)*p, : ] = np.hstack([ np.zeros((p,zdim*i)), aux ])
-
-            print(Coef)
 
             Null = sp.linalg.null_space( Coef.T )
             if Null.size != 0:
                 break
+
+        M = Null.T
+        Mcoefs = [ M[:, i*p:(i+1)*(p) ] for i in range(deg+1) ]
+        
+        return MultiPoly(kernel=[(k,) for k in range(0, deg+1) ], coeffs=Mcoefs)
 
     def compatibilize(self, plant: DynamicSystem, clf_dict: dict, cbf_dict, p = 1.0):
         '''
