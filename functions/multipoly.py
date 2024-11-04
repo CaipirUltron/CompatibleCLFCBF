@@ -446,7 +446,7 @@ class MultiPoly(Function):
         elif self.ndim == 1: type_text = "vector"
         elif self.ndim == 2: type_text = "matrix"
 
-        poly_repr = f"{type_text.capitalize()} poly on x:\n"
+        poly_repr = f"{type_text.capitalize()} poly in x:\n"
         for coeff, power in zip(self.coeffs, self.kernel):
             if isinstance(coeff, (int, float)):
                 if coeff > 0: sign_text = "+ "

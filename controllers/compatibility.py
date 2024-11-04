@@ -5,6 +5,7 @@ import warnings
 from scipy import signal
 from scipy.optimize import fsolve, minimize
 from scipy.linalg import null_space, inv
+from dataclasses import dataclass
 
 from numpy.polynomial import polynomial as poly
 from numpy.polynomial import Polynomial as Poly
@@ -15,6 +16,14 @@ from dynamic_systems import DynamicSystem, LinearSystem
 from functions import MultiPoly
 
 ZERO_ACCURACY = 1e-9
+
+@dataclass
+class Eigen():
+    alpha: complex
+    beta: float
+    eigenvalue: complex
+    l_eigenvectors: list | np.ndarray
+    r_eigenvectors: list | np.ndarray
 
 def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np.ndarray:
     '''
@@ -262,43 +271,130 @@ class MatrixPencil():
         
         # Validate passed parameters.
         if M.ndim != 2 or N.ndim != 2:
-            raise TypeError("A and B must be two dimensional arrays.")
+            raise TypeError("M and N must be two dimensional arrays.")
 
         if M.shape != N.shape:
             raise TypeError("Matrix dimensions are not equal.")
 
         if M.shape[0] != M.shape[1]:
-            raise Exception("Matrices are not square.")
+            self.type = 'singular'
+        else:
+            self.type = 'regular'
 
         self.M, self.N = M, N
-        self.dim = M.shape[0]
-        self.eigen()
+        self.shape = M.shape
+        self.poly = MultiPoly(kernel=[(0,), (1,)], coeffs=[ -self.N, self.M ])
+        self.eigens = None
+
+        self.max_order = 100
+        self.nullspace_poly = None
+
+        self.n_poly = None
+        self.d_poly = None
+        self.computed_from = None
+
+        self.needs_update = {"eigen": True, 
+                             "nullspace": True,
+                             "inverse": True, 
+                              }
+
+    def set(self, M, N):
+        '''
+        Update method for the pencil. If all is set, update everything 
+        '''
+        self.__init__(M, N)
+        for key in self.needs_update.keys(): self.needs_update[key] = True
 
     def eigen(self):
         '''
         Computes the generalized eigenvalues/eigenvectors of the pencil using the QZ decomposition.
         It simultaneously decomposes the two matrices of P(λ) = λ M - N as M = Q MM Z' and N = Q NN Z',
         where MM is block upper triangular, NN is upper triangular and Q, Z are unitary matrices.
-        '''
-        # Compute the pencil eigenvalues
-        self.MM, self.NN, self.beta, self.alpha, self.Q, self.Z = sp.linalg.ordqz(self.M, self.N, output='real')
-        self.eigenvalues = self.alpha / self.beta
 
-        # Compute real eigenvalues 
-        self.real_eigenvalues = np.array([ z.real for z in self.eigenvalues if np.abs(z.imag) < 1e-12 ])
-        self.real_eigenvalues.sort()
+        If the pencil is singular, compute the nullspace first and then 
+        '''
+        if not self.needs_update["eigen"]: return
+        if self.type == 'singular':
+            raise NotImplementedError("Eigenvalue computation (currently) not implemented for singular matrix pencils.")
+
+        # Compute the pencil eigenvalues
+        self.MM, self.NN, beta, alpha, self.Q, self.Z = sp.linalg.ordqz(self.M, self.N, output='real')
+        self.eigens = [ Eigen(alpha[k], beta[k], alpha[k]/beta[k], [], []) for k in range(len(alpha)) ]
 
         # Compute the pencil eigenvectors
-        self.eigenvectors = []
-        for alpha, beta in zip(self.alpha, self.beta):
-            Qs = null_space( self(alpha, beta) )
-            self.eigenvectors.append( {"eigenvalue": (alpha, beta), "eigenvectors": Qs} )
+        for eig in self.eigens:
+
+            Qright = null_space( self(eig.alpha, eig.beta) )
+            Qleft = null_space( self(eig.alpha, eig.beta).T )
+
+            eig.r_eigenvectors.append( Qright )
+            eig.l_eigenvectors.append( Qleft )
+
+        self.needs_update["eigen"] = False
+
+    def nullspace(self):
+        ''' 
+        Computes the nullspace of a singular pencil λ M - N
+        '''
+        if not self.needs_update["nullspace"]: return
+
+        # General singular case
+        n, p = self.shape[0], self.shape[1]
+        for deg in range(0, self.max_order):
+
+            N = np.zeros([ (deg+2)*n, (deg+1)*p ])
+            for i in range(deg+1):
+                N[ i*n:(i+1)*n , i*p:(i+1)*p ] = - self.N
+                N[ (i+1)*n:(i+2)*n , i*p:(i+1)*p ] = + self.M
+
+            Null = sp.linalg.null_space(N)
+
+            # Regular case
+            if n == p and Null.size == 0:
+                self.nullspace_poly = MultiPoly( kernel=[(0,)], coeffs=[np.zeros((p,1))] )
+                return 
+
+            # End case
+            if Null.size != 0:
+                break
+        
+        # Extract matrices
+        self.nullspace_poly = MultiPoly(kernel=[(k,) for k in range(0,deg+1)], coeffs=[ Null[d*p:(d+1)*p] for d in range(0, deg+1) ])
+        self.needs_update["nullspace"] = False
+
+    def get_poly(self):
+        ''' Returns matrix polynomial equivalent to the pencil '''
+        return self.poly
+
+    def get_real_eigen(self):
+        ''' Returns the sorted real pencil eigenvalues '''
+
+        self.eigen()
+
+        tol = 1e-12
+        real_eigens = []
+        for eig in self.eigens:
+            if np.abs(eig.eigenvalue.imag) < tol:
+                real_eigens.append(eig.eigenvalue.real)
+        
+        real_eigens = np.array(real_eigens)
+        real_eigens.sort()
+
+        return real_eigens
+
+    def get_nullspace(self):
+        '''  Returns the nullspace polynomial'''
+
+        self.nullspace()
+        return self.nullspace_poly
 
     def inverse(self):
         '''
         Computes the pencil adjoint polynomial matrix adj(λ) and polynomial determinant det(λ).
         The pencil inverse is then given by P^(-1)(λ) = 1/det(λ) adj(λ).
-        '''        
+        '''
+        if not self.needs_update["inverse"]: return
+        
         n = self.M.shape[0]
 
         ''' Computes the pencil determinant polynomial expression '''
@@ -372,6 +468,8 @@ class MatrixPencil():
                 # Populate adjoint matrix
                 self.adjoint[ blk_i_slice, blk_j_slice ] = Lij
 
+        self.needs_update["inverse"] = False
+
     def qfunction(self, H: list | np.ndarray, w: list | np.ndarray):
         '''
         Computes the numerator and denominator numpy polynomials n(λ), d(λ) 
@@ -383,22 +481,30 @@ class MatrixPencil():
         Inputs: - matrix Hh from q(λ) = v(λ).T @ Hh v(λ)
                 - vector w from P(λ) v(λ) = w
         '''
-        if not hasattr(self, "determinant") or not hasattr(self, "adjoint"):
-            self.inverse()
-
         if isinstance(H, list): H = np.array(H)
         if isinstance(w, list): w = np.array(w)
 
-        # Validate passed parameters.
-        if H.shape != (self.dim, self.dim):
-            raise TypeError("H must have the same dimension as the pencil matrices.")
+        if self.computed_from != None:
+            if np.all(H == self.computed_from["H"]) and np.all(w == self.computed_from["w"]):
+                return
 
-        if len(w) != self.M.shape[0]:
-            raise TypeError("Vector w must have the same dimensions as the pencil λ M - N.")
+        # Validate passed parameters.
+        n, p = self.shape[0], self.shape[1]
+        if H.shape != (p,p):
+            raise TypeError("H must have compatible dimensions.")
+
+        if len(w) != n:
+            raise TypeError("Vector w must have compatible dimensions.")
+
+        self.computed_from = {"H": H, "w": w}
+
+        if self.needs_update["eigen"]: self.eigen()
 
         Zinv = np.linalg.inv(self.Z)
         barHh = Zinv @ H @ (Zinv.T)
         barw = np.linalg.inv(self.Q) @ w
+
+        if self.needs_update["inverse"]: self.inverse()
 
         self.n_poly = ( barw.T @ self.adjoint.T @ barHh @ self.adjoint @ barw )
         self.d_poly = self.determinant**2
@@ -411,8 +517,6 @@ class MatrixPencil():
         for k, c in enumerate(self.d_poly.coef):
             if np.abs(c) < 1e-12: 
                 self.d_poly.coef[k] = 0.0
-
-        self.computed_from = {"H": H, "w": w}
 
     def qfunction_value(self, l: float, H: list | np.ndarray, w: list | np.ndarray):
         '''
@@ -432,32 +536,45 @@ class MatrixPencil():
 
         return self.n_poly, self.d_poly
 
-    def equilibria(self):
+    def equilibria(self, H: list | np.ndarray = None, w: list | np.ndarray = None):
         ''' 
-        Assuming the q-function was already computed, 
-        boundary equilibrium solutions can be computed from 
+        Boundary equilibrium solutions can be computed from 
         the q-function by solving q(λ) = n(λ)/d(λ) = 1, or the roots of n(λ) - d(λ).
 
         Returns: a list of dictionaries with all boundary equilibrium solutions 
         and their stability numbers (if dim == 2, otherwise stability is None).
         '''
-        if not hasattr(self, "n_poly") or not hasattr(self, "d_poly"):
-            raise Exception("Q-function was not yet computed.")
+        error_flag = H and self.computed_from["H"] == None
+        error_flag = error_flag or ( w and self.computed_from["w"] == None )
 
-        H = self.computed_from["H"]
-        w = self.computed_from["w"]
+        if error_flag: raise Exception("Q-function was not computed.")
 
+        needs_update = False
+
+        if H == None: 
+            H = self.computed_from["H"]
+        else: needs_update = True
+            
+        if w == None: 
+            w = self.computed_from["w"]
+        else: needs_update = True
+
+        # Updates qfunction if needed be
+        if needs_update:
+            self.qfunction(H, w)
+
+        real_zero_tol = 1e-12
         zeros = (self.n_poly - self.d_poly).roots()
-        real_zeros = np.array([ z.real for z in zeros if np.abs(z.imag) < 1e-12 ])
+        real_zeros = np.array([ z.real for z in zeros if np.abs(z.imag) < real_zero_tol ])
         real_zeros.sort()
 
         sols = [ {"lambda": z} for z in real_zeros ]
         for sol in sols:
-            if self.dim == 2:
+            if self.shape == (2,2):
                 l = sol["lambda"]
                 P = self(l)
-                v = np.linalg.inv(P) @ w
-                grad_h = H @ v
+                v_polys = self.adjoint @ w
+                grad_h = H @ np.array([ v(l) for v in v_polys ])
                 perp = np.array([ grad_h[1], -grad_h[0] ])
                 sol["stability"] = perp.T @ P @ perp
             else:
@@ -489,7 +606,7 @@ class MatrixPencil():
         x0 = clf_dict["center"]         # clf center
         Hv0 = clf_dict["Hv"]             # initial Hv
 
-        n = self.dim
+        n = self.shape[0]
         ndof = int(n*(n+1)/2)
 
         Hh = cbf_dict["Hh"]             # cbf Hessian
@@ -511,6 +628,7 @@ class MatrixPencil():
             self.__init__(M,N)
 
             # Recompute q-function
+            self.inverse()
             self.qfunction(H = Hh, w = N @ (xi - x0) )
             zero_poly = self.n_poly - self.d_poly
 
@@ -574,34 +692,27 @@ class MatrixPencil():
 
         return Hv
 
-    def plot_qfunction(self, ax, res=0.1, q_limits=(0, 100)):
+    def plot_qfunction(self, ax, res: float = None, q_limits=(0, 100)):
         ''' Plot q(λ) at axes ax.'''
 
         q_min, q_max = q_limits[0], q_limits[1]
 
-        # Get real eigenvalues
-        real_eigs = []
-        for eig in self.eigenvalues:
-            if np.abs(eig.imag) < 1e-10:
-                real_eigs.append(eig.real)
-        real_eigs = np.array(real_eigs)
-        real_eigs.sort()
-
-        equilibria = []
+        lambdas = []
         sols = self.equilibria()
         for sol in sols:
-            equilibria.append(sol["lambda"])
+            lambdas.append(sol["lambda"])
 
         factor = 1.5
-        if equilibria:
-            l_min, l_max = factor*min(equilibria), factor*max(equilibria)
+        if lambdas:
+            l_min, l_max = factor*min(lambdas), factor*max(lambdas)
         else:
             l_min, l_max = 0.0, 1000
 
+        if res == None: res = (l_max - l_min)/1000
         lambdas = np.arange(l_min, l_max, res)
 
         # Plot real eigenvalues
-        for eig in real_eigs:
+        for eig in self.get_real_eigen():
             ax.plot( [ eig for _ in lambdas ], np.linspace(q_min, q_max, len(lambdas)), 'b--' )
 
         # Plot the solution line

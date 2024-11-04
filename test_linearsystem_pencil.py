@@ -66,7 +66,7 @@ N = p * BB @ Hv - Acl
 w = N @ CBFcenter - p * BB @ Hv @ CLFcenter
 
 pencil = MatrixPencil(M,N)
-print(f"Pencil λ M - N spectra = {pencil.eigenvalues}")
+print(f"Pencil λ M - N spectra = {pencil.eigens}")
 
 pencil.qfunction(Hh, w)
 
