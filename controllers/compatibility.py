@@ -296,6 +296,7 @@ class MatrixPencil():
         self.needs_update = {"eigen": True, 
                              "nullspace": True,
                              "inverse": True, 
+                             "orthogonal": True,
                               }
 
     def set(self, M, N):
@@ -334,7 +335,8 @@ class MatrixPencil():
 
     def nullspace(self):
         ''' 
-        Computes the nullspace of a singular pencil λ M - N
+        Computes the nullspace polynomial Λ(λ) Z of the singular pencil λ M - N, satisfying
+        (λ M - N) Λ(λ) Z = 0 identically for all λ
         '''
         if not self.needs_update["nullspace"]: return
 
@@ -359,7 +361,9 @@ class MatrixPencil():
                 break
         
         # Extract matrices
-        self.nullspace_poly = MultiPoly(kernel=[(k,) for k in range(0,deg+1)], coeffs=[ Null[d*p:(d+1)*p] for d in range(0, deg+1) ])
+        coefs = [ Null[d*p:(d+1)*p] for d in range(0, deg+1) ]
+
+        self.nullspace_poly = MultiPoly(kernel=[(k,) for k in range(0,deg+1)], coeffs=coefs)
         self.needs_update["nullspace"] = False
 
     def get_poly(self):
@@ -387,6 +391,16 @@ class MatrixPencil():
 
         self.nullspace()
         return self.nullspace_poly
+
+    def get_qfunction(self):
+        '''
+        Returns the numerator and denominator polynomials n(λ) and d(λ) 
+        of the q-function, if already computed.
+        '''
+        if not hasattr(self, "n_poly") or not hasattr(self, "d_poly"):
+            raise Exception("Q-function was not yet computed.")
+
+        return self.n_poly, self.d_poly
 
     def inverse(self):
         '''
@@ -526,16 +540,6 @@ class MatrixPencil():
         v = inv(P) @ w
         return v.T @ H @ v 
 
-    def get_qfunction(self):
-        '''
-        Returns the numerator and denominator polynomials n(λ) and d(λ) 
-        of the q-function, if already computed.
-        '''
-        if not hasattr(self, "n_poly") or not hasattr(self, "d_poly"):
-            raise Exception("Q-function was not yet computed.")
-
-        return self.n_poly, self.d_poly
-
     def equilibria(self, H: list | np.ndarray = None, w: list | np.ndarray = None):
         ''' 
         Boundary equilibrium solutions can be computed from 
@@ -581,6 +585,38 @@ class MatrixPencil():
                 sol["stability"] = None
 
         return sols
+
+    def orthogonal_nullspace(self, H):
+        ''' 
+        Computes the matrix polynomial O(λ) orthogonal to the nullspace polynomial Λ(λ) Z,
+        that is, O(λ) H Λ(λ) Z = 0 
+        '''
+        if not self.needs_update["orthogonal"]: return
+
+        n, p = self.shape[0], self.shape[1]
+        if H.shape != (p, p): 
+            raise TypeError(f"Passed H must be ({p},{p})")
+
+        if self.needs_update["nullspace"]: self.nullspace()
+
+        Zs = self.nullspace_poly.coeffs
+        numZs = len(self.nullspace_poly.coeffs)
+        eps = numZs-1
+        zdim = self.nullspace_poly.shape[1]
+
+        for deg in range(0, self.max_order):
+            Coef = np.zeros(( (deg+1)*p, (eps+1)*zdim ))
+            print(Coef.shape)
+
+            for i in range(0, eps-deg):
+                aux = H @ np.hstack([ Zs[k] for k in range(0, numZs - i) ])
+                Coef[ i*p:(i+1)*p, : ] = np.hstack([ np.zeros((p,zdim*i)), aux ])
+
+            print(Coef)
+
+            Null = sp.linalg.null_space( Coef.T )
+            if Null.size != 0:
+                break
 
     def compatibilize(self, plant: DynamicSystem, clf_dict: dict, cbf_dict, p = 1.0):
         '''
