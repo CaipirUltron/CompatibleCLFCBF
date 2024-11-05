@@ -833,8 +833,7 @@ class MultiPoly(Function):
         constraints = [ SOS >> 0 ]
 
         norm_const = min(np.abs(self.coeffs))
-        if norm_const < 1e-3:
-            norm_const = 1.0
+        if norm_const < 1e-3: norm_const = 1.0
 
         for locs, c in zip(self.sos_locations, self.coeffs):
             constraints += [ sum([ SOSt[index] if index[0]==index[1] else 2*SOSt[index] for index in locs ]) == c/norm_const ]

@@ -27,59 +27,57 @@ class Eigen():
 
 def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np.ndarray:
     '''
-    Finds the polynomial array x(λ) that solves (λ T - S) x(λ) = b(λ), where T, S are 1x1 or 2x2
-    and b(λ) is a polynomial array of arbitrary order.
+    Finds the polynomial array x(λ) that solves (λ T - S) x(λ) = b(λ), where T, S are n x n (n=1 or n=2)
+    and b(λ) is a polynomial array of size nxr or nxr.
 
-    Input: - matrices T, S from linear matrix pencil (λ T - S), where T is 
+    Input: - matrices T, S from linear matrix pencil (λ T - S)
     '''
-    if isinstance(T, (int, float)): T = np.array([[T]])
-    if isinstance(S, (int, float)): S = np.array([[S]])
+    if isinstance(T, (int, float)): T = np.array([[ T ]])
+    if isinstance(S, (int, float)): S = np.array([[ S ]])
 
     if T.shape != S.shape:
         raise TypeError("T and S must have the same shape.")
     
-    if T.shape[0] != T.shape[0]:
+    if T.shape[0] != T.shape[1]:
         raise TypeError("T and S must be square matrices.")
 
-    blk_size = T.shape[0]
-    bshape = b_poly.shape
-    if bshape[0] != blk_size:
+    n = T.shape[1]
+    r = b_poly.shape[1]
+
+    if n != b_poly.shape[0]:
         raise TypeError("Number of lines in (λ T - S) and b(λ) must be the same.")
 
-    # Extract arrays from b_poly and store in b_coefs list (variable size)
-    bsys = np.zeros((0, bshape[1]))
+    # Extract max. degree of b_poly
+    max_deg = 0
     for (i,j), poly in np.ndenumerate(b_poly):
-
         if not isinstance( poly, Poly ):
             raise TypeError("b(λ) is not an array of polynomials.")
-        
-        # Setup bsys
-        b_order = len(poly.coef)
-        n_coefs_toadd = b_order - int(bsys.shape[0] / blk_size)
-        if n_coefs_toadd > 0:
-            bsys = np.vstack([ bsys ] + [ np.zeros((blk_size, bshape[1])) for _ in range(n_coefs_toadd) ])
+        max_deg = max( max_deg, poly.degree() )
 
+    # Initialize and populate bsys
+    bsys = np.zeros(((max_deg+1)*n,r))
+    for (i,j), poly in np.ndenumerate(b_poly):
         for k, c in enumerate(poly.coef):
-            bsys[ k * blk_size + i, j ] = c
+            bsys[ k * n + i, j ] = c
 
-    # Constructs the Asys and bsys matrices
-    b_order = int(bsys.shape[0] / blk_size)
-    Asys = np.zeros([ b_order*blk_size, (b_order-1)*blk_size ])
-    for i in range(b_order-1):
-        Asys[ i*blk_size:(i+1)*blk_size , i*blk_size:(i+1)*blk_size ] = -S
-        Asys[ (i+1)*blk_size:(i+2)*blk_size , i*blk_size:(i+1)*blk_size ] = T
+    #  Initialize and populate Asys
+    Asys = np.zeros(((max_deg+1)*n, max_deg*n))
+    for i in range(max_deg):
+        Asys[ i*n:(i+1)*n , i*n:(i+1)*n ] = -S
+        Asys[ (i+1)*n:(i+2)*n , i*n:(i+1)*n ] = T
 
     results = np.linalg.lstsq(Asys, bsys, rcond=None)
     x_coefs = results[0]
-    residue = np.linalg.norm(results[1])
-
+    res = results[1]
+    residue = np.linalg.norm(res)
     if residue > 1e-12: 
         warnings.warn(f"Large residue detected on linear system solution = {residue}")
 
-    x_poly = np.array([[ Poly([0.0 for _ in range(b_order-1) ]) for j in range(bshape[1]) ] for i in range(blk_size) ])
+    if max_deg == 0: max_deg = 1
+    x_poly = np.array([[ Poly([0.0 for _ in range(max_deg) ]) for j in range(r) ] for i in range(n) ])
     for (i,j), c in np.ndenumerate(x_coefs):
-        exp = int(i/blk_size)
-        x_poly[i%blk_size,j].coef[exp] = c
+        exp = int(i/n)
+        x_poly[i%n,j].coef[exp] = c
 
     return x_poly
 
@@ -406,8 +404,9 @@ class MatrixPencil():
         Computes the pencil adjoint polynomial matrix adj(λ) and polynomial determinant det(λ).
         The pencil inverse is then given by P^(-1)(λ) = 1/det(λ) adj(λ).
         '''
-        if not self.needs_update["inverse"]: return
-        
+        if not self.needs_update["inverse"]: 
+            return
+
         n = self.M.shape[0]
 
         ''' Computes the pencil determinant polynomial expression '''
@@ -469,9 +468,8 @@ class MatrixPencil():
 
                         # Compute polynomial (λ Tik - Sik) and get the kj slice of adjoint
                         Tik = self.MM[ blk_i_slice, blk_k_slice ]
-                        Sik = self. NN[ blk_i_slice, blk_k_slice ]
+                        Sik = self.NN[ blk_i_slice, blk_k_slice ]
                         poly_ik = np.array([[ Poly([ -Sik[a,b], Tik[a,b] ]) for b in range(Tik.shape[1]) ] for a in range(Tik.shape[0]) ])
-
                         adjoint_kj = self.adjoint[ blk_k_slice, blk_j_slice ]
 
                         b_poly -= poly_ik @ adjoint_kj
@@ -555,7 +553,10 @@ class MatrixPencil():
         Returns: a list of dictionaries with all boundary equilibrium solutions 
         and their stability numbers (if dim == 2, otherwise stability is None).
         '''
-        real_zero_tol = 1e-12
+        H = self.computed_from["H"]
+        w = self.computed_from["w"]
+
+        real_zero_tol = 1e-6
         zeros = (self.n_poly - self.d_poly).roots()
         real_zeros = np.array([ z.real for z in zeros if np.abs(z.imag) < real_zero_tol ])
         real_zeros.sort()
@@ -605,7 +606,7 @@ class MatrixPencil():
 
         M = Null.T
         Mcoefs = [ M[:, i*p:(i+1)*(p) ] for i in range(deg+1) ]
-        
+
         return MultiPoly(kernel=[(k,) for k in range(0, deg+1) ], coeffs=Mcoefs)
 
     def compatibilize(self, plant: DynamicSystem, clf_dict: dict, cbf_dict, p = 1.0):
@@ -641,9 +642,7 @@ class MatrixPencil():
         M = B @ B.T @ Hh
 
         def cost(var: np.ndarray):
-            '''
-            Objective function
-            '''
+            ''' Objective function: find closest compatible CLF '''
             return np.linalg.norm( Hvfun(var) - Hv0 )
 
         def psd_constr(var: np.ndarray):
@@ -651,29 +650,31 @@ class MatrixPencil():
             N = B @ B.T @ Hvfun(var) - A
 
             # Recompute pencil with new values
-            self.__init__(M,N)
+            self.__init__(M, N)
 
             # Recompute q-function
             self.inverse()
             self.qfunction(H = Hh, w = N @ (xi - x0) )
             zero_poly = self.n_poly - self.d_poly
 
-            if self.n_poly.trim(tol=1e-3).degree() < self.d_poly.trim(tol=1e-3).degree():
+            trim_tol = 1e-12
+            if self.n_poly.trim(tol=trim_tol).degree() < self.d_poly.trim(tol=trim_tol).degree():
 
                 # NON-SINGULAR CASE
+                leading_c = zero_poly.coef[-1]
                 zeros = zero_poly.roots()
+
                 real_zeros = [ z.real for z in zeros if np.abs(z.imag) < 1e-3 ]
-
                 min_zero, max_zero = min(real_zeros), max(real_zeros)
-                real_remainder = - Poly([-min_zero, 1.0]) * Poly([-max_zero, 1.0])
 
-                # The result of the division by the real remainder is the desired-to-be psd polynomial
-                coefs, rem = polydiv(zero_poly.coef, real_remainder.coef)
-                rem_norm = np.linalg.norm(rem)
-                if rem_norm > 1e-3:
-                    warnings.warn(f"Remainder norm is too large = {rem_norm}.")
+                ztol = 1e-6
+                psd_poly = Poly([1.0])
+                for z in zeros:
+                    if np.abs(z - min_zero) < ztol or np.abs(z - max_zero) < ztol:
+                        continue
+                    psd_poly *= Poly([-z, 1.0])
 
-                psd_poly = MultiPoly.from_nppoly( Poly(coefs.real) )
+                psd_poly = MultiPoly.from_nppoly( psd_poly )
             else:
 
                 # SINGULAR CASE
@@ -681,10 +682,11 @@ class MatrixPencil():
 
             psd_poly.sos_decomposition()
             R = psd_poly.sos_matrix
-            eigsR = np.linalg.eigvals( R )
 
-            tol = 0.1
-            return np.linalg.eigvals(R - tol*np.eye(R.shape[0])) 
+            tol = 0.01
+            eigs = np.linalg.eigvals(R - tol*np.eye(R.shape[0]))
+
+            return eigs
 
         def den_constr(var: np.ndarray):
             ''' Returns the error between the d polynomials '''
@@ -708,7 +710,7 @@ class MatrixPencil():
             var0 = np.random.randn(ndof)
             objective = lambda var: 0.0
 
-        sol = minimize( objective, var0, constraints=constr, options={"disp": True, "maxiter": 5000} )
+        sol = minimize( objective, var0, constraints=constr, options={"disp": True, "maxiter": 1000} )
         Hv = Hvfun(sol.x)
 
         # Restores pencil variables
@@ -734,7 +736,8 @@ class MatrixPencil():
         else:
             l_min, l_max = 0.0, 1000
 
-        if res == None: res = (l_max - l_min)/1000
+        if res == None: 
+            res = (l_max - l_min)/1000
         lambdas = np.arange(l_min, l_max, res)
 
         # Plot real eigenvalues
