@@ -13,7 +13,7 @@ from functions.multipoly import MultiPoly
 from dynamic_systems import LinearSystem
 from controllers.compatibility import MatrixPencil
 
-n, m = 2, 2
+n, m = 2, 1
 
 A = np.random.randint(low=1, high=10, size=(n,n))
 B = np.random.randint(low=1, high=10, size=(n,m))
@@ -24,7 +24,7 @@ B = np.random.randint(low=1, high=10, size=(n,m))
 BB = (B @ B.T)
 
 real = np.random.randint(-10, -1)
-imag = np.random.randint(0, 1)
+imag = np.random.randint(0, 10)
 # imag = 0.0
 real_parts = np.array([ real, real ])
 imag_parts = np.array([ imag*(1j), -imag*(1j) ])
@@ -64,12 +64,16 @@ Hh = hessian_2Dquadratic(CBFeigs, CBFangle)
 p = 1.0
 ''' ---------------------------- Compute pencil and q-function ----------------------------------- '''
 
-M = BB @ Hh 
+M = BB @ Hh
 N = p * BB @ Hv - Acl
 w = N @ CBFcenter - p * BB @ Hv @ CLFcenter
 
 pencil = MatrixPencil(M,N)
 pencil.eigen()
+
+print(pencil.MM)
+print(pencil.NN)
+
 print(f"Pencil λ M - N spectra =")
 for k, eig in enumerate(pencil.eigens):
     print(f"λ{k+1} = {eig.eigenvalue}")
@@ -108,6 +112,6 @@ fig.suptitle('Compatibilization of Linear System')
 
 pencil.plot_qfunction(ax[0], res=0.05)
 
-Hv = pencil.compatibilize( plant, clf_dict, cbf_dict, p=1 )
+# Hv = pencil.compatibilize( plant, clf_dict, cbf_dict, p=1 )
 pencil.plot_qfunction(ax[1], res=0.05)
 plt.show()

@@ -290,8 +290,12 @@ class MatrixPencil():
         self.trim_tol = 1e-8
         self.real_zero_tol = 1e-6
 
+        self.trim_tol = 1e-8
+        self.real_zero_tol = 1e-6
+
         self.n_poly = None
         self.d_poly = None
+
 
         self.computed_from = {"H": None, "w": None}
 
@@ -534,10 +538,9 @@ class MatrixPencil():
 
         if self.needs_update["inverse"]: self.inverse()
 
-        self.n_poly = sp.linalg.sqrtm(barHh) @ self.adjoint @ barw
-
         self.n_poly = ( barw.T @ self.adjoint.T @ barHh @ self.adjoint @ barw ).trim(tol=self.trim_tol)
         self.d_poly = ( self.determinant**2 ).trim(tol=self.trim_tol)
+        
         self.zero_poly = ( self.n_poly - self.d_poly ).trim(tol=self.trim_tol)
 
     def qfunction_value(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
@@ -674,22 +677,28 @@ class MatrixPencil():
             self.qfunction(H = Hh, w = N @ (xi - x0) )
 
             if self.n_poly.degree() < self.d_poly.degree():
+            if self.n_poly.degree() < self.d_poly.degree():
 
                 # NON-SINGULAR CASE
                 leading_c = self.zero_poly.coef[-1]
                 zeros = self.zero_poly.roots()
+                leading_c = self.zero_poly.coef[-1]
+                zeros = self.zero_poly.roots()
 
+                real_zeros = [ z.real for z in zeros if np.abs(z.imag) < self.real_zero_tol ]
                 real_zeros = [ z.real for z in zeros if np.abs(z.imag) < self.real_zero_tol ]
                 min_zero, max_zero = min(real_zeros), max(real_zeros)
 
                 psd_poly = Poly([1.0])
                 for z in zeros:
                     if z == min_zero or z == max_zero: continue
+                    if z == min_zero or z == max_zero: continue
                     psd_poly *= Poly([-z, 1.0])
 
                 psd_poly = MultiPoly.from_nppoly( psd_poly )
             else:
                 # SINGULAR CASE
+                psd_poly = MultiPoly.from_nppoly( self.zero_poly )
                 psd_poly = MultiPoly.from_nppoly( self.zero_poly )
 
             psd_poly.sos_decomposition()
@@ -725,6 +734,10 @@ class MatrixPencil():
         constr = [ {"type": "ineq", "fun": psd_constr} ]
         # constr += [ {"type": "eq", "fun": const_eigenvec} ]
 
+        if "Hv" in clf_dict.keys(): objective = cost
+        else: objective = lambda var: 0.0
+
+        var0 = np.random.randn(ndof)
         if "Hv" in clf_dict.keys(): objective = cost
         else: objective = lambda var: 0.0
 
