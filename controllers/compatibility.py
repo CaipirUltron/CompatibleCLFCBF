@@ -677,7 +677,6 @@ class MatrixPencil():
             self.qfunction(H = Hh, w = N @ (xi - x0) )
 
             if self.n_poly.degree() < self.d_poly.degree():
-            if self.n_poly.degree() < self.d_poly.degree():
 
                 # NON-SINGULAR CASE
                 leading_c = self.zero_poly.coef[-1]

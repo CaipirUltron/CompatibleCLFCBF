@@ -13,7 +13,7 @@ from functions.multipoly import MultiPoly
 from dynamic_systems import LinearSystem
 from controllers.compatibility import MatrixPencil
 
-n, m = 2, 1
+n, m = 2, 2
 
 A = np.random.randint(low=1, high=10, size=(n,n))
 B = np.random.randint(low=1, high=10, size=(n,m))
@@ -112,6 +112,6 @@ fig.suptitle('Compatibilization of Linear System')
 
 pencil.plot_qfunction(ax[0], res=0.05)
 
-# Hv = pencil.compatibilize( plant, clf_dict, cbf_dict, p=1 )
+Hv = pencil.compatibilize( plant, clf_dict, cbf_dict, p=1 )
 pencil.plot_qfunction(ax[1], res=0.05)
 plt.show()
