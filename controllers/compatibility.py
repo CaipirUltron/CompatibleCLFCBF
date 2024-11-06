@@ -287,8 +287,12 @@ class MatrixPencil():
         self.max_order = 100
         self.nullspace_poly = None
 
+        self.trim_tol = 1e-8
+        self.real_zero_tol = 1e-6
+
         self.n_poly = None
         self.d_poly = None
+
         self.computed_from = {"H": None, "w": None}
 
         self.needs_update = {"eigen": True, 
@@ -317,7 +321,13 @@ class MatrixPencil():
 
         # Compute the pencil eigenvalues
         self.MM, self.NN, beta, alpha, self.Q, self.Z = sp.linalg.ordqz(self.M, self.N, output='real')
-        self.eigens = [ Eigen(alpha[k], beta[k], alpha[k]/beta[k], [], []) for k in range(len(alpha)) ]
+
+        self.eigens = []
+        for k in range(len(alpha)):
+            if beta[k] != 0:
+                self.eigens.append( Eigen(alpha[k], beta[k], alpha[k]/beta[k], [], []) )
+            else:
+                self.eigens.append( Eigen(alpha[k], 0.0, np.inf, [], []) )
 
         # Compute the pencil eigenvectors
         for eig in self.eigens:
@@ -524,17 +534,11 @@ class MatrixPencil():
 
         if self.needs_update["inverse"]: self.inverse()
 
-        self.n_poly = ( barw.T @ self.adjoint.T @ barHh @ self.adjoint @ barw )
-        self.d_poly = self.determinant**2
+        self.n_poly = sp.linalg.sqrtm(barHh) @ self.adjoint @ barw
 
-        # Trim coefficients
-        for k, c in enumerate(self.n_poly.coef):
-            if np.abs(c) < 1e-12: 
-                self.n_poly.coef[k] = 0.0
-
-        for k, c in enumerate(self.d_poly.coef):
-            if np.abs(c) < 1e-12: 
-                self.d_poly.coef[k] = 0.0
+        self.n_poly = ( barw.T @ self.adjoint.T @ barHh @ self.adjoint @ barw ).trim(tol=self.trim_tol)
+        self.d_poly = ( self.determinant**2 ).trim(tol=self.trim_tol)
+        self.zero_poly = ( self.n_poly - self.d_poly ).trim(tol=self.trim_tol)
 
     def qfunction_value(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
         '''
@@ -555,9 +559,8 @@ class MatrixPencil():
         H = self.computed_from["H"]
         w = self.computed_from["w"]
 
-        real_zero_tol = 1e-6
-        zeros = (self.n_poly - self.d_poly).roots()
-        real_zeros = np.array([ z.real for z in zeros if np.abs(z.imag) < real_zero_tol ])
+        zeros = self.zero_poly.roots()
+        real_zeros = np.array([ z.real for z in zeros if np.abs(z.imag) < self.real_zero_tol ])
         real_zeros.sort()
 
         sols = [ {"lambda": z} for z in real_zeros ]
@@ -669,37 +672,31 @@ class MatrixPencil():
             # Recompute q-function
             self.inverse()
             self.qfunction(H = Hh, w = N @ (xi - x0) )
-            zero_poly = self.n_poly - self.d_poly
 
-            trim_tol = 1e-12
-            if self.n_poly.trim(tol=trim_tol).degree() < self.d_poly.trim(tol=trim_tol).degree():
+            if self.n_poly.degree() < self.d_poly.degree():
 
                 # NON-SINGULAR CASE
-                leading_c = zero_poly.coef[-1]
-                zeros = zero_poly.roots()
+                leading_c = self.zero_poly.coef[-1]
+                zeros = self.zero_poly.roots()
 
-                real_zeros = [ z.real for z in zeros if np.abs(z.imag) < 1e-3 ]
+                real_zeros = [ z.real for z in zeros if np.abs(z.imag) < self.real_zero_tol ]
                 min_zero, max_zero = min(real_zeros), max(real_zeros)
 
-                ztol = 1e-6
                 psd_poly = Poly([1.0])
                 for z in zeros:
-                    if np.abs(z - min_zero) < ztol or np.abs(z - max_zero) < ztol:
-                        continue
+                    if z == min_zero or z == max_zero: continue
                     psd_poly *= Poly([-z, 1.0])
 
                 psd_poly = MultiPoly.from_nppoly( psd_poly )
             else:
-
                 # SINGULAR CASE
-                psd_poly = MultiPoly.from_nppoly( zero_poly )
+                psd_poly = MultiPoly.from_nppoly( self.zero_poly )
 
             psd_poly.sos_decomposition()
             R = psd_poly.sos_matrix
 
             tol = 0.01
             eigs = np.linalg.eigvals(R - tol*np.eye(R.shape[0]))
-
             return eigs
 
         def num_constr(var: np.ndarray):
@@ -728,13 +725,10 @@ class MatrixPencil():
         constr = [ {"type": "ineq", "fun": psd_constr} ]
         # constr += [ {"type": "eq", "fun": const_eigenvec} ]
 
-        if "Hv" in clf_dict.keys():
-            var0 = sym2vector(Hv0)
-            objective = cost
-        else:
-            var0 = np.random.randn(ndof)
-            objective = lambda var: 0.0
+        if "Hv" in clf_dict.keys(): objective = cost
+        else: objective = lambda var: 0.0
 
+        var0 = np.random.randn(ndof)
         sol = minimize( objective, var0, constraints=constr, options={"disp": True, "maxiter": 1000} )
         Hv = Hvfun(sol.x)
 

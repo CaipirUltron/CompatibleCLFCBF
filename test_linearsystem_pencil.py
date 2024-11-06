@@ -18,6 +18,9 @@ n, m = 2, 2
 A = np.random.randint(low=1, high=10, size=(n,n))
 B = np.random.randint(low=1, high=10, size=(n,m))
 
+# A = np.zeros((n,n))
+# B = np.eye(n)
+
 BB = (B @ B.T)
 
 real = np.random.randint(-10, -1)
@@ -54,7 +57,7 @@ CLFcenter = np.array([0.0, 0.0])
 Hv = hessian_2Dquadratic(CLFeigs, CLFangle)
 
 CBFeigs = np.array([ 1.0, 4.0 ])
-CBFangle = np.deg2rad(5)
+CBFangle = np.deg2rad(0)
 CBFcenter = np.array([0.0, 5.0])
 Hh = hessian_2Dquadratic(CBFeigs, CBFangle)
 
@@ -64,9 +67,6 @@ p = 1.0
 M = BB @ Hh 
 N = p * BB @ Hv - Acl
 w = N @ CBFcenter - p * BB @ Hv @ CLFcenter
-
-print(f"Hh = {Hh}")
-print(f"Hv = {Hv}")
 
 pencil = MatrixPencil(M,N)
 pencil.eigen()
