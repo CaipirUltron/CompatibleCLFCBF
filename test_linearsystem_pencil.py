@@ -91,7 +91,7 @@ zero_poly = n_poly - d_poly
 
 print(f"n(λ) = {n_poly}")
 print(f"d(λ) = {d_poly}")
-print(f"n(λ) - d(λ) = {n_poly - d_poly}")
+print(f"n(λ) - d(λ) = {zero_poly}")
 
 n_poly = MultiPoly.from_nppoly( n_poly )
 d_poly = MultiPoly.from_nppoly( d_poly )
@@ -110,5 +110,4 @@ pencil.plot_qfunction(ax[0], res=0.05)
 
 Hv = pencil.compatibilize( plant, clf_dict, cbf_dict, p=1 )
 pencil.plot_qfunction(ax[1], res=0.05)
-
 plt.show()

@@ -519,9 +519,8 @@ class MatrixPencil():
 
         if self.needs_update["eigen"]: self.eigen()
 
-        Zinv = np.linalg.inv(self.Z)
-        barHh = Zinv @ H @ (Zinv.T)
-        barw = np.linalg.inv(self.Q) @ w
+        barHh = self.Z.T @ H @ self.Z
+        barw = self.Q.T @ w
 
         if self.needs_update["inverse"]: self.inverse()
 
@@ -626,6 +625,7 @@ class MatrixPencil():
         # Stores pencil variables for latter restauration
         auxM, auxN = self.M, self.N
         old_n_poly, old_d_poly = self.n_poly, self.d_poly
+        oldZ, oldQ = self.Z, self.Q
         old_computed_from = self.computed_from
 
         ''' ------------------------------ Compatibilization code ------------------------------ '''
@@ -688,20 +688,31 @@ class MatrixPencil():
 
             return eigs
 
-        def den_constr(var: np.ndarray):
-            ''' Returns the error between the d polynomials '''
+        def num_constr(var: np.ndarray):
+            ''' Returns the error between the n(λ) polynomials '''
             N = B @ B.T @ Hvfun(var) - A
-
-            # Recompute pencil with new values
             self.__init__(M,N)
-
-            # Recompute q-function
             self.qfunction(H = Hh, w = N @ (xi - x0) )
-
             return np.linalg.norm( old_n_poly.coef - self.n_poly.coef )
 
+        def den_constr(var: np.ndarray):
+            ''' Returns the error between the d(λ) polynomials '''
+            N = B @ B.T @ Hvfun(var) - A
+            self.__init__(M,N)
+            self.qfunction(H = Hh, w = N @ (xi - x0) )
+            return np.linalg.norm( old_d_poly.coef - self.d_poly.coef )
+
+        def const_eigenvec(var: np.ndarray):
+            ''' Constraint for constant pencil eigenvectors '''
+            N = B @ B.T @ Hvfun(var) - A
+            self.__init__(M,N)
+            self.eigen()
+            distZ = np.linalg.norm(oldZ.T @ self.Z - np.eye(n), 'fro')
+            distQ = np.linalg.norm(oldQ.T @ self.Q - np.eye(n), 'fro')
+            return distZ + distQ
+
         constr = [ {"type": "ineq", "fun": psd_constr} ]
-        # constr += [ {"type": "eq", "fun": den_constr} ]
+        # constr += [ {"type": "eq", "fun": const_eigenvec} ]
 
         if "Hv" in clf_dict.keys():
             var0 = sym2vector(Hv0)
