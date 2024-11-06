@@ -50,9 +50,19 @@ print(f"Null space Λ(λ) Z = \n{null_poly}")
 print(f"Shape of Λ(λ) Z = {null_poly.shape}")
 
 ortho_poly = pencil.orthogonal_nullspace(H)
-print(ortho_poly)
+print(f"O(λ) = {ortho_poly}")
+print(f" O(λ) H Λ(λ) Z = {ortho_poly @ H @ null_poly}")
 
-print( ortho_poly @ H @ null_poly )
+reg_poly = pencil.regular_pencil(H)
+Mr = reg_poly.coeffs[1]
+Nr = -reg_poly.coeffs[0]
+
+reg_pencil = MatrixPencil(Mr, Nr)
+print(f"P(λ) O'(λ) = {reg_pencil}")
+reg_pencil.eigen()
+print("Reg. pencil eigenvalues:")
+for k, eig in enumerate(reg_pencil.eigens):
+    print(f"λ{k+1} = {eig.eigenvalue}")
 
 # ------------------------------------ Plot -----------------------------------
 # fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(5.0, 5.0), layout="constrained")

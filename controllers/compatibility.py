@@ -274,10 +274,10 @@ class MatrixPencil():
         if M.shape != N.shape:
             raise TypeError("Matrix dimensions are not equal.")
 
-        if M.shape[0] != M.shape[1]:
-            self.type = 'singular'
-        else:
+        if M.shape[0] == M.shape[1]: 
             self.type = 'regular'
+        else: 
+            self.type = 'singular'
 
         self.M, self.N = M, N
         self.shape = M.shape
@@ -607,6 +607,20 @@ class MatrixPencil():
         Mcoefs = [ M[:, i*p:(i+1)*(p) ] for i in range(deg+1) ]
 
         return MultiPoly(kernel=[(k,) for k in range(0, deg+1) ], coeffs=Mcoefs)
+
+    def regular_pencil(self, H: list | np.ndarray):
+        '''
+        Using H of appropriate size, return regular matrix pencil P(λ) O(λ).T
+        with O(λ) H Λ(λ) Z = 0
+        '''
+        if self.type == "regular":
+            return self
+        
+        # Get slice of polynomial that is orthogonal to the nullspace 
+        O_poly = self.orthogonal_nullspace(H)
+        Or_poly = O_poly[0:self.shape[0], :]
+
+        return self.poly @ Or_poly.T
 
     def compatibilize(self, plant: DynamicSystem, clf_dict: dict, cbf_dict, p = 1.0):
         '''
