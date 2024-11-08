@@ -23,11 +23,17 @@ B = np.random.randint(low=1, high=10, size=(n,m))
 
 BB = (B @ B.T)
 
-real = np.random.randint(-10, -1)
-imag = np.random.randint(0, 10)
-# imag = 0.0
-real_parts = np.array([ real, real ])
-imag_parts = np.array([ imag*(1j), -imag*(1j) ])
+# Creates desired poles based on number of states
+minimum, maximum = -1, -10
+real_part = np.zeros(n)
+imag_part = np.zeros(n, dtype='complex')
+for k in range(int(np.floor(n/2))):
+    real = (maximum-minimum)*np.random.rand() + minimum
+    imag = (maximum-minimum)*np.random.rand() + minimum
+
+    real_part[2*k:2*k+2] = np.array([ real, real ])
+    imag_part[2*k:2*k+2] = np.array([ imag*(1j), -imag*(1j) ])
+if n%2 != 0: real_part[-1] = (maximum-minimum)*np.random.rand() + minimum
 
 rankC = np.linalg.matrix_rank( control.ctrb(A, B) )
 if rankC < A.shape[0]:
@@ -36,9 +42,9 @@ else:
     print(f"(A, B) pair is controllable.")
     rankB = np.linalg.matrix_rank(B)
     if rankB >= rankC:
-        desired_poles = real_parts + imag_parts
+        desired_poles = real_part + imag_part
     else:
-        desired_poles = [-1, -2]
+        desired_poles = real_part
     
     print(f"Desired poles = {desired_poles}")
     K = control.place(A, B, p=desired_poles)
@@ -70,9 +76,6 @@ w = N @ CBFcenter - p * BB @ Hv @ CLFcenter
 
 pencil = MatrixPencil(M,N)
 pencil.eigen()
-
-print(pencil.MM)
-print(pencil.NN)
 
 print(f"Pencil λ M - N spectra =")
 for k, eig in enumerate(pencil.eigens):
@@ -112,6 +115,6 @@ fig.suptitle('Compatibilization of Linear System')
 
 pencil.plot_qfunction(ax[0], res=0.05)
 
-Hv = pencil.compatibilize( plant, clf_dict, cbf_dict, p=1 )
+# Hv = pencil.compatibilize( plant, clf_dict, cbf_dict, p=1 )
 pencil.plot_qfunction(ax[1], res=0.05)
 plt.show()

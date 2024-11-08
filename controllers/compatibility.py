@@ -771,6 +771,32 @@ class MatrixPencil():
             res = (l_max - l_min)/1000
         lambdas = np.arange(l_min, l_max, res)
 
+        # Looks for Hurwitz definite sets
+        is_inserting_nsd, is_inserting_psd = False, False
+        Hnsd_intervals, Hpsd_intervals = [], []
+        for l in lambdas:
+
+            # Neg. def. Hurwitz intervals
+            if np.all( np.linalg.eigvals(self(l)).real < 0.0 ):
+                if not is_inserting_nsd:
+                    Hnsd_intervals.append([ l, np.inf ])
+                is_inserting_nsd = True
+            elif is_inserting_nsd:
+                Hnsd_intervals[-1][1] = l
+                is_inserting_nsd = False
+
+            # Pos. def. Hurwitz intervals
+            if np.all( np.linalg.eigvals(self(l)).real > 0.0 ):
+                if not is_inserting_psd:
+                    Hpsd_intervals.append([ l, np.inf ])
+                is_inserting_psd = True
+            elif is_inserting_psd:
+                Hpsd_intervals[-1][1] = l
+                is_inserting_psd = False
+
+        print(f"Hurwitz neg. = {Hnsd_intervals}")
+        print(f"Hurwitz pos. = {Hpsd_intervals}")
+
         # Plot real eigenvalues
         for eig in self.get_real_eigen():
             ax.plot( [ eig for _ in lambdas ], np.linspace(q_min, q_max, len(lambdas)), 'b--' )
