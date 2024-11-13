@@ -38,7 +38,7 @@ for i in range(numTests):
         real = (maximum-minimum)*np.random.rand() + minimum
         imag = (maximum-minimum)*np.random.rand() + minimum
         real_part[2*k:2*k+2] = np.array([ real, real ])
-        # imag_part[2*k:2*k+2] = np.array([ imag*(1j), -imag*(1j) ])
+        imag_part[2*k:2*k+2] = np.array([ imag*(1j), -imag*(1j) ])
     if n%2 != 0: real_part[-1] = (maximum-minimum)*np.random.rand() + minimum
 
     desired_poles = real_part + imag_part
@@ -47,14 +47,10 @@ for i in range(numTests):
     N -= Acl
 
     pencil = MatrixPencil(M, N)
-    real_eigP = pencil.get_real_eigen()
-    if len(real_eigP) > 2:
-        Min, Max = real_eigP[0], real_eigP[1]
-        delta = Max - Min
-        l = delta/2 + Min
-    else:
-        continue
+    stability_pencil = MatrixPencil(M + M.T, N + N.T)
 
+    Min, Max = 1, 10
+    l = (Max - Min)*np.random.randn() - Min
     P = pencil(l)
     eigP = np.linalg.eigvals(P)
     try:
@@ -66,15 +62,19 @@ for i in range(numTests):
     Sym_PinvG = PinvG + PinvG.T
     eigPinvG = np.linalg.eigvals(Sym_PinvG)
 
-    PinvG2 = PinvG @ Hh @ PinvG
-    Sym_PinvG2 = PinvG2 + PinvG2.T
-    eigPinvG2 = np.linalg.eigvals(Sym_PinvG2)
+    Pinv1 = Pinv @ M @ Pinv @ G
+    Q1 = Pinv1 + Pinv1.T
+    eigQ1 = np.linalg.eigvals(Q1)
 
-    fail = np.any( eigPinvG2.real < 0)
+    Pinv2 = Pinv @ M @ Pinv
+    Q2 = Pinv2 + Pinv2.T
+    eigQ2 = np.linalg.eigvals(Q2)
 
+    # fail = np.all( eigQ1.real > 0 ) and np.any( eigQ2.real < 0 )
+    fail = np.any( stability_pencil.get_real_eigen() < 0 )
     if fail:
         print(f"Conjecture is wrong after {i} trials. Counter example is:")
-        print(f"Q eigs = {eigPinvG2}")
+        print(f"Q eigs = {eigQ1}")
         sys.exit()
 
 print(f"Conjecture most likely correct after {numTests} trials")
