@@ -24,16 +24,18 @@ B = np.random.randint(low=1, high=10, size=(n,m))
 BB = (B @ B.T)
 
 # Creates desired poles based on number of states
-minimum, maximum = -1, -10
+real_min, real_max = -20, -1
+imag_min, imag_max = 0, 20
+
 real_part = np.zeros(n)
 imag_part = np.zeros(n, dtype='complex')
 for k in range(int(np.floor(n/2))):
-    real = (maximum-minimum)*np.random.rand() + minimum
-    imag = (maximum-minimum)*np.random.rand() + minimum
+    real = (real_max-real_min)*np.random.rand() + real_min
+    imag = (imag_max-imag_min)*np.random.rand() + imag_max
 
     real_part[2*k:2*k+2] = np.array([ real, real ])
     imag_part[2*k:2*k+2] = np.array([ imag*(1j), -imag*(1j) ])
-if n%2 != 0: real_part[-1] = (maximum-minimum)*np.random.rand() + minimum
+if n%2 != 0: real_part[-1] = (real_max-real_min)*np.random.rand() + real_min
 
 rankC = np.linalg.matrix_rank( control.ctrb(A, B) )
 if rankC < A.shape[0]:
@@ -75,11 +77,17 @@ N = p * BB @ Hv - Acl
 w = N @ CBFcenter - p * BB @ Hv @ CLFcenter
 
 pencil = MatrixPencil(M,N)
-pencil.eigen()
+
+print(f"MM = {pencil.MM}")
+print(f"NN = {pencil.NN}")
+
+blk_poles, blk_adjs = pencil._blocks()
 
 print(f"Pencil λ M - N spectra =")
 for k, eig in enumerate(pencil.eigens):
     print(f"λ{k+1} = {eig.eigenvalue}")
+
+print(blk_poles)
 
 pencil.qfunction(Hh, w)
 

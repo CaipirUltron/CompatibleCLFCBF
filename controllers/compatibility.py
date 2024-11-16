@@ -2,28 +2,18 @@ import scipy as sp
 import numpy as np
 import warnings 
 
+from copy import copy
 from scipy import signal
 from scipy.optimize import fsolve, minimize
 from scipy.linalg import null_space, inv
 from dataclasses import dataclass
+from itertools import product
 
-from numpy.polynomial import polynomial as poly
 from numpy.polynomial import Polynomial as Poly
-from numpy.polynomial.polynomial import polydiv, polymul
+np.polynomial.set_default_printstyle('unicode')
 
-from common import vector2sym, sym2vector
 from dynamic_systems import DynamicSystem, LinearSystem
-from functions import MultiPoly
-
-ZERO_ACCURACY = 1e-9
-
-@dataclass
-class Eigen():
-    alpha: complex
-    beta: float
-    eigenvalue: complex
-    l_eigenvectors: list | np.ndarray
-    r_eigenvectors: list | np.ndarray
+from functions import Function, MultiPoly
 
 def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np.ndarray:
     '''
@@ -74,215 +64,284 @@ def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np
         warnings.warn(f"Large residue detected on linear system solution = {residue}")
 
     if max_deg == 0: max_deg = 1
-    x_poly = np.array([[ Poly([0.0 for _ in range(max_deg) ]) for j in range(r) ] for i in range(n) ])
+    x_poly = np.array([[ Poly([0.0 for _ in range(max_deg) ], symbol='λ') for j in range(r) ] for i in range(n) ])
     for (i,j), c in np.ndenumerate(x_coefs):
         exp = int(i/n)
         x_poly[i%n,j].coef[exp] = c
 
     return x_poly
 
-class PolynomialCLFCBFPair():
+@dataclass
+class Eigen():
+    ''' 
+    Data class for generalized eigenvalues/eigenvectors.
+    ( βeta M - alpha N ) r_eigenvectors = 0 or
+    l_eigenvectors' ( βeta M - alpha N ) = 0
     '''
-    Class for polynomial CLF-CBF pairs of the form:
-    V(x,P) = m(x) P m(x) and h(x,Q) = m(x) Q m(x) - 1.
-    In this initial implementation, the pair is represented by their respective shape matrices P and Q.
-    '''
-    def __init__(self, P, Q, max_iter = 1000):
-        self.update(P = P, Q = Q, max_iter = max_iter)
-
-    def update(self, **kwargs):
-        '''
-        Updates the CLF-CBF pair.
-        '''
-        for key in kwargs:
-            if key == "P":
-                self.P = kwargs[key]
-                continue
-            if key == "Q":
-                self.Q = kwargs[key]
-                continue
-            if key == "max_iter":
-                self.max_iter = kwargs[key]
-                continue
-
-        self.pencil = LinearMatrixPencil2( self.Q, self.P )
-        self.n = self.pencil.dim-1
-
-        self.C = scipy.linalg.block_diag(np.zeros([self.n,self.n]), 1) # C matrix for PEP
-
-        self.asymptotes = self.compute_asymptotes()
-        self.lambdas, self.kappas, self.equilibria, self.initial_lines = self.compute_equilibrium()
-
-    def compute_asymptotes(self):
-        '''
-        Computes the asymptotes of the graph det( lambda Q - kappa C - P ) = 0.
-        Returns a dict whose keys are the angular coefficients of the asymptotes.
-        The values for each key are: the associated linear coefficient, in case that angular coefficient (key) is finite;
-                                     the associated horizontal position of the asymptote, in case the angular coefficient is +-inf (vertical asymptote).
-        '''
-        # Compute angular coefficients of the asymptotes
-        pencil_angular_coefs = LinearMatrixPencil2(self.Q, self.C)
-        angular_coefs = pencil_angular_coefs.eigenvalues
-        asymptotes = { angular_coef: [] for angular_coef in angular_coefs }
-
-        # Compute linear coefficients of the asymptotes
-        sorted_eigenvalues = np.sort(self.pencil.eigenvalues)
-        to_be_deleted = []
-        for i in range(len(sorted_eigenvalues)):
-            if np.abs(sorted_eigenvalues[i]) == np.inf:
-                to_be_deleted.append(i)
-        sorted_eigenvalues = np.delete(sorted_eigenvalues, to_be_deleted)
-        differences = np.diff(sorted_eigenvalues)
-        '''
-        Define initializers for the algorithm.
-        If +-inf eigenvalues were found, bound the initiliazers to be inside the limits of the finite spectra: important to prevent singularities.
-        '''
-        initializers = []
-        initializers.append( sorted_eigenvalues[0] - differences[0]/2 )
-        for k in range(len(differences)):
-            initializers.append( sorted_eigenvalues[k] + differences[k]/2 )
-        initializers.append( sorted_eigenvalues[-1] + differences[-1]/2 )
-
-        for i in range(len(angular_coefs)):
-            if np.abs(angular_coefs[i]) == np.inf:
-                null_space_Q = null_space(self.Q).reshape(self.n+1)
-                sol = - (null_space_Q @ self.P @ null_space_Q) / (null_space_Q @ self.C @ null_space_Q)
-                asymptotes[angular_coefs[i]].append(sol)
-                continue
-            def compute_trace(s):
-                    invPencil = np.linalg.inv(self.pencil.value(s))
-                    return np.trace( invPencil @ ( angular_coefs[i]*self.Q - self.C ) )
-            for k in range(len(initializers)):
-                sols, infodict, ier, mesg = fsolve( compute_trace, initializers[k], factor=0.1, full_output = True )
-                if ier == 1:
-                    for sol in sols:
-                        if np.any( np.abs(asymptotes[angular_coefs[i]] - sol) < 0.00001 ):
-                            continue
-                        asymptotes[angular_coefs[i]].append(sol)
-
-        return asymptotes
-
-    def compute_equilibrium(self):
-        '''
-        Computes all equilibrium points of the CLF-CBF pair, using the Parametric Eigenvalue Problem (PEP)
-        '''
-        # Separate horizontal from non-horizontal asymptotes.
-        # Non-horizontal asymptotes are represented by equation \kappa = m \lambda + p
-        lambda_positions = []
-        non_horizontal_lines = []
-        for key in self.asymptotes.keys():
-            if np.abs(key) < ZERO_ACCURACY:
-                for p in self.asymptotes[key]:
-                    if np.any( np.abs(lambda_positions - p) < ZERO_ACCURACY ):
-                        continue
-                    lambda_positions.append(p)
-            else:
-                if np.abs(key) == np.inf:
-                    non_horizontal = [ ( 0.0,lin_coef ) for lin_coef in self.asymptotes[key] ]
-                else:
-                    non_horizontal = [ ( 1/key, -lin_coef/key ) for lin_coef in self.asymptotes[key] ]
-                non_horizontal_lines = non_horizontal_lines + non_horizontal
-
-        # Compute intersections with non-horizontal asymptotes
-        intersection_pts = np.array([], dtype=float).reshape(2,0)
-        for k in range(len(lambda_positions)):
-            vert_pos = lambda_positions[k]
-            for non_horizontal in non_horizontal_lines:
-                m, p = non_horizontal[0], non_horizontal[1]
-                kappa_val, lambda_val = m*vert_pos + p, vert_pos
-                pt = np.array([kappa_val, lambda_val]).reshape(2,1)
-                intersection_pts = np.hstack([intersection_pts, pt])
-        diffs = np.diff(intersection_pts)
-        # diffs = np.hstack([diffs, diffs[:,-1].reshape(2,1)])
-
-        # Compute random initial points
-        # def generate_pts(center, R, n):
-        #     '''
-        #     Generates n random points inside a circle of radius R centered on center,
-        #     filtering points with negative y-value.
-        #     '''
-        #     pts = np.array([], dtype=float).reshape(2,0)
-        #     for _ in range(n):
-        #         pt = np.random.normal( center, R, 2 )
-        #         # if pt[1]>=0:
-        #         pts = np.hstack([pts, pt.reshape(2,1)])
-        #     return pts
-
-        # Compute random initial points
-        # num_internal_points = 10
-        # intermediate_pts = np.array([], dtype=float).reshape(2,0)
-        # for k in range(np.shape(diffs)[1]):
-        #     for i in range(num_internal_points):
-        #         d = np.linalg.norm(diffs[:,k])
-        #         vert_pt = intersection_pts[:,k] + i*diffs[:,k]/(num_internal_points)
-        #         # hor_pt = intersection_pts[:,k] + (-num_internal_points/2 + i)*np.array([d, 0.0])/(num_internal_points)
-        #         intermediate_pts = np.hstack([intermediate_pts, vert_pt.reshape(2,1)])
-
-        # Compute intermediary points for defining initial lines
-        num_internal_lines = 1
-        intermediate_pts = np.array([], dtype=float).reshape(2,0)
-        first_pt = intersection_pts[:,0] - diffs[:,0]/2
-        intermediate_pts = np.hstack([intermediate_pts, first_pt.reshape(2,1)])
-        for k in range(diffs.shape[1]):
-            for i in range(1,num_internal_lines+1):
-                pt = intersection_pts[:,k] + i*diffs[:,k]/(num_internal_lines+1)
-                intermediate_pts = np.hstack([intermediate_pts, pt.reshape(2,1)])
-        last_pt = intersection_pts[:,-1] + diffs[:,-1]/2
-        intermediate_pts = np.hstack([intermediate_pts, last_pt.reshape(2,1)])
-
-        # Compute the initial lines
-        init_lines = []
-        for pt in intermediate_pts.T:
-            m = -0.1
-            p = pt[1] - m*pt[0]
-            init_lines.append( { "angular_coef": m, "linear_coef" : p } )
-
-        # Solves the PEP problem for many different initial lines and store non-repeating results
-        lambdas, kappas, equilibrium_points = np.array([], dtype=float), np.array([], dtype=float), np.array([], dtype=float).reshape(self.n,0)
-
-        # lambda_p, kappa_p, Z, init_kappas, init_lambdas = solve_PEP( self.Q, self.P, initial_points = intermediate_pts, max_iter = self.max_iter )
-        lambda_p, kappa_p, Z, init_kappas, init_lambdas = solve_PEP( self.Q, self.P, initial_lines = init_lines, max_iter = self.max_iter )
-        for i in range(len(lambda_p)):
-            equal_lambda = np.any( np.abs( lambda_p[i] - lambdas ) < ZERO_ACCURACY )
-            # equal_kappa = np.any( np.abs( kappa_p[i] - kappas ) < ZERO_ACCURACY )
-            eq = Z[0:-1,i].reshape(self.n,1)
-            equal_eigenvec = np.any( np.linalg.norm( eq - equilibrium_points, axis=0 ) < ZERO_ACCURACY )
-            if equal_lambda and equal_eigenvec:
-                continue
-            lambdas = np.hstack([lambdas, lambda_p[i]])
-            kappas = np.hstack([kappas, kappa_p[i]])
-            equilibrium_points = np.hstack([equilibrium_points, eq])
-
-        # init_pts = np.vstack([init_kappas, init_lambdas])
-
-        return lambdas, kappas, equilibrium_points, init_lines
+    alpha: complex
+    beta: float
+    eigenvalue: complex
+    rightEigenvectors: list | np.ndarray
+    leftEigenvectors: list | np.ndarray
 
 class MatrixPencil():
     '''
-    Class for Linear Matrix Pencils of the form P(λ) = λ M - N.
-    Computes generalized eigenvalues/eigenvector pairs, rational q-functions, among others.
+    Class for linear matrix pencils of the form P(λ) = λ M - N.
+    - generalized eigenvalues/eigenvector pairs
+    - generate equivalent symmetric pencil
     '''
     def __init__(self, M: list | np.ndarray, N: list | np.ndarray):
 
         if isinstance(M, list): M = np.array(M)
         if isinstance(N, list): N = np.array(N)
         
-        # Validate passed parameters.
         if M.ndim != 2 or N.ndim != 2:
             raise TypeError("M and N must be two dimensional arrays.")
 
         if M.shape != N.shape:
             raise TypeError("Matrix dimensions are not equal.")
 
+        self.type = ''
         if M.shape[0] == M.shape[1]: 
-            self.type = 'regular'
+            self.type += 'regular'
         else: 
-            self.type = 'singular'
+            self.type += 'singular'
 
         self.M, self.N = M, N
         self.shape = M.shape
+
+        '''
+        Uses QZ algorithm to decompose the two pencil matrices into M = Q MM Z' and N = Q NN Z',
+        where MM is block upper triangular, NN is upper triangular and Q, Z are unitary matrices.
+        '''
+        if self.type == 'singular':
+            raise NotImplementedError("Eigenvalue computation (currently) not implemented for singular matrix pencils.")
+        
+        self.NN, self.MM, self.alphas, self.betas, self.Q, self.Z = sp.linalg.ordqz(self.N, self.M, output='real')
+
+        ''' Computes Eigen list '''
+        self.eigens = self.eigen(self.alphas, self.betas)
+
+        ''' Parameters '''
+        self.realEigenTol = 1e-10           # Tolerance to consider an eigenvalue as real
+        self.max_order = 10                 # Max. polynomial order to compute nullspace solutions 
+
+    def set(self, M, N):
+        ''' Pencil update method '''
+        self.__init__(M, N)
+
+    def get_eigen(self) -> list[Eigen]:
+        ''' Get method for generalized eigenvalues '''
+        return self.eigens
+
+    def get_real_eigen(self) -> list[Eigen]:
+        '''
+        Returns an Eigen list with sorted real eigenvalues
+        '''
+        realAlphas, realBetas = [], []
+        for eig in self.eigens:
+            if np.abs(eig.alpha.imag) < self.realEigenTol:
+                realAlphas.append( eig.alpha.real )
+                realBetas.append( eig.beta )
+
+        realEigens = self.eigen(realAlphas, realBetas)
+        realEigens.sort(key=lambda eig: eig.eigenvalue)
+        return realEigens
+
+    def eigen(self, alphas: np.ndarray, betas: np.ndarray):
+        '''
+        Computes generalized eigenvalues/eigenvectors from polar eigenvalues.
+        '''
+        if len(alphas) != len(betas):
+            raise TypeError("The same number of polar eigenvalues must be passed.")
+
+        eigens: list[Eigen] = []
+        for alpha, beta in zip(alphas, betas):
+
+            zRight = null_space( self(alpha, beta) )
+            zLeft = null_space( self(alpha, beta).T )
+
+            if beta != 0:
+                eigens.append( Eigen(alpha, beta, alpha/beta, zRight, zLeft) )
+            else:
+                eigens.append( Eigen(alpha, 0.0, np.inf if alpha.real > 0 else -np.inf, zRight, zLeft) )
+
+        return eigens
+
+    def nullspace(self):
+        ''' 
+        Returns the nullspace polynomial Λ(λ) Z of the singular pencil λ M - N, satisfying
+        (λ M - N) Λ(λ) Z = 0 identically for all λ
+        '''
+        n, p = self.shape[0], self.shape[1]
+        for deg in range(0, self.max_order):
+
+            N = np.zeros([ (deg+2)*n, (deg+1)*p ])
+            for i in range(deg+1):
+                N[ i*n:(i+1)*n , i*p:(i+1)*p ] = - self.N
+                N[ (i+1)*n:(i+2)*n , i*p:(i+1)*p ] = + self.M
+
+            Null = sp.linalg.null_space(N)
+
+            # Regular case
+            if n == p and Null.size == 0:
+                return MultiPoly( kernel=[(0,)], coeffs=[np.zeros((p,1))] )
+
+            # End case
+            if Null.size != 0:
+                break
+
+            if deg == self.max_order - 1:
+                warnings.warn("Max. degree might be low. Consider increasing the parameter.")
+        
+        # Extract matrices
+        coefs = [ Null[d*p:(d+1)*p] for d in range(0, deg+1) ]
+
+        return MultiPoly(kernel=[(k,) for k in range(0,deg+1)], coeffs=coefs)
+
+    def symmetric(self):
+        ''' Returns equivalent symmetric pencil. '''
+        return MatrixPencil( 0.5*(self.M + self.M.T), 0.5*(self.N + self.N.T) )
+
+    def antisymmetric(self):
+        ''' Returns equivalent symmetric pencil. '''
+        return MatrixPencil( 0.5*(self.M - self.M.T), 0.5*(self.N - self.N.T) )
+
+    def to_poly(self):
+        ''' Returns equivalent array of polynomials '''
+        poly_arr = np.array([[ Poly([0.0], symbol='λ') for j in range(self.shape[1]) ] for i in range(self.shape[0]) ])
+        for (i,j) in product(range(self.shape[0]),range(self.shape[1])):
+            poly_arr[i,j] += Poly([-self.N[i,j], self.M[i,j] ], symbol='λ')
+        return poly_arr
+
+    def inverse(self):
+        '''
+        Returns:  - pencil adjoint polynomial matrix adj(λ)
+                  - polynomial determinant det(λ)
+        Used to compute the pencil inverse P(λ)^(-1) = det(λ)^(-1) adj(λ).
+        '''        
+        n = self.M.shape[0]
+
+        ''' Computes blocks of the QZ decomposition '''
+        blk_poles, blk_adjs = self._blocks()
+        blk_dims = [ pole.degree() for pole in blk_poles ]
+
+        ''' Computes pencil determinant '''
+        determinant = np.prod(blk_poles)
+
+        ''' Computes the pencil adjoint matrix '''
+        num_blks = len(blk_poles)
+        adjoint_arr = np.array([[ Poly([0.0], symbol='λ') for _ in range(n) ] for _ in range(n) ])
+
+        # Iterate over each block, starting by the last one
+        for i in range(num_blks-1, -1, -1):
+            blk_i_slice = slice( i*blk_dims[i], (i+1)*blk_dims[i] )
+
+            for j in range(i, num_blks):
+                blk_j_slice = slice( j*blk_dims[j], (j+1)*blk_dims[j] )
+
+                ''' 
+                j == i: Computes ADJOINT DIAGONAL BLOCKS
+                j != i: Computes ADJOINT UPPER TRIANGULAR BLOCKS
+                '''
+                if j == i:
+                    poles_ij = np.array([[ np.prod([ pole for k, pole in enumerate(blk_poles) if k != j ]) ]])
+                    Lij = poles_ij * blk_adjs[j]
+                else:
+                    Tii = self.MM[ blk_i_slice, blk_i_slice ]
+                    Sii = self.NN[ blk_i_slice, blk_i_slice ]
+
+                    b_poly = np.array([[ Poly([0.0], symbol='λ') for _ in range(blk_dims[j]) ] for _ in range(blk_dims[i]) ])
+                    for k in range(i+1, j+1):
+                        blk_k_slice = slice( k*blk_dims[k], (k+1)*blk_dims[k] )
+
+                        # Compute polynomial (λ Tik - Sik) and get the kj slice of adjoint
+                        Tik = self.MM[ blk_i_slice, blk_k_slice ]
+                        Sik = self.NN[ blk_i_slice, blk_k_slice ]
+                        poly_ik = np.array([[ Poly([ -Sik[a,b], Tik[a,b] ], symbol='λ') for b in range(Tik.shape[1]) ] for a in range(Tik.shape[0]) ])
+                        adjoint_kj = adjoint_arr[ blk_k_slice, blk_j_slice ]
+
+                        b_poly -= poly_ik @ adjoint_kj
+
+                    Lij = solve_poly_linearsys( Tii, Sii, b_poly )
+
+                # Populate adjoint matrix
+                adjoint_arr[ blk_i_slice, blk_j_slice ] = Lij
+
+        return determinant, self.Z @ adjoint_arr @ self.Q.T
+
+    def _blocks(self):
+        '''  
+        Computes information about blocks of the QZ decomposition.
+        Returns: - list of block poles
+                 - list of block adjoint matrices
+        '''
+        n = self.M.shape[0]
+
+        ''' Computes the block poles and adjoint matrices '''
+        blk_poles, blk_adjs = [], []
+        i = 0
+        while i < n:
+            # 2X2 BLOCKS OF COMPLEX CONJUGATE PENCIL EIGENVALUES
+            if i < n-1 and self.NN[i+1,i] != 0.0:
+
+                MMblock = self.MM[i:i+2,i:i+2]      # this is diagonal
+                NNblock = self.NN[i:i+2,i:i+2]      # this is full 2x2
+
+                a = np.linalg.det(MMblock)
+                b = -( MMblock[0,0] * NNblock[1,1] + MMblock[1,1] * NNblock[0,0] )
+                c = np.linalg.det(NNblock)
+                blk_poles.append( Poly([ c, b, a ], symbol='λ') )
+
+                adj11 = Poly([ -NNblock[1,1],  MMblock[1,1] ], symbol='λ')
+                adj12 = Poly([ NNblock[0,1] ], symbol='λ')
+                adj21 = Poly([ NNblock[1,0] ], symbol='λ')
+                adj22 = Poly([ -NNblock[0,0],  MMblock[0,0] ], symbol='λ')
+                blk_adjs.append( np.array([[ adj11, adj12 ],[ adj21, adj22 ]]) )
+
+                i+=2
+            # 1X1 BLOCKS OF REAL PENCIL EIGENVALUES
+            else:
+                MMblock = self.MM[i,i]
+                NNblock = self.NN[i,i]
+
+                blk_poles.append( Poly([ -NNblock, MMblock ], symbol='λ') )
+                blk_adjs.append( np.array([Poly(1.0, symbol='λ')]) )
+
+                i+=1
+                
+        return blk_poles, blk_adjs
+
+    def __call__(self, alpha: int | float, beta: int | float = 1.0) -> np.ndarray:
+        '''
+        Returns pencil value.
+        If only one argument is passed, it is interpreted as the λ value and method returns matrix P(λ) = λ M - N.
+        If two arguments are passed, they are interpreted as α, β values and method returns P(α, β) = α M - β N.
+        '''
+        return alpha * self.M  - beta * self.N
+
+    def __str__(self) -> str:
+        '''
+        Print the pencil P(λ) = λ M - N
+        '''
+        np.set_printoptions(precision=3, suppress=True)
+        ret_str = '{}'.format(type(self).__name__) + " = \u03BB M - N with \n"
+        ret_str = ret_str + 'M = \n' + self.M.__str__() + '\n'
+        ret_str = ret_str + 'N = \n' + self.N.__str__()
+        return ret_str
+
+class QFunction(Function):
+    ''' 
+    Class for Qfunction methods and analysis.
+
+    '''
+    def __init__(self, P: MatrixPencil, H: list | np.ndarray, w: list | np.ndarray):
+        
+        if isinstance(H, list): H = np.array(H)
+        if isinstance(w, list): w = np.array(w)
+        self._verify(P, H, w)
+
         self.poly = MultiPoly(kernel=[(0,), (1,)], coeffs=[ -self.N, self.M ])
-        self.eigens = None
 
         self.max_order = 100
         self.nullspace_poly = None
@@ -296,112 +355,23 @@ class MatrixPencil():
         self.n_poly = None
         self.d_poly = None
 
+    def _verify(P: MatrixPencil, H: list | np.ndarray, w: list | np.ndarray):
+        ''' Verification method for passed '''
 
-        self.computed_from = {"H": None, "w": None}
+        if not isinstance( P, MatrixPencil ):
+            raise TypeError("P must be a MatrixPencil.")
 
-        self.needs_update = {"eigen": True, 
-                             "nullspace": True,
-                             "inverse": True,
-                              }
+        if H.ndim != 2:
+            raise TypeError("H must be a n x n array.")
 
-    def set(self, M, N):
-        '''
-        Update method for the pencil. If all is set, update everything 
-        '''
-        self.__init__(M, N)
-        for key in self.needs_update.keys(): self.needs_update[key] = True
+        if not w.shape in ( (2,), (2,1) ):
+            raise TypeError("w must be a n x 1 array.")
 
-    def eigen(self):
-        '''
-        Computes the generalized eigenvalues/eigenvectors of the pencil using the QZ decomposition.
-        It simultaneously decomposes the two matrices of P(λ) = λ M - N as M = Q MM Z' and N = Q NN Z',
-        where MM is block upper triangular, NN is upper triangular and Q, Z are unitary matrices.
+        if H.shape[0] != H.shape[1]:
+            raise TypeError("H must be a square matrix.")
 
-        If the pencil is singular, compute the nullspace first and then 
-        '''
-        if not self.needs_update["eigen"]: return
-        if self.type == 'singular':
-            raise NotImplementedError("Eigenvalue computation (currently) not implemented for singular matrix pencils.")
-
-        # Compute the pencil eigenvalues
-        self.MM, self.NN, beta, alpha, self.Q, self.Z = sp.linalg.ordqz(self.M, self.N, output='real')
-
-        self.eigens = []
-        for k in range(len(alpha)):
-            if beta[k] != 0:
-                self.eigens.append( Eigen(alpha[k], beta[k], alpha[k]/beta[k], [], []) )
-            else:
-                self.eigens.append( Eigen(alpha[k], 0.0, np.inf, [], []) )
-
-        # Compute the pencil eigenvectors
-        for eig in self.eigens:
-
-            Qright = null_space( self(eig.alpha, eig.beta) )
-            Qleft = null_space( self(eig.alpha, eig.beta).T )
-
-            eig.r_eigenvectors.append( Qright )
-            eig.l_eigenvectors.append( Qleft )
-
-        self.needs_update["eigen"] = False
-
-    def nullspace(self):
-        ''' 
-        Computes the nullspace polynomial Λ(λ) Z of the singular pencil λ M - N, satisfying
-        (λ M - N) Λ(λ) Z = 0 identically for all λ
-        '''
-        if not self.needs_update["nullspace"]: return
-
-        # General singular case
-        n, p = self.shape[0], self.shape[1]
-        for deg in range(0, self.max_order):
-
-            N = np.zeros([ (deg+2)*n, (deg+1)*p ])
-            for i in range(deg+1):
-                N[ i*n:(i+1)*n , i*p:(i+1)*p ] = - self.N
-                N[ (i+1)*n:(i+2)*n , i*p:(i+1)*p ] = + self.M
-
-            Null = sp.linalg.null_space(N)
-
-            # Regular case
-            if n == p and Null.size == 0:
-                self.nullspace_poly = MultiPoly( kernel=[(0,)], coeffs=[np.zeros((p,1))] )
-                return 
-
-            # End case
-            if Null.size != 0:
-                break
-        
-        # Extract matrices
-        coefs = [ Null[d*p:(d+1)*p] for d in range(0, deg+1) ]
-
-        self.nullspace_poly = MultiPoly(kernel=[(k,) for k in range(0,deg+1)], coeffs=coefs)
-        self.needs_update["nullspace"] = False
-
-    def get_poly(self):
-        ''' Returns matrix polynomial equivalent to the pencil '''
-        return self.poly
-
-    def get_real_eigen(self):
-        ''' Returns the sorted real pencil eigenvalues '''
-
-        self.eigen()
-
-        tol = 1e-12
-        real_eigens = []
-        for eig in self.eigens:
-            if np.abs(eig.eigenvalue.imag) < tol:
-                real_eigens.append(eig.eigenvalue.real)
-        
-        real_eigens = np.array(real_eigens)
-        real_eigens.sort()
-
-        return real_eigens
-
-    def get_nullspace(self):
-        '''  Returns the nullspace polynomial'''
-
-        self.nullspace()
-        return self.nullspace_poly
+        if H.shape[0] != len(w):
+            raise TypeError("H and w must have the same dimension.")
 
     def get_qfunction(self):
         '''
@@ -412,88 +382,6 @@ class MatrixPencil():
             raise Exception("Q-function was not yet computed.")
 
         return self.n_poly, self.d_poly
-
-    def inverse(self):
-        '''
-        Computes the pencil adjoint polynomial matrix adj(λ) and polynomial determinant det(λ).
-        The pencil inverse is then given by P^(-1)(λ) = 1/det(λ) adj(λ).
-        '''
-        if not self.needs_update["inverse"]: 
-            return
-
-        n = self.M.shape[0]
-
-        ''' Computes the pencil determinant polynomial expression '''
-        blk_dims, blk_poles, blk_adjs = [], [], []
-        for i in range(n):
-
-            # 2X2 BLOCKS OF COMPLEX CONJUGATE PENCIL EIGENVALUES
-            if i < n-1 and self.MM[i+1,i] != 0.0:
-                blk_dims.append(2)
-
-                MMblock = self.MM[i:i+2,i:i+2]
-                NNblock = self.NN[i:i+2,i:i+2]
-
-                a = np.linalg.det(MMblock)
-                b = -( MMblock[0,0] * NNblock[1,1] + NNblock[0,0] * MMblock[1,1] )
-                c = np.linalg.det(NNblock)
-                blk_poles.append( Poly([ c, b, a ]) )
-
-                adj11 = Poly([ -NNblock[1,1],  MMblock[1,1] ])
-                adj12 = Poly([           0.0, -MMblock[0,1] ])
-                adj21 = Poly([           0.0, -MMblock[1,0] ])
-                adj22 = Poly([ -NNblock[0,0],  MMblock[0,0] ])
-                blk_adjs.append( np.array([[ adj11, adj12 ],[ adj21, adj22 ]]) )
-
-            # 1X1 BLOCKS OF REAL PENCIL EIGENVALUES
-            else:
-                blk_dims.append(1)
-
-                MMblock = self.MM[i,i]
-                NNblock = self.NN[i,i]
-
-                blk_poles.append( Poly([ -NNblock, MMblock ]) )
-                blk_adjs.append( np.array([Poly(1.0)]) )
-        
-        self.determinant = np.prod([ pole for pole in blk_poles ])
-
-        ''' Computes the pencil adjoint matrix '''
-        num_blks = len(blk_dims)
-        self.adjoint = np.array([[ Poly([0.0]) for _ in range(n) ] for _ in range(n) ])
-        for i in range(num_blks-1, -1, -1):
-            blk_i_slice = slice( i*blk_dims[i], (i+1)*blk_dims[i] )
-
-            for j in range(i, num_blks):
-                blk_j_slice = slice( j*blk_dims[j], (j+1)*blk_dims[j] )
-
-                # Computes ADJOINT DIAGONAL BLOCKS
-                if j == i:
-                    poles_ij = np.array([[ np.prod([ pole for k, pole in enumerate(blk_poles) if k != i ]) ]])
-                    Lij = poles_ij * blk_adjs[j]
-
-                # Computes ADJOINT UPPER TRIANGULAR BLOCKS
-                else:
-                    Tii = self.MM[ blk_i_slice, blk_i_slice ]
-                    Sii = self.NN[ blk_i_slice, blk_i_slice ]
-
-                    b_poly = np.array([[ Poly([0.0]) for _ in range(blk_dims[j]) ] for _ in range(blk_dims[i]) ])
-                    for k in range(i+1, j+1):
-                        blk_k_slice = slice( k*blk_dims[k], (k+1)*blk_dims[k] )
-
-                        # Compute polynomial (λ Tik - Sik) and get the kj slice of adjoint
-                        Tik = self.MM[ blk_i_slice, blk_k_slice ]
-                        Sik = self.NN[ blk_i_slice, blk_k_slice ]
-                        poly_ik = np.array([[ Poly([ -Sik[a,b], Tik[a,b] ]) for b in range(Tik.shape[1]) ] for a in range(Tik.shape[0]) ])
-                        adjoint_kj = self.adjoint[ blk_k_slice, blk_j_slice ]
-
-                        b_poly -= poly_ik @ adjoint_kj
-
-                    Lij = solve_poly_linearsys( Tii, Sii, b_poly )
-
-                # Populate adjoint matrix
-                self.adjoint[ blk_i_slice, blk_j_slice ] = Lij
-
-        self.needs_update["inverse"] = False
 
     def qfunction(self, 
                   H: list | np.ndarray = None, 
@@ -538,8 +426,8 @@ class MatrixPencil():
 
         if self.needs_update["inverse"]: self.inverse()
 
-        self.n_poly = ( barw.T @ self.adjoint.T @ barHh @ self.adjoint @ barw ).trim(tol=self.trim_tol)
-        self.d_poly = ( self.determinant**2 ).trim(tol=self.trim_tol)
+        self.n_poly = ( barw.T @ adjoint.T @ barHh @ adjoint @ barw ).trim(tol=self.trim_tol)
+        self.d_poly = ( determinant**2 ).trim(tol=self.trim_tol)
         
         self.zero_poly = ( self.n_poly - self.d_poly ).trim(tol=self.trim_tol)
 
@@ -571,7 +459,7 @@ class MatrixPencil():
             if self.shape == (2,2):
                 l = sol["lambda"]
                 P = self(l)
-                v_polys = self.adjoint @ w
+                v_polys : list[Poly] = adjoint @ w
                 grad_h = H @ np.array([ v(l) for v in v_polys ])
                 perp = np.array([ grad_h[1], -grad_h[0] ])
                 sol["stability"] = perp.T @ P @ perp
@@ -756,14 +644,14 @@ class MatrixPencil():
 
         q_min, q_max = q_limits[0], q_limits[1]
 
-        lambdas = []
+        lambdas_eq = []
         sols = self.equilibria()
         for sol in sols:
-            lambdas.append(sol["lambda"])
+            lambdas_eq.append(sol["lambda"])
 
         factor = 1.5
-        if lambdas:
-            l_min, l_max = factor*min(lambdas), factor*max(lambdas)
+        if lambdas_eq:
+            l_min, l_max = factor*min(lambdas_eq), factor*max(lambdas_eq)
         else:
             l_min, l_max = 0.0, 1000
 
@@ -776,8 +664,10 @@ class MatrixPencil():
         Hnsd_intervals, Hpsd_intervals = [], []
         for l in lambdas:
 
+            P = self(l)
+            P = P + P.T
             # Neg. def. Hurwitz intervals
-            if np.all( np.linalg.eigvals(self(l)).real < 0.0 ):
+            if np.all( np.linalg.eigvals(P).real < 0.0 ):
                 if not is_inserting_nsd:
                     Hnsd_intervals.append([ l, np.inf ])
                 is_inserting_nsd = True
@@ -786,7 +676,7 @@ class MatrixPencil():
                 is_inserting_nsd = False
 
             # Pos. def. Hurwitz intervals
-            if np.all( np.linalg.eigvals(self(l)).real > 0.0 ):
+            if np.all( np.linalg.eigvals(P).real > 0.0 ):
                 if not is_inserting_psd:
                     Hpsd_intervals.append([ l, np.inf ])
                 is_inserting_psd = True
@@ -813,27 +703,14 @@ class MatrixPencil():
             if sol["stability"] > 0: ax.plot( sol["lambda"], 1.0, 'bo' ) # stable solutions
             if sol["stability"] < 0: ax.plot( sol["lambda"], 1.0, 'ro' ) # unstable solutions
 
+        # Plots real eigenvalues from stability pencil
+        s_eigen = self.get_stability_eigen()
+        for eig in s_eigen:
+            ax.plot( [ eig for _ in lambdas ], np.linspace(q_min, q_max, len(lambdas)), 'g--' )
+
         ax.set_xlim(l_min, l_max) 
         ax.set_ylim(q_min, q_max)
         ax.legend()
-
-    def __call__(self, l: int | float, beta: int | float = 1.0) -> np.ndarray:
-        '''
-        Returns pencil value.
-        If only one argument is passed, it is interpreted as the λ value and method returns matrix P(λ) = λ M - N.
-        If two arguments are passed, they are interpreted as α, β values and method returns P(α, β) = α M - β N.
-        '''
-        return l * self.M  - beta * self.N
-
-    def __str__(self) -> str:
-        '''
-        Print the pencil P(λ) = λ M - N.
-        '''
-        np.set_printoptions(precision=3, suppress=True)
-        ret_str = '{}'.format(type(self).__name__) + " = \u03BB M - N \n"
-        ret_str = ret_str + 'M = ' + self.M.__str__() + '\n'
-        ret_str = ret_str + 'N = ' + self.N.__str__()
-        return ret_str
 
 class CLFCBFPair():
     '''
@@ -1022,3 +899,179 @@ class CLFCBFPair():
         '''
         pencil_inv = np.linalg.inv( self.pencil.value( lambda_var ) )
         return pencil_inv.dot(self.v0)
+
+class PolynomialCLFCBFPair():
+    '''
+    Class for polynomial CLF-CBF pairs of the form:
+    V(x,P) = m(x) P m(x) and h(x,Q) = m(x) Q m(x) - 1.
+    In this initial implementation, the pair is represented by their respective shape matrices P and Q.
+    '''
+    def __init__(self, P, Q, max_iter = 1000):
+        self.update(P = P, Q = Q, max_iter = max_iter)
+
+    def update(self, **kwargs):
+        '''
+        Updates the CLF-CBF pair.
+        '''
+        for key in kwargs:
+            if key == "P":
+                self.P = kwargs[key]
+                continue
+            if key == "Q":
+                self.Q = kwargs[key]
+                continue
+            if key == "max_iter":
+                self.max_iter = kwargs[key]
+                continue
+
+        self.pencil = LinearMatrixPencil2( self.Q, self.P )
+        self.n = self.pencil.dim-1
+
+        self.C = scipy.linalg.block_diag(np.zeros([self.n,self.n]), 1) # C matrix for PEP
+
+        self.asymptotes = self.compute_asymptotes()
+        self.lambdas, self.kappas, self.equilibria, self.initial_lines = self.compute_equilibrium()
+
+    def compute_asymptotes(self):
+        '''
+        Computes the asymptotes of the graph det( lambda Q - kappa C - P ) = 0.
+        Returns a dict whose keys are the angular coefficients of the asymptotes.
+        The values for each key are: the associated linear coefficient, in case that angular coefficient (key) is finite;
+                                     the associated horizontal position of the asymptote, in case the angular coefficient is +-inf (vertical asymptote).
+        '''
+        # Compute angular coefficients of the asymptotes
+        pencil_angular_coefs = LinearMatrixPencil2(self.Q, self.C)
+        angular_coefs = pencil_angular_coefs.eigenvalues
+        asymptotes = { angular_coef: [] for angular_coef in angular_coefs }
+
+        # Compute linear coefficients of the asymptotes
+        sorted_eigenvalues = np.sort(self.pencil.eigenvalues)
+        to_be_deleted = []
+        for i in range(len(sorted_eigenvalues)):
+            if np.abs(sorted_eigenvalues[i]) == np.inf:
+                to_be_deleted.append(i)
+        sorted_eigenvalues = np.delete(sorted_eigenvalues, to_be_deleted)
+        differences = np.diff(sorted_eigenvalues)
+        '''
+        Define initializers for the algorithm.
+        If +-inf eigenvalues were found, bound the initiliazers to be inside the limits of the finite spectra: important to prevent singularities.
+        '''
+        initializers = []
+        initializers.append( sorted_eigenvalues[0] - differences[0]/2 )
+        for k in range(len(differences)):
+            initializers.append( sorted_eigenvalues[k] + differences[k]/2 )
+        initializers.append( sorted_eigenvalues[-1] + differences[-1]/2 )
+
+        for i in range(len(angular_coefs)):
+            if np.abs(angular_coefs[i]) == np.inf:
+                null_space_Q = null_space(self.Q).reshape(self.n+1)
+                sol = - (null_space_Q @ self.P @ null_space_Q) / (null_space_Q @ self.C @ null_space_Q)
+                asymptotes[angular_coefs[i]].append(sol)
+                continue
+            def compute_trace(s):
+                    invPencil = np.linalg.inv(self.pencil.value(s))
+                    return np.trace( invPencil @ ( angular_coefs[i]*self.Q - self.C ) )
+            for k in range(len(initializers)):
+                sols, infodict, ier, mesg = fsolve( compute_trace, initializers[k], factor=0.1, full_output = True )
+                if ier == 1:
+                    for sol in sols:
+                        if np.any( np.abs(asymptotes[angular_coefs[i]] - sol) < 0.00001 ):
+                            continue
+                        asymptotes[angular_coefs[i]].append(sol)
+
+        return asymptotes
+
+    def compute_equilibrium(self):
+        '''
+        Computes all equilibrium points of the CLF-CBF pair, using the Parametric Eigenvalue Problem (PEP)
+        '''
+        # Separate horizontal from non-horizontal asymptotes.
+        # Non-horizontal asymptotes are represented by equation \kappa = m \lambda + p
+        lambda_positions = []
+        non_horizontal_lines = []
+        for key in self.asymptotes.keys():
+            if np.abs(key) < ZERO_ACCURACY:
+                for p in self.asymptotes[key]:
+                    if np.any( np.abs(lambda_positions - p) < ZERO_ACCURACY ):
+                        continue
+                    lambda_positions.append(p)
+            else:
+                if np.abs(key) == np.inf:
+                    non_horizontal = [ ( 0.0,lin_coef ) for lin_coef in self.asymptotes[key] ]
+                else:
+                    non_horizontal = [ ( 1/key, -lin_coef/key ) for lin_coef in self.asymptotes[key] ]
+                non_horizontal_lines = non_horizontal_lines + non_horizontal
+
+        # Compute intersections with non-horizontal asymptotes
+        intersection_pts = np.array([], dtype=float).reshape(2,0)
+        for k in range(len(lambda_positions)):
+            vert_pos = lambda_positions[k]
+            for non_horizontal in non_horizontal_lines:
+                m, p = non_horizontal[0], non_horizontal[1]
+                kappa_val, lambda_val = m*vert_pos + p, vert_pos
+                pt = np.array([kappa_val, lambda_val]).reshape(2,1)
+                intersection_pts = np.hstack([intersection_pts, pt])
+        diffs = np.diff(intersection_pts)
+        # diffs = np.hstack([diffs, diffs[:,-1].reshape(2,1)])
+
+        # Compute random initial points
+        # def generate_pts(center, R, n):
+        #     '''
+        #     Generates n random points inside a circle of radius R centered on center,
+        #     filtering points with negative y-value.
+        #     '''
+        #     pts = np.array([], dtype=float).reshape(2,0)
+        #     for _ in range(n):
+        #         pt = np.random.normal( center, R, 2 )
+        #         # if pt[1]>=0:
+        #         pts = np.hstack([pts, pt.reshape(2,1)])
+        #     return pts
+
+        # Compute random initial points
+        # num_internal_points = 10
+        # intermediate_pts = np.array([], dtype=float).reshape(2,0)
+        # for k in range(np.shape(diffs)[1]):
+        #     for i in range(num_internal_points):
+        #         d = np.linalg.norm(diffs[:,k])
+        #         vert_pt = intersection_pts[:,k] + i*diffs[:,k]/(num_internal_points)
+        #         # hor_pt = intersection_pts[:,k] + (-num_internal_points/2 + i)*np.array([d, 0.0])/(num_internal_points)
+        #         intermediate_pts = np.hstack([intermediate_pts, vert_pt.reshape(2,1)])
+
+        # Compute intermediary points for defining initial lines
+        num_internal_lines = 1
+        intermediate_pts = np.array([], dtype=float).reshape(2,0)
+        first_pt = intersection_pts[:,0] - diffs[:,0]/2
+        intermediate_pts = np.hstack([intermediate_pts, first_pt.reshape(2,1)])
+        for k in range(diffs.shape[1]):
+            for i in range(1,num_internal_lines+1):
+                pt = intersection_pts[:,k] + i*diffs[:,k]/(num_internal_lines+1)
+                intermediate_pts = np.hstack([intermediate_pts, pt.reshape(2,1)])
+        last_pt = intersection_pts[:,-1] + diffs[:,-1]/2
+        intermediate_pts = np.hstack([intermediate_pts, last_pt.reshape(2,1)])
+
+        # Compute the initial lines
+        init_lines = []
+        for pt in intermediate_pts.T:
+            m = -0.1
+            p = pt[1] - m*pt[0]
+            init_lines.append( { "angular_coef": m, "linear_coef" : p } )
+
+        # Solves the PEP problem for many different initial lines and store non-repeating results
+        lambdas, kappas, equilibrium_points = np.array([], dtype=float), np.array([], dtype=float), np.array([], dtype=float).reshape(self.n,0)
+
+        # lambda_p, kappa_p, Z, init_kappas, init_lambdas = solve_PEP( self.Q, self.P, initial_points = intermediate_pts, max_iter = self.max_iter )
+        lambda_p, kappa_p, Z, init_kappas, init_lambdas = solve_PEP( self.Q, self.P, initial_lines = init_lines, max_iter = self.max_iter )
+        for i in range(len(lambda_p)):
+            equal_lambda = np.any( np.abs( lambda_p[i] - lambdas ) < ZERO_ACCURACY )
+            # equal_kappa = np.any( np.abs( kappa_p[i] - kappas ) < ZERO_ACCURACY )
+            eq = Z[0:-1,i].reshape(self.n,1)
+            equal_eigenvec = np.any( np.linalg.norm( eq - equilibrium_points, axis=0 ) < ZERO_ACCURACY )
+            if equal_lambda and equal_eigenvec:
+                continue
+            lambdas = np.hstack([lambdas, lambda_p[i]])
+            kappas = np.hstack([kappas, kappa_p[i]])
+            equilibrium_points = np.hstack([equilibrium_points, eq])
+
+        # init_pts = np.vstack([init_kappas, init_lambdas])
+
+        return lambdas, kappas, equilibrium_points, init_lines
