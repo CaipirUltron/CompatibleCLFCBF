@@ -1,19 +1,19 @@
-import scipy as sp
-import numpy as np
-import warnings 
+import math
+import warnings
 
-from copy import copy
+import numpy as np
+from numpy.polynomial import Polynomial as Poly
+from matplotlib.axes import Axes
+
+import scipy as sp
 from scipy import signal
 from scipy.optimize import fsolve, minimize
 from scipy.linalg import null_space, inv
 from dataclasses import dataclass
 from itertools import product
 
-from numpy.polynomial import Polynomial as Poly
-np.polynomial.set_default_printstyle('unicode')
-
 from dynamic_systems import DynamicSystem, LinearSystem
-from functions import Function, MultiPoly
+from functions import MultiPoly
 
 def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np.ndarray:
     '''
@@ -116,19 +116,28 @@ class MatrixPencil():
         '''
         if self.type == 'singular':
             raise NotImplementedError("Eigenvalue computation (currently) not implemented for singular matrix pencils.")
-        
+
         self.NN, self.MM, self.alphas, self.betas, self.Q, self.Z = sp.linalg.ordqz(self.N, self.M, output='real')
 
         ''' Computes Eigen list '''
-        self.eigens = self.eigen(self.alphas, self.betas)
+        self.eigens = self._eigen(self.alphas, self.betas)
 
         ''' Parameters '''
         self.realEigenTol = 1e-10           # Tolerance to consider an eigenvalue as real
         self.max_order = 10                 # Max. polynomial order to compute nullspace solutions 
 
-    def set(self, M, N):
+    def set(self, **kwargs):
         ''' Pencil update method '''
-        self.__init__(M, N)
+
+        newM, newN = self.M, self.N
+        for key in kwargs.keys():
+            if key == 'M':
+                newM = kwargs['M']
+                continue
+            if key == 'N':
+                newN = kwargs['N']
+                continue
+        self.__init__(newM, newN)
 
     def get_eigen(self) -> list[Eigen]:
         ''' Get method for generalized eigenvalues '''
@@ -144,11 +153,11 @@ class MatrixPencil():
                 realAlphas.append( eig.alpha.real )
                 realBetas.append( eig.beta )
 
-        realEigens = self.eigen(realAlphas, realBetas)
+        realEigens = self._eigen(realAlphas, realBetas)
         realEigens.sort(key=lambda eig: eig.eigenvalue)
         return realEigens
 
-    def eigen(self, alphas: np.ndarray, betas: np.ndarray):
+    def _eigen(self, alphas: np.ndarray, betas: np.ndarray) -> list[Eigen]:
         '''
         Computes generalized eigenvalues/eigenvectors from polar eigenvalues.
         '''
@@ -168,7 +177,7 @@ class MatrixPencil():
 
         return eigens
 
-    def nullspace(self):
+    def nullspace(self) -> MultiPoly:
         ''' 
         Returns the nullspace polynomial Λ(λ) Z of the singular pencil λ M - N, satisfying
         (λ M - N) Λ(λ) Z = 0 identically for all λ
@@ -219,8 +228,10 @@ class MatrixPencil():
         Returns:  - pencil adjoint polynomial matrix adj(λ)
                   - polynomial determinant det(λ)
         Used to compute the pencil inverse P(λ)^(-1) = det(λ)^(-1) adj(λ).
-        '''        
-        n = self.M.shape[0]
+        '''
+        n, m = self.shape[0], self.shape[1]
+        if n != m:
+            raise NotImplementedError("Cannot compute the inverse of a non-square matrix pencil.")
 
         ''' Computes blocks of the QZ decomposition '''
         blk_poles, blk_adjs = self._blocks()
@@ -330,30 +341,27 @@ class MatrixPencil():
         ret_str = ret_str + 'N = \n' + self.N.__str__()
         return ret_str
 
-class QFunction(Function):
+class QFunction():
     ''' 
-    Class for Qfunction methods and analysis.
-
+    General class for Qfunctions q(λ) = v(λ)' H v(λ), where P(λ) v(λ) = w
+    and P(λ) is a regular linear matrix pencil.
     '''
     def __init__(self, P: MatrixPencil, H: list | np.ndarray, w: list | np.ndarray):
         
         if isinstance(H, list): H = np.array(H)
         if isinstance(w, list): w = np.array(w)
-        self._verify(P, H, w)
+        QFunction._verify(P, H, w)
 
-        self.poly = MultiPoly(kernel=[(0,), (1,)], coeffs=[ -self.N, self.M ])
+        self.pencil = P
+        self.symPencil = self.pencil.symmetric()
+
+        self.H = H
+        self.w = w
+        self._compute_polys()
 
         self.max_order = 100
-        self.nullspace_poly = None
-
         self.trim_tol = 1e-8
         self.real_zero_tol = 1e-6
-
-        self.trim_tol = 1e-8
-        self.real_zero_tol = 1e-6
-
-        self.n_poly = None
-        self.d_poly = None
 
     def _verify(P: MatrixPencil, H: list | np.ndarray, w: list | np.ndarray):
         ''' Verification method for passed '''
@@ -373,71 +381,78 @@ class QFunction(Function):
         if H.shape[0] != len(w):
             raise TypeError("H and w must have the same dimension.")
 
-    def get_qfunction(self):
-        '''
-        Returns the numerator and denominator polynomials n(λ) and d(λ) 
-        of the q-function, if already computed.
-        '''
-        if not hasattr(self, "n_poly") or not hasattr(self, "d_poly"):
-            raise Exception("Q-function was not yet computed.")
+    def _compute_polys(self):
+        ''' Private method for computing the QFunction polynomials '''
 
-        return self.n_poly, self.d_poly
+        determinant, adjoint = self.pencil.inverse()
+        self.n_poly = ( self.w.T @ adjoint.T @ self.H @ adjoint @ self.w )
+        self.d_poly = ( determinant**2 )
+        self.zero_poly = ( self.n_poly - self.d_poly )
 
-    def qfunction(self, 
-                  H: list | np.ndarray = None, 
-                  w: list | np.ndarray = None):
-        '''
-        Computes the numerator and denominator numpy polynomials n(λ), d(λ) 
-        of the q-function q(λ) = n(λ)/d(λ) from the previously computed pencil adjoint and determinant.
-        In summary, the q-function is the solution to the following problem:
-        - P(λ) v(λ) = w, 
-        - q(λ) = v(λ).T @ Hh v(λ).
+    def set(self, **kwargs):
+        ''' QFunction update method '''
 
-        Inputs: - matrix Hh from q(λ) = v(λ).T @ Hh v(λ)
-                - vector w from P(λ) v(λ) = w
-        '''
-        if H is None and self.computed_from["H"] is None:
-            raise TypeError("H must be passed to compute the q-function.")
+        newM, newN = self.pencil.M, self.pencil.N
+        newH, new_w = self.H, self.w
+        for key in kwargs.keys():
+            if key == 'M':
+                newM = kwargs['M']
+                continue
+            if key == 'N':
+                newN = kwargs['N']
+                continue
+            if key == 'H':
+                newH = kwargs['H']
+                continue
+            if key == 'w':
+                new_w = kwargs['w']
+                continue
 
-        if w is None and self.computed_from["w"] is None:
-            raise TypeError("w must be passed to compute the q-function.")
+        self.pencil.set( M=newM, N=newN )
+        self.symPencil.set( M=0.5*(newM+newM.T), N=0.5*(newN+newN.T) )
 
-        if isinstance(H, list): H = np.array(H)
-        if isinstance(w, list): w = np.array(w)
+        self.H = newH
+        self.w = new_w
+        self._compute_polys()
 
-        no_need_recompute = np.all(H == self.computed_from["H"])
-        no_need_recompute = no_need_recompute and np.all(w == self.computed_from["w"])
-        if no_need_recompute: return
-
-        # Validate passed parameters.
-        n, p = self.shape[0], self.shape[1]
-        if H.shape != (p,p):
-            raise TypeError("H must have compatible dimensions.")
-
-        if len(w) != n:
-            raise TypeError("Vector w must have compatible dimensions.")
-
-        self.computed_from = {"H": H, "w": w}
-
-        if self.needs_update["eigen"]: self.eigen()
-
-        barHh = self.Z.T @ H @ self.Z
-        barw = self.Q.T @ w
-
-        if self.needs_update["inverse"]: self.inverse()
-
-        self.n_poly = ( barw.T @ adjoint.T @ barHh @ adjoint @ barw ).trim(tol=self.trim_tol)
-        self.d_poly = ( determinant**2 ).trim(tol=self.trim_tol)
-        
-        self.zero_poly = ( self.n_poly - self.d_poly ).trim(tol=self.trim_tol)
-
-    def qfunction_value(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
+    def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
         '''
         Computes the q-function value q(λ) = n(λ)/d(λ) for a given λ (for DEBUG only)
         '''
-        P = self(l)
-        v = inv(P) @ w
-        return v.T @ H @ v 
+        P = self.pencil(l)
+        v = inv(P) @ self.w
+        return v.T @ self.H @ v 
+
+    def __call__(self, l):
+        ''' Calling method '''
+        return self.n_poly(l) / self.d_poly(l)
+
+    def get_polys(self):
+        '''
+        Returns: - numerator polynomial n(λ)
+                 - denominator polynomial d(λ) 
+        '''
+        return self.n_poly, self.d_poly
+
+    def v_derivative(self, order=0):
+        '''
+        Computes the derivatives of v(λ) of any order.
+        Returns: - vector polynomial v_poly(λ)
+                 - scalar divisor polynomial a(λ)
+        v(λ) = 1/a(λ) v_poly(λ)
+        '''
+        det, adjoint = self.pencil.inverse()
+        v = math.factorial(order) * adjoint @ self.w
+
+        power = np.eye(self.pencil.shape[0])
+        for k in range(order): 
+            power @= - adjoint @ self.pencil.M
+        v = power @ v
+
+        return v, det**(order+1)
+
+    def v(self):
+        return self.v_derivative(order=0)
 
     def equilibria(self) -> list[dict]:
         ''' 
@@ -447,20 +462,18 @@ class QFunction(Function):
         Returns: a list of dictionaries with all boundary equilibrium solutions 
         and their stability numbers (if dim == 2, otherwise stability is None).
         '''
-        H = self.computed_from["H"]
-        w = self.computed_from["w"]
-
         zeros = self.zero_poly.roots()
         real_zeros = np.array([ z.real for z in zeros if np.abs(z.imag) < self.real_zero_tol ])
         real_zeros.sort()
 
+        vPolys, _ = self.v()
+
         sols = [ {"lambda": z} for z in real_zeros ]
         for sol in sols:
-            if self.shape == (2,2):
+            if self.pencil.shape == (2,2):
                 l = sol["lambda"]
-                P = self(l)
-                v_polys : list[Poly] = adjoint @ w
-                grad_h = H @ np.array([ v(l) for v in v_polys ])
+                P = self.pencil(l)
+                grad_h = self.H @ np.array([ v(l) for v in vPolys ])
                 perp = np.array([ grad_h[1], -grad_h[0] ])
                 sol["stability"] = perp.T @ P @ perp
             else:
@@ -468,29 +481,23 @@ class QFunction(Function):
 
         return sols
 
-    def orthogonal_nullspace(self, H: list | np.ndarray):
+    def orthogonal_nullspace(self) -> MultiPoly:
         ''' 
         Computes the matrix polynomial O(λ) orthogonal to the nullspace polynomial Λ(λ) Z,
         that is, O(λ) H Λ(λ) Z = 0 
         '''
-        if isinstance(H, list): H = np.array(H)
+        p = self.pencil.shape[1]
 
-        n, p = self.shape[0], self.shape[1]
-        if H.shape != (p, p): 
-            raise TypeError(f"Passed H must be ({p},{p})")
-
-        self.nullspace()
-        zdim = self.nullspace_poly.shape[1]
-        Zcoefs = self.nullspace_poly.coeffs
-
-        numZcoefs = len(self.nullspace_poly.coeffs)
-
+        nullspacePoly = self.pencil.nullspace()
+        zdim = nullspacePoly.shape[1]
+        Zcoefs = nullspacePoly.coeffs
+        numZcoefs = len(nullspacePoly.coeffs)
         for deg in range(0, self.max_order):
 
             Coef = np.zeros(( (deg+1)*p, numZcoefs*zdim ))
 
             for i in range(0, numZcoefs-deg):
-                aux = H @ np.hstack([ Zcoefs[k] for k in range(0, numZcoefs - i) ])
+                aux = self.H @ np.hstack([ Zcoefs[k] for k in range(0, numZcoefs - i) ])
                 Coef[ i*p:(i+1)*p, : ] = np.hstack([ np.zeros((p,zdim*i)), aux ])
 
             Null = sp.linalg.null_space( Coef.T )
@@ -502,19 +509,105 @@ class QFunction(Function):
 
         return MultiPoly(kernel=[(k,) for k in range(0, deg+1) ], coeffs=Mcoefs)
 
-    def regular_pencil(self, H: list | np.ndarray):
+    def regular_pencil(self):
         '''
-        Using H of appropriate size, return regular matrix pencil P(λ) O(λ).T
-        with O(λ) H Λ(λ) Z = 0
+        Computes the regular matrix pencil P(λ) O(λ).T, 
+        where O(λ) is the matrix polynomial orthogonal to the nullspace polynomial Λ(λ) Z.
+
+        OBS: useful for general polynomial kernels, resulting in singular pencils.
         '''
-        if self.type == "regular":
-            return self
+        if self.pencil.type == "regular":
+            return self.pencil
         
         # Get slice of polynomial that is orthogonal to the nullspace 
-        O_poly = self.orthogonal_nullspace(H)
-        Or_poly = O_poly[0:self.shape[0], :]
+        O_poly = self.orthogonal_nullspace()
+        Or_poly = O_poly[0:self.pencil.shape[0], :]
 
-        return self.poly @ Or_poly.T
+        return self.pencil.to_poly() @ Or_poly.T
+
+    def plot(self, ax: Axes, res: float = 0.0, q_limits=(0, 100)):
+        ''' Plot q(λ) at axes ax.'''
+
+        q_min, q_max = q_limits[0], q_limits[1]
+        lambdaRange = []
+
+        realEigens = self.pencil.get_real_eigen()
+        for eig in realEigens: 
+            lambdaRange.append(eig.eigenvalue)
+
+        stabilityEigens = self.symPencil.get_eigen()
+        for eig in stabilityEigens: 
+            lambdaRange.append(eig.eigenvalue)
+
+        sols = self.equilibria()
+        for sol in sols: 
+            lambdaRange.append(sol["lambda"])
+
+        factor = 10
+        l_min, l_max = min(lambdaRange), max(lambdaRange)
+        deltaLambda = l_max - l_min
+        l_min -= deltaLambda/factor
+        l_max += deltaLambda/factor
+        if res == 0.0: 
+            res = (l_max - l_min)/10000
+        lambdas = np.arange(l_min, l_max, res)
+
+        # Looks for Hurwitz definite sets
+        is_inserting_nsd, is_inserting_psd = False, False
+        Hnsd_intervals, Hpsd_intervals = [], []
+        for l in lambdas:
+
+            P = self.pencil(l)
+            P = P + P.T
+            # Neg. def. Hurwitz intervals
+            if np.all( np.linalg.eigvals(P).real < 0.0 ):
+                if not is_inserting_nsd:
+                    Hnsd_intervals.append([ l, np.inf ])
+                is_inserting_nsd = True
+            elif is_inserting_nsd:
+                Hnsd_intervals[-1][1] = l
+                is_inserting_nsd = False
+
+            # Pos. def. Hurwitz intervals
+            if np.all( np.linalg.eigvals(P).real > 0.0 ):
+                if not is_inserting_psd:
+                    Hpsd_intervals.append([ l, np.inf ])
+                is_inserting_psd = True
+            elif is_inserting_psd:
+                Hpsd_intervals[-1][1] = l
+                is_inserting_psd = False
+
+        print(f"Hurwitz neg. = {Hnsd_intervals}")
+        print(f"Hurwitz pos. = {Hpsd_intervals}")
+
+        # Plot real eigenvalues
+        
+        for k, eig in enumerate(realEigens):
+            label_text = ''
+            if k == 0: label_text = 'λ(P)'
+            ax.plot( [ eig.eigenvalue for _ in lambdas ], np.linspace(q_min, q_max, len(lambdas)), 'b--', label=label_text )
+
+        # Plot the solution line
+        ax.plot( lambdas, [ 1.0 for l in lambdas ], 'r--' )
+
+        # Plot q-function
+        q_array = [ self.n_poly(l) / self.d_poly(l) for l in lambdas ]
+        ax.plot( lambdas, q_array )
+
+        # Plots boundary equilibrium solutions
+        for sol in sols:
+            if sol["stability"] > 0: ax.plot( sol["lambda"], 1.0, 'bo' ) # stable solutions
+            if sol["stability"] < 0: ax.plot( sol["lambda"], 1.0, 'ro' ) # unstable solutions
+
+        # Plots real eigenvalues from stability pencil
+        for k, eig in enumerate(stabilityEigens):
+            label_text = ''
+            if k == 0: label_text = 'λ(P+P\')'
+            ax.plot( [ eig.eigenvalue for _ in lambdas ], np.linspace(q_min, q_max, len(lambdas)), 'g--', label=label_text )
+
+        ax.set_xlim(l_min, l_max) 
+        ax.set_ylim(q_min, q_max)
+        ax.legend()
 
     def compatibilize(self, plant: DynamicSystem, clf_dict: dict, cbf_dict, p = 1.0):
         '''
@@ -531,7 +624,7 @@ class QFunction(Function):
             raise NotImplementedError("Currently, compatibilization is implemented linear systems only.")
 
         # Stores pencil variables for latter restauration
-        auxM, auxN = self.M, self.N
+        auxM, auxN = self.pencil.M, self.pencil.N
         old_n_poly, old_d_poly = self.n_poly, self.d_poly
         oldZ, oldQ = self.Z, self.Q
         old_computed_from = self.computed_from
@@ -638,79 +731,6 @@ class QFunction(Function):
         # self.computed_from = old_computed_from
 
         return Hv
-
-    def plot_qfunction(self, ax, res: float = None, q_limits=(0, 100)):
-        ''' Plot q(λ) at axes ax.'''
-
-        q_min, q_max = q_limits[0], q_limits[1]
-
-        lambdas_eq = []
-        sols = self.equilibria()
-        for sol in sols:
-            lambdas_eq.append(sol["lambda"])
-
-        factor = 1.5
-        if lambdas_eq:
-            l_min, l_max = factor*min(lambdas_eq), factor*max(lambdas_eq)
-        else:
-            l_min, l_max = 0.0, 1000
-
-        if res == None: 
-            res = (l_max - l_min)/1000
-        lambdas = np.arange(l_min, l_max, res)
-
-        # Looks for Hurwitz definite sets
-        is_inserting_nsd, is_inserting_psd = False, False
-        Hnsd_intervals, Hpsd_intervals = [], []
-        for l in lambdas:
-
-            P = self(l)
-            P = P + P.T
-            # Neg. def. Hurwitz intervals
-            if np.all( np.linalg.eigvals(P).real < 0.0 ):
-                if not is_inserting_nsd:
-                    Hnsd_intervals.append([ l, np.inf ])
-                is_inserting_nsd = True
-            elif is_inserting_nsd:
-                Hnsd_intervals[-1][1] = l
-                is_inserting_nsd = False
-
-            # Pos. def. Hurwitz intervals
-            if np.all( np.linalg.eigvals(P).real > 0.0 ):
-                if not is_inserting_psd:
-                    Hpsd_intervals.append([ l, np.inf ])
-                is_inserting_psd = True
-            elif is_inserting_psd:
-                Hpsd_intervals[-1][1] = l
-                is_inserting_psd = False
-
-        print(f"Hurwitz neg. = {Hnsd_intervals}")
-        print(f"Hurwitz pos. = {Hpsd_intervals}")
-
-        # Plot real eigenvalues
-        for eig in self.get_real_eigen():
-            ax.plot( [ eig for _ in lambdas ], np.linspace(q_min, q_max, len(lambdas)), 'b--' )
-
-        # Plot the solution line
-        ax.plot( lambdas, [ 1.0 for l in lambdas ], 'r--' )
-
-        # Plot q-function
-        q_array = [ self.n_poly(l) / self.d_poly(l) for l in lambdas ]
-        ax.plot( lambdas, q_array, label='q' )
-
-        # Plots boundary equilibrium solutions
-        for sol in sols:
-            if sol["stability"] > 0: ax.plot( sol["lambda"], 1.0, 'bo' ) # stable solutions
-            if sol["stability"] < 0: ax.plot( sol["lambda"], 1.0, 'ro' ) # unstable solutions
-
-        # Plots real eigenvalues from stability pencil
-        s_eigen = self.get_stability_eigen()
-        for eig in s_eigen:
-            ax.plot( [ eig for _ in lambdas ], np.linspace(q_min, q_max, len(lambdas)), 'g--' )
-
-        ax.set_xlim(l_min, l_max) 
-        ax.set_ylim(q_min, q_max)
-        ax.legend()
 
 class CLFCBFPair():
     '''

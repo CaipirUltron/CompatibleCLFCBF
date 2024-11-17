@@ -1,10 +1,7 @@
 import numpy as np
-from numpy.polynomial import Polynomial as Poly
-
-import scipy as sp
 
 from itertools import product
-from controllers import Eigen, MatrixPencil
+from controllers import MatrixPencil
 
 n = 2
 
@@ -12,8 +9,7 @@ M = np.random.randn(n,n)
 N = np.random.randn(n,n)
 pencil = MatrixPencil(M, N)
 
-''' Test for pencil eigenpairs '''
-print("Checking whether the solutions (a M - b N) z = 0 are correct for linear matrix pencil (M, N).")
+print("Starting MatrixPencil unit tests.")
 
 det_error = 0.0
 det_ratio_error = 0.0
