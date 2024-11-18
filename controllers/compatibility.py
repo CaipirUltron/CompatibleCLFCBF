@@ -3,7 +3,9 @@ import warnings
 
 import numpy as np
 from numpy.polynomial import Polynomial as Poly
+
 from matplotlib.axes import Axes
+import matplotlib.patches as patches
 
 import scipy as sp
 from scipy import signal
@@ -83,6 +85,7 @@ class Eigen():
     eigenvalue: complex
     rightEigenvectors: list | np.ndarray
     leftEigenvectors: list | np.ndarray
+    inertia: float                  # value of z_left' M z_right
 
 class MatrixPencil():
     '''
@@ -157,6 +160,13 @@ class MatrixPencil():
         realEigens.sort(key=lambda eig: eig.eigenvalue)
         return realEigens
 
+    def has_real_spectra(self):
+        ''' Checks if the pencil has real spectra '''
+        for eig in self.eigens:
+            if np.abs(eig.alpha.imag) > self.realEigenTol:
+                return False
+        return True
+
     def _eigen(self, alphas: np.ndarray, betas: np.ndarray) -> list[Eigen]:
         '''
         Computes generalized eigenvalues/eigenvectors from polar eigenvalues.
@@ -167,13 +177,23 @@ class MatrixPencil():
         eigens: list[Eigen] = []
         for alpha, beta in zip(alphas, betas):
 
-            zRight = null_space( self(alpha, beta) )
-            zLeft = null_space( self(alpha, beta).T )
+            P = self(alpha, beta)
+            zRight = null_space(P, rcond=1e-11)
+            zLeft = null_space(P.T, rcond=1e-11)
+
+            # print( np.linalg.eigvals(P) )
+            # print(f"zRight = {zRight}")
+            # print(f"zLeft = {zLeft}")
+
+            zRight = zRight.reshape(self.shape[0], )
+            zLeft = zLeft.reshape(self.shape[0], )
+
+            inertia = zLeft.T @ self.M @ zRight
 
             if beta != 0:
-                eigens.append( Eigen(alpha, beta, alpha/beta, zRight, zLeft) )
+                eigens.append( Eigen(alpha, beta, alpha/beta, zRight, zLeft, inertia) )
             else:
-                eigens.append( Eigen(alpha, 0.0, np.inf if alpha.real > 0 else -np.inf, zRight, zLeft) )
+                eigens.append( Eigen(alpha, 0.0, np.inf if alpha.real > 0 else -np.inf, zRight, zLeft, inertia) )
 
         return eigens
 
@@ -353,7 +373,7 @@ class QFunction():
         QFunction._verify(P, H, w)
 
         self.pencil = P
-        self.symPencil = self.pencil.symmetric()
+        self.symmetricPencil : MatrixPencil = self.pencil.symmetric()
 
         self.H = H
         self.w = w
@@ -474,7 +494,8 @@ class QFunction():
                 l = sol["lambda"]
                 P = self.pencil(l)
                 grad_h = self.H @ np.array([ v(l) for v in vPolys ])
-                perp = np.array([ grad_h[1], -grad_h[0] ])
+                unit_grad_h = grad_h/np.linalg.norm(grad_h)
+                perp = np.array([ unit_grad_h[1], -unit_grad_h[0] ])
                 sol["stability"] = perp.T @ P @ perp
             else:
                 sol["stability"] = None
@@ -525,7 +546,7 @@ class QFunction():
 
         return self.pencil.to_poly() @ Or_poly.T
 
-    def plot(self, ax: Axes, res: float = 0.0, q_limits=(0, 100)):
+    def plot(self, ax: Axes, res: float = 0.0, q_limits=(-100, 100)):
         ''' Plot q(λ) at axes ax.'''
 
         q_min, q_max = q_limits[0], q_limits[1]
@@ -533,11 +554,13 @@ class QFunction():
 
         realEigens = self.pencil.get_real_eigen()
         for eig in realEigens: 
-            lambdaRange.append(eig.eigenvalue)
+            lambdaRange.append(eig.eigenvalue.real)
 
-        stabilityEigens = self.symPencil.get_eigen()
-        for eig in stabilityEigens: 
-            lambdaRange.append(eig.eigenvalue)
+        has_real_spectra = self.pencil.has_real_spectra()
+        if has_real_spectra:
+            stabilityEigens = self.symmetricPencil.get_real_eigen()
+            for eig in stabilityEigens:
+                lambdaRange.append(eig.eigenvalue.real)
 
         sols = self.equilibria()
         for sol in sols: 
@@ -549,43 +572,59 @@ class QFunction():
         l_min -= deltaLambda/factor
         l_max += deltaLambda/factor
         if res == 0.0: 
-            res = (l_max - l_min)/10000
+            res = (l_max - l_min)/20000
         lambdas = np.arange(l_min, l_max, res)
 
         # Looks for Hurwitz definite sets
         is_inserting_nsd, is_inserting_psd = False, False
-        Hnsd_intervals, Hpsd_intervals = [], []
+        nsd_intervals, psd_intervals = [], []
         for l in lambdas:
 
-            P = self.pencil(l)
-            P = P + P.T
-            # Neg. def. Hurwitz intervals
-            if np.all( np.linalg.eigvals(P).real < 0.0 ):
+            Psym = self.symmetricPencil(l)
+
+            # Negative definite intervals
+            if np.all( np.linalg.eigvals(Psym).real < 0.0 ):
                 if not is_inserting_nsd:
-                    Hnsd_intervals.append([ l, np.inf ])
+                    nsd_intervals.append([ l, np.inf ])
                 is_inserting_nsd = True
             elif is_inserting_nsd:
-                Hnsd_intervals[-1][1] = l
+                nsd_intervals[-1][1] = l
                 is_inserting_nsd = False
 
-            # Pos. def. Hurwitz intervals
-            if np.all( np.linalg.eigvals(P).real > 0.0 ):
+            # Positive definite intervals
+            if np.all( np.linalg.eigvals(Psym).real > 0.0 ):
                 if not is_inserting_psd:
-                    Hpsd_intervals.append([ l, np.inf ])
+                    psd_intervals.append([ l, np.inf ])
                 is_inserting_psd = True
             elif is_inserting_psd:
-                Hpsd_intervals[-1][1] = l
+                psd_intervals[-1][1] = l
                 is_inserting_psd = False
 
-        print(f"Hurwitz neg. = {Hnsd_intervals}")
-        print(f"Hurwitz pos. = {Hpsd_intervals}")
+        strip_size = (q_max - q_min)/40
+        strip_alpha = 0.6
 
-        # Plot real eigenvalues
-        
-        for k, eig in enumerate(realEigens):
-            label_text = ''
-            if k == 0: label_text = 'λ(P)'
-            ax.plot( [ eig.eigenvalue for _ in lambdas ], np.linspace(q_min, q_max, len(lambdas)), 'b--', label=label_text )
+        # Add nsd strips
+        for interval in nsd_intervals:
+            xy = (interval[0], -strip_size/2)
+            if interval[1] == np.inf: interval[1] = l_max
+            length = interval[1] - interval[0]
+            rect = patches.Rectangle(xy, length, strip_size, facecolor='red', alpha=strip_alpha)
+            ax.add_patch(rect)
+
+        # Add psd strips
+        for interval in psd_intervals:
+            xy = (interval[0], -strip_size/2)
+            if interval[1] == np.inf: interval[1] = l_max
+            length = interval[1] - interval[0]
+            rect = patches.Rectangle(xy, length, strip_size, facecolor='blue', alpha=strip_alpha)
+            ax.add_patch(rect)
+
+        print(f"Pencil nsd interval = {nsd_intervals}")
+        print(f"Pencil psd interval = {psd_intervals}")
+
+        # Plot the zero lines
+        ax.plot( lambdas, [ 0.0 for l in lambdas ], 'k' )       # horizontal axis
+        ax.plot( [ 0.0, 0.0 ], [ q_min, q_max ], 'k' )          # vertical axis
 
         # Plot the solution line
         ax.plot( lambdas, [ 1.0 for l in lambdas ], 'r--' )
@@ -595,18 +634,37 @@ class QFunction():
         ax.plot( lambdas, q_array )
 
         # Plots boundary equilibrium solutions
-        for sol in sols:
-            if sol["stability"] > 0: ax.plot( sol["lambda"], 1.0, 'bo' ) # stable solutions
-            if sol["stability"] < 0: ax.plot( sol["lambda"], 1.0, 'ro' ) # unstable solutions
+        for k, sol in enumerate(sols):
+            stability = sol["stability"]
+            label_txt = f"{k+1} stability = {stability:2.2f}"
+            ax.text(sol["lambda"], 1.0, f"{k+1}", color='k', fontsize=12)
+            if stability > 0:
+                label_txt += ' (unstable)'
+                ax.plot( sol["lambda"], 1.0, 'bo', label=label_txt) # unstable solutions
+            if stability < 0:
+                label_txt += ' (stable)'
+                ax.plot( sol["lambda"], 1.0, 'ro', label=label_txt ) # stable solutions
 
         # Plots real eigenvalues from stability pencil
-        for k, eig in enumerate(stabilityEigens):
-            label_text = ''
-            if k == 0: label_text = 'λ(P+P\')'
-            ax.plot( [ eig.eigenvalue for _ in lambdas ], np.linspace(q_min, q_max, len(lambdas)), 'g--', label=label_text )
+        if has_real_spectra:
+            for k, eig in enumerate(stabilityEigens):
+                # label_txt = f"{k+1} inertia = {eig.inertia:2.2f}"
+                # ax.text(eig.eigenvalue, 0.0, f"{k+1}", color='k', fontsize=12)
+                arrowLen = q_max/10
+                arrowWidth = (l_max - l_min)/100
+                if eig.inertia > 0.0:
+                    direction = q_max/2
+                else:
+                    direction = - q_max/2
+                ax.arrow(eig.eigenvalue, 0.0, 0.0, direction, edgecolor='green', facecolor='green', head_length=arrowLen, head_width=arrowWidth)
 
-        ax.set_xlim(l_min, l_max) 
-        ax.set_ylim(q_min, q_max)
+        ax.set_xlim(l_min, l_max)
+
+        if has_real_spectra:
+            ax.set_ylim(-q_max, q_max)
+        else:
+            ax.set_ylim(q_min, q_max)
+
         ax.legend()
 
     def compatibilize(self, plant: DynamicSystem, clf_dict: dict, cbf_dict, p = 1.0):

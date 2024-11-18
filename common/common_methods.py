@@ -1,6 +1,9 @@
 import time
 import math
 import json
+import control
+import warnings
+
 import numpy as np
 
 from itertools import product, combinations
@@ -31,6 +34,72 @@ def timeit(func):
         print(f'Function {func.__name__}{args} {kwargs} took {total_time:.6f} seconds.')
         return result
     return timeit_wrapper
+
+def randomGen(type, limits, size=[1]):
+    ''' 
+    Random array generator.
+    '''
+    if type == 'int':
+        return np.random.randint(low=limits[0], high=limits[1], size=size)
+    else:
+        return (limits[1] - limits[0])*np.random.rand(*size) + limits[0]
+
+def genStableLI(n, m, **kwargs) -> tuple:
+    ''' 
+    Generates random (A, B) controllable pairs of sizes (n,m)
+    and returns the pair (Acl, B), where Acl = A - B K is a corresponding closed-loop 
+    A matrix that stabilizes the closed-loop system.
+    '''
+    typ = 'float'
+    matrixLimits = [ -1, +1 ]
+    realLimits = [ -2, -1 ]
+    imagLimits = [  0, 1 ]
+    for key in kwargs.keys():
+        if key.lower() == 'type':
+            typ = kwargs['type']
+            continue
+        # Random limits
+        if key.lower() == 'random_lim':
+            matrixLimits = kwargs['random_lim']
+            continue
+        # Real limits
+        if key.lower() == 'real_lim':
+            realLimits = kwargs['real_lim']
+            continue
+        # Imaginary limits
+        if key.lower() == 'imag_lim':
+            imagLimits = kwargs['imag_lim']
+            continue
+
+    # Creates random pairs (A,B) until one is controllable
+    A = randomGen(typ, matrixLimits, size=(n,n))
+    B = randomGen(typ, matrixLimits, size=(n,m))
+    rankC = np.linalg.matrix_rank( control.ctrb(A,B) )
+    while rankC < A.shape[0]:
+        B = randomGen(typ, matrixLimits, size=(n,m))
+        rankC = np.linalg.matrix_rank( control.ctrb(A,B) )
+
+    # Creates desired poles based on number of states
+    realPart = np.zeros(n)
+    imagPart = np.zeros(n, dtype='complex')
+    for k in range(int(np.floor(n/2))):
+        real = randomGen('float', realLimits)[0]
+        imag = randomGen('float', imagLimits)[0]
+        realPart[2*k:2*k+2] = np.array([ real, real ])
+        imagPart[2*k:2*k+2] = np.array([ imag*(1j), -imag*(1j) ])
+    if n%2 != 0: 
+        realPart[-1] = (realLimits[1]-realLimits[0])*np.random.rand() + realLimits[0]
+
+    rankB = np.linalg.matrix_rank(B)
+    if rankB >= rankC:
+        desired_poles = realPart + imagPart
+    else:
+        desired_poles = realPart
+    
+    K = control.place(A, B, p=desired_poles)
+    Acl = A - B @ K
+
+    return Acl, B
 
 def cofactor(A):
     """

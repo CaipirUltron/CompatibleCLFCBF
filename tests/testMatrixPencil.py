@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.linalg import eigvals as eigs
 
 from itertools import product
 from controllers import MatrixPencil
@@ -20,12 +21,13 @@ inverse_error = 0.0
 symb_det_error = 0.0
 adjoint_error = 0.0
 
-numTests = 100
+numTests = 1000
 for it in range(numTests):
 
     M = np.random.randn(n,n)
     N = np.random.randn(n,n)
-    pencil.set(M, N)
+    
+    pencil.set(M=M, N=N)
     pencilPoly = pencil.to_poly()
     determinant, adjoint = pencil.inverse()
 

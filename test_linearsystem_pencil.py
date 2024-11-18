@@ -8,54 +8,17 @@ from numpy.linalg import eigvals as eigs
 
 from numpy.polynomial import Polynomial as Poly
 
-from common import hessian_2Dquadratic, vector2sym, sym2vector
+from common import hessian_2Dquadratic, vector2sym, genStableLI
 from functions.multipoly import MultiPoly
 from dynamic_systems import LinearSystem
 from controllers.compatibility import MatrixPencil
 
 n, m = 2, 2
 
-A = np.random.randint(low=1, high=10, size=(n,n))
-B = np.random.randint(low=1, high=10, size=(n,m))
-
-# A = np.zeros((n,n))
-# B = np.eye(n)
+A, B = genStableLI(n, m, type='int', random_lim=(-10, +10))
+plant = LinearSystem(initial_state=np.zeros(n), initial_control=np.zeros(n), A=Acl, B=B)
 
 BB = (B @ B.T)
-
-# Creates desired poles based on number of states
-real_min, real_max = -20, -1
-imag_min, imag_max = 0, 20
-
-real_part = np.zeros(n)
-imag_part = np.zeros(n, dtype='complex')
-for k in range(int(np.floor(n/2))):
-    real = (real_max-real_min)*np.random.rand() + real_min
-    imag = (imag_max-imag_min)*np.random.rand() + imag_max
-
-    real_part[2*k:2*k+2] = np.array([ real, real ])
-    imag_part[2*k:2*k+2] = np.array([ imag*(1j), -imag*(1j) ])
-if n%2 != 0: real_part[-1] = (real_max-real_min)*np.random.rand() + real_min
-
-rankC = np.linalg.matrix_rank( control.ctrb(A, B) )
-if rankC < A.shape[0]:
-    print(f"(A, B) pair is not controllable.")
-else:
-    print(f"(A, B) pair is controllable.")
-    rankB = np.linalg.matrix_rank(B)
-    if rankB >= rankC:
-        desired_poles = real_part + imag_part
-    else:
-        desired_poles = real_part
-    
-    print(f"Desired poles = {desired_poles}")
-    K = control.place(A, B, p=desired_poles)
-    Acl = A - B @ K
-    eigsAcl = np.linalg.eigvals(Acl)
-    print(f"Poles of Acl = {eigsAcl}")
-
-# Acl = np.zeros((n,n))
-plant = LinearSystem(initial_state=np.zeros(n), initial_control=np.zeros(n), A=Acl, B=B)
 
 ''' ---------------------------- Define quadratic CLF and CBF ----------------------------------- '''
 
@@ -73,7 +36,7 @@ p = 1.0
 ''' ---------------------------- Compute pencil and q-function ----------------------------------- '''
 
 M = BB @ Hh
-N = p * BB @ Hv - Acl
+N = p * BB @ Hv - A
 w = N @ CBFcenter - p * BB @ Hv @ CLFcenter
 
 pencil = MatrixPencil(M,N)
