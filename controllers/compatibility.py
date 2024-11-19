@@ -383,6 +383,7 @@ class QFunction():
         self.max_order = 100
         self.trim_tol = 1e-8
         self.real_zero_tol = 1e-6
+        self.stability_zero_tol = 1e-10
 
     def _verify(P: MatrixPencil, H: list | np.ndarray, w: list | np.ndarray):
         ''' Verification method for passed '''
@@ -409,6 +410,7 @@ class QFunction():
         self.n_poly = ( self.w.T @ adjoint.T @ self.H @ adjoint @ self.w )
         self.d_poly = ( determinant**2 )
         self.zero_poly = ( self.n_poly - self.d_poly )
+        self.v_poly, self.det_poly = self._v_poly()
 
     def set(self, **kwargs):
         ''' QFunction update method '''
@@ -455,7 +457,7 @@ class QFunction():
         '''
         return self.n_poly, self.d_poly
 
-    def v_derivative(self, order=0):
+    def _v_poly_derivative(self, order=0):
         '''
         Computes the derivatives of v(λ) of any order.
         Returns: - vector polynomial v_poly(λ)
@@ -472,8 +474,14 @@ class QFunction():
 
         return v, det**(order+1)
 
-    def v(self):
-        return self.v_derivative(order=0)
+    def _v_poly(self):
+        return self._v_poly_derivative(order=0)
+
+    def v(self, l):
+        '''
+        Compute v(λ) using polynomials
+        '''
+        return np.array([ v_elem_poly(l) / self.det_poly(l) for v_elem_poly in self.v_poly ])
 
     def equilibria(self) -> list[dict]:
         ''' 
@@ -487,18 +495,22 @@ class QFunction():
         real_zeros = np.array([ z.real for z in zeros if np.abs(z.imag) < self.real_zero_tol and z.real >= 0.0 ])
         real_zeros.sort()
 
-        vPolys, detPoly = self.v()
-
         sols = [ {"lambda": z} for z in real_zeros ]
-        for sol in sols:
-            l = sol["lambda"]
-            P = self.pencil(l)
-            grad_h = self.H @ np.array([ v(l)/detPoly(l) for v in vPolys ])
-            Proj = np.eye(self.dim) - (np.outer(grad_h, grad_h) / np.linalg.norm(grad_h)**2)
-            S = Proj @ (P + P.T) @ Proj
-            stabilityEigs = np.array([ eig for eig in np.linalg.eigvals(S) if np.abs(eig) > 1e-10 ])
-            sol["stability"] = max(stabilityEigs)
+        for sol in sols:  
+            sol["stability"] = max( self.stability(sol["lambda"]) )
         return sols
+
+    def stability(self, l):
+        '''
+        Returns the eigenvalues of the stability matrix S computed at λ
+        '''
+        P = self.pencil(l)
+        grad_h = self.H @ self.v(l)
+        Proj = np.eye(self.dim) - (np.outer(grad_h, grad_h) / np.linalg.norm(grad_h)**2)
+        S = Proj @ (P + P.T) @ Proj
+        stabilityEigs = np.array([ eig for eig in np.linalg.eigvals(S) if np.abs(eig) > self.stability_zero_tol ])
+
+        return stabilityEigs
 
     def orthogonal_nullspace(self) -> MultiPoly:
         ''' 
@@ -575,9 +587,13 @@ class QFunction():
             res = (l_max - l_min)/20000
         lambdas = np.arange(l_min, l_max, res)
 
-        # Looks for Hurwitz definite sets
+        # Looks for definite intervals
         is_inserting_nsd, is_inserting_psd = False, False
         nsd_intervals, psd_intervals = [], []
+
+        is_inserting_nsd_stability, is_inserting_psd_stability = False, False
+        nsd_stability_intervals, psd_stability_intervals = [], []
+
         for l in lambdas:
 
             Psym = self.symmetricPencil(l)
@@ -600,6 +616,24 @@ class QFunction():
                 psd_intervals[-1][1] = l
                 is_inserting_psd = False
 
+            # Negative definite stability (stability) intervals
+            if np.all( self.stability(l) < 0.0 ):
+                if not is_inserting_nsd_stability:
+                    nsd_stability_intervals.append([ l, np.inf ])
+                is_inserting_nsd_stability = True
+            elif is_inserting_nsd_stability:
+                nsd_stability_intervals[-1][1] = l
+                is_inserting_nsd_stability = False  
+
+            # Negative definite stability (instability) intervals
+            if np.all( self.stability(l) > 0.0 ):
+                if not is_inserting_psd_stability:
+                    psd_stability_intervals.append([ l, np.inf ])
+                is_inserting_psd_stability = True
+            elif is_inserting_psd_stability:
+                psd_stability_intervals[-1][1] = l
+                is_inserting_psd_stability = False  
+
         strip_size = (q_max - q_min)/40
         strip_alpha = 0.6
 
@@ -619,8 +653,24 @@ class QFunction():
             rect = patches.Rectangle(xy, length, strip_size, facecolor='blue', alpha=strip_alpha)
             ax.add_patch(rect)
 
-        print(f"Pencil nsd interval = {nsd_intervals}")
-        print(f"Pencil psd interval = {psd_intervals}")
+        # Add stability nsd strips
+        for interval in nsd_stability_intervals:
+            xy = (interval[0], -strip_size/2)
+            if interval[1] == np.inf: interval[1] = l_max
+            length = interval[1] - interval[0]
+            rect = patches.Rectangle(xy, length, strip_size, facecolor='red', alpha=strip_alpha)
+            ax.add_patch(rect)
+
+        # Add stability psd strips
+        for interval in psd_stability_intervals:
+            xy = (interval[0], -strip_size/2)
+            if interval[1] == np.inf: interval[1] = l_max
+            length = interval[1] - interval[0]
+            rect = patches.Rectangle(xy, length, strip_size, facecolor='blue', alpha=strip_alpha)
+            ax.add_patch(rect)
+
+        print(f"Pencil nsd interval = {nsd_stability_intervals}")
+        print(f"Pencil psd interval = {psd_stability_intervals}")
 
         # Plot the zero lines
         ax.plot( lambdas, [ 0.0 for l in lambdas ], 'k' )       # horizontal axis
