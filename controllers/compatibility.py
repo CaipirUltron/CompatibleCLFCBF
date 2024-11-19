@@ -377,6 +377,7 @@ class QFunction():
 
         self.H = H
         self.w = w
+        self.dim = H.shape[0]
         self._compute_polys()
 
         self.max_order = 100
@@ -486,20 +487,17 @@ class QFunction():
         real_zeros = np.array([ z.real for z in zeros if np.abs(z.imag) < self.real_zero_tol and z.real >= 0.0 ])
         real_zeros.sort()
 
-        vPolys, _ = self.v()
+        vPolys, detPoly = self.v()
 
         sols = [ {"lambda": z} for z in real_zeros ]
         for sol in sols:
-            if self.pencil.shape == (2,2):
-                l = sol["lambda"]
-                P = self.pencil(l)
-                grad_h = self.H @ np.array([ v(l) for v in vPolys ])
-                unit_grad_h = grad_h/np.linalg.norm(grad_h)
-                perp = np.array([ unit_grad_h[1], -unit_grad_h[0] ])
-                sol["stability"] = perp.T @ P @ perp
-            else:
-                sol["stability"] = None
-
+            l = sol["lambda"]
+            P = self.pencil(l)
+            grad_h = self.H @ np.array([ v(l)/detPoly(l) for v in vPolys ])
+            Proj = np.eye(self.dim) - (np.outer(grad_h, grad_h) / np.linalg.norm(grad_h)**2)
+            S = Proj @ (P + P.T) @ Proj
+            stabilityEigs = np.array([ eig for eig in np.linalg.eigvals(S) if np.abs(eig) > 1e-10 ])
+            sol["stability"] = max(stabilityEigs)
         return sols
 
     def orthogonal_nullspace(self) -> MultiPoly:
@@ -554,13 +552,15 @@ class QFunction():
 
         realEigens = self.pencil.get_real_eigen()
         for eig in realEigens: 
-            if np.abs(eig.eigenvalue.real) < np.inf: lambdaRange.append(eig.eigenvalue.real)
+            if np.abs(eig.eigenvalue.real) < np.inf and np.abs(eig.eigenvalue.real) > -np.inf: 
+                lambdaRange.append(eig.eigenvalue.real)
 
         has_real_spectra = self.pencil.has_real_spectra()
         if has_real_spectra:
             stabilityEigens = self.symmetricPencil.get_real_eigen()
             for eig in stabilityEigens:
-                if np.abs(eig.eigenvalue.real) < np.inf: lambdaRange.append(eig.eigenvalue.real)
+                if np.abs(eig.eigenvalue.real) < np.inf and np.abs(eig.eigenvalue.real) > -np.inf: 
+                    lambdaRange.append(eig.eigenvalue.real)
 
         sols = self.equilibria()
         for sol in sols: 
