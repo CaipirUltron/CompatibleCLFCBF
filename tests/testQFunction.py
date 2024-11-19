@@ -1,10 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from common import randomGen, genStableLI, hessian_2Dquadratic
+from common import randomR, genStableLI, hessian_quadratic
 from controllers import MatrixPencil, QFunction
 
-n, m = 2, 2
+n, m = 3, 3
 
 while True:
 
@@ -12,14 +12,12 @@ while True:
     G = (B @ B.T)
 
     CLFeigs = np.random.randint(low=1, high=10, size=n)
-    CLFangle = np.deg2rad( np.random.randint(low=-180,high=180 ) )
     CLFcenter = 10*np.random.randn(2)
-    Hv = hessian_2Dquadratic(CLFeigs, CLFangle)
+    Hv = hessian_quadratic(CLFeigs, randomR(n) )
 
     CBFeigs = np.random.randint(low=1, high=10, size=n)
-    CBFangle = np.deg2rad( np.random.randint(low=-180,high=180 ) )
     CBFcenter = 10*np.random.randn(2)
-    Hh = hessian_2Dquadratic(CBFeigs, CBFangle)
+    Hh = hessian_quadratic(CBFeigs, randomR(n) )
 
     w = np.random.randn(n)
 

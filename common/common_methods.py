@@ -515,10 +515,26 @@ def hessian_2Dquadratic(eigen: np.ndarray, angle: float):
     '''
     Generates hessian matrix of a 2D quadratic function, from eigenvalues and angle (in radians) of principal axis of inertia
     '''
-    if len(eigen) != 2: raise Exception("Only works for n= 2")
-    if np.any(np.array(eigen) < 0): raise Exception("Eigenvalues must be non-negative.")
-    R = rot2D(angle)
+    if len(eigen) != 2: 
+        raise Exception("Only works for n= 2")
+
+    return hessian_quadratic(eigen, rot2D(angle))
+
+def hessian_quadratic(eigen: np.ndarray, R: np.ndarray):
+    '''
+    Generates hessian matrix of a quadratic function, from eigenvalues and rotation matrix
+    '''
+    if np.any(np.array(eigen) < 0): 
+        raise TypeError("Eigenvalues must be non-negative.")
     return R.T @ np.diag(eigen) @ R
+
+def randomR(n: int) -> np.ndarray:
+    '''
+    Generates random rotation matrix of dimension n using QR decomposition 
+    '''
+    A = np.random.randn(n,n)
+    Q, R = np.linalg.qr(A)
+    return Q
 
 def circular_boundary_shape( radius, center, kernel_dim ):
     ''' Returns shape matrix of (kernel_dim x kernel_dim) representing a circular obstacle with radius and center '''

@@ -370,14 +370,13 @@ class QFunction():
         
         if isinstance(H, list): H = np.array(H)
         if isinstance(w, list): w = np.array(w)
-        QFunction._verify(P, H, w)
+        self._verify(P, H, w)
 
         self.pencil = P
         self.symmetricPencil : MatrixPencil = self.pencil.symmetric()
 
         self.H = H
         self.w = w
-        self.dim = H.shape[0]
         self._compute_polys()
 
         self.max_order = 100
@@ -385,7 +384,7 @@ class QFunction():
         self.real_zero_tol = 1e-6
         self.stability_zero_tol = 1e-10
 
-    def _verify(P: MatrixPencil, H: list | np.ndarray, w: list | np.ndarray):
+    def _verify(self, P: MatrixPencil, H: list | np.ndarray, w: list | np.ndarray):
         ''' Verification method for passed '''
 
         if not isinstance( P, MatrixPencil ):
@@ -394,14 +393,16 @@ class QFunction():
         if H.ndim != 2:
             raise TypeError("H must be a n x n array.")
 
-        if not w.shape in ( (2,), (2,1) ):
-            raise TypeError("w must be a n x 1 array.")
-
         if H.shape[0] != H.shape[1]:
             raise TypeError("H must be a square matrix.")
 
-        if H.shape[0] != len(w):
+        self.dim = H.shape[0]
+
+        if len(w) != self.dim:
             raise TypeError("H and w must have the same dimension.")
+
+        if not w.shape in ( (self.dim,), (self.dim,1) ):
+            raise TypeError("w must be a n x 1 array.")
 
     def _compute_polys(self):
         ''' Private method for computing the QFunction polynomials '''
@@ -579,7 +580,9 @@ class QFunction():
             lambdaRange.append(sol["lambda"])
 
         factor = 10
-        l_min, l_max = min(lambdaRange), max(lambdaRange)
+        l_min, l_max = -100,  100
+        if lambdaRange:
+            l_min, l_max = min(lambdaRange), max(lambdaRange)
         deltaLambda = l_max - l_min
         l_min -= deltaLambda/factor
         l_max += deltaLambda/factor
@@ -587,37 +590,15 @@ class QFunction():
             res = (l_max - l_min)/20000
         lambdas = np.arange(l_min, l_max, res)
 
-        # Looks for definite intervals
-        is_inserting_nsd, is_inserting_psd = False, False
-        nsd_intervals, psd_intervals = [], []
-
         is_inserting_nsd_stability, is_inserting_psd_stability = False, False
         nsd_stability_intervals, psd_stability_intervals = [], []
 
         for l in lambdas:
 
-            Psym = self.symmetricPencil(l)
-
-            # Negative definite intervals
-            if np.all( np.linalg.eigvals(Psym).real < 0.0 ):
-                if not is_inserting_nsd:
-                    nsd_intervals.append([ l, np.inf ])
-                is_inserting_nsd = True
-            elif is_inserting_nsd:
-                nsd_intervals[-1][1] = l
-                is_inserting_nsd = False
-
-            # Positive definite intervals
-            if np.all( np.linalg.eigvals(Psym).real > 0.0 ):
-                if not is_inserting_psd:
-                    psd_intervals.append([ l, np.inf ])
-                is_inserting_psd = True
-            elif is_inserting_psd:
-                psd_intervals[-1][1] = l
-                is_inserting_psd = False
+            eigS = self.stability(l)
 
             # Negative definite stability (stability) intervals
-            if np.all( self.stability(l) < 0.0 ):
+            if np.all( eigS < 0.0 ):
                 if not is_inserting_nsd_stability:
                     nsd_stability_intervals.append([ l, np.inf ])
                 is_inserting_nsd_stability = True
@@ -626,7 +607,7 @@ class QFunction():
                 is_inserting_nsd_stability = False  
 
             # Negative definite stability (instability) intervals
-            if np.all( self.stability(l) > 0.0 ):
+            if np.any( eigS > 0.0 ):
                 if not is_inserting_psd_stability:
                     psd_stability_intervals.append([ l, np.inf ])
                 is_inserting_psd_stability = True
@@ -636,22 +617,6 @@ class QFunction():
 
         strip_size = (q_max - q_min)/40
         strip_alpha = 0.6
-
-        # Add nsd strips
-        for interval in nsd_intervals:
-            xy = (interval[0], -strip_size/2)
-            if interval[1] == np.inf: interval[1] = l_max
-            length = interval[1] - interval[0]
-            rect = patches.Rectangle(xy, length, strip_size, facecolor='red', alpha=strip_alpha)
-            ax.add_patch(rect)
-
-        # Add psd strips
-        for interval in psd_intervals:
-            xy = (interval[0], -strip_size/2)
-            if interval[1] == np.inf: interval[1] = l_max
-            length = interval[1] - interval[0]
-            rect = patches.Rectangle(xy, length, strip_size, facecolor='blue', alpha=strip_alpha)
-            ax.add_patch(rect)
 
         # Add stability nsd strips
         for interval in nsd_stability_intervals:
@@ -673,7 +638,7 @@ class QFunction():
         print(f"Pencil psd interval = {psd_stability_intervals}")
 
         # Plot the zero lines
-        ax.plot( lambdas, [ 0.0 for l in lambdas ], 'k' )       # horizontal axis
+        ax.plot( [l_min, l_max], [ 0.0, 0.0 ], 'k' )       # horizontal axis
         ax.plot( [ 0.0, 0.0 ], [ q_min, q_max ], 'k' )          # vertical axis
 
         # Plot the solution line
