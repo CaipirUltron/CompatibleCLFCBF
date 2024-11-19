@@ -554,13 +554,13 @@ class QFunction():
 
         realEigens = self.pencil.get_real_eigen()
         for eig in realEigens: 
-            lambdaRange.append(eig.eigenvalue.real)
+            if np.abs(eig.eigenvalue.real) < np.inf: lambdaRange.append(eig.eigenvalue.real)
 
         has_real_spectra = self.pencil.has_real_spectra()
         if has_real_spectra:
             stabilityEigens = self.symmetricPencil.get_real_eigen()
             for eig in stabilityEigens:
-                lambdaRange.append(eig.eigenvalue.real)
+                if np.abs(eig.eigenvalue.real) < np.inf: lambdaRange.append(eig.eigenvalue.real)
 
         sols = self.equilibria()
         for sol in sols: 
@@ -639,10 +639,8 @@ class QFunction():
             label_txt = f"{k+1} stability = {stability:2.2f}"
             ax.text(sol["lambda"], 1.0, f"{k+1}", color='k', fontsize=12)
             if stability > 0:
-                label_txt += ' (unstable)'
                 ax.plot( sol["lambda"], 1.0, 'bo', label=label_txt) # unstable solutions
             if stability < 0:
-                label_txt += ' (stable)'
                 ax.plot( sol["lambda"], 1.0, 'ro', label=label_txt ) # stable solutions
 
         # Plots real eigenvalues from stability pencil

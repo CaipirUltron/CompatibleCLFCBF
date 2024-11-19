@@ -50,11 +50,15 @@ def genStableLI(n, m, **kwargs) -> tuple:
     and returns the pair (Acl, B), where Acl = A - B K is a corresponding closed-loop 
     A matrix that stabilizes the closed-loop system.
     '''
+    stabilize = False
     typ = 'float'
     matrixLimits = [ -1, +1 ]
     realLimits = [ -2, -1 ]
     imagLimits = [  0, 1 ]
     for key in kwargs.keys():
+        if key.lower() == 'stabilize':
+            stabilize = kwargs['stabilize']
+            continue
         if key.lower() == 'type':
             typ = kwargs['type']
             continue
@@ -74,6 +78,9 @@ def genStableLI(n, m, **kwargs) -> tuple:
     # Creates random pairs (A,B) until one is controllable
     A = randomGen(typ, matrixLimits, size=(n,n))
     B = randomGen(typ, matrixLimits, size=(n,m))
+
+    if not stabilize: return A, B
+
     rankC = np.linalg.matrix_rank( control.ctrb(A,B) )
     while rankC < A.shape[0]:
         B = randomGen(typ, matrixLimits, size=(n,m))
@@ -97,9 +104,9 @@ def genStableLI(n, m, **kwargs) -> tuple:
         desired_poles = realPart
     
     K = control.place(A, B, p=desired_poles)
-    Acl = A - B @ K
+    A = A - B @ K
 
-    return Acl, B
+    return A, B
 
 def cofactor(A):
     """

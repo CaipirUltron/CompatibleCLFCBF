@@ -8,7 +8,7 @@ n, m = 2, 2
 
 while True:
 
-    A, B = genStableLI(n, m, type='int', random_lim=(-10, +10), real_lim=(-10, -1), imag_lim=(0, 1))
+    A, B = genStableLI(n, m, stabilize=False, type='int', random_lim=(-10, +10), real_lim=(-10, -1), imag_lim=(0, 1))
     G = (B @ B.T)
 
     CLFeigs = np.random.randint(low=1, high=10, size=n)
