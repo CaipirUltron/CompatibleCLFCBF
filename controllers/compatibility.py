@@ -483,7 +483,7 @@ class QFunction():
         and their stability numbers (if dim == 2, otherwise stability is None).
         '''
         zeros = self.zero_poly.roots()
-        real_zeros = np.array([ z.real for z in zeros if np.abs(z.imag) < self.real_zero_tol ])
+        real_zeros = np.array([ z.real for z in zeros if np.abs(z.imag) < self.real_zero_tol and z.real >= 0.0 ])
         real_zeros.sort()
 
         vPolys, _ = self.v()
