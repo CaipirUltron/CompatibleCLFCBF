@@ -49,7 +49,6 @@ for it in range(numTests):
             symb_det_error += determinant(eig.eigenvalue)
 
         ''' Test pencil inverse '''
-        
         detDiag = np.array([[ determinant if j==i else 0.0 for j in range(n) ] for i in range(n) ])
         adjPolyError = pencilPoly @ adjoint - detDiag
         for (i,j) in product(range(pencil.shape[0]), range(pencil.shape[1])):

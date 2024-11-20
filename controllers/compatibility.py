@@ -62,7 +62,9 @@ def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np
     x_coefs = results[0]
     res = results[1]
     residue = np.linalg.norm(res)
-    if residue > 1e-12: 
+
+    residue_tol = 1e-11
+    if residue > residue_tol:
         warnings.warn(f"Large residue detected on linear system solution = {residue}")
 
     if max_deg == 0: max_deg = 1
@@ -266,10 +268,10 @@ class MatrixPencil():
 
         # Iterate over each block, starting by the last one
         for i in range(num_blks-1, -1, -1):
-            blk_i_slice = slice( i*blk_dims[i], (i+1)*blk_dims[i] )
+            blk_i_slice = slice( sum(blk_dims[0:i]), sum(blk_dims[0:i+1]) )
 
             for j in range(i, num_blks):
-                blk_j_slice = slice( j*blk_dims[j], (j+1)*blk_dims[j] )
+                blk_j_slice = slice( sum(blk_dims[0:j]), sum(blk_dims[0:j+1]) )
 
                 ''' 
                 j == i: Computes ADJOINT DIAGONAL BLOCKS
@@ -284,7 +286,7 @@ class MatrixPencil():
 
                     b_poly = np.array([[ Poly([0.0], symbol='λ') for _ in range(blk_dims[j]) ] for _ in range(blk_dims[i]) ])
                     for k in range(i+1, j+1):
-                        blk_k_slice = slice( k*blk_dims[k], (k+1)*blk_dims[k] )
+                        blk_k_slice = slice( sum(blk_dims[0:k]), sum(blk_dims[0:k+1]) )
 
                         # Compute polynomial (λ Tik - Sik) and get the kj slice of adjoint
                         Tik = self.MM[ blk_i_slice, blk_k_slice ]
@@ -558,16 +560,19 @@ class QFunction():
         return self.pencil.to_poly() @ Or_poly.T
 
     def plot(self, ax: Axes, res: float = 0.0, q_limits=(-100, 100)):
-        ''' Plot q(λ) at axes ax.'''
-
+        '''
+        Plots the Q-function for analysis.
+        '''
         q_min, q_max = q_limits[0], q_limits[1]
         lambdaRange = []
 
+        ''' Add real eigenvalues to range '''
         realEigens = self.pencil.get_real_eigen()
         for eig in realEigens: 
-            if np.abs(eig.eigenvalue.real) < np.inf and np.abs(eig.eigenvalue.real) > -np.inf: 
+            if np.abs(eig.eigenvalue.real) < np.inf and np.abs(eig.eigenvalue.real) > -np.inf:
                 lambdaRange.append(eig.eigenvalue.real)
 
+        ''' Add real eigenvalues to range '''
         has_real_spectra = self.pencil.has_real_spectra()
         if has_real_spectra:
             stabilityEigens = self.symmetricPencil.get_real_eigen()
@@ -575,80 +580,83 @@ class QFunction():
                 if np.abs(eig.eigenvalue.real) < np.inf and np.abs(eig.eigenvalue.real) > -np.inf: 
                     lambdaRange.append(eig.eigenvalue.real)
 
+        ''' Add equilibrium solutions to range '''
         sols = self.equilibria()
         for sol in sols: 
             lambdaRange.append(sol["lambda"])
 
+        ''' Using range min, max values, generate λ range to be plotted '''
         factor = 10
         l_min, l_max = -100,  100
-        if lambdaRange:
-            l_min, l_max = min(lambdaRange), max(lambdaRange)
+        if lambdaRange: l_min, l_max = min(lambdaRange), max(lambdaRange)
+
         deltaLambda = l_max - l_min
         l_min -= deltaLambda/factor
         l_max += deltaLambda/factor
-        if res == 0.0: 
-            res = (l_max - l_min)/20000
+
+        if res == 0.0: res = deltaLambda/20000
+
         lambdas = np.arange(l_min, l_max, res)
 
-        is_inserting_nsd_stability, is_inserting_psd_stability = False, False
-        nsd_stability_intervals, psd_stability_intervals = [], []
-
+        ''' Loops through each λ on range to find stable/unstable intervals '''
+        is_inserting_nsd, is_inserting_psd = False, False
+        nsd_intervals, psd_intervals = [], []
         for l in lambdas:
 
             eigS = self.stability(l)
 
-            # Negative definite stability (stability) intervals
+            ''' Negative definite (stability) intervals '''
             if np.all( eigS < 0.0 ):
-                if not is_inserting_nsd_stability:
-                    nsd_stability_intervals.append([ l, np.inf ])
-                is_inserting_nsd_stability = True
-            elif is_inserting_nsd_stability:
-                nsd_stability_intervals[-1][1] = l
-                is_inserting_nsd_stability = False  
+                if not is_inserting_nsd:
+                    nsd_intervals.append([ l, np.inf ])
+                is_inserting_nsd = True
+            elif is_inserting_nsd:
+                nsd_intervals[-1][1] = l
+                is_inserting_nsd = False  
 
-            # Negative definite stability (instability) intervals
+            ''' Non-negative definite (instability) intervals '''
             if np.any( eigS > 0.0 ):
-                if not is_inserting_psd_stability:
-                    psd_stability_intervals.append([ l, np.inf ])
-                is_inserting_psd_stability = True
-            elif is_inserting_psd_stability:
-                psd_stability_intervals[-1][1] = l
-                is_inserting_psd_stability = False  
+                if not is_inserting_psd:
+                    psd_intervals.append([ l, np.inf ])
+                is_inserting_psd = True
+            elif is_inserting_psd:
+                psd_intervals[-1][1] = l
+                is_inserting_psd = False  
 
         strip_size = (q_max - q_min)/40
         strip_alpha = 0.6
 
-        # Add stability nsd strips
-        for interval in nsd_stability_intervals:
+        ''' Plot nsd strips '''
+        for interval in nsd_intervals:
             xy = (interval[0], -strip_size/2)
             if interval[1] == np.inf: interval[1] = l_max
             length = interval[1] - interval[0]
             rect = patches.Rectangle(xy, length, strip_size, facecolor='red', alpha=strip_alpha)
             ax.add_patch(rect)
 
-        # Add stability psd strips
-        for interval in psd_stability_intervals:
+        ''' Plot psd strips '''
+        for interval in psd_intervals:
             xy = (interval[0], -strip_size/2)
             if interval[1] == np.inf: interval[1] = l_max
             length = interval[1] - interval[0]
             rect = patches.Rectangle(xy, length, strip_size, facecolor='blue', alpha=strip_alpha)
             ax.add_patch(rect)
 
-        print(f"Pencil nsd interval = {nsd_stability_intervals}")
-        print(f"Pencil psd interval = {psd_stability_intervals}")
+        print(f"Pencil negative definite intervals = {nsd_intervals}")
+        print(f"Pencil positive definite intervals = {psd_intervals}")
 
-        # Plot the zero lines
+        ''' Plot zero lines '''
         ax.plot( [l_min, l_max], [ 0.0, 0.0 ], 'k' )       # horizontal axis
         ax.plot( [ 0.0, 0.0 ], [ q_min, q_max ], 'k' )          # vertical axis
 
-        # Plot the solution line
+        ''' Plot the solution line q(λ) = 1 '''
         ax.plot( lambdas, [ 1.0 for l in lambdas ], 'r--' )
 
-        # Plot q-function
+        ''' Plot the Q-function q(λ) '''
         q_array = [ self.n_poly(l) / self.d_poly(l) for l in lambdas ]
         ax.plot( lambdas, q_array )
 
-        # Plots boundary equilibrium solutions
+        ''' Plots equilibrium (stable/unstable) λ solutions satisfying q(λ) = 1 '''
         for k, sol in enumerate(sols):
             stability = sol["stability"]
             label_txt = f"{k+1} stability = {stability:2.2f}"
@@ -658,11 +666,9 @@ class QFunction():
             if stability < 0:
                 ax.plot( sol["lambda"], 1.0, 'ro', label=label_txt ) # stable solutions
 
-        # Plots real eigenvalues from stability pencil
+        ''' Plots arrows from eigenvalues of equivalent symmetric pencil '''
         if has_real_spectra:
             for k, eig in enumerate(stabilityEigens):
-                # label_txt = f"{k+1} inertia = {eig.inertia:2.2f}"
-                # ax.text(eig.eigenvalue, 0.0, f"{k+1}", color='k', fontsize=12)
                 arrowLen = q_max/10
                 arrowWidth = (l_max - l_min)/100
                 if eig.inertia > 0.0:
@@ -671,13 +677,12 @@ class QFunction():
                     direction = - q_max/2
                 ax.arrow(eig.eigenvalue, 0.0, 0.0, direction, edgecolor='green', facecolor='green', head_length=arrowLen, head_width=arrowWidth)
 
+        ''' Sets axes limits and legends '''
         ax.set_xlim(l_min, l_max)
-
         if has_real_spectra:
             ax.set_ylim(-q_max, q_max)
         else:
             ax.set_ylim(q_min, q_max)
-
         ax.legend()
 
     def compatibilize(self, plant: DynamicSystem, clf_dict: dict, cbf_dict, p = 1.0):
