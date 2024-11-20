@@ -6,6 +6,7 @@ from numpy.polynomial import Polynomial as Poly
 
 from matplotlib.axes import Axes
 import matplotlib.patches as patches
+import matplotlib.colors as mcolors
 
 import scipy as sp
 from scipy import signal
@@ -16,6 +17,29 @@ from itertools import product
 
 from dynamic_systems import DynamicSystem, LinearSystem
 from functions import MultiPoly
+
+def get_coefs(poly: np.ndarray):
+    ''' Get the coefficients of a given ndarray of Polynomials '''
+
+    if not isinstance(poly, np.ndarray):
+        raise TypeError("Polynomial must be an ndarray.")
+
+    v_coefs = []
+    for index, vi in np.ndenumerate(poly):
+
+        if not isinstance(vi, Poly):
+            raise TypeError("The elements of v(λ) must be polynomials.")
+        
+        # Creates new coefficients as necessary
+        if len(vi.coef) > len(v_coefs):
+            for _ in range(len(vi.coef) - len(v_coefs)):
+                v_coefs.append( np.zeros(poly.shape) )
+
+        # Populate given coefficient
+        for k, c in enumerate(vi.coef):
+            v_coefs[k][index] = c
+
+    return v_coefs
 
 def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np.ndarray:
     '''
@@ -74,6 +98,63 @@ def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np
         x_poly[i%n,j].coef[exp] = c
 
     return x_poly
+
+def solve_poly_orthonormal(arr_poly: np.ndarray):
+    ''' 
+    Computes the orthonormal matrix polynomial Q(λ) satisfying v(λ)' Q(λ) = 0, 
+    where v(λ) is a vector polynomial given by vec_poly.
+    '''
+    n = len(arr_poly)
+    if arr_poly.shape not in ( (n,) , (n,1) ):
+        raise TypeError("v(λ) be a n x 1 polynomial.")
+
+    v_coefs = get_coefs(arr_poly)
+    poly_degree = len(v_coefs)-1
+    
+    max_order = 3
+    for Qdegree in range(0, max_order):
+        Vmatrix = np.zeros([ poly_degree + Qdegree + 1, n*(Qdegree+1) ])
+        
+        sliding_list = [ v.reshape(-1,) for v in v_coefs ]
+        zeros = [ np.zeros(n) for _ in range(Qdegree) ]
+        sliding_list = zeros + sliding_list + zeros
+                
+        for i in range(poly_degree + Qdegree + 1):
+            l = sliding_list[i:i+Qdegree+1]
+            l.reverse()
+            Vmatrix[i,:] = np.hstack(l)
+
+        Null = sp.linalg.null_space(Vmatrix)
+        if Null.size == 0:
+            continue
+
+        p = Null.shape[1]
+        num_params = n * p
+        params = np.random.randn(num_params)
+
+        Qarr = np.hstack([ Null @ params[k*p:(k+1)*p] for k in range(n) ])
+
+        
+        Qterm = np.zeros((n,n))
+        for d in range(1,2*Qdegree):
+            for i in range(d+1):
+                Qterm += 
+            
+
+        for i,j in product(range(Qdegree), range(Qdegree)):
+            i_sl = slice(i*n,(i+1)*n)
+            j_sl = slice(j*n,(j+1)*n)
+            if i == j:
+                if i == 0:
+                    error += np.linalg.norm( Qarr[i_sl,:].T @ Qarr[j_sl,:] - np.eye(n)  )
+                else:
+                    error += np.linalg.norm( Qarr[i_sl,:].T @ Qarr[j_sl,:] )
+            else:
+
+
+
+        print(f"Q = {Qdegree}")
+        print(Null)
 
 @dataclass
 class Eigen():
@@ -559,7 +640,7 @@ class QFunction():
 
         return self.pencil.to_poly() @ Or_poly.T
 
-    def plot(self, ax: Axes, res: float = 0.0, q_limits=(-100, 100)):
+    def plot(self, ax: Axes, res: float = 0.0, q_limits=(-10, 500)):
         '''
         Plots the Q-function for analysis.
         '''
@@ -631,7 +712,7 @@ class QFunction():
             xy = (interval[0], -strip_size/2)
             if interval[1] == np.inf: interval[1] = l_max
             length = interval[1] - interval[0]
-            rect = patches.Rectangle(xy, length, strip_size, facecolor='red', alpha=strip_alpha)
+            rect = patches.Rectangle(xy, length, strip_size, facecolor=mcolors.TABLEAU_COLORS['tab:orange'], alpha=strip_alpha)
             ax.add_patch(rect)
 
         ''' Plot psd strips '''
@@ -639,11 +720,11 @@ class QFunction():
             xy = (interval[0], -strip_size/2)
             if interval[1] == np.inf: interval[1] = l_max
             length = interval[1] - interval[0]
-            rect = patches.Rectangle(xy, length, strip_size, facecolor='blue', alpha=strip_alpha)
+            rect = patches.Rectangle(xy, length, strip_size, facecolor='cyan', alpha=strip_alpha)
             ax.add_patch(rect)
 
-        print(f"Pencil negative definite intervals = {nsd_intervals}")
-        print(f"Pencil positive definite intervals = {psd_intervals}")
+        print(f"Stability intervals = {nsd_intervals}")
+        print(f"Instability intervals = {psd_intervals}")
 
         ''' Plot zero lines '''
         ax.plot( [l_min, l_max], [ 0.0, 0.0 ], 'k' )       # horizontal axis
@@ -672,17 +753,14 @@ class QFunction():
                 arrowLen = q_max/10
                 arrowWidth = (l_max - l_min)/100
                 if eig.inertia > 0.0:
-                    direction = q_max/2
+                    direction = q_max/8
                 else:
-                    direction = - q_max/2
+                    direction = - q_max/8
                 ax.arrow(eig.eigenvalue, 0.0, 0.0, direction, edgecolor='green', facecolor='green', head_length=arrowLen, head_width=arrowWidth)
 
         ''' Sets axes limits and legends '''
         ax.set_xlim(l_min, l_max)
-        if has_real_spectra:
-            ax.set_ylim(-q_max, q_max)
-        else:
-            ax.set_ylim(q_min, q_max)
+        ax.set_ylim(q_min, q_max)
         ax.legend()
 
     def compatibilize(self, plant: DynamicSystem, clf_dict: dict, cbf_dict, p = 1.0):
