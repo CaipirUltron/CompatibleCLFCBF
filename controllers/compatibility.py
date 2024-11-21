@@ -507,9 +507,6 @@ class QFunction():
         self.stability_poly = self._stability_poly()
         self.stability_pencil = companion_form(self.stability_poly)
 
-        for k, eig in enumerate( self.stability_pencil.get_eigen() ):
-            print(f"{k+1}-th eigenvalue of S(λ) companion form = {eig.eigenvalue}")
-
     def _v_poly_derivative(self, order=0):
         '''
         Computes the derivatives of v(λ) of any order.
@@ -646,35 +643,39 @@ class QFunction():
         q_min, q_max = q_limits[0], q_limits[1]
         lambdaRange = []
 
-        ''' Add real eigenvalues to range '''
+        ''' Add pencil real eigenvalues to range '''
         realEigens = self.pencil.get_real_eigen()
-        for eig in realEigens: 
+        for eig in realEigens:
             if np.abs(eig.eigenvalue.real) < np.inf and np.abs(eig.eigenvalue.real) > -np.inf:
                 lambdaRange.append(eig.eigenvalue.real)
 
-        ''' Add real eigenvalues to range '''
-        has_real_spectra = self.pencil.has_real_spectra()
-        if has_real_spectra:
-            stabilityEigens = self.symmetricPencil.get_real_eigen()
-            for eig in stabilityEigens:
-                if np.abs(eig.eigenvalue.real) < np.inf and np.abs(eig.eigenvalue.real) > -np.inf: 
-                    lambdaRange.append(eig.eigenvalue.real)
+        # ''' Add real eigenvalues to range '''
+        # has_real_spectra = self.pencil.has_real_spectra()
+        # if has_real_spectra:
+        #     stabilityEigens = self.symmetricPencil.get_real_eigen()
+        #     for eig in stabilityEigens:
+        #         if np.abs(eig.eigenvalue.real) < np.inf and np.abs(eig.eigenvalue.real) > -np.inf: 
+        #             lambdaRange.append(eig.eigenvalue.real)
 
         ''' Add equilibrium solutions to range '''
         sols = self.equilibria()
         for sol in sols: 
             lambdaRange.append(sol["lambda"])
 
+        for eig in self.stability_pencil.get_real_eigen():
+            lambdaRange.append(eig.eigenvalue)
+
         ''' Using range min, max values, generate λ range to be plotted '''
         factor = 10
         l_min, l_max = -100,  100
-        if lambdaRange: l_min, l_max = min(lambdaRange), max(lambdaRange)
+        if lambdaRange: 
+            l_min, l_max = min(lambdaRange), max(lambdaRange)
 
         deltaLambda = l_max - l_min
         l_min -= deltaLambda/factor
         l_max += deltaLambda/factor
-
-        if res == 0.0: res = deltaLambda/20000
+        if res == 0.0:
+            res = deltaLambda/20000
 
         lambdas = np.arange(l_min, l_max, res)
 
@@ -695,7 +696,7 @@ class QFunction():
                 is_insert_nsd = False  
 
             ''' Indefinite (instability) intervals '''
-            if np.any( eigS > 0.0 ):
+            if np.any( eigS > 0.0 ) and np.any( eigS < 0.0 ):
                 if not is_insert_ind:
                     ind_intervals.append([ l, np.inf ])
                 is_insert_ind = True
@@ -760,16 +761,16 @@ class QFunction():
             if stability < 0:
                 ax.plot( sol["lambda"], 1.0, 'ro', label=label_txt ) # stable solutions
 
-        ''' Plots arrows from eigenvalues of equivalent symmetric pencil '''
-        if has_real_spectra:
-            for k, eig in enumerate(stabilityEigens):
-                arrowLen = q_max/10
-                arrowWidth = (l_max - l_min)/100
-                if eig.inertia > 0.0:
-                    direction = q_max/8
-                else:
-                    direction = - q_max/8
-                ax.arrow(eig.eigenvalue, 0.0, 0.0, direction, edgecolor='green', facecolor='green', head_length=arrowLen, head_width=arrowWidth)
+        # ''' Plots arrows from eigenvalues of equivalent symmetric pencil '''
+        # if has_real_spectra:
+        #     for k, eig in enumerate(stabilityEigens):
+        #         arrowLen = q_max/10
+        #         arrowWidth = (l_max - l_min)/100
+        #         if eig.inertia > 0.0:
+        #             direction = q_max/8
+        #         else:
+        #             direction = - q_max/8
+        #         ax.arrow(eig.eigenvalue, 0.0, 0.0, direction, edgecolor='green', facecolor='green', head_length=arrowLen, head_width=arrowWidth)
 
         ''' Sets axes limits and legends '''
         ax.set_xlim(l_min, l_max)

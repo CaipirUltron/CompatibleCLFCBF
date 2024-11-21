@@ -8,8 +8,8 @@ from controllers import MatrixPencil, QFunction
 
 n, m = 3, 3
 
-# loop = False
-loop = True
+loop = False
+# loop = True
 
 def generateAndPlot(ax):
     '''
@@ -49,6 +49,8 @@ def generateAndPlot(ax):
             print(text+" type.")
 
     qfun = QFunction(pencil, Hh, w)
+    for k, eig in enumerate( qfun.stability_pencil.get_real_eigen() ):
+        print(f"{k+1}-th real eigenvalue of S(λ) companion form = {eig.eigenvalue}")
     qfun.plot(ax)
 
 if not loop:
