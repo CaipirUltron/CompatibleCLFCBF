@@ -4,10 +4,10 @@ from numpy.linalg import eigvals as eigs
 from itertools import product
 from controllers import MatrixPencil
 
-n = 2
+n, p = 2, 2
 
-M = np.random.randn(n,n)
-N = np.random.randn(n,n)
+M = np.random.randn(n,p)
+N = np.random.randn(n,p)
 pencil = MatrixPencil(M, N)
 
 print("Starting MatrixPencil unit tests.")
@@ -17,21 +17,21 @@ det_ratio_error = 0.0
 l_error = 0.0
 r_error = 0.0
 null_error = 0.0
-inverse_error = 0.0
 symb_det_error = 0.0
 adjoint_error = 0.0
 
 numTests = 1000
 for it in range(numTests):
 
-    M = np.random.randn(n,n)
-    N = np.random.randn(n,n)
+    M = np.random.randn(n,p)
+    N = np.random.randn(n,p)
     
     pencil.set(M=M, N=N)
-    pencilPoly = pencil.to_poly()
-    determinant, adjoint = pencil.inverse()
-
+    pencilPoly = pencil.to_poly_array()
+    
     if pencil.type == 'regular':
+
+        determinant, adjoint = pencil.inverse()
 
         ''' Test eigenvalues/eigenvectors (only for regular matrix pencils) '''
         eigens = pencil.get_eigen()
@@ -56,8 +56,11 @@ for it in range(numTests):
 
     ''' Test nullspace (only for singular matrix pencils) '''
     if pencil.type == 'singular':
+
         nullPoly = pencil.nullspace()
-        null_error += np.linalg.norm( ( nullPoly.T @ M.T ).coeffs ) + np.linalg.norm( ( nullPoly.T @ M.T ).coeffs )
+        error_poly = pencilPoly @ nullPoly
+        for index, poly in np.ndenumerate(error_poly):
+            null_error += np.linalg.norm( poly.coef )
 
 print(f"Exit after testing with {it+1} random samples. \n")
 
@@ -66,7 +69,6 @@ if pencil.type == 'regular':
     print(f"Pencil determinant error (on ratio computed pencil) = {det_ratio_error}")
     print(f"Pencil left eigenvector error = {l_error}")
     print(f"Pencil right eigenvector error = {r_error}")
-    print(f"Pencil inverse error = {inverse_error}")
     print(f"Pencil symbolic determinant error = {symb_det_error}")
     print(f"Pencil adjoint error = {adjoint_error}")
 

@@ -41,13 +41,13 @@ def to_coefs(poly: np.ndarray):
 
     return v_coefs
 
-def to_poly_array(coefs: list[np.ndarray]):
+def to_poly_array(coefs: list[np.ndarray], symbol='x'):
     ''' From a list of polynomial coefficients, return corresponding ndarray of Polynomials '''
 
     shape = coefs[0].shape
     poly_arr = np.zeros(shape, dtype=Poly)
     for index, _ in np.ndenumerate(poly_arr):
-        poly_arr[index] = Poly([ c[index] for c in coefs ])
+        poly_arr[index] = Poly([ c[index] for c in coefs ], symbol=symbol)
 
     return poly_arr
 
@@ -109,76 +109,51 @@ def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np
 
     return x_poly
 
-def solve_poly_orthonormal(arr_poly: np.ndarray):
+def poly_nullspace(Varr: np.ndarray[Poly], max_degree=20):
     ''' 
-    Computes the orthonormal matrix polynomial Q(λ) satisfying v(λ)' Q(λ) = 0, 
-    where v(λ) is a vector polynomial given by vec_poly.
+    Returns the minimum (right) nullspace polynomial N(λ) = N0 + λ N1 + λ² N2 + ... of V(λ), that is, V(λ) N(λ) = 0.
+    Inputs:
+        - V(λ) is an (n x m) array polynomial given by Varr.
+        - max_degree is the maximum degree to try to find N(λ)
     '''
-    n = len(arr_poly)
-    if arr_poly.shape not in ( (n,) , (n,1) ):
-        raise TypeError("v(λ) be a n x 1 polynomial.")
+    if Varr.shape == (Varr.shape[0],):
+        Varr = Varr.reshape(-1,1)
 
-    v_coefs = to_coefs(arr_poly)
-    poly_degree = len(v_coefs)-1
+    n, m = Varr.shape
+    if n == m:
+        raise Exception("Vmatrix does not have a non-trivial right nullspace.")
+
+    if not isinstance(Varr, np.ndarray):
+        raise TypeError("v(λ) must be a ndarray of Polynomials.")
+
+    Vcoefs = to_coefs(Varr)
+    Vdegree = len(Vcoefs)-1
     
-    max_order = 20
-    for Qdegree in range(0, max_order):
+    for Qdegree in range(0, max_degree+1):
 
-        Vmatrix = np.zeros([ poly_degree + Qdegree + 1, n*(Qdegree+1) ])
+        Vmatrix = np.zeros([ n*(Vdegree + Qdegree + 1), m*(Qdegree+1) ])
         
-        sliding_list = [ v.reshape(-1,) for v in v_coefs ]
-        zeros = [ np.zeros(n) for _ in range(Qdegree) ]
+        sliding_list = [ c for c in Vcoefs ]
+        zeros = [ np.zeros((n,m)) for _ in range(Qdegree) ]
         sliding_list = zeros + sliding_list + zeros
-                
-        for i in range(poly_degree + Qdegree + 1):
+        
+        for i in range(Vdegree + Qdegree + 1):
             l = sliding_list[i:i+Qdegree+1]
             l.reverse()
-            Vmatrix[i,:] = np.hstack(l)
+            Vmatrix[i*n:(i+1)*n,:] = np.hstack(l)
 
         Null = sp.linalg.null_space(Vmatrix)
-        if Null.size == 0:
-            continue
-
-        p = Null.shape[1]
-        num_params = n * p
-
-        def to_Q(params: np.ndarray):
-            ''' Transforms param vector in list of Q(λ) coefficients '''
-
-            Qarr = np.hstack([ ( Null @ params[k*p:(k+1)*p] ).reshape(-1,1) for k in range(n-1) ])
-            Qlist = [ Qarr[i*n:(i+1)*n,:] for i in range(Qdegree+1) ]
-            return Qlist
-
-        def objective(params: np.ndarray):
-            '''
-            Objective function: find orthonormal matrix Q(λ) with Q(λ)' Q(λ) = I constructed from nullspace
-            '''
-            Qlist = to_Q(params)
-
-            error = 0.0
-            for d in range(0,2*Qdegree+1):
-                
-                Qterm = np.zeros((n-1,n-1))
-                for i,j in product(range(Qdegree+1),range(Qdegree+1)):                  
-                    if i+j == d: 
-                        Qterm += Qlist[i].T @ Qlist[j]
-
-                if d == 0: error += np.linalg.norm( Qterm - np.eye(n-1) )
-                else: error += np.linalg.norm( Qterm )
-
-            return error
-        
-        params0 = np.random.randn(num_params)
-        sol = minimize( objective, params0, options={"disp": True, "maxiter": 1000} )
-
-        threshold = 1e-4
-        if sol.fun <= threshold:
+        if Null.size != 0:
             break
 
-    Q = to_poly_array( to_Q(sol.x) )
-    print(Q.T @ Q)
+        if Qdegree == max_degree:
+            warnings.warn("Vmatrix likely does not have a non-trivial right nullspace.")
+            return None
 
-    return Q
+    # Qarr = np.hstack([ ( Null @ params[k*q:(k+1)*q] ).reshape(-1,1) for k in range(p) ])
+
+    Ncoefs = [ Null[i*m:(i+1)*m,:] for i in range(Qdegree+1) ]
+    return to_poly_array(Ncoefs, symbol=Varr[0,0].symbol)
 
 @dataclass
 class Eigen():
@@ -225,12 +200,10 @@ class MatrixPencil():
         where MM is block upper triangular, NN is upper triangular and Q, Z are unitary matrices.
         '''
         if self.type == 'singular':
-            raise NotImplementedError("Eigenvalue computation (currently) not implemented for singular matrix pencils.")
-
-        self.NN, self.MM, self.alphas, self.betas, self.Q, self.Z = sp.linalg.ordqz(self.N, self.M, output='real')
-
-        ''' Computes Eigen list '''
-        self.eigens = self._eigen(self.alphas, self.betas)
+            warnings.warn("Eigenvalue computation (currently) not implemented for singular matrix pencils.")
+        else:
+            self.NN, self.MM, self.alphas, self.betas, self.Q, self.Z = sp.linalg.ordqz(self.N, self.M, output='real')
+            self.eigens = self._eigen(self.alphas, self.betas)
 
         ''' Parameters '''
         self.realEigenTol = 1e-10           # Tolerance to consider an eigenvalue as real
@@ -304,36 +277,12 @@ class MatrixPencil():
 
         return eigens
 
-    def nullspace(self) -> MultiPoly:
+    def nullspace(self) -> np.ndarray:
         ''' 
-        Returns the nullspace polynomial Λ(λ) Z of the singular pencil λ M - N, satisfying
-        (λ M - N) Λ(λ) Z = 0 identically for all λ
+        Returns the pencil minimum nullspace polynomial N(λ), 
+        a matrix polynomial satisfying ( λ M - N ) N(λ) = 0, identically (for all λ).
         '''
-        n, p = self.shape[0], self.shape[1]
-        for deg in range(0, self.max_order):
-
-            N = np.zeros([ (deg+2)*n, (deg+1)*p ])
-            for i in range(deg+1):
-                N[ i*n:(i+1)*n , i*p:(i+1)*p ] = - self.N
-                N[ (i+1)*n:(i+2)*n , i*p:(i+1)*p ] = + self.M
-
-            Null = sp.linalg.null_space(N)
-
-            # Regular case
-            if n == p and Null.size == 0:
-                return MultiPoly( kernel=[(0,)], coeffs=[np.zeros((p,1))] )
-
-            # End case
-            if Null.size != 0:
-                break
-
-            if deg == self.max_order - 1:
-                warnings.warn("Max. degree might be low. Consider increasing the parameter.")
-        
-        # Extract matrices
-        coefs = [ Null[d*p:(d+1)*p] for d in range(0, deg+1) ]
-
-        return MultiPoly(kernel=[(k,) for k in range(0,deg+1)], coeffs=coefs)
+        return poly_nullspace( self.to_poly_array() )
 
     def symmetric(self):
         ''' Returns equivalent symmetric pencil. '''
@@ -343,7 +292,7 @@ class MatrixPencil():
         ''' Returns equivalent symmetric pencil. '''
         return MatrixPencil( 0.5*(self.M - self.M.T), 0.5*(self.N - self.N.T) )
 
-    def to_poly(self):
+    def to_poly_array(self):
         ''' Returns equivalent array of polynomials '''
         poly_arr = np.array([[ Poly([0.0], symbol='λ') for j in range(self.shape[1]) ] for i in range(self.shape[0]) ])
         for (i,j) in product(range(self.shape[0]),range(self.shape[1])):
@@ -519,6 +468,50 @@ class QFunction():
         self.d_poly = ( determinant**2 )
         self.zero_poly = ( self.n_poly - self.d_poly )
         self.v_poly, self.det_poly = self._v_poly()
+        self.stability_poly = self._stability_poly()
+
+        print(f"S(λ) shape = { self.stability_poly.shape }")
+        print(f"S(λ) = { self.stability_poly }")
+
+        if self.stability_poly.shape == (1,1):
+            print(f"S(λ) roots = { self.stability_poly[0,0].roots() }")
+
+    def _v_poly_derivative(self, order=0):
+        '''
+        Computes the derivatives of v(λ) of any order.
+        Returns: - vector polynomial v_poly(λ)
+                 - scalar divisor polynomial a(λ)
+        v(λ) = 1/a(λ) v_poly(λ)
+        '''
+        det, adjoint = self.pencil.inverse()
+        v = math.factorial(order) * adjoint @ self.w
+
+        power = np.eye(self.pencil.shape[0])
+        for k in range(order): 
+            power @= - adjoint @ self.pencil.M
+        v = power @ v
+
+        return v, det**(order+1)
+
+    def _v_poly(self):
+        return self._v_poly_derivative(order=0)
+
+    def _stability_poly(self) -> np.ndarray[Poly]:
+        ''' Computes the stability polynomial matrix '''
+
+        nablah_poly = self.H @ self.v_poly
+        null_poly = poly_nullspace(nablah_poly.reshape(1,-1))
+
+        Ps_poly = self.pencil.symmetric().to_poly_array()
+        return null_poly.T @ Ps_poly @ null_poly
+        
+    def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
+        '''
+        Computes the q-function value q(λ) = n(λ)/d(λ) for a given λ (for DEBUG only)
+        '''
+        P = self.pencil(l)
+        v = inv(P) @ self.w
+        return v.T @ self.H @ v 
 
     def set(self, **kwargs):
         ''' QFunction update method '''
@@ -546,45 +539,13 @@ class QFunction():
         self.w = new_w
         self._compute_polys()
 
-    def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
-        '''
-        Computes the q-function value q(λ) = n(λ)/d(λ) for a given λ (for DEBUG only)
-        '''
-        P = self.pencil(l)
-        v = inv(P) @ self.w
-        return v.T @ self.H @ v 
-
-    def __call__(self, l):
-        ''' Calling method '''
-        return self.n_poly(l) / self.d_poly(l)
-
     def get_polys(self):
         '''
         Returns: - numerator polynomial n(λ)
                  - denominator polynomial d(λ) 
         '''
         return self.n_poly, self.d_poly
-
-    def _v_poly_derivative(self, order=0):
-        '''
-        Computes the derivatives of v(λ) of any order.
-        Returns: - vector polynomial v_poly(λ)
-                 - scalar divisor polynomial a(λ)
-        v(λ) = 1/a(λ) v_poly(λ)
-        '''
-        det, adjoint = self.pencil.inverse()
-        v = math.factorial(order) * adjoint @ self.w
-
-        power = np.eye(self.pencil.shape[0])
-        for k in range(order): 
-            power @= - adjoint @ self.pencil.M
-        v = power @ v
-
-        return v, det**(order+1)
-
-    def _v_poly(self):
-        return self._v_poly_derivative(order=0)
-
+    
     def v(self, l):
         '''
         Compute v(λ) using polynomials
@@ -622,31 +583,11 @@ class QFunction():
 
     def orthogonal_nullspace(self) -> MultiPoly:
         ''' 
-        Computes the matrix polynomial O(λ) orthogonal to the nullspace polynomial Λ(λ) Z,
-        that is, O(λ) H Λ(λ) Z = 0 
+        Computes the matrix polynomial O(λ) orthogonal to H N(λ),
+        where N(λ) is the pencil minimum nullspace polynomial.
         '''
-        p = self.pencil.shape[1]
-
-        nullspacePoly = self.pencil.nullspace()
-        zdim = nullspacePoly.shape[1]
-        Zcoefs = nullspacePoly.coeffs
-        numZcoefs = len(nullspacePoly.coeffs)
-        for deg in range(0, self.max_order):
-
-            Coef = np.zeros(( (deg+1)*p, numZcoefs*zdim ))
-
-            for i in range(0, numZcoefs-deg):
-                aux = self.H @ np.hstack([ Zcoefs[k] for k in range(0, numZcoefs - i) ])
-                Coef[ i*p:(i+1)*p, : ] = np.hstack([ np.zeros((p,zdim*i)), aux ])
-
-            Null = sp.linalg.null_space( Coef.T )
-            if Null.size != 0:
-                break
-
-        M = Null.T
-        Mcoefs = [ M[:, i*p:(i+1)*(p) ] for i in range(deg+1) ]
-
-        return MultiPoly(kernel=[(k,) for k in range(0, deg+1) ], coeffs=Mcoefs)
+        nullspace_poly = self.pencil.nullspace()
+        return poly_nullspace( nullspace_poly.T @ self.H )
 
     def regular_pencil(self):
         '''
@@ -662,7 +603,7 @@ class QFunction():
         O_poly = self.orthogonal_nullspace()
         Or_poly = O_poly[0:self.pencil.shape[0], :]
 
-        return self.pencil.to_poly() @ Or_poly.T
+        return self.pencil.to_poly_array() @ Or_poly.T
 
     def plot(self, ax: Axes, res: float = 0.0, q_limits=(-10, 500)):
         '''
@@ -909,6 +850,10 @@ class QFunction():
         # self.computed_from = old_computed_from
 
         return Hv
+
+    def __call__(self, l):
+        ''' Calling method '''
+        return self.n_poly(l) / self.d_poly(l)
 
 class CLFCBFPair():
     '''

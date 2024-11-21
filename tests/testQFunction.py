@@ -4,17 +4,12 @@ from numpy.polynomial import Polynomial as Poly
 import matplotlib.pyplot as plt
 
 from common import randomR, genStableLI, hessian_quadratic
-from controllers import MatrixPencil, QFunction, solve_poly_orthonormal
+from controllers import MatrixPencil, QFunction, poly_nullspace
 
 n, m = 3, 3
 
 loop = False
 # loop = True
-
-v = np.array([ Poly([1,2,3,4]), Poly([-5,-4,0,3,1]), Poly([1,0,-2,70,2]) ])
-print(v)
-Q = solve_poly_orthonormal(v)
-print(Q.T @ Q)
 
 def generateAndPlot(ax):
     '''
