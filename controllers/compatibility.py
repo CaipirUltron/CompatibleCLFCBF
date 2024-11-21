@@ -19,8 +19,9 @@ from dynamic_systems import DynamicSystem, LinearSystem
 from functions import MultiPoly
 
 def to_coefs(poly: np.ndarray):
-    ''' Get the coefficients of a given ndarray of Polynomials '''
-
+    '''
+    Get the coefficients of a given ndarray of Polynomials.
+    '''
     if not isinstance(poly, np.ndarray):
         raise TypeError("Polynomial must be an ndarray.")
 
@@ -41,9 +42,10 @@ def to_coefs(poly: np.ndarray):
 
     return v_coefs
 
-def to_poly_array(coefs: list[np.ndarray], symbol='x'):
-    ''' From a list of polynomial coefficients, return corresponding ndarray of Polynomials '''
-
+def from_coefs(coefs: list[np.ndarray], symbol='x'):
+    '''
+    From a list of polynomial coefficients, return corresponding ndarray of Polynomials
+    '''
     shape = coefs[0].shape
     poly_arr = np.zeros(shape, dtype=Poly)
     for index, _ in np.ndenumerate(poly_arr):
@@ -153,7 +155,36 @@ def poly_nullspace(Varr: np.ndarray[Poly], max_degree=20):
     # Qarr = np.hstack([ ( Null @ params[k*q:(k+1)*q] ).reshape(-1,1) for k in range(p) ])
 
     Ncoefs = [ Null[i*m:(i+1)*m,:] for i in range(Qdegree+1) ]
-    return to_poly_array(Ncoefs, symbol=Varr[0,0].symbol)
+    return from_coefs(Ncoefs, symbol=Varr[0,0].symbol)
+
+def companion_form(poly: np.ndarray):
+    ''' 
+    Returns a linear matrix pencil that is the companion form of a given square polynomial matrix P(λ).
+    '''
+
+    if not isinstance(poly, np.ndarray):
+        raise TypeError("Polynomial must be an ndarray.")
+
+    shape = poly.shape
+    if shape[0] != shape[1]:
+        raise NotImplementedError("Companion form is only implemented for square matrix polynomials. ")
+    
+    n = shape[0]
+    coefs = to_coefs(poly)
+    deg = len(coefs)-1
+
+    # Builds block diagonal matrix M
+    M = np.zeros((deg*n,deg*n))
+    M = sp.linalg.block_diag(*([ coefs[-1] ] + [ np.eye(n) for _ in range(deg-1) ]))
+
+    # Builds row companion form matrix N
+    N = np.zeros((deg*n,deg*n))
+    for i in range(deg):
+        N[0:n, i*n:(i+1)*n] = -coefs[deg-1-i]                 # First row block
+        if i < deg-1:
+            N[(i+1)*n:(i+2)*n, i*n:(i+1)*n] = np.eye(n)    # Additional -I's at the diagonal below
+
+    return MatrixPencil(M,N)
 
 @dataclass
 class Eigen():
@@ -463,18 +494,21 @@ class QFunction():
     def _compute_polys(self):
         ''' Private method for computing the QFunction polynomials '''
 
+        ''' Computation of Q-function numerator/denominator polynomials '''
         determinant, adjoint = self.pencil.inverse()
         self.n_poly = ( self.w.T @ adjoint.T @ self.H @ adjoint @ self.w )
         self.d_poly = ( determinant**2 )
+
+        ''' Computation of the zero-polynomial, for computing the boundary equilibrium points '''
         self.zero_poly = ( self.n_poly - self.d_poly )
+
+        ''' Computation of stability properties of the boundary equilibrium points '''
         self.v_poly, self.det_poly = self._v_poly()
         self.stability_poly = self._stability_poly()
+        self.stability_pencil = companion_form(self.stability_poly)
 
-        print(f"S(λ) shape = { self.stability_poly.shape }")
-        print(f"S(λ) = { self.stability_poly }")
-
-        if self.stability_poly.shape == (1,1):
-            print(f"S(λ) roots = { self.stability_poly[0,0].roots() }")
+        for k, eig in enumerate( self.stability_pencil.get_eigen() ):
+            print(f"{k+1}-th eigenvalue of S(λ) companion form = {eig.eigenvalue}")
 
     def _v_poly_derivative(self, order=0):
         '''
@@ -501,8 +535,8 @@ class QFunction():
 
         nablah_poly = self.H @ self.v_poly
         null_poly = poly_nullspace(nablah_poly.reshape(1,-1))
-
         Ps_poly = self.pencil.symmetric().to_poly_array()
+
         return null_poly.T @ Ps_poly @ null_poly
         
     def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
@@ -645,34 +679,43 @@ class QFunction():
         lambdas = np.arange(l_min, l_max, res)
 
         ''' Loops through each λ on range to find stable/unstable intervals '''
-        is_inserting_nsd, is_inserting_psd = False, False
-        nsd_intervals, psd_intervals = [], []
+        is_insert_nsd, is_insert_ind, is_insert_psd = False, False, False
+        nsd_intervals, ind_intervals, psd_intervals = [], [], []
         for l in lambdas:
 
             eigS = self.stability(l)
 
             ''' Negative definite (stability) intervals '''
             if np.all( eigS < 0.0 ):
-                if not is_inserting_nsd:
+                if not is_insert_nsd:
                     nsd_intervals.append([ l, np.inf ])
-                is_inserting_nsd = True
-            elif is_inserting_nsd:
+                is_insert_nsd = True
+            elif is_insert_nsd:
                 nsd_intervals[-1][1] = l
-                is_inserting_nsd = False  
+                is_insert_nsd = False  
 
-            ''' Non-negative definite (instability) intervals '''
+            ''' Indefinite (instability) intervals '''
             if np.any( eigS > 0.0 ):
-                if not is_inserting_psd:
+                if not is_insert_ind:
+                    ind_intervals.append([ l, np.inf ])
+                is_insert_ind = True
+            elif is_insert_ind:
+                ind_intervals[-1][1] = l
+                is_insert_ind = False  
+
+            ''' Positive definite (instability) intervals '''
+            if np.all( eigS > 0.0 ):
+                if not is_insert_psd:
                     psd_intervals.append([ l, np.inf ])
-                is_inserting_psd = True
-            elif is_inserting_psd:
+                is_insert_psd = True
+            elif is_insert_psd:
                 psd_intervals[-1][1] = l
-                is_inserting_psd = False  
+                is_insert_psd = False  
 
         strip_size = (q_max - q_min)/40
         strip_alpha = 0.6
 
-        ''' Plot nsd strips '''
+        ''' Plot nsd strips (stable) '''
         for interval in nsd_intervals:
             xy = (interval[0], -strip_size/2)
             if interval[1] == np.inf: interval[1] = l_max
@@ -680,16 +723,21 @@ class QFunction():
             rect = patches.Rectangle(xy, length, strip_size, facecolor=mcolors.TABLEAU_COLORS['tab:orange'], alpha=strip_alpha)
             ax.add_patch(rect)
 
-        ''' Plot psd strips '''
+        ''' Plot indefinite strips (instable) '''
+        for interval in ind_intervals:
+            xy = (interval[0], -strip_size/2)
+            if interval[1] == np.inf: interval[1] = l_max
+            length = interval[1] - interval[0]
+            rect = patches.Rectangle(xy, length, strip_size, facecolor=mcolors.TABLEAU_COLORS['tab:gray'], alpha=strip_alpha)
+            ax.add_patch(rect)
+
+        ''' Plot psd strips (instable) '''
         for interval in psd_intervals:
             xy = (interval[0], -strip_size/2)
             if interval[1] == np.inf: interval[1] = l_max
             length = interval[1] - interval[0]
-            rect = patches.Rectangle(xy, length, strip_size, facecolor='cyan', alpha=strip_alpha)
+            rect = patches.Rectangle(xy, length, strip_size, facecolor=mcolors.TABLEAU_COLORS['tab:cyan'], alpha=strip_alpha)
             ax.add_patch(rect)
-
-        print(f"Stability intervals = {nsd_intervals}")
-        print(f"Instability intervals = {psd_intervals}")
 
         ''' Plot zero lines '''
         ax.plot( [l_min, l_max], [ 0.0, 0.0 ], 'k' )       # horizontal axis
