@@ -18,7 +18,7 @@ from itertools import product
 from dynamic_systems import DynamicSystem, LinearSystem
 from functions import MultiPoly
 
-def get_coefs(poly: np.ndarray):
+def to_coefs(poly: np.ndarray):
     ''' Get the coefficients of a given ndarray of Polynomials '''
 
     if not isinstance(poly, np.ndarray):
@@ -40,6 +40,16 @@ def get_coefs(poly: np.ndarray):
             v_coefs[k][index] = c
 
     return v_coefs
+
+def to_poly_array(coefs: list[np.ndarray]):
+    ''' From a list of polynomial coefficients, return corresponding ndarray of Polynomials '''
+
+    shape = coefs[0].shape
+    poly_arr = np.zeros(shape, dtype=Poly)
+    for index, _ in np.ndenumerate(poly_arr):
+        poly_arr[index] = Poly([ c[index] for c in coefs ])
+
+    return poly_arr
 
 def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np.ndarray:
     '''
@@ -108,11 +118,12 @@ def solve_poly_orthonormal(arr_poly: np.ndarray):
     if arr_poly.shape not in ( (n,) , (n,1) ):
         raise TypeError("v(λ) be a n x 1 polynomial.")
 
-    v_coefs = get_coefs(arr_poly)
+    v_coefs = to_coefs(arr_poly)
     poly_degree = len(v_coefs)-1
     
-    max_order = 3
+    max_order = 20
     for Qdegree in range(0, max_order):
+
         Vmatrix = np.zeros([ poly_degree + Qdegree + 1, n*(Qdegree+1) ])
         
         sliding_list = [ v.reshape(-1,) for v in v_coefs ]
@@ -130,31 +141,44 @@ def solve_poly_orthonormal(arr_poly: np.ndarray):
 
         p = Null.shape[1]
         num_params = n * p
-        params = np.random.randn(num_params)
 
-        Qarr = np.hstack([ Null @ params[k*p:(k+1)*p] for k in range(n) ])
+        def to_Q(params: np.ndarray):
+            ''' Transforms param vector in list of Q(λ) coefficients '''
 
+            Qarr = np.hstack([ ( Null @ params[k*p:(k+1)*p] ).reshape(-1,1) for k in range(n-1) ])
+            Qlist = [ Qarr[i*n:(i+1)*n,:] for i in range(Qdegree+1) ]
+            return Qlist
+
+        def objective(params: np.ndarray):
+            '''
+            Objective function: find orthonormal matrix Q(λ) with Q(λ)' Q(λ) = I constructed from nullspace
+            '''
+            Qlist = to_Q(params)
+
+            error = 0.0
+            for d in range(0,2*Qdegree+1):
+                
+                Qterm = np.zeros((n-1,n-1))
+                for i,j in product(range(Qdegree+1),range(Qdegree+1)):                  
+                    if i+j == d: 
+                        Qterm += Qlist[i].T @ Qlist[j]
+
+                if d == 0: error += np.linalg.norm( Qterm - np.eye(n-1) )
+                else: error += np.linalg.norm( Qterm )
+
+            return error
         
-        Qterm = np.zeros((n,n))
-        for d in range(1,2*Qdegree):
-            for i in range(d+1):
-                Qterm += 
-            
+        params0 = np.random.randn(num_params)
+        sol = minimize( objective, params0, options={"disp": True, "maxiter": 1000} )
 
-        for i,j in product(range(Qdegree), range(Qdegree)):
-            i_sl = slice(i*n,(i+1)*n)
-            j_sl = slice(j*n,(j+1)*n)
-            if i == j:
-                if i == 0:
-                    error += np.linalg.norm( Qarr[i_sl,:].T @ Qarr[j_sl,:] - np.eye(n)  )
-                else:
-                    error += np.linalg.norm( Qarr[i_sl,:].T @ Qarr[j_sl,:] )
-            else:
+        threshold = 1e-4
+        if sol.fun <= threshold:
+            break
 
+    Q = to_poly_array( to_Q(sol.x) )
+    print(Q.T @ Q)
 
-
-        print(f"Q = {Qdegree}")
-        print(Null)
+    return Q
 
 @dataclass
 class Eigen():

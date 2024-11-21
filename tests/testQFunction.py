@@ -11,9 +11,10 @@ n, m = 3, 3
 loop = False
 # loop = True
 
-v = np.array([ Poly([1,2,3,4,-1]), Poly([-5,4,0,3,1]), Poly([1,0,-2,7,2]) ])
+v = np.array([ Poly([1,2,3,4]), Poly([-5,-4,0,3,1]), Poly([1,0,-2,70,2]) ])
 print(v)
-solve_poly_orthonormal(v)
+Q = solve_poly_orthonormal(v)
+print(Q.T @ Q)
 
 def generateAndPlot(ax):
     '''
