@@ -1,6 +1,4 @@
 import numpy as np
-from numpy.polynomial import Polynomial as Poly
-
 import matplotlib.pyplot as plt
 
 from common import randomR, genStableLI, hessian_quadratic
@@ -32,8 +30,7 @@ def generateAndPlot(ax):
     w = N @ ( CBFcenter - CLFcenter )
 
     pencil = MatrixPencil(M, N)
-    pencilEigens = pencil.get_eigen()
-    for k, eig in enumerate(pencilEigens):
+    for k, eig in enumerate(pencil.eigens):
         print(f"{k+1}-th gen. eigenvalue = {eig.eigenvalue}.")
 
     if pencil.has_real_spectra():
@@ -49,7 +46,7 @@ def generateAndPlot(ax):
             print(text+" type.")
 
     qfun = QFunction(pencil, Hh, w)
-    for k, eig in enumerate( qfun.stability_pencil.get_real_eigen() ):
+    for k, eig in enumerate( qfun.stability_matrix.get_real_eigen() ):
         print(f"{k+1}-th real eigenvalue of S(λ) companion form = {eig.eigenvalue}")
     qfun.plot(ax)
 

@@ -4,10 +4,10 @@ from numpy.linalg import eigvals as eigs
 from itertools import product
 from controllers import MatrixPencil
 
-n, p = 2, 2
+shape = (2,2)
 
-M = np.random.randn(n,p)
-N = np.random.randn(n,p)
+M = np.random.randn(*shape)
+N = np.random.randn(*shape)
 pencil = MatrixPencil(M, N)
 
 print("Starting MatrixPencil unit tests.")
@@ -23,8 +23,8 @@ adjoint_error = 0.0
 numTests = 1000
 for it in range(numTests):
 
-    M = np.random.randn(n,p)
-    N = np.random.randn(n,p)
+    M = np.random.randn(*shape)
+    N = np.random.randn(*shape)
     
     pencil.set(M=M, N=N)
     pencilPoly = pencil.to_poly_array()
@@ -34,8 +34,7 @@ for it in range(numTests):
         determinant, adjoint = pencil.inverse()
 
         ''' Test eigenvalues/eigenvectors (only for regular matrix pencils) '''
-        eigens = pencil.get_eigen()
-        for k, eig in enumerate(eigens):
+        for k, eig in enumerate(pencil.eigens):
 
             Pvalue = pencil(eig.alpha, eig.beta)
             PvalueRatio = pencil(eig.eigenvalue)
@@ -49,7 +48,7 @@ for it in range(numTests):
             symb_det_error += determinant(eig.eigenvalue)
 
         ''' Test pencil inverse '''
-        detDiag = np.array([[ determinant if j==i else 0.0 for j in range(n) ] for i in range(n) ])
+        detDiag = np.array([[ determinant if j==i else 0.0 for j in range(shape[1]) ] for i in range(shape[0]) ])
         adjPolyError = pencilPoly @ adjoint - detDiag
         for (i,j) in product(range(pencil.shape[0]), range(pencil.shape[1])):
             adjoint_error += sum(adjPolyError[i,j].coef)
