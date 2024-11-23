@@ -5,9 +5,6 @@ import operator
 import cvxpy as cvx
 import numpy as np
 import sympy as sym
-import contourpy as ctp
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 
 from copy import deepcopy
 from scipy.optimize import least_squares

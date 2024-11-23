@@ -2,38 +2,39 @@ import numpy as np
 from numpy.linalg import eigvals as eigs
 
 from itertools import product
-from controllers import MatrixPolynomial
+from common.math import MatrixPolynomial
 
-shape = (2,3)
-degree = 2
+shape1 = (2,1)
+degree1 = 2
 
-coefs = [ np.random.randn(*shape) for _ in range(degree+1) ]
-poly_matrix = MatrixPolynomial(*coefs)
-print(poly_matrix)
-print(f"Coefficients of P({poly_matrix.symbol}):")
-for k, c in enumerate(poly_matrix.coef):
-    print(f"P{k} = \n{c}")
+coefs1 = [ np.random.randn(*shape1) for _ in range(degree1+1) ]
+poly1 = MatrixPolynomial(coefs1)
 
-degree = 4
+shape2 = (2,1)
+degree2 = 2
 
-# update_method = 'args'
-update_method = 'kargs'
+coefs2 = [ np.random.randn(*shape2) for _ in range(degree2+1) ]
+poly2 = MatrixPolynomial(coefs2)
 
-if update_method == 'args':
-    coefs = [ np.random.randn(*shape) for _ in range(degree+1) ]
-    print("New produced coefficients:")
-    for k, c in enumerate(coefs):
-        print(f"P{k} = \n{c}")
-    poly_matrix.set(*coefs)
+num_updates = 1
+poly = poly1
+for _ in range(num_updates):
 
-if update_method == 'kargs':
-    # coefs = { str(i):np.random.randn(*shape) for i in range(degree+1) }
-    coefs = { str(2):np.random.randn(*shape) }
-    print("New produced coefficients:")
-    for k, c in coefs.items():
-        print(f"P{k} = \n{c}")
-    poly_matrix.set(**coefs)
+    shape1 = (2,1)
+    degree1 = 2
 
-print(f"Coefficients of P({poly_matrix.symbol}) after update:")
-for k, c in enumerate(poly_matrix.coef):
-    print(f"P{k} = \n{c}")
+    coefs1 = [ 10*np.ones(shape1) for _ in range(degree1+1) ]
+    poly1.update(coefs1)
+    print(poly1)
+
+    shape2 = (2,1)
+    degree2 = 2
+
+    coefs2 = [ np.ones(shape2) for _ in range(degree2+1) ]
+    poly2.update(coefs2)
+    print(poly2)
+
+    print( np.outer( poly1, poly2 ).shape )
+
+    res = MatrixPolynomial.from_array( np.outer( poly1, poly2 )[0,0] )
+    print(res)
