@@ -2,6 +2,7 @@ import numpy as np
 import scipy as sp
 import operator
 
+from numpy.random import rand, randn, randint
 from numpy.polynomial import Polynomial as Poly
 from dataclasses import dataclass
 from itertools import product
@@ -37,7 +38,10 @@ class MatrixPolynomial():
                     continue
                 raise TypeError("Polynomial variable name must be a string.")
 
-        # Initializes polynomial number of coefficients, shape and type
+        ''' 
+        coef can be:
+
+        '''
         if isinstance(coef, list):
             self.num_coef = len(coef)
             self.shape = coef[0].shape
@@ -50,6 +54,9 @@ class MatrixPolynomial():
             self.shape = (coef.shape[1], coef.shape[2])
         else:
             raise TypeError("MatrixPolynomial must receive a list/dict of coefficients.")
+
+        if self.shape == (self.shape[0],):
+            self.shape = (self.shape[0],1)
 
         if self.shape[0] == self.shape[1]:
             self.type = 'regular'
@@ -104,8 +111,12 @@ class MatrixPolynomial():
         Verify if a passed coefficient is valid.
         '''
         if not isinstance(coef, np.ndarray) or coef.shape != self.shape:
-            raise TypeError("Passed coefficient is invalid.")
-
+            error_msg = f"Passed coefficient of type {type(coef)}"
+            if isinstance(coef, np.ndarray):
+                error_msg += f" of shape {coef.shape}"
+            error_msg += f" is not compatible with {np.ndarray} of shape {self.shape}."
+            raise TypeError(error_msg) 
+        
     def _add_sub(op1, op2, type):
         '''
         MatrixPolynomial addition/subtraction
@@ -259,7 +270,12 @@ class MatrixPolynomial():
 
         ''' Updates by np.ndarray os elements of signature (powers, i, j) '''
         if isinstance(coef, np.ndarray):
-            self.elements = coef
+
+            if coef.ndim == 3:
+                self.elements = coef
+
+            if coef.ndim <= 2 and coef[*[ randint(coef.shape[n]) for n in range(coef.ndim) ]] :
+                pass
 
         self.coef = [ c for c in self.elements ]
         self._update_poly_array()
