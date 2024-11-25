@@ -27,7 +27,6 @@ class MatrixPolynomial():
     '''
     SUBS_INTS = '₀₁₂₃₄₅₆₇₈₉'
     SUPS_INTS = '⁰¹²³⁴⁵⁶⁷⁸⁹'
-    
     def __init__(self, coef, **kwargs):
         
         self.symbol = 'λ'
@@ -38,35 +37,43 @@ class MatrixPolynomial():
                     continue
                 raise TypeError("Polynomial variable name must be a string.")
 
-        ''' 
-        coef can be:
-
+        '''
+        coef can be : - list [ coef0, coef1, ... , coefN ] of ordered powers OR
+                      - dict { 0: coef0, 1: coef1, ... , N: coefN } of (power:coef) pairs 
+                        (repeating power keys are not allowed and return an error)
+                      - np.ndarray with ndim = 3 with each element being (powers, i, j)
         '''
         if isinstance(coef, list):
             self.num_coef = len(coef)
+            self.ndim = coef[0].ndim
             self.shape = coef[0].shape
         elif isinstance(coef, dict):
             powers = coef.keys()
             self.num_coef = len(coef)
+            self.ndim = coef[powers[0]].ndim
             self.shape = coef[powers[0]].shape
         elif isinstance(coef, np.ndarray) and coef.ndim == 3:
             self.num_coef = coef.shape[0]
-            self.shape = (coef.shape[1], coef.shape[2])
+            self.ndim = coef.ndim-1
+            self.shape = coef[0].shape
         else:
             raise TypeError("MatrixPolynomial must receive a list/dict of coefficients.")
 
-        if self.shape == (self.shape[0],):
-            self.shape = (self.shape[0],1)
+        self.vector_like = self.ndim == 1
+        self.matrix_like = self.ndim == 2
+        self.is_square = self.matrix_like and (self.shape[0] == self.shape[1])
 
-        if self.shape[0] == self.shape[1]:
-            self.type = 'regular'
-        else: 
-            self.type = 'singular'
+        if self.is_square: self.type = 'regular'
+        else: self.type = 'singular'
 
         # Initializes coefficients and polynomial array
-        self.elements = np.zeros((self.num_coef, self.shape[0], self.shape[1]))
+        shape_of_elements = tuple([self.num_coef] + [ self.shape[dim] for dim in range(self.ndim) ])
+        self.elements = np.zeros(shape_of_elements)         # 3D array with (powers, i, j)
         self.coef = [ np.zeros(self.shape) for _ in range(self.num_coef) ]
-        self.poly_array: np.ndarray[Poly] = np.array([[ Poly([0.0]) for _ in range(self.shape[1]) ] for _ in range(self.shape[0]) ])
+
+        self.poly_array: np.ndarray[Poly] = np.zeros(self.shape, dtype=Poly)
+        for index, _ in np.ndenumerate(self.poly_array):
+            self.poly_array[index] = Poly([0.0])
 
         # Sets coefficients
         self.update(coef)
@@ -83,7 +90,9 @@ class MatrixPolynomial():
         Representation method for the matrix polynomial P(λ) = P₀ + λ P₁ + λ² P₂ + ... 
         '''
         np.set_printoptions(precision=3, suppress=True)
-        ret_str = f'({self.shape[0]} x {self.shape[1]}) ' + '{}'.format(type(self).__name__) + f" on {self.symbol}: P({self.symbol}) = P₀"
+        ret_str = f"{self.shape[0]}"
+        ret_str += "".join([ f" x {self.shape[dim]}" for dim in range(1,self.ndim) ])
+        ret_str += "".join([ ' {}'.format(type(self).__name__), f" on {self.symbol}: P({self.symbol}) = P₀"])
         for k in range(1, self.degree+1):
             k_str = str(k)
             power_str = "".join([ MatrixPolynomial.SUPS_INTS[int(k_str[i])] for i in range(len(k_str)) ])
@@ -124,10 +133,12 @@ class MatrixPolynomial():
         if np.abs(type) != 1:
             raise ValueError("\"op\" argument should be +1 or -1.")
 
-        if isinstance(op1, MatrixPolynomial): op1 = op1.poly_array
-        if isinstance(op2, MatrixPolynomial): op2 = op2.poly_array
+        if isinstance(op1, MatrixPolynomial): 
+            op1 = op1.poly_array
+        if isinstance(op2, MatrixPolynomial): 
+            op2 = op2.poly_array
 
-        return op2 + type * op2
+        return op1 + type * op2
 
     def _add(op1, op2):
         return MatrixPolynomial._add_sub(op1, op2, type=+1)
@@ -141,8 +152,10 @@ class MatrixPolynomial():
                                               type = -1 for matrix-like,
                                               type = 0 for outer product
         '''
-        if isinstance(op1, MatrixPolynomial): op1 = op1.poly_array
-        if isinstance(op2, MatrixPolynomial): op2 = op2.poly_array
+        if isinstance(op1, MatrixPolynomial): 
+            op1 = op1.poly_array
+        if isinstance(op2, MatrixPolynomial): 
+            op2 = op2.poly_array
 
         if type == 1:
             return op1 * op2
@@ -204,14 +217,18 @@ class MatrixPolynomial():
         '''
         Updates ndarray of numpy Polynomials using the elements.
         '''
-        for (power, i, j), ele in np.ndenumerate(self.elements):
-
-            curr_poly = self.poly_array[i,j]
+        for index_ele, ele in np.ndenumerate(self.elements):
+            power = index_ele[0]
+            index = index_ele[1:]
+            curr_poly = self.poly_array[index]
             num_powers_toadd = power - curr_poly.degree()
             if num_powers_toadd > 0:
-                self.poly_array[i,j].coef = np.hstack([ curr_poly.coef, [0.0 for _ in range(num_powers_toadd) ] ])
+                self.poly_array[index].coef = np.hstack([ curr_poly.coef, [0.0 for _ in range(num_powers_toadd) ] ])
+            self.poly_array[index].coef[power] = ele
 
-            self.poly_array[i,j].coef[power] = ele
+    def outer(poly1, poly2):
+        ''' Outer product between MatrixPolynomials '''
+        return MatrixPolynomial._multiply(poly1, poly2, type = 0)
 
     def update(self, coef: list | dict):
         '''
@@ -221,6 +238,7 @@ class MatrixPolynomial():
         Input: - list [ coef0, coef1, ... , coefN ] of ordered powers OR
                - dict { 0: coef0, 1: coef1, ... , N: coefN } of (power:coef) pairs 
                         (repeating power keys are not allowed and return an error)
+               - np.ndarray with ndim = 3 with each element being (powers, i, j)
 
         OBS: this setting method is APPENDING, meaning that 
         if the number of passed coefficients exceeds the current 
@@ -287,13 +305,16 @@ class MatrixPolynomial():
     @property
     def T(self):
         ''' Transpose operation '''
-        return self.poly_array.T
+        return MatrixPolynomial.from_array( self.poly_array.T )
 
     @classmethod
     def from_array(cls, poly_array: np.ndarray[Poly]):
         '''
         Creates a MatrixPolynomial object using an ndarray of (scalar) Polynomials
         '''
+        if isinstance(poly_array, np.polynomial.Polynomial):
+            return poly_array
+
         if not isinstance(poly_array, np.ndarray):
             raise TypeError("Polynomial must be an ndarray.")
 
@@ -310,7 +331,6 @@ class MatrixPolynomial():
                     coefs.append( np.zeros(poly_array.shape) )
 
             # Populate given coefficient
-            for k, c in enumerate(poly.coef):
-                coefs[k][index] = c
+            for k, c in enumerate(poly.coef): coefs[k][index] = c
 
         return cls(coefs)
