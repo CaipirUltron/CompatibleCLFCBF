@@ -1,14 +1,15 @@
 import numpy as np
 from numpy.linalg import eigvals as eigs
 
-from itertools import product
-from controllers import MatrixPencil
+from numpy.polynomial import Polynomial as Poly
+from common import MatrixPencil
+from common import MatrixPolynomial as mp
 
 shape = (2,2)
 
 M = np.random.randn(*shape)
 N = np.random.randn(*shape)
-pencil = MatrixPencil(M, N)
+pencil = MatrixPencil( M, N )
 
 print("Starting MatrixPencil unit tests.")
 
@@ -25,9 +26,7 @@ for it in range(numTests):
 
     M = np.random.randn(*shape)
     N = np.random.randn(*shape)
-    
-    pencil.set(M=M, N=N)
-    pencilPoly = pencil.to_poly_array()
+    pencil.update(M = M, N = N)
     
     if pencil.type == 'regular':
 
@@ -48,18 +47,18 @@ for it in range(numTests):
             symb_det_error += determinant(eig.eigenvalue)
 
         ''' Test pencil inverse '''
-        detDiag = np.array([[ determinant if j==i else 0.0 for j in range(shape[1]) ] for i in range(shape[0]) ])
-        adjPolyError = pencilPoly @ adjoint - detDiag
-        for (i,j) in product(range(pencil.shape[0]), range(pencil.shape[1])):
-            adjoint_error += sum(adjPolyError[i,j].coef)
+        detDiag = np.array([[ determinant if j==i else Poly([0.0], symbol=pencil.symbol) for j in range(shape[1]) ] for i in range(shape[0]) ])
+        adjPolyError = pencil @ adjoint - detDiag
+
+        for index, _ in np.ndenumerate( pencil.coef[0] ):
+            adjoint_error += sum( adjPolyError[index].coef )
 
     ''' Test nullspace (only for singular matrix pencils) '''
     if pencil.type == 'singular':
 
         nullPoly = pencil.nullspace()
-        error_poly = pencilPoly @ nullPoly
-        for index, poly in np.ndenumerate(error_poly):
-            null_error += np.linalg.norm( poly.coef )
+        error_poly = pencil @ nullPoly
+        for index, poly in np.ndenumerate(error_poly): null_error += np.linalg.norm( poly.coef )
 
 print(f"Exit after testing with {it+1} random samples. \n")
 

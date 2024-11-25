@@ -1,25 +1,10 @@
+import operator
+import warnings
+
 import numpy as np
 import scipy as sp
-import operator
 
-from numpy.random import rand, randn, randint
 from numpy.polynomial import Polynomial as Poly
-from dataclasses import dataclass
-from itertools import product
-
-@dataclass
-class Eigen():
-    ''' 
-    Data class for generalized eigenvalues/eigenvectors.
-    ( βeta M - alpha N ) r_eigenvectors = 0 or
-    l_eigenvectors' ( βeta M - alpha N ) = 0
-    '''
-    alpha: complex
-    beta: float
-    eigenvalue: complex
-    rightEigenvectors: list | np.ndarray
-    leftEigenvectors: list | np.ndarray
-    inertia: float                  # value of z_left' M z_right
 
 class MatrixPolynomial():
     '''
@@ -27,6 +12,7 @@ class MatrixPolynomial():
     '''
     SUBS_INTS = '₀₁₂₃₄₅₆₇₈₉'
     SUPS_INTS = '⁰¹²³⁴⁵⁶⁷⁸⁹'
+
     def __init__(self, coef, **kwargs):
         
         self.symbol = 'λ'
@@ -73,17 +59,35 @@ class MatrixPolynomial():
 
         self.poly_array: np.ndarray[Poly] = np.zeros(self.shape, dtype=Poly)
         for index, _ in np.ndenumerate(self.poly_array):
-            self.poly_array[index] = Poly([0.0])
+            self.poly_array[index] = Poly([0.0], symbol=self.symbol)
 
         # Sets coefficients
-        self.update(coef)
+        self.update(coef=coef)
+
+        ''' Parameters '''
+        self.realEigenTol = 1e-10           # Tolerance to consider an eigenvalue as real
+        self.max_order = 20                 # Max. polynomial order to compute nullspace solutions
+
+    def __power__(self, power):
+        ''' Matrix power '''
+        return np.linalg.matrix_power(self.poly_array, power)
+
+    def __pos__(self):
+        return self.poly_array
+
+    def __neg__(self):
+        return -self.poly_array
+
+    def __getitem__(self, items):
+        ''' Subscritable method '''
+        return self.poly_array[items]
 
     def __call__(self, l):
         '''
         MatrixPolynomial call method.
         Returns: - np.ndarray value of P(λ) = P₀ + λ P₁ + λ² P₂ + ... for given λ.
         '''
-        return np.sum([ (l**k) * c for k, c in enumerate(self.coef) ])
+        return sum([ (l**k) * c for k, c in enumerate(self.coef) ])
 
     def __repr__(self) -> str:
         '''
@@ -124,7 +128,7 @@ class MatrixPolynomial():
             if isinstance(coef, np.ndarray):
                 error_msg += f" of shape {coef.shape}"
             error_msg += f" is not compatible with {np.ndarray} of shape {self.shape}."
-            raise TypeError(error_msg) 
+            raise TypeError(error_msg)
         
     def _add_sub(op1, op2, type):
         '''
@@ -199,20 +203,6 @@ class MatrixPolynomial():
     __mul__, __rmul__, __imul__ = _operator_fallbacks(_mul, operator.mul)
     __matmul__, __rmatmul__, __imatmul__ = _operator_fallbacks(_matmul, operator.matmul)
 
-    def __power__(self, power):
-        ''' Matrix power '''
-        return np.linalg.matrix_power(self.poly_array, power)
-
-    def __pos__(self):
-        return self.poly_array
-
-    def __neg__(self):
-        return -self.poly_array
-
-    def __getitem__(self, items):
-        ''' Subscritable method '''
-        return self.poly_array[items]
-
     def _update_poly_array(self):
         '''
         Updates ndarray of numpy Polynomials using the elements.
@@ -225,6 +215,21 @@ class MatrixPolynomial():
             if num_powers_toadd > 0:
                 self.poly_array[index].coef = np.hstack([ curr_poly.coef, [0.0 for _ in range(num_powers_toadd) ] ])
             self.poly_array[index].coef[power] = ele
+
+    def _symm(self, type = +1):
+        '''
+        Returns equivalent symmetric/antisymmetric matrix polynomial (or linear matrix pencil).
+        '''
+        if not self.is_square:
+            if type == +1: type_text = "symmetric"
+            if type == -1: type_text = "antisymmetric"
+            msg_txt = f"Cannot compute {type_text} part of non-square matrix polynomial."
+            raise Exception(msg_txt)
+        
+        if not isinstance(self, MatrixPencil):
+            return MatrixPolynomial( coef=[ 0.5*(c + type * c.T) for c in self.coef ] )
+        else:
+            return MatrixPencil( M = 0.5*(self.M + type * self.M.T), N = 0.5*(self.N + type * self.N.T) )
 
     def outer(poly1, poly2):
         ''' Outer product between MatrixPolynomials '''
@@ -292,7 +297,7 @@ class MatrixPolynomial():
             if coef.ndim == 3:
                 self.elements = coef
 
-            if coef.ndim <= 2 and coef[*[ randint(coef.shape[n]) for n in range(coef.ndim) ]] :
+            if coef.ndim <= 2 and coef[*[ np.random.randint(coef.shape[n]) for n in range(coef.ndim) ]] :
                 pass
 
         self.coef = [ c for c in self.elements ]
@@ -301,6 +306,76 @@ class MatrixPolynomial():
         ''' Updates the number of coefs, max degree and generalized eigenvalues '''
         self.num_coef = self.elements.shape[0]
         self.degree = self.num_coef - 1
+
+    def nullspace(self):
+        ''' 
+        Returns the minimum (right) nullspace polynomial of P(λ), that is,
+        a new polynomial matrix N(λ) = N0 + λ N1 + λ² N2 + ... of P(λ) satisfying P(λ) N(λ) = 0.
+
+        Inputs: - max_degree is the maximum possible degree of N(λ)
+        '''
+        if not self.is_square:
+            raise Exception("Vmatrix does not have a non-trivial right nullspace.")
+        
+        n, m = self.shape[0], self.shape[1]
+        for Qdegree in range(0, self.max_order+1):
+
+            Vmatrix = np.zeros([ n*(self.degree + Qdegree + 1), m*(Qdegree+1) ])
+            
+            sliding_list = [ c for c in self.coef ]
+            zeros = [ np.zeros((n,m)) for _ in range(Qdegree) ]
+            sliding_list = zeros + sliding_list + zeros
+            
+            for i in range(self.degree + Qdegree + 1):
+                l = sliding_list[i:i+Qdegree+1]
+                l.reverse()
+                Vmatrix[i*n:(i+1)*n,:] = np.hstack(l)
+
+            Null = sp.linalg.null_space(Vmatrix)
+            if Null.size != 0:
+                break
+
+            if Qdegree == self.max_order:
+                warnings.warn("P(λ) likely does not have a non-trivial right nullspace.")
+                return None
+
+        Ncoefs = [ Null[i*m:(i+1)*m,:] for i in range(Qdegree+1) ]
+        return MatrixPolynomial(coef=Ncoefs, symbol=self.symbol)
+
+    def symmetric(self):
+        '''
+        Returns equivalent symmetric matrix polynomial.
+        '''
+        self._symm(type=+1)
+
+    def antisymmetric(self):
+        '''
+        Returns equivalent antisymmetric matrix polynomial.
+        '''
+        self._symm(type=-1)
+
+    def companion_form(self):
+        ''' 
+        Returns a MatrixPencil that is the equivalent companion form of P(λ).
+        '''
+        if self.shape[0] != self.shape[1]:
+            raise NotImplementedError("Companion form is only implemented for square matrix polynomials. ")
+        
+        n = self.shape[0]
+        deg = self.degree
+
+        # Builds block diagonal matrix M
+        M = np.zeros((deg*n,deg*n))
+        M = sp.linalg.block_diag(*([ self.coef[-1] ] + [ np.eye(n) for _ in range(deg-1) ]))
+
+        # Builds row companion form matrix N
+        N = np.zeros((deg*n,deg*n))
+        for i in range(deg):
+            N[0:n, i*n:(i+1)*n] = -self.coef[deg-1-i]                 # First row block
+            if i < deg-1:
+                N[(i+1)*n:(i+2)*n, i*n:(i+1)*n] = np.eye(n)    # Additional -I's at the diagonal below
+
+        return MatrixPencil( M, N )
 
     @property
     def T(self):
@@ -331,6 +406,7 @@ class MatrixPolynomial():
                     coefs.append( np.zeros(poly_array.shape) )
 
             # Populate given coefficient
-            for k, c in enumerate(poly.coef): coefs[k][index] = c
+            for k, c in enumerate(poly.coef): 
+                coefs[k][index] = c
 
-        return cls(coefs)
+        return cls(coefs, symbol=poly.symbol)
