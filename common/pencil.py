@@ -70,8 +70,9 @@ def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np
 class Eigen():
     ''' 
     Data class for generalized eigenvalues/eigenvectors.
-    ( β M - α N ) r_eigenvectors = 0 or
-    l_eigenvectors' ( β M - α N ) = 0
+    Holds: - (α, β) polar form of eigenvalue
+           - left/right eigenvectors
+           - eigenvalue inertia, if real
     '''
     alpha: complex
     beta: float
@@ -82,9 +83,9 @@ class Eigen():
 
 class MatrixPencil(MatrixPolynomial):
     '''
-    Class for linear matrix pencils of the form P(λ) = λ M - N.
-    - generalized eigenvalues/eigenvector pairs
-    - generate equivalent symmetric pencil
+    Class for linear matrix pencils of the form P(λ) = λ M - N (derived from MatrixPolynomial class)
+    Each object holds: - its M, N matrices;
+                       - a list with all pencil eigenvalues in standard/polar form and corresponding left/right eigenvectors;
     '''
     def __init__(self, M: list | np.ndarray, N: list | np.ndarray, **kwargs):
 

@@ -6,6 +6,8 @@ import scipy as sp
 
 from numpy.polynomial import Polynomial as Poly
 
+from .pencil import MatrixPencil
+
 class MatrixPolynomial():
     '''
     Class for matrix polynomials of the form P(λ) = P₀ + λ P₁ + λ² P₂ + ... of finite degree.
