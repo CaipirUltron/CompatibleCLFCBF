@@ -31,12 +31,14 @@ class QFunction():
 
         self.H = H
         self.w = w
-        self._compute_polys()
 
-        self.max_order = 100
+        ''' Class parameters '''
         self.trim_tol = 1e-8
-        self.real_zero_tol = 1e-6
-        self.stability_zero_tol = 1e-10
+        self.real_tol = 1e-6
+        self.compatibility_params = {"eps1": 1.0,        # eps1 should be > 1
+                                     "eps2": 1e-1 }      # eps2 should be small
+
+        self._compute_polys()
 
     def __call__(self, l):
         ''' Calling method '''
@@ -79,6 +81,9 @@ class QFunction():
         self.stability_matrix = self._stability_matrix()
         self.stability_pencil = self.stability_matrix.companion_form()
 
+        ''' Computation of compatibility matrix polynomial '''
+        self.compatibility_matrix = self._compatibility_matrix()
+
     def _v_poly_derivative(self, order=0) -> tuple[Poly, np.ndarray[Poly]]:
         '''
         Computes the derivatives of v(λ) of any order.
@@ -115,6 +120,28 @@ class QFunction():
 
         return MatrixPolynomial.from_array(S_poly)
         
+    def _compatibility_matrix(self) -> MatrixPolynomial:
+        '''  
+        Compatibility matrix is a sufficient condition for compatibility of the CLF-CBF pair and given Linear System
+        '''
+        symb = self.pencil.symbol
+        eps1 = self.compatibility_params["eps1"]
+        eps2 = self.compatibility_params["eps2"]
+
+        poly_lambda = np.array([ Poly([0, 1], symbol=symb) ])
+        stability_part = eps2 * poly_lambda * self.stability_matrix.poly_array
+        p = stability_part.shape[0]
+
+        safe_zero_poly = self.n_poly - eps1 * self.d_poly
+        identity_part = np.array([[ safe_zero_poly if j==i else Poly([0.0], symbol=symb) for j in range(p) ] for i in range(p) ])
+        
+        compatibility_matrix = identity_part + stability_part
+        print(f"Compatibility = ")
+        for index, ele in np.ndenumerate(compatibility_matrix):
+            print(f"({index[0]},{index[1]}) = {ele}")
+
+        return compatibility_matrix
+
     def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
         '''
         Computes the q-function value q(λ) = n(λ)/d(λ) for a given λ (for DEBUG only)
@@ -147,7 +174,7 @@ class QFunction():
         self.pencil.update( M=newM, N=newN )
         self._compute_polys()
 
-    def get_polys(self):
+    def get_polys(self) -> tuple[Poly, Poly]:
         '''
         Returns: - numerator polynomial n(λ)
                  - denominator polynomial d(λ) 
@@ -171,7 +198,7 @@ class QFunction():
         and their stability numbers (if dim == 2, otherwise stability is None).
         '''
         zeros = self.zero_poly.roots()
-        real_zeros = np.array([ z.real for z in zeros if np.abs(z.imag) < self.real_zero_tol and z.real >= 0.0 ])
+        real_zeros = np.array([ z.real for z in zeros if np.abs(z.imag) < self.real_tol and z.real >= 0.0 ])
         real_zeros.sort()
 
         sols = [ {"lambda": z} for z in real_zeros ]
@@ -184,7 +211,7 @@ class QFunction():
         Returns the eigenvalues of the stability matrix S computed at λ
         '''
         stabilityEigs = np.array([ eig for eig in np.linalg.eigvals( self.stability_matrix(l) )
-                                   if np.abs(eig) > self.stability_zero_tol ])
+                                   if np.abs(eig.imag) < self.real_tol ])
         return stabilityEigs
 
     def orthogonal_nullspace(self) -> MatrixPolynomial:
@@ -391,8 +418,8 @@ class QFunction():
                 leading_c = self.zero_poly.coef[-1]
                 zeros = self.zero_poly.roots()
 
-                real_zeros = [ z.real for z in zeros if np.abs(z.imag) < self.real_zero_tol ]
-                real_zeros = [ z.real for z in zeros if np.abs(z.imag) < self.real_zero_tol ]
+                real_zeros = [ z.real for z in zeros if np.abs(z.imag) < self.real_tol ]
+                real_zeros = [ z.real for z in zeros if np.abs(z.imag) < self.real_tol ]
                 min_zero, max_zero = min(real_zeros), max(real_zeros)
 
                 psd_poly = Poly([1.0])
