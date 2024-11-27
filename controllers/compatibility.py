@@ -1,5 +1,4 @@
 import math
-import warnings
 
 import numpy as np
 from numpy.polynomial import Polynomial as Poly
@@ -8,7 +7,6 @@ from matplotlib.axes import Axes
 import matplotlib.patches as patches
 import matplotlib.colors as mcolors
 
-import scipy as sp
 from scipy import signal
 from scipy.optimize import fsolve, minimize
 from scipy.linalg import null_space, inv
@@ -16,556 +14,6 @@ from scipy.linalg import null_space, inv
 from dynamic_systems import DynamicSystem, LinearSystem
 from functions import MultiPoly
 from common import MatrixPencil, MatrixPolynomial
-
-def to_coefs(poly: np.ndarray):
-    '''
-    Get the lsit of coefficients of a given ndarray of (scalar) Polynomials.
-    '''
-    if not isinstance(poly, np.ndarray):
-        raise TypeError("Polynomial must be an ndarray.")
-
-    v_coefs = []
-    for index, vi in np.ndenumerate(poly):
-
-        if not isinstance(vi, Poly):
-            raise TypeError("The elements of v(λ) must be polynomials.")
-        
-        # Creates new coefficients as necessary
-        if len(vi.coef) > len(v_coefs):
-            for _ in range(len(vi.coef) - len(v_coefs)):
-                v_coefs.append( np.zeros(poly.shape) )
-
-        # Populate given coefficient
-        for k, c in enumerate(vi.coef):
-            v_coefs[k][index] = c
-
-    return v_coefs
-
-def from_coefs(coefs: list[np.ndarray], symbol='x'):
-    '''
-    From a list of polynomial coefficients, return corresponding ndarray of Polynomials
-    '''
-    shape = coefs[0].shape
-    poly_arr = np.zeros(shape, dtype=Poly)
-    for index, _ in np.ndenumerate(poly_arr):
-        poly_arr[index] = Poly([ c[index] for c in coefs ], symbol=symbol)
-
-    return poly_arr
-
-def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np.ndarray:
-    '''
-    Finds the polynomial array x(λ) that solves (λ T - S) x(λ) = b(λ), where T, S are n x n (n=1 or n=2)
-    and b(λ) is a polynomial array of size nxr or nxr.
-
-    Input: - matrices T, S from linear matrix pencil (λ T - S)
-    '''
-    if isinstance(T, (int, float)): T = np.array([[ T ]])
-    if isinstance(S, (int, float)): S = np.array([[ S ]])
-
-    if T.shape != S.shape:
-        raise TypeError("T and S must have the same shape.")
-    
-    if T.shape[0] != T.shape[1]:
-        raise TypeError("T and S must be square matrices.")
-
-    n = T.shape[1]
-    r = b_poly.shape[1]
-
-    if n != b_poly.shape[0]:
-        raise TypeError("Number of lines in (λ T - S) and b(λ) must be the same.")
-
-    # Extract max. degree of b_poly
-    max_deg = 0
-    for (i,j), poly in np.ndenumerate(b_poly):
-        if not isinstance( poly, Poly ):
-            raise TypeError("b(λ) is not an array of polynomials.")
-        max_deg = max( max_deg, poly.degree() )
-
-    # Initialize and populate bsys
-    bsys = np.zeros(((max_deg+1)*n,r))
-    for (i,j), poly in np.ndenumerate(b_poly):
-        for k, c in enumerate(poly.coef):
-            bsys[ k * n + i, j ] = c
-
-    #  Initialize and populate Asys
-    Asys = np.zeros(((max_deg+1)*n, max_deg*n))
-    for i in range(max_deg):
-        Asys[ i*n:(i+1)*n , i*n:(i+1)*n ] = -S
-        Asys[ (i+1)*n:(i+2)*n , i*n:(i+1)*n ] = T
-
-    results = np.linalg.lstsq(Asys, bsys, rcond=None)
-    x_coefs = results[0]
-    res = results[1]
-    residue = np.linalg.norm(res)
-
-    residue_tol = 1e-11
-    if residue > residue_tol:
-        warnings.warn(f"Large residue detected on linear system solution = {residue}")
-
-    if max_deg == 0: max_deg = 1
-    x_poly = np.array([[ Poly([0.0 for _ in range(max_deg) ], symbol='λ') for j in range(r) ] for i in range(n) ])
-    for (i,j), c in np.ndenumerate(x_coefs):
-        exp = int(i/n)
-        x_poly[i%n,j].coef[exp] = c
-
-    return x_poly
-
-def poly_nullspace(Varr: np.ndarray[Poly], max_degree=20):
-    ''' 
-    Returns the minimum (right) nullspace polynomial N(λ) = N0 + λ N1 + λ² N2 + ... of V(λ), that is, V(λ) N(λ) = 0.
-    Inputs:
-        - V(λ) is an (n x m) array polynomial given by Varr.
-        - max_degree is the maximum degree to try to find N(λ)
-    '''
-    if Varr.shape == (Varr.shape[0],):
-        Varr = Varr.reshape(-1,1)
-
-    n, m = Varr.shape
-    if n == m:
-        raise Exception("Vmatrix does not have a non-trivial right nullspace.")
-
-    if not isinstance(Varr, np.ndarray):
-        raise TypeError("v(λ) must be a ndarray of Polynomials.")
-
-    Vcoefs = to_coefs(Varr)
-    Vdegree = len(Vcoefs)-1
-    
-    for Qdegree in range(0, max_degree+1):
-
-        Vmatrix = np.zeros([ n*(Vdegree + Qdegree + 1), m*(Qdegree+1) ])
-        
-        sliding_list = [ c for c in Vcoefs ]
-        zeros = [ np.zeros((n,m)) for _ in range(Qdegree) ]
-        sliding_list = zeros + sliding_list + zeros
-        
-        for i in range(Vdegree + Qdegree + 1):
-            l = sliding_list[i:i+Qdegree+1]
-            l.reverse()
-            Vmatrix[i*n:(i+1)*n,:] = np.hstack(l)
-
-        Null = sp.linalg.null_space(Vmatrix)
-        if Null.size != 0:
-            break
-
-        if Qdegree == max_degree:
-            warnings.warn("Vmatrix likely does not have a non-trivial right nullspace.")
-            return None
-
-    # Qarr = np.hstack([ ( Null @ params[k*q:(k+1)*q] ).reshape(-1,1) for k in range(p) ])
-
-    Ncoefs = [ Null[i*m:(i+1)*m,:] for i in range(Qdegree+1) ]
-    return from_coefs(Ncoefs, symbol=Varr[0,0].symbol)
-
-def companion_form(poly: np.ndarray):
-    ''' 
-    Returns a linear matrix pencil that is the companion form of a given square polynomial matrix P(λ).
-    '''
-    if not isinstance(poly, np.ndarray):
-        raise TypeError("Polynomial must be an ndarray.")
-
-    shape = poly.shape
-    if shape[0] != shape[1]:
-        raise NotImplementedError("Companion form is only implemented for square matrix polynomials. ")
-    
-    n = shape[0]
-    coefs = to_coefs(poly)
-    deg = len(coefs)-1
-
-    # Builds block diagonal matrix M
-    M = np.zeros((deg*n,deg*n))
-    M = sp.linalg.block_diag(*([ coefs[-1] ] + [ np.eye(n) for _ in range(deg-1) ]))
-
-    # Builds row companion form matrix N
-    N = np.zeros((deg*n,deg*n))
-    for i in range(deg):
-        N[0:n, i*n:(i+1)*n] = -coefs[deg-1-i]                 # First row block
-        if i < deg-1:
-            N[(i+1)*n:(i+2)*n, i*n:(i+1)*n] = np.eye(n)    # Additional -I's at the diagonal below
-
-    return MatrixPencil(M,N)
-
-# @dataclass
-# class Eigen():
-#     ''' 
-#     Data class for generalized eigenvalues/eigenvectors.
-#     ( βeta M - alpha N ) r_eigenvectors = 0 or
-#     l_eigenvectors' ( βeta M - alpha N ) = 0
-#     '''
-#     alpha: complex
-#     beta: float
-#     eigenvalue: complex
-#     rightEigenvectors: list | np.ndarray
-#     leftEigenvectors: list | np.ndarray
-#     inertia: float                  # value of z_left' M z_right
-
-# class MatrixPencil():
-#     '''
-#     Class for linear matrix pencils of the form P(λ) = λ M - N.
-#     - generalized eigenvalues/eigenvector pairs
-#     - generate equivalent symmetric pencil
-#     '''
-#     def __init__(self, M: list | np.ndarray, N: list | np.ndarray):
-
-#         if isinstance(M, list): M = np.array(M)
-#         if isinstance(N, list): N = np.array(N)
-        
-#         if M.ndim != 2 or N.ndim != 2:
-#             raise TypeError("M and N must be two dimensional arrays.")
-
-#         if M.shape != N.shape:
-#             raise TypeError("Matrix dimensions are not equal.")
-
-#         if M.shape[0] == M.shape[1]: 
-#             self.type = 'regular'
-#         else: 
-#             self.type = 'singular'
-
-#         self.M, self.N = M, N
-#         self.shape = M.shape
-
-#         ''' Parameters '''
-#         self.realEigenTol = 1e-10           # Tolerance to consider an eigenvalue as real
-#         self.max_order = 10                 # Max. polynomial order to compute nullspace solutions 
-
-#         '''
-#         Uses QZ algorithm to decompose the two pencil matrices into M = Q MM Z' and N = Q NN Z',
-#         where MM is block upper triangular, NN is upper triangular and Q, Z are unitary matrices.
-#         '''
-#         if self.type == 'regular':
-#             self.NN, self.MM, self.alphas, self.betas, self.Q, self.Z = sp.linalg.ordqz(self.N, self.M, output='real')
-#             self.eigens = self._eigen(self.alphas, self.betas)
-
-#     def __call__(self, alpha: int | float, beta: int | float = 1.0) -> np.ndarray:
-#         '''
-#         Returns pencil value.
-#         If only one argument is passed, it is interpreted as the λ value and method returns matrix P(λ) = λ M - N.
-#         If two arguments are passed, they are interpreted as α, β values and method returns P(α, β) = α M - β N.
-#         '''
-#         return alpha * self.M  - beta * self.N
-
-#     def __str__(self) -> str:
-#         '''
-#         Print the pencil P(λ) = λ M - N
-#         '''
-#         np.set_printoptions(precision=3, suppress=True)
-#         ret_str = '{}'.format(type(self).__name__) + " = λ M - N with \n"
-#         ret_str = ret_str + 'M = \n' + self.M.__str__() + '\n'
-#         ret_str = ret_str + 'N = \n' + self.N.__str__()
-#         return ret_str
-
-#     def _eigen(self, alphas: np.ndarray, betas: np.ndarray) -> list[Eigen]:
-#         '''
-#         Computes generalized eigenvalues/eigenvectors from polar eigenvalues.
-#         '''
-#         if len(alphas) != len(betas):
-#             raise TypeError("The same number of polar eigenvalues must be passed.")
-
-#         eigens: list[Eigen] = []
-#         for alpha, beta in zip(alphas, betas):
-
-#             P = self(alpha, beta)
-#             zRight = null_space(P, rcond=1e-11)
-#             zLeft = null_space(P.T, rcond=1e-11)
-
-#             zRight = zRight.reshape(self.shape[0], )
-#             zLeft = zLeft.reshape(self.shape[0], )
-
-#             inertia = zLeft.T @ self.M @ zRight
-
-#             if beta != 0:
-#                 eigens.append( Eigen(alpha, beta, alpha/beta, zRight, zLeft, inertia) )
-#             else:
-#                 eigens.append( Eigen(alpha, 0.0, np.inf if alpha.real > 0 else -np.inf, zRight, zLeft, inertia) )
-
-#         return eigens
-
-#     def _blocks(self):
-#         '''  
-#         Computes information about blocks of the QZ decomposition.
-#         Returns: - list of block poles
-#                  - list of block adjoint matrices
-#         '''
-#         n = self.M.shape[0]
-
-#         ''' Computes the block poles and adjoint matrices '''
-#         blk_poles, blk_adjs = [], []
-#         i = 0
-#         while i < n:
-#             # 2X2 BLOCKS OF COMPLEX CONJUGATE PENCIL EIGENVALUES
-#             if i < n-1 and self.NN[i+1,i] != 0.0:
-
-#                 MMblock = self.MM[i:i+2,i:i+2]      # this is diagonal
-#                 NNblock = self.NN[i:i+2,i:i+2]      # this is full 2x2
-
-#                 a = np.linalg.det(MMblock)
-#                 b = -( MMblock[0,0] * NNblock[1,1] + MMblock[1,1] * NNblock[0,0] )
-#                 c = np.linalg.det(NNblock)
-#                 blk_poles.append( Poly([ c, b, a ], symbol='λ') )
-
-#                 adj11 = Poly([ -NNblock[1,1],  MMblock[1,1] ], symbol='λ')
-#                 adj12 = Poly([ NNblock[0,1] ], symbol='λ')
-#                 adj21 = Poly([ NNblock[1,0] ], symbol='λ')
-#                 adj22 = Poly([ -NNblock[0,0],  MMblock[0,0] ], symbol='λ')
-#                 blk_adjs.append( np.array([[ adj11, adj12 ],[ adj21, adj22 ]]) )
-
-#                 i+=2
-#             # 1X1 BLOCKS OF REAL PENCIL EIGENVALUES
-#             else:
-#                 MMblock = self.MM[i,i]
-#                 NNblock = self.NN[i,i]
-
-#                 blk_poles.append( Poly([ -NNblock, MMblock ], symbol='λ') )
-#                 blk_adjs.append( np.array([Poly(1.0, symbol='λ')]) )
-
-#                 i+=1
-                
-#         return blk_poles, blk_adjs
-
-#     def _verify_coef(self, coef):
-#         ''' Verify if a passed coefficient is valid. '''
-#         if not isinstance(coef, np.ndarray) or coef.shape != self.shape:
-#             raise TypeError("Passed coefficient is invalid.")
-
-#     def set(self, **kwargs):
-#         ''' Pencil update method '''
-
-#         for key in kwargs.keys():
-#             if key == 'M':
-#                 self._verify_coef(kwargs['M'])
-#                 self.M = kwargs['M']
-#                 continue
-#             if key == 'N':
-#                 self._verify_coef(kwargs['N'])
-#                 self.N = kwargs['N']
-#                 continue
-
-#         if self.type == 'regular':
-#             self.NN, self.MM, self.alphas, self.betas, self.Q, self.Z = sp.linalg.ordqz(self.N, self.M, output='real')
-#             self.eigens = self._eigen(self.alphas, self.betas)
-
-#     def get_real_eigen(self) -> list[Eigen]:
-#         '''
-#         Returns an Eigen list with sorted real eigenvalues
-#         '''
-#         realAlphas, realBetas = [], []
-#         for eig in self.eigens:
-#             if np.abs(eig.alpha.imag) < self.realEigenTol:
-#                 realAlphas.append( eig.alpha.real )
-#                 realBetas.append( eig.beta )
-
-#         realEigens = self._eigen(realAlphas, realBetas)
-#         realEigens.sort(key=lambda eig: eig.eigenvalue)
-#         return realEigens
-
-#     def has_real_spectra(self):
-#         ''' Checks if the pencil has real spectra '''
-#         for eig in self.eigens:
-#             if np.abs(eig.alpha.imag) > self.realEigenTol:
-#                 return False
-#         return True
-
-#     def nullspace(self) -> np.ndarray:
-#         ''' 
-#         Returns the pencil minimum nullspace polynomial N(λ), 
-#         a matrix polynomial satisfying ( λ M - N ) N(λ) = 0, identically (for all λ).
-#         '''
-#         return poly_nullspace( self.to_poly_array() )
-
-#     def symmetric(self):
-#         ''' Returns equivalent symmetric pencil. '''
-#         return MatrixPencil( 0.5*(self.M + self.M.T), 0.5*(self.N + self.N.T) )
-
-#     def antisymmetric(self):
-#         ''' Returns equivalent symmetric pencil. '''
-#         return MatrixPencil( 0.5*(self.M - self.M.T), 0.5*(self.N - self.N.T) )
-
-#     def to_poly_array(self):
-#         ''' Returns equivalent array of polynomials '''
-#         poly_arr = np.array([[ Poly([0.0], symbol='λ') for j in range(self.shape[1]) ] for i in range(self.shape[0]) ])
-#         for (i,j) in product(range(self.shape[0]),range(self.shape[1])):
-#             poly_arr[i,j] += Poly([-self.N[i,j], self.M[i,j] ], symbol='λ')
-#         return poly_arr
-
-#     def inverse(self):
-#         '''
-#         Returns:  - pencil adjoint polynomial matrix adj(λ)
-#                   - polynomial determinant det(λ)
-#         Used to compute the pencil inverse P(λ)^(-1) = det(λ)^(-1) adj(λ).
-#         '''
-#         n, m = self.shape[0], self.shape[1]
-#         if n != m:
-#             raise NotImplementedError("Cannot compute the inverse of a non-square matrix pencil.")
-
-#         ''' Computes blocks of the QZ decomposition '''
-#         blk_poles, blk_adjs = self._blocks()
-#         blk_dims = [ pole.degree() for pole in blk_poles ]
-
-#         ''' Computes pencil determinant '''
-#         determinant = np.prod(blk_poles)
-
-#         ''' Computes the pencil adjoint matrix '''
-#         num_blks = len(blk_poles)
-#         adjoint_arr = np.array([[ Poly([0.0], symbol='λ') for _ in range(n) ] for _ in range(n) ])
-
-#         # Iterate over each block, starting by the last one
-#         for i in range(num_blks-1, -1, -1):
-#             blk_i_slice = slice( sum(blk_dims[0:i]), sum(blk_dims[0:i+1]) )
-
-#             for j in range(i, num_blks):
-#                 blk_j_slice = slice( sum(blk_dims[0:j]), sum(blk_dims[0:j+1]) )
-
-#                 ''' 
-#                 j == i: Computes ADJOINT DIAGONAL BLOCKS
-#                 j != i: Computes ADJOINT UPPER TRIANGULAR BLOCKS
-#                 '''
-#                 if j == i:
-#                     poles_ij = np.array([[ np.prod([ pole for k, pole in enumerate(blk_poles) if k != j ]) ]])
-#                     Lij = poles_ij * blk_adjs[j]
-#                 else:
-#                     Tii = self.MM[ blk_i_slice, blk_i_slice ]
-#                     Sii = self.NN[ blk_i_slice, blk_i_slice ]
-
-#                     b_poly = np.array([[ Poly([0.0], symbol='λ') for _ in range(blk_dims[j]) ] for _ in range(blk_dims[i]) ])
-#                     for k in range(i+1, j+1):
-#                         blk_k_slice = slice( sum(blk_dims[0:k]), sum(blk_dims[0:k+1]) )
-
-#                         # Compute polynomial (λ Tik - Sik) and get the kj slice of adjoint
-#                         Tik = self.MM[ blk_i_slice, blk_k_slice ]
-#                         Sik = self.NN[ blk_i_slice, blk_k_slice ]
-#                         poly_ik = np.array([[ Poly([ -Sik[a,b], Tik[a,b] ], symbol='λ') for b in range(Tik.shape[1]) ] for a in range(Tik.shape[0]) ])
-#                         adjoint_kj = adjoint_arr[ blk_k_slice, blk_j_slice ]
-
-#                         b_poly -= poly_ik @ adjoint_kj
-
-#                     Lij = solve_poly_linearsys( Tii, Sii, b_poly )
-
-#                 # Populate adjoint matrix
-#                 adjoint_arr[ blk_i_slice, blk_j_slice ] = Lij
-
-#         return determinant, self.Z @ adjoint_arr @ self.Q.T
-
-# class MatrixPolynomial():
-#     '''
-#     Class for square matrix polynomials of the form P(λ) = P₀ + λ P₁ + λ² P₂ + ... + λ^eps P_eps
-#     - generalized eigenvalues/eigenvector pairs
-#     - generate equivalent symmetric pencil
-#     '''
-#     def __init__(self, *args, symbol="λ"):
-        
-#         if len(args) == 0:
-#             raise TypeError("At least one matrix coefficient should be passed.")
-
-#         self.shape = args[0].shape
-#         if self.shape[0] == self.shape[1]:
-#             self.type = 'regular'
-#         else: 
-#             self.type = 'singular'
-
-#         self.coef = []
-#         for arg in args:
-#             if not isinstance(arg, np.ndarray) or arg.shape != self.shape:
-#                 raise TypeError("MatrixPoly should receive a list of polynomial coefficients.")
-#             self.coef.append(arg)
-
-#         self.symbol = symbol
-#         self.num_coef = len(self.coef)
-#         self.degree = self.num_coef - 1
-
-#         if self.type == 'regular':
-#             self._eigen()
-
-#     def __call__(self, l):
-#         '''
-#         MatrixPolynomial call method.
-#         Returns: - np.ndarray value of P(λ) = P₀ + λ P₁ + λ² P₂ + ... for given λ.
-#         '''
-#         return np.sum([ (l**k) * c for k, c in enumerate(self.coef) ])
-
-#     def __str__(self) -> str:
-#         '''
-#         Print the matrix polynomial P(λ) = P₀ + λ P₁ + λ² P₂ + ... 
-#         '''
-#         np.set_printoptions(precision=3, suppress=True)
-#         subscript_chars = '₀₁₂₃₄₅₆₇₈₉'
-#         superscript_chars = '⁰¹²³⁴⁵⁶⁷⁸⁹'
-#         ret_str = f'({self.shape[0]} x {self.shape[1]}) ' + '{}'.format(type(self).__name__) + f" on {self.symbol}: P({self.symbol}) = P₀"
-#         for k in range(1, self.degree):
-#             k_str = str(k)
-#             power_str = "".join([ superscript_chars[int(k_str[i])] for i in range(len(k_str)) ])
-#             index_str = "".join([ subscript_chars[int(k_str[i])] for i in range(len(k_str)) ])
-#             ret_str += f' + {self.symbol}' + power_str + ' P' + index_str
-#         return ret_str
-
-#     def _verify_coef(self, coef):
-#         ''' Verify if a passed coefficient is valid. '''
-#         if not isinstance(coef, np.ndarray) or coef.shape != self.shape:
-#             raise TypeError("Passed coefficient is invalid.")
-
-#     def _eigen(self):
-#         '''
-#         Compute the matrix polynomial eigenvalues ->
-#         This is done by computing the equivalent linear matrix pencil from the companion form
-#         '''
-#         self.poly_arr = from_coefs(self.coef)
-#         self.equiv_pencil = companion_form(self.poly_arr)
-#         self.eigens = self.equiv_pencil.eigens
-
-#     def set(self, *coefs, **coefs_dict):
-#         '''
-#         Update method for matrix polynomial.
-#         Inputs: - (coef0, coef1, ... , coefN)           (coefs list)
-#                 - 0: coef0, 1: coef1, ... , N: coefN    (coefs_dict dictionary)
-
-#         OBS:    If the number of passed coefs subceeds the current number of coefs, returns an error.
-#                 If the number of passed coefs exceeds the current number of coefs, adds new coefficients.
-#         '''
-#         insert_mode = 0                                         # insert_mode = 0 : uses coefs list (default)
-#         if len(coefs) == 0 and len(coefs_dict) == 0:
-#             raise TypeError("Coefficients must be provided.")
-#         elif len(coefs_dict) > 0:
-#             insert_mode = 1                                     # insert_mode = 1 : uses coefs_dict dictionary
-
-#         ''' (Default) - updates by ordered sequence of increasing powers (numpy Polynomial style) '''
-#         if insert_mode == 0:
-#             if len(coefs) < self.num_coef:
-#                 raise Exception("Not enough coefficients were passed.")
-#             else:
-#                 for k, c in enumerate(coefs):
-#                     self._verify_coef(c)
-#                     if k < self.num_coef:
-#                         self.coef[k] = c
-#                     else:
-#                         self.coef.append(c)
-
-#         ''' Updates by (power,coefficient) pairs '''
-#         if insert_mode == 1:
-#             for k, c in coefs_dict.items():
-#                 k = int(k)
-#                 self._verify_coef(c)
-#                 curr_range = range(0, len(self.coef))
-#                 if k in curr_range:
-#                     self.coef[k] = c
-#                 else:
-#                     num_extra_coefs = k - len(self.coef) + 1
-#                     self.coef += [ np.zeros(self.shape) for _ in range(num_extra_coefs) ]
-#                     self.coef[k] = c
-
-#         ''' Updates the number of coefs, max degree and gen. eigenvalues '''
-#         self.num_coef = len(self.coef)
-#         self.degree = self.num_coef - 1
-#         if self.type == 'regular':
-#             self._eigen()
-
-#     def get_real_eigen(self) -> list[Eigen]:
-#         ''' Get method for real generalized eigenvalues '''
-#         return self.equiv_pencil.get_real_eigen()
-
-#     @classmethod
-#     def from_array(cls, poly_arr: np.ndarray):
-#         '''
-#         Creates a MatrixPolynomial object using an ndarray of (scalar) Polynomials 
-#         '''
-#         return cls(*to_coefs(poly_arr))
 
 class QFunction():
     ''' 
@@ -595,8 +43,9 @@ class QFunction():
         return self.n_poly(l) / self.d_poly(l)
 
     def _verify(self, P: MatrixPencil, H: list | np.ndarray, w: list | np.ndarray):
-        ''' Verification method for passed '''
-
+        ''' 
+        Verification method for pencil intialization.
+        '''
         if not isinstance( P, MatrixPencil ):
             raise TypeError("P must be a MatrixPencil.")
 
@@ -626,14 +75,15 @@ class QFunction():
         self.zero_poly = ( self.n_poly - self.d_poly )
 
         ''' Computation of stability properties of the boundary equilibrium points '''
-        self.v_poly, self.det_poly = self._v_poly()
+        self.divisor_poly, self.v_poly = self._v_poly()
         self.stability_matrix = self._stability_matrix()
+        self.stability_pencil = self.stability_matrix.companion_form()
 
-    def _v_poly_derivative(self, order=0):
+    def _v_poly_derivative(self, order=0) -> tuple[Poly, np.ndarray[Poly]]:
         '''
         Computes the derivatives of v(λ) of any order.
-        Returns: - vector polynomial v_poly(λ)
-                 - scalar divisor polynomial a(λ)
+        Returns: - scalar divisor polynomial a(λ)
+                 - vector polynomial v_poly(λ)
         v(λ) = 1/a(λ) v_poly(λ)
         '''
         det, adjoint = self.pencil.inverse()
@@ -642,20 +92,26 @@ class QFunction():
         power = np.eye(self.pencil.shape[0])
         for k in range(order): 
             power @= - adjoint @ self.pencil.M
+
+        div = det**(order+1)
         v = power @ v
 
-        return v, det**(order+1)
+        return div, v
 
-    def _v_poly(self):
+    def _v_poly(self) -> tuple[Poly, np.ndarray[Poly]]:
+        '''
+        Compute the v(λ) polynomial
+        '''
         return self._v_poly_derivative(order=0)
 
     def _stability_matrix(self) -> MatrixPolynomial:
         ''' Computes the stability polynomial matrix '''
 
-        nablah_poly = self.H @ self.v_poly
-        null_poly = poly_nullspace(nablah_poly.reshape(1,-1))
-        Psymmetric_poly = self.pencil.symmetric().to_poly_array()
-        S_poly = null_poly.T @ Psymmetric_poly @ null_poly
+        nablah = MatrixPolynomial.from_array( ( self.H @ self.v_poly ).reshape(1,-1) )
+
+        nullspace = nablah.nullspace()
+        Psym = self.pencil.symmetric()
+        S_poly = nullspace.T @ Psym @ nullspace
 
         return MatrixPolynomial.from_array(S_poly)
         
@@ -667,9 +123,12 @@ class QFunction():
         v = inv(P) @ self.w
         return v.T @ self.H @ v 
 
-    def set(self, **kwargs):
-        ''' QFunction update method '''
-
+    def update(self, **kwargs):
+        ''' 
+        QFunction update method.
+        Inputs: - M, N - pencil matrices for pencil update
+                - H and w - Q-function matrix and constant vector
+        '''
         newM, newN = self.pencil.M, self.pencil.N
         for key in kwargs.keys():
             if key == 'M':
@@ -699,7 +158,9 @@ class QFunction():
         '''
         Compute v(λ) using polynomials
         '''
-        return np.array([ v_elem_poly(l) / self.det_poly(l) for v_elem_poly in self.v_poly ])
+        div = self.divisor_poly(l)
+        v = np.array([ poly(l) for _, poly in np.ndenumerate(self.v_poly) ])
+        return v / div
 
     def equilibria(self) -> list[dict]:
         ''' 
@@ -722,21 +183,19 @@ class QFunction():
         '''
         Returns the eigenvalues of the stability matrix S computed at λ
         '''
-        P = self.pencil(l)
-        grad_h = self.H @ self.v(l)
-        Proj = np.eye(self.dim) - (np.outer(grad_h, grad_h) / np.linalg.norm(grad_h)**2)
-        S = Proj @ (P + P.T) @ Proj
-        stabilityEigs = np.array([ eig for eig in np.linalg.eigvals(S) if np.abs(eig) > self.stability_zero_tol ])
-
+        stabilityEigs = np.array([ eig for eig in np.linalg.eigvals( self.stability_matrix(l) )
+                                   if np.abs(eig) > self.stability_zero_tol ])
         return stabilityEigs
 
-    def orthogonal_nullspace(self) -> MultiPoly:
+    def orthogonal_nullspace(self) -> MatrixPolynomial:
         ''' 
         Computes the matrix polynomial O(λ) orthogonal to H N(λ),
         where N(λ) is the pencil minimum nullspace polynomial.
         '''
-        nullspace_poly = self.pencil.nullspace()
-        return poly_nullspace( nullspace_poly.T @ self.H )
+        pencil_nullspace = self.pencil.nullspace()
+        Hnull = MatrixPolynomial.from_array( pencil_nullspace.T @ self.H )
+
+        return Hnull.nullspace()
 
     def regular_pencil(self):
         '''
@@ -752,7 +211,7 @@ class QFunction():
         O_poly = self.orthogonal_nullspace()
         Or_poly = O_poly[0:self.pencil.shape[0], :]
 
-        return self.pencil.to_poly_array() @ Or_poly.T
+        return self.pencil @ Or_poly.T
 
     def plot(self, ax: Axes, res: float = 0.0, q_limits=(-10, 500)):
         '''
@@ -772,7 +231,7 @@ class QFunction():
         for sol in sols: 
             lambdaRange.append(sol["lambda"])
 
-        for eig in self.stability_matrix.real_eigen():
+        for eig in self.stability_pencil.real_eigen():
             lambdaRange.append(eig.eigenvalue)
 
         ''' Using range min, max values, generate λ range to be plotted '''

@@ -33,20 +33,8 @@ def generateAndPlot(ax):
     for k, eig in enumerate(pencil.eigens):
         print(f"{k+1}-th gen. eigenvalue = {eig.eigenvalue}.")
 
-    if pencil.has_real_spectra():
-        print("The given matrix pencil has real spectra.")
-
-        stabilityEigens = pencil.symmetric().get_real_eigen()
-        for k, eig in enumerate(stabilityEigens):
-            text = f"{k+1}-th symmetric eigenvalue = {eig.eigenvalue} is of the "
-            if eig.inertia > 0.0:
-                text += "positive"
-            else:
-                text += "negative"
-            print(text+" type.")
-
     qfun = QFunction(pencil, Hh, w)
-    for k, eig in enumerate( qfun.stability_matrix.get_real_eigen() ):
+    for k, eig in enumerate( qfun.stability_pencil.real_eigen() ):
         print(f"{k+1}-th real eigenvalue of S(λ) companion form = {eig.eigenvalue}")
     qfun.plot(ax)
 
