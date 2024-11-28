@@ -13,7 +13,7 @@ from scipy.linalg import null_space, inv
 
 from dynamic_systems import DynamicSystem, LinearSystem
 from functions import MultiPoly
-from common import MatrixPencil, MatrixPolynomial
+from common import *
 
 class QFunction():
     ''' 
@@ -26,8 +26,7 @@ class QFunction():
         if isinstance(w, list): w = np.array(w)
         self._verify(P, H, w)
 
-        self.pencil = P
-        self.symmetricPencil : MatrixPencil = self.pencil.symmetric()
+        self.pencil: MatrixPencil = P
 
         self.H = H
         self.w = w
@@ -112,33 +111,29 @@ class QFunction():
     def _stability_matrix(self) -> MatrixPolynomial:
         ''' Computes the stability polynomial matrix '''
 
-        nablah = MatrixPolynomial.from_array( ( self.H @ self.v_poly ).reshape(1,-1) )
-
-        nullspace = nablah.nullspace()
+        # nablah = ( self.H @ self.v_poly ).reshape(1,-1)
+        nablah = ( self.H @ self.v_poly )
+        null = nullspace( nablah )
         Psym = self.pencil.symmetric()
-        S_poly = nullspace.T @ Psym @ nullspace
+        S_matrix = null.T @ Psym @ null
 
-        return MatrixPolynomial.from_array(S_poly)
+        return MatrixPolynomial(S_matrix)
         
     def _compatibility_matrix(self) -> MatrixPolynomial:
         '''  
         Compatibility matrix is a sufficient condition for compatibility of the CLF-CBF pair and given Linear System
         '''
-        symb = self.pencil.symbol
         eps1 = self.compatibility_params["eps1"]
         eps2 = self.compatibility_params["eps2"]
 
-        poly_lambda = np.array([ Poly([0, 1], symbol=symb) ])
-        stability_part = eps2 * poly_lambda * self.stability_matrix.poly_array
-        p = stability_part.shape[0]
+        symb = self.pencil.symbol
+        lambda_poly = np.array([ Poly([0, 1], symbol=symb) ])
+        stability_part = eps2 * lambda_poly * self.stability_matrix.poly_array
 
         safe_zero_poly = self.n_poly - eps1 * self.d_poly
-        identity_part = np.array([[ safe_zero_poly if j==i else Poly([0.0], symbol=symb) for j in range(p) ] for i in range(p) ])
+        identity_part = np.diag([ safe_zero_poly for _ in range(self.dim-1) ])
         
-        compatibility_matrix = identity_part + stability_part
-        print(f"Compatibility = ")
-        for index, ele in np.ndenumerate(compatibility_matrix):
-            print(f"({index[0]},{index[1]}) = {ele}")
+        compatibility_matrix = MatrixPolynomial(identity_part + stability_part)
 
         return compatibility_matrix
 
@@ -220,9 +215,7 @@ class QFunction():
         where N(λ) is the pencil minimum nullspace polynomial.
         '''
         pencil_nullspace = self.pencil.nullspace()
-        Hnull = MatrixPolynomial.from_array( pencil_nullspace.T @ self.H )
-
-        return Hnull.nullspace()
+        return nullspace( pencil_nullspace.T @ self.H )
 
     def regular_pencil(self):
         '''

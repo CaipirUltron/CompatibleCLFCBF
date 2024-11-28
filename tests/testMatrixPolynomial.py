@@ -26,10 +26,10 @@ for _ in range(num_updates):
     coefs2 = [ np.random.randn(*shape2) for _ in range(degree2+1) ]
     poly2.update(coefs2)
     print(poly2)
-    print(poly2.T)
 
-    poly_res = poly1.T @ poly2
+    poly_res = poly2 @ poly1.T
+    print(poly_res)
 
-    res = MatrixPolynomial.from_array( poly_res )
+    res = MatrixPolynomial( coef=poly_res )
 
     print(res)

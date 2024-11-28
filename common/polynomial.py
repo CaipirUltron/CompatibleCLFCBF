@@ -8,36 +8,45 @@ from dataclasses import dataclass
 from scipy.linalg import null_space
 from numpy.polynomial import Polynomial as Poly
 
-def to_coefs(poly: np.ndarray[Poly]) -> tuple[ list[np.ndarray], str ]:
+def to_coef(poly_arr: np.ndarray[Poly]) -> tuple[ list[np.ndarray], str ]:
     '''
-    Input:   - np.ndarray of numpy Polynomials
+    Input:   - np.ndarray of numpy Polynomials or
     Returns: - list of np.ndarray coefficients.
     '''
-    if not isinstance(poly, np.ndarray):
+    if not isinstance(poly_arr, np.ndarray):
         raise TypeError("Input must be an np.ndarray.")
 
-    symbol = poly[*(0 for _ in range(poly.ndim))].symbol
-    coefs = []
-    for index, vi in np.ndenumerate(poly):
+    # get the symbol
+    symbol = 'x'
+    for index, p in np.ndenumerate(poly_arr):
+        if hasattr(p, "symbol"): 
+            symbol = p.symbol
+            break
 
-        if not isinstance(vi, Poly):
+    # populate coefs
+    coefs = []
+    for index, p in np.ndenumerate(poly_arr):
+
+        if isinstance(p, (float, np.float32, int, np.int32)):
+            p = Poly([p], symbol=symbol)
+        elif not isinstance(p, Poly):
             raise TypeError("Input must by an np.ndarray of numpy Polynomials.")
-        
-        if symbol != vi.symbol:
-            raise TypeError("Input must by an np.ndarray of numpy Polynomials of the same symbol.")
+        else:
+            if p.symbol != symbol:
+                raise Exception("Polynomials do not have the same symbol.")
 
         # Creates new coefficients as necessary
-        if len(vi.coef) > len(coefs):
-            for _ in range(len(vi.coef) - len(coefs)):
-                coefs.append( np.zeros(poly.shape) )
+        if len(p.coef) > len(coefs):
+            for _ in range(len(p.coef) - len(coefs)):
+                coefs.append( np.zeros(poly_arr.shape) )
 
         # Populate given coefficient
-        for k, c in enumerate(vi.coef):
+        for k, c in enumerate(p.coef):
             coefs[k][index] = c
 
     return coefs, symbol
 
-def from_coef(coef: list[np.ndarray], symbol='x') -> np.ndarray[Poly]:
+def to_array(coef: list[np.ndarray], symbol='x') -> np.ndarray[Poly]:
     '''
     Input:   - list of np.ndarray coefficients
     Returns: - np.ndarray of numpy Polynomials
@@ -48,6 +57,83 @@ def from_coef(coef: list[np.ndarray], symbol='x') -> np.ndarray[Poly]:
         poly_arr[index] = Poly([ c[index] for c in coef ], symbol=symbol)
 
     return poly_arr
+
+def nullspace(poly_arr: np.ndarray[Poly], max_order = 20) -> np.ndarray[Poly]:
+    ''' 
+    Returns the minimum (right) nullspace polynomial of P(λ), that is,
+    a new polynomial matrix N(λ) = N0 + λ N1 + λ² N2 + ... of P(λ) satisfying P(λ) N(λ) = 0.
+
+    Inputs: - np.ndarray of numpy Polynomials
+            - max_degree is the maximum possible degree of N(λ)
+    '''
+    if not isinstance(poly_arr, np.ndarray):
+        raise TypeError("Input must be a numpy array of Polynomials.")
+
+    if poly_arr.ndim == 1:
+        poly_arr = poly_arr.reshape(1,-1)
+
+    coefs, symbol = to_coef(poly_arr)
+    degree = len(coefs)-1
+
+    n, m = poly_arr.shape[0], poly_arr.shape[1]
+    for Qdegree in range(0, max_order+1):
+
+        Vmatrix = np.zeros([ n*(degree + Qdegree + 1), m*(Qdegree+1) ])
+        
+        sliding_list = [ c for c in coefs ]
+        zeros = [ np.zeros((n,m)) for _ in range(Qdegree) ]
+        sliding_list = zeros + sliding_list + zeros
+        
+        for i in range(degree + Qdegree + 1):
+            l = sliding_list[i:i+Qdegree+1]
+            l.reverse()
+            Vmatrix[i*n:(i+1)*n,:] = np.hstack(l)
+
+        Null = sp.linalg.null_space(Vmatrix)
+        if Null.size != 0:
+            break
+
+        if Qdegree == max_order:
+            warnings.warn("P(λ) likely does not have a non-trivial right nullspace.")
+            return None
+
+    Ncoefs = [ Null[i*m:(i+1)*m,:] for i in range(Qdegree+1) ]
+    poly_array = to_array(coef=Ncoefs, symbol=symbol)
+
+    return poly_array
+
+def companion_form(matrix_poly: list[np.ndarray] | np.ndarray[Poly]):
+    ''' 
+    Returns the M and N matrices of a linear matrix pencil λ M - N that is the equivalent companion form of a given matrix polynomial.
+    '''
+    if isinstance(matrix_poly, np.ndarray):
+        coefs = to_coef( matrix_poly )
+    elif isinstance(matrix_poly, list):
+        coefs = matrix_poly
+    else:
+        raise TypeError("Input should be a list of coefficients or np.ndarray of numpy Polynomials.")
+
+    ndim = coefs[0].ndim
+    shape = coefs[0].shape
+
+    if ndim != 2:
+        raise NotImplementedError("Companion form is only implemented for square matrix polynomials. ")
+    
+    n = shape[0]
+    deg = len(coefs) - 1
+
+    # Builds block diagonal matrix M
+    M = np.zeros((deg*n,deg*n))
+    M = sp.linalg.block_diag(*([ coefs[-1] ] + [ np.eye(n) for _ in range(deg-1) ]))
+
+    # Builds row companion form matrix N
+    N = np.zeros((deg*n,deg*n))
+    for i in range(deg):
+        N[0:n, i*n:(i+1)*n] = -coefs[deg-1-i]                 # First row block
+        if i < deg-1:
+            N[(i+1)*n:(i+2)*n, i*n:(i+1)*n] = np.eye(n)    # Additional -I's at the diagonal below
+
+    return M, N
 
 def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np.ndarray:
     '''
@@ -150,14 +236,15 @@ class MatrixPolynomial():
             self.ndim = coef[0].ndim
             self.shape = coef[0].shape
         elif isinstance(coef, dict):
-            powers = coef.keys()
-            self.num_coef = len(coef)
+            powers = [ int(p) for p in coef.keys() if not int(p) in powers ]
+            self.num_coef = len(powers)
             self.ndim = coef[powers[0]].ndim
             self.shape = coef[powers[0]].shape
-        elif isinstance(coef, np.ndarray) and coef.ndim == 3:
-            self.num_coef = coef.shape[0]
-            self.ndim = coef.ndim-1
-            self.shape = coef[0].shape
+        elif isinstance(coef, np.ndarray):
+            degrees = [ c.degree() for index, c in np.ndenumerate(coef) ]
+            self.num_coef = max(degrees) + 1
+            self.ndim = coef.ndim
+            self.shape = coef.shape
         else:
             raise TypeError("MatrixPolynomial must receive a list/dict of coefficients.")
 
@@ -165,14 +252,13 @@ class MatrixPolynomial():
         self.matrix_like = self.ndim == 2
         self.is_square = self.matrix_like and (self.shape[0] == self.shape[1])
 
-        if self.is_square: self.type = 'regular'
-        else: self.type = 'singular'
+        if self.is_square: 
+            self.type = 'regular'
+        else: 
+            self.type = 'singular'
 
         # Initializes coefficients and polynomial array
-        shape_of_elements = tuple([self.num_coef] + [ self.shape[dim] for dim in range(self.ndim) ])
-        self.elements = np.zeros(shape_of_elements)         # 3D array with (powers, i, j)
         self.coef = [ np.zeros(self.shape) for _ in range(self.num_coef) ]
-
         self.poly_array: np.ndarray[Poly] = np.zeros(self.shape, dtype=Poly)
         for index, _ in np.ndenumerate(self.poly_array):
             self.poly_array[index] = Poly([0.0], symbol=self.symbol)
@@ -319,20 +405,7 @@ class MatrixPolynomial():
     __mul__, __rmul__, __imul__ = _operator_fallbacks(_mul, operator.mul)
     __matmul__, __rmatmul__, __imatmul__ = _operator_fallbacks(_matmul, operator.matmul)
 
-    def _update_poly_array(self):
-        '''
-        Updates ndarray of numpy Polynomials using the elements.
-        '''
-        for index_ele, ele in np.ndenumerate(self.elements):
-            power = index_ele[0]
-            index = index_ele[1:]
-            curr_poly = self.poly_array[index]
-            num_powers_toadd = power - curr_poly.degree()
-            if num_powers_toadd > 0:
-                self.poly_array[index].coef = np.hstack([ curr_poly.coef, [0.0 for _ in range(num_powers_toadd) ] ])
-            self.poly_array[index].coef[power] = ele
-
-    def _symm(self, type = +1):
+    def _symm(self, type = +1) -> np.ndarray[Poly]:
         '''
         Returns equivalent symmetric/antisymmetric matrix polynomial (or linear matrix pencil).
         '''
@@ -343,17 +416,12 @@ class MatrixPolynomial():
             raise Exception(msg_txt)
         
         return 0.5 * ( self.poly_array + type * self.poly_array.T )
-    
-        # if not isinstance(self, MatrixPencil):
-        #     return MatrixPolynomial( coef=[ 0.5*(c + type * c.T) for c in self.coef ] )
-        # else:
-        #     return MatrixPencil( M = 0.5*(self.M + type * self.M.T), N = 0.5*(self.N + type * self.N.T) )
 
     def outer(poly1, poly2):
         ''' Outer product between MatrixPolynomials '''
         return MatrixPolynomial._multiply(poly1, poly2, type = 0)
 
-    def update(self, coef: list | dict):
+    def update(self, coef: list | dict | np.ndarray):
         '''
         Update method for matrix polynomial. Existing coefficients can be modified, 
         but the polynomial shape cannot be changed after creation.
@@ -361,32 +429,24 @@ class MatrixPolynomial():
         Input: - list [ coef0, coef1, ... , coefN ] of ordered powers OR
                - dict { 0: coef0, 1: coef1, ... , N: coefN } of (power:coef) pairs 
                         (repeating power keys are not allowed and return an error)
-               - np.ndarray with ndim = 3 with each element being (powers, i, j)
-
-        OBS: this setting method is APPENDING, meaning that 
-        if the number of passed coefficients exceeds the current 
-        number of coefficients, it appends new coefficients.
+               - np.ndarray[numpy.polynomial.Polynomial]
         '''
     
         ''' (Default) - updates by ordered sequence of increasing powers (numpy Polynomial style) '''
         if isinstance(coef, list):
-            for k, c in enumerate(coef):
-
-                # verify is coefficient is valid
+            self.coef = []
+            for c in coef:
                 self._verify_coef(c)
-
-                # appends new coefficient if necessary
-                if k >= self.num_coef:
-                    self.elements = np.append(self.elements, c[np.newaxis,], axis=0)
-
-                # updates coefficient
-                self.elements[k] = c                                                    
+                self.coef.append(c)
+            self.poly_array = to_array(self.coef, self.symbol)
 
         ''' Updates by dictionary of (power:coefficient) '''
         if isinstance(coef, dict):
             powers = []
+            self.coef = []
             for k, c in coef.items():
-                
+                self._verify_coef(c)
+
                 # Verify power entries
                 if ( isinstance(k, int) and k >= 0 ) or ( isinstance(k, str) and str.isnumeric(k) and int(k) >= 0 ):
                     k = int(k)
@@ -397,79 +457,40 @@ class MatrixPolynomial():
                 else:
                     raise TypeError("Dictionary keys must represent polynomial powers.")
                 
-                # verify is coefficient is valid
-                self._verify_coef(c)
-
                 # appends new coefficients if necessary
                 if k >= len(self.coef):
                     num_extra_coefs = k - len(self.coef) + 1
-                    extra_zeros = np.zeros((num_extra_coefs, self.shape[0], self.shape[1]))
-                    self.elements = np.append(self.elements, extra_zeros, axis=0)
+                    self.coef += [ np.zeros(*( self.shape[i] for i in range(self.ndim))) for _ in range(num_extra_coefs) ]
 
-                # updates coefficient
-                self.elements[k] = c
+                # update coefficient k
+                self.coef[k] = c
+            self.poly_array = to_array(coef, self.symbol)
 
-        ''' Updates by np.ndarray os elements of signature (powers, i, j) '''
+        ''' Updates by np.ndarray of numpy Polynomials '''
         if isinstance(coef, np.ndarray):
-
-            if coef.ndim == 3:
-                self.elements = coef
-
-            if coef.ndim <= 2 and coef[*[ np.random.randint(coef.shape[n]) for n in range(coef.ndim) ]] :
-                pass
-
-        self.coef = [ c for c in self.elements ]
-        self._update_poly_array()
+            self.coef, symbol = to_coef(coef)
+            self.poly_array = to_array(self.coef, symbol)
 
         ''' Updates the number of coefs, max degree and generalized eigenvalues '''
-        self.num_coef = self.elements.shape[0]
+        self.num_coef = len(self.coef)
         self.degree = self.num_coef - 1
 
-    def nullspace(self):
+    def nullspace(self) -> np.ndarray[Poly]:
         ''' 
         Returns the minimum (right) nullspace polynomial of P(λ), that is,
         a new polynomial matrix N(λ) = N0 + λ N1 + λ² N2 + ... of P(λ) satisfying P(λ) N(λ) = 0.
 
         Inputs: - max_degree is the maximum possible degree of N(λ)
         '''
-        if self.is_square:
-            raise Exception("Vmatrix does not have a non-trivial right nullspace.")
-        
-        n, m = self.shape[0], self.shape[1]
+        return nullspace(self.poly_array, self.symbol)
 
-        for Qdegree in range(0, self.max_order+1):
-
-            Vmatrix = np.zeros([ n*(self.degree + Qdegree + 1), m*(Qdegree+1) ])
-            
-            sliding_list = [ c for c in self.coef ]
-            zeros = [ np.zeros((n,m)) for _ in range(Qdegree) ]
-            sliding_list = zeros + sliding_list + zeros
-            
-            for i in range(self.degree + Qdegree + 1):
-                l = sliding_list[i:i+Qdegree+1]
-                l.reverse()
-                Vmatrix[i*n:(i+1)*n,:] = np.hstack(l)
-
-            Null = sp.linalg.null_space(Vmatrix)
-            if Null.size != 0:
-                break
-
-            if Qdegree == self.max_order:
-                warnings.warn("P(λ) likely does not have a non-trivial right nullspace.")
-                return None
-
-        Ncoefs = [ Null[i*m:(i+1)*m,:] for i in range(Qdegree+1) ]
-        poly_array = from_coef(coef=Ncoefs, symbol=self.symbol)
-
-        return poly_array
-
-    def symmetric(self):
+    def symmetric(self) -> np.ndarray[Poly]:
         '''
         Returns equivalent symmetric matrix polynomial.
         '''
         return self._symm(type=+1)
 
-    def antisymmetric(self):
+    def antisymmetric(self) -> np.ndarray[Poly]:
         '''
         Returns equivalent antisymmetric matrix polynomial.
         '''
@@ -479,37 +500,52 @@ class MatrixPolynomial():
         ''' 
         Returns a MatrixPencil that is the equivalent companion form of P(λ).
         '''
-        if self.shape[0] != self.shape[1]:
-            raise NotImplementedError("Companion form is only implemented for square matrix polynomials. ")
-        
-        n = self.shape[0]
-        deg = self.degree
-
-        # Builds block diagonal matrix M
-        M = np.zeros((deg*n,deg*n))
-        M = sp.linalg.block_diag(*([ self.coef[-1] ] + [ np.eye(n) for _ in range(deg-1) ]))
-
-        # Builds row companion form matrix N
-        N = np.zeros((deg*n,deg*n))
-        for i in range(deg):
-            N[0:n, i*n:(i+1)*n] = -self.coef[deg-1-i]                 # First row block
-            if i < deg-1:
-                N[(i+1)*n:(i+2)*n, i*n:(i+1)*n] = np.eye(n)    # Additional -I's at the diagonal below
-
+        M, N = companion_form( self.coef )
         return MatrixPencil( M, N )
 
     @property
     def T(self):
         ''' Transpose operation '''
-        return MatrixPolynomial.from_array( self.poly_array.T )
+        return self.poly_array.T
 
     @classmethod
-    def from_array(cls, poly_array: np.ndarray[Poly]):
+    def constant(cls, const_arr: np.ndarray):
         '''
-        Creates a MatrixPolynomial object using an ndarray of (scalar) Polynomials
+        Returns a constant MatrixPolynomial with only one coefficient const_arr
         '''
-        coef, symbol = to_coefs(poly_array)
-        return cls(coef=coef, symbol=symbol)
+        if not isinstance(const_arr, np.ndarray):
+            raise TypeError("Input must be a constant numpy array.")
+
+        for index, ele in np.ndenumerate(const_arr):
+            if not isinstance(ele, (float, int, np.float32, np.int32)):
+                raise TypeError("Input must be a constant numpy array.")
+        
+        # If shape is passed, returns a zero polynomial with the given shape
+        return cls(coef=[ const_arr ])
+
+    @classmethod
+    def eye(cls, dim=2):
+        '''
+        Returns the identity MatrixPolynomial of dimension dim
+        '''
+        return MatrixPolynomial.constant( np.eye(dim) )
+
+    @classmethod
+    def zeros(cls, size=(2,2)):
+        '''
+        Returns the identity MatrixPolynomial of dimension dim
+        '''
+        return MatrixPolynomial.constant( np.zeros(size) )
+
+    @classmethod
+    def diag(cls, poly_list: list):
+        '''
+        Returns a diagonal MatrixPolynomial with the numpy Polynomials in poly_list
+        '''
+        if not isinstance(poly_list, list):
+            raise TypeError("Input must be a list of numpy Polynomials.")
+
+        return cls(coef=np.diag(poly_list))
 
 class MatrixPencil(MatrixPolynomial):
     '''
@@ -692,7 +728,6 @@ class MatrixPencil(MatrixPolynomial):
                 # Populate adjoint matrix
                 adjoint_arr[ blk_i_slice, blk_j_slice ] = Lij
 
-        # adjoint = MatrixPolynomial.from_array( self.Z @ adjoint_arr @ self.Q.T )
         adjoint = self.Z @ adjoint_arr @ self.Q.T
 
         return determinant, adjoint
