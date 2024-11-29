@@ -82,8 +82,8 @@ class QFunction():
         self.n_poly = self.n_poly/norm_coef
         self.d_poly = self.d_poly/norm_coef
 
-        print(f"roots of n(λ) = { self.n_poly.roots() }")
-        print(f"roots of d(λ) = { self.d_poly.roots() }")
+        # print(f"roots of n(λ) = { self.n_poly.roots() }")
+        # print(f"roots of d(λ) = { self.d_poly.roots() }")
 
         ''' Computation of the zero-polynomial, for computing the boundary equilibrium points '''
         self.zero_poly = ( self.n_poly - self.d_poly )
@@ -102,6 +102,12 @@ class QFunction():
         # C = self.compatibility_matrix.sos_decomposition()
         # eigC = np.linalg.eigvals(C)
         # print(f"Compatibility eigenvalues = {eigC}")
+
+    def _v_poly(self) -> tuple[Poly, np.ndarray[Poly]]:
+        '''
+        Compute the v(λ) polynomial
+        '''
+        return self._v_poly_derivative(order=0)
 
     def _v_poly_derivative(self, order=0) -> tuple[Poly, np.ndarray[Poly]]:
         '''
@@ -122,12 +128,6 @@ class QFunction():
 
         return div, v
 
-    def _v_poly(self) -> tuple[Poly, np.ndarray[Poly]]:
-        '''
-        Compute the v(λ) polynomial
-        '''
-        return self._v_poly_derivative(order=0)
-
     def _stability_matrix(self) -> MatrixPolynomial:
         ''' Computes the stability polynomial matrix '''
 
@@ -137,6 +137,8 @@ class QFunction():
         S_deg = self.d_poly.degree() - 1
         null_deg = math.floor(S_deg / 2)
         Q_matrix = nullspace( nablah, degree=null_deg )[:,0:self.dim-1]
+
+        print(f"Q(λ) of shape {Q_matrix.shape} = \n{Q_matrix}")
 
         ''' Computes the stability matrix polynomial from N(λ) '''
         Psym = self.pencil.symmetric()

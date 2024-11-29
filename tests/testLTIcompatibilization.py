@@ -34,7 +34,7 @@ Hv = hessian_quadratic(CLFeigs, rotCLF )
 
 CBFeigs = np.array([ 8.0, 1.0 ])
 CBFcenter = np.array([ 0.0, 3.0 ])
-rotCBF = rot2D(np.deg2rad(90))
+rotCBF = rot2D(np.deg2rad(180))
 Hh = hessian_quadratic(CBFeigs, rotCBF )
 
 p = 1.0
