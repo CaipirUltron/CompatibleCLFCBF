@@ -1,9 +1,12 @@
+import math
 import operator
 import warnings
 
 import numpy as np
 import scipy as sp
+import cvxpy as cvx
 
+from itertools import product
 from dataclasses import dataclass
 from scipy.linalg import null_space
 from numpy.polynomial import Polynomial as Poly
@@ -104,7 +107,7 @@ def nullspace(poly_arr: np.ndarray[Poly], max_order = 20) -> np.ndarray[Poly]:
 
 def companion_form(matrix_poly: list[np.ndarray] | np.ndarray[Poly]):
     ''' 
-    Returns the M and N matrices of a linear matrix pencil λ M - N that is the equivalent companion form of a given matrix polynomial.
+    Returns the M and N (deg*n, deg*n)-matrices of a linear matrix pencil λ M - N that is the equivalent companion form of a given matrix polynomial.
     '''
     if isinstance(matrix_poly, np.ndarray):
         coefs = to_coef( matrix_poly )
@@ -116,7 +119,7 @@ def companion_form(matrix_poly: list[np.ndarray] | np.ndarray[Poly]):
     ndim = coefs[0].ndim
     shape = coefs[0].shape
 
-    if ndim != 2:
+    if ndim != 2 and shape[0] != shape[1]:
         raise NotImplementedError("Companion form is only implemented for square matrix polynomials. ")
     
     n = shape[0]
@@ -270,6 +273,9 @@ class MatrixPolynomial():
         self.realEigenTol = 1e-10           # Tolerance to consider an eigenvalue as real
         self.max_order = 2                 # Max. polynomial order to compute nullspace solutions
 
+        ''' Setups the SOS decomposition problem in CVXPY '''
+        self._init_sos_decomposition()
+
     def __power__(self, power):
         ''' Matrix power '''
         return np.linalg.matrix_power(self.poly_array, power)
@@ -331,7 +337,55 @@ class MatrixPolynomial():
                 error_msg += f" of shape {coef.shape}"
             error_msg += f" is not compatible with {np.ndarray} of shape {self.shape}."
             raise TypeError(error_msg)
+
+    def _compute_sos_locs(self):
+        '''
+        Computes the index matrix representing the rule for placing the coefficients in the correct places on the 
+        shape matrix of the SOS representation. Algorithm gives preference for putting the elements of coeffs 
+        closer to the main diagonal of the SOS matrix.
+        '''
+        # Compute SOS kernel first
+        self.sos_kern_deg = math.ceil(self.degree/2)
+        self.sos_locs = [ [] for _ in self.coef ]
+        for exp in range(self.num_coef):
+
+            # Checks the possible (i,j) locations on SOS matrix where the monomial can be put
+            for (i,j) in product(range(self.sos_kern_deg+1),range(self.sos_kern_deg+1)):
+                if i > j: continue
+                if exp == i + j:
+                    self.sos_locs[exp].append( (i,j) )
+
+    def _init_sos_decomposition(self):
+        ''' Initialization of SOS decomposition '''
+
+        if not self.type == "regular":
+            return
         
+        if self.degree % 2 != 0:
+            warnings.warn("Be aware that a polynomial matrix of odd degree can never be p.s.d.")
+
+        self._compute_sos_locs()
+        dim = self.shape[0]
+        self.sos_dim = (self.sos_kern_deg + 1) * dim
+
+        ''' Setup CVXPY parameters and variables '''
+        self.coef_params = [ cvx.Parameter( shape=self.shape ) for _ in self.coef ]
+        self.SOS = cvx.Variable( (self.sos_dim, self.sos_dim), symmetric=True )
+        self.SOSt = np.zeros((self.sos_kern_deg+1, self.sos_kern_deg+1), dtype=object)
+        for i in range(self.sos_kern_deg+1):
+            for j in range(self.sos_kern_deg+1):
+                if i <= j:
+                    self.SOSt[i,j] = cvx.Variable( shape=self.shape, symmetric=True if i == j else False )
+                else:
+                    self.SOSt[i,j] = self.SOSt[j,i].T
+
+        ''' Setup CVXPY cost, constraints and problem '''
+        self.constraints = [ self.SOS >> 0 ]
+        for locs, c_param in zip(self.sos_locs, self.coef_params):
+            self.constraints += [ sum([ self.SOSt[index] if index[0]==index[1] else self.SOSt[index] + self.SOSt[index].T for index in locs ]) == c_param ]
+        self.cost = cvx.norm( self.SOS - cvx.bmat(self.SOSt.tolist()) )
+        self.sos_problem = cvx.Problem( cvx.Minimize( self.cost ), self.constraints )
+
     def _add_sub(op1, op2, type):
         '''
         MatrixPolynomial addition/subtraction
@@ -417,6 +471,25 @@ class MatrixPolynomial():
         
         return 0.5 * ( self.poly_array + type * self.poly_array.T )
 
+    def _test_sos_decomposition(self, num_samples):
+        '''
+        Test method for SOS decomposition.
+        '''
+        sos_matrix = self.sos_decomposition(verbose=True)
+
+        def call(l):
+            Lambda = np.vstack([ (l**k)*np.eye(*self.shape) for k in range(self.sos_kern_deg+1) ])
+            return Lambda.T @ sos_matrix @ Lambda
+
+        error = 0.0
+        for _ in range(num_samples):
+            l = np.random.randn()
+            val1 = self(l)
+            val2 = call(l)
+            error += np.linalg.norm( val1 - val2 )
+
+        print(f"Test for SOS decomposition finished after {num_samples} random trials with error = {error}.")
+
     def outer(poly1, poly2):
         ''' Outer product between MatrixPolynomials '''
         return MatrixPolynomial._multiply(poly1, poly2, type = 0)
@@ -471,9 +544,14 @@ class MatrixPolynomial():
             self.coef, symbol = to_coef(coef)
             self.poly_array = to_array(self.coef, symbol)
 
-        ''' Updates the number of coefs, max degree and generalized eigenvalues '''
+        # at this point, self.coef and self.poly_array are updated
+
+        ''' Updates the number of coefs, max degree and reinitiaze sos decomposition if necessary '''
+        old_num_coef = self.num_coef
         self.num_coef = len(self.coef)
         self.degree = self.num_coef - 1
+        if self.num_coef != old_num_coef:
+            self._init_sos_decomposition()
 
     def nullspace(self) -> np.ndarray[Poly]:
         ''' 
@@ -503,6 +581,20 @@ class MatrixPolynomial():
         M, N = companion_form( self.coef )
         return MatrixPencil( M, N )
 
+    def sos_decomposition(self, verbose=False):
+        '''
+        SOS decomposition of MatrixPolynomial
+        '''
+        for k, c in enumerate(self.coef):
+            self.coef_params[k].value = c
+
+        self.sos_problem.solve(solver = 'SCS', verbose=False)
+        if verbose: 
+            print(f"SOS decomposition problem returned with status {self.sos_problem.status}, final cost = {self.cost.value}")
+
+        sos_matrix = np.block([[ self.SOSt[i,j].value for j in range(self.sos_kern_deg+1) ] for i in range(self.sos_kern_deg+1) ])
+        return sos_matrix
+
     @property
     def T(self):
         ''' Transpose operation '''
@@ -520,22 +612,25 @@ class MatrixPolynomial():
             if not isinstance(ele, (float, int, np.float32, np.int32)):
                 raise TypeError("Input must be a constant numpy array.")
         
-        # If shape is passed, returns a zero polynomial with the given shape
-        return cls(coef=[ const_arr ])
+        if cls == MatrixPolynomial:
+            return cls(coef=[ const_arr ])
+        
+        if cls == MatrixPencil:
+            return cls( M=np.zeros(const_arr.shape), N=-const_arr )
 
     @classmethod
     def eye(cls, dim=2):
         '''
         Returns the identity MatrixPolynomial of dimension dim
         '''
-        return MatrixPolynomial.constant( np.eye(dim) )
+        return cls.constant( np.eye(dim) )
 
     @classmethod
     def zeros(cls, size=(2,2)):
         '''
         Returns the identity MatrixPolynomial of dimension dim
         '''
-        return MatrixPolynomial.constant( np.zeros(size) )
+        return cls.constant( np.zeros(size) )
 
     @classmethod
     def diag(cls, poly_list: list):

@@ -1,19 +1,18 @@
 import math
-
 import numpy as np
-from numpy.polynomial import Polynomial as Poly
-
-from matplotlib.axes import Axes
 import matplotlib.patches as patches
 import matplotlib.colors as mcolors
+
+from matplotlib.axes import Axes
+from numpy.polynomial import Polynomial as Poly
 
 from scipy import signal
 from scipy.optimize import fsolve, minimize
 from scipy.linalg import null_space, inv
 
-from dynamic_systems import DynamicSystem, LinearSystem
-from functions import MultiPoly
 from common import *
+from functions import MultiPoly
+from dynamic_systems import DynamicSystem, LinearSystem
 
 class QFunction():
     ''' 
@@ -36,6 +35,12 @@ class QFunction():
         self.real_tol = 1e-6
         self.compatibility_params = {"eps1": 1.0,        # eps1 should be > 1
                                      "eps2": 1e-1 }      # eps2 should be small
+
+        ''' Stability/compatibility matrices '''
+        stb_dim = self.dim-1
+        self.stability_matrix: MatrixPolynomial = MatrixPolynomial.zeros(size=(stb_dim, stb_dim))
+        self.stability_pencil: MatrixPencil = None
+        self.compatibility_matrix: MatrixPolynomial = MatrixPolynomial.zeros(size=(stb_dim, stb_dim))
 
         self._compute_polys()
 
@@ -77,11 +82,10 @@ class QFunction():
 
         ''' Computation of stability properties of the boundary equilibrium points '''
         self.divisor_poly, self.v_poly = self._v_poly()
-        self.stability_matrix = self._stability_matrix()
-        self.stability_pencil = self.stability_matrix.companion_form()
+        self._stability_matrix()
 
         ''' Computation of compatibility matrix polynomial '''
-        self.compatibility_matrix = self._compatibility_matrix()
+        self._compatibility_matrix()
 
     def _v_poly_derivative(self, order=0) -> tuple[Poly, np.ndarray[Poly]]:
         '''
@@ -115,9 +119,13 @@ class QFunction():
         nablah = ( self.H @ self.v_poly )
         null = nullspace( nablah )
         Psym = self.pencil.symmetric()
-        S_matrix = null.T @ Psym @ null
+        self.stability_matrix.update( null.T @ Psym @ null )
 
-        return MatrixPolynomial(S_matrix)
+        if self.stability_pencil is None:
+            self.stability_pencil = self.stability_matrix.companion_form()
+        else:
+            newM, newN = companion_form( self.stability_matrix.poly_array )
+            self.stability_pencil.update(M = newM, N = newN )
         
     def _compatibility_matrix(self) -> MatrixPolynomial:
         '''  
@@ -133,9 +141,7 @@ class QFunction():
         safe_zero_poly = self.n_poly - eps1 * self.d_poly
         identity_part = np.diag([ safe_zero_poly for _ in range(self.dim-1) ])
         
-        compatibility_matrix = MatrixPolynomial(identity_part + stability_part)
-
-        return compatibility_matrix
+        self.compatibility_matrix.update(identity_part + stability_part)
 
     def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
         '''
