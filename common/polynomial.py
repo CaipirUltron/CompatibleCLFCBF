@@ -361,8 +361,8 @@ class MatrixPolynomial():
         if not self.type == "regular":
             return
         
-        if self.degree % 2 != 0:
-            warnings.warn("Be aware that a polynomial matrix of odd degree can never be p.s.d.")
+        # if self.degree % 2 != 0:
+        #     warnings.warn("Be aware that a polynomial matrix of odd degree can never be p.s.d.")
 
         self._compute_sos_locs()
         dim = self.shape[0]

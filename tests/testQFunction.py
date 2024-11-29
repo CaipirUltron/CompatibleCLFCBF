@@ -39,7 +39,6 @@ def generateAndPlot(ax):
     for k, eig in enumerate( qfun.stability_pencil.real_eigen() ):
         print(f"{k+1}-th real eigenvalue of S(λ) companion form = {eig.eigenvalue}")
 
-    qfun.compatibility_matrix._test_sos_decomposition(100)
     qfun.plot(ax)
 
 if not loop:

@@ -33,7 +33,7 @@ class QFunction():
         ''' Class parameters '''
         self.trim_tol = 1e-8
         self.real_tol = 1e-6
-        self.compatibility_params = {"eps1": 1.0,        # eps1 should be > 1
+        self.compatibility_params = {"eps1": 1.1,        # eps1 should be > 1
                                      "eps2": 1e-1 }      # eps2 should be small
 
         ''' Stability/compatibility matrices '''
@@ -77,6 +77,11 @@ class QFunction():
         self.n_poly = ( self.w.T @ adjoint.T @ self.H @ adjoint @ self.w )
         self.d_poly = ( determinant**2 )
 
+        # Normalize numerator/denominator coefficients
+        max_coef = max([ np.abs(c) for c in self.n_poly.coef ]+[ np.abs(c) for c in self.d_poly.coef ])
+        self.n_poly = self.n_poly/max_coef
+        self.d_poly = self.d_poly/max_coef
+
         ''' Computation of the zero-polynomial, for computing the boundary equilibrium points '''
         self.zero_poly = ( self.n_poly - self.d_poly )
 
@@ -86,6 +91,10 @@ class QFunction():
 
         ''' Computation of compatibility matrix polynomial '''
         self._compatibility_matrix()
+
+        C = self.compatibility_matrix.sos_decomposition()
+        eigC = np.linalg.eigvals(C)
+        print(f"Compatibility eigenvalues = {eigC}")
 
     def _v_poly_derivative(self, order=0) -> tuple[Poly, np.ndarray[Poly]]:
         '''
@@ -134,14 +143,21 @@ class QFunction():
         eps1 = self.compatibility_params["eps1"]
         eps2 = self.compatibility_params["eps2"]
 
+        safe_zero_poly = self.n_poly - eps1 * self.d_poly
+        safe_zero_poly = safe_zero_poly / max(safe_zero_poly.coef)
+        identity_part = np.diag([ safe_zero_poly for _ in range(self.dim-1) ])
+
         symb = self.pencil.symbol
         lambda_poly = np.array([ Poly([0, 1], symbol=symb) ])
         stability_part = eps2 * lambda_poly * self.stability_matrix.poly_array
 
-        safe_zero_poly = self.n_poly - eps1 * self.d_poly
-        identity_part = np.diag([ safe_zero_poly for _ in range(self.dim-1) ])
-        
-        self.compatibility_matrix.update(identity_part + stability_part)
+        compatibility = identity_part + self.stability_matrix.poly_array
+        self.compatibility_matrix.update(compatibility)
+
+        print(f"Zero poly = {safe_zero_poly}")
+        print(f"Id part = {identity_part}")
+        print(f"eps λ S(λ) = {stability_part}")
+        print(f"C(λ) = {compatibility}")
 
     def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
         '''
@@ -244,7 +260,7 @@ class QFunction():
         Plots the Q-function for analysis.
         '''
         q_min, q_max = q_limits[0], q_limits[1]
-        lambdaRange = []
+        lambdaRange = [0.0]
 
         ''' Add pencil real eigenvalues to range '''
         realEigens = self.pencil.real_eigen()
@@ -263,8 +279,7 @@ class QFunction():
         ''' Using range min, max values, generate λ range to be plotted '''
         factor = 10
         l_min, l_max = -100,  100
-        if lambdaRange: 
-            l_min, l_max = min(lambdaRange), max(lambdaRange)
+        l_min, l_max = min(lambdaRange), max(lambdaRange)
 
         deltaLambda = l_max - l_min
         l_min -= deltaLambda/factor
