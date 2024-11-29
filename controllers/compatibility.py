@@ -15,12 +15,12 @@ from functions import MultiPoly
 from dynamic_systems import DynamicSystem, LinearSystem
 
 class QFunction():
-    ''' 
+    '''
     General class for Qfunctions q(λ) = v(λ)' H v(λ), where P(λ) v(λ) = w
     and P(λ) is a regular linear matrix pencil.
     '''
     def __init__(self, P: MatrixPencil, H: list | np.ndarray, w: list | np.ndarray):
-        
+
         if isinstance(H, list): H = np.array(H)
         if isinstance(w, list): w = np.array(w)
         self._verify(P, H, w)
@@ -34,7 +34,7 @@ class QFunction():
         self.trim_tol = 1e-8
         self.real_tol = 1e-6
         self.compatibility_params = {"eps1": 1.1,        # eps1 should be > 1
-                                     "eps2": 1e-1 }      # eps2 should be small
+                                     "eps2": 1e-0 }      # eps2 should be small
 
         ''' Stability/compatibility matrices '''
         stb_dim = self.dim-1
@@ -42,14 +42,14 @@ class QFunction():
         self.stability_pencil: MatrixPencil = None
         self.compatibility_matrix: MatrixPolynomial = MatrixPolynomial.zeros(size=(stb_dim, stb_dim))
 
-        self._compute_polys()
+        self._compute_polynomials()
 
     def __call__(self, l):
         ''' Calling method '''
         return self.n_poly(l) / self.d_poly(l)
 
     def _verify(self, P: MatrixPencil, H: list | np.ndarray, w: list | np.ndarray):
-        ''' 
+        '''
         Verification method for pencil intialization.
         '''
         if not isinstance( P, MatrixPencil ):
@@ -69,7 +69,7 @@ class QFunction():
         if not w.shape in ( (self.dim,), (self.dim,1) ):
             raise TypeError("w must be a n x 1 array.")
 
-    def _compute_polys(self):
+    def _compute_polynomials(self):
         ''' Private method for computing the QFunction polynomials '''
 
         ''' Computation of Q-function numerator/denominator polynomials '''
@@ -77,24 +77,31 @@ class QFunction():
         self.n_poly = ( self.w.T @ adjoint.T @ self.H @ adjoint @ self.w )
         self.d_poly = ( determinant**2 )
 
-        # Normalize numerator/denominator coefficients
-        max_coef = max([ np.abs(c) for c in self.n_poly.coef ]+[ np.abs(c) for c in self.d_poly.coef ])
-        self.n_poly = self.n_poly/max_coef
-        self.d_poly = self.d_poly/max_coef
+        # Normalize numerator/denominator coefficients with the mean value of all coefficients
+        norm_coef = np.mean([ np.abs(c) for c in self.n_poly.coef ]+[ np.abs(c) for c in self.d_poly.coef ])
+        self.n_poly = self.n_poly/norm_coef
+        self.d_poly = self.d_poly/norm_coef
+
+        print(f"n(λ) = {self.n_poly}")
+        print(f"d(λ) = {self.d_poly}")
 
         ''' Computation of the zero-polynomial, for computing the boundary equilibrium points '''
         self.zero_poly = ( self.n_poly - self.d_poly )
 
         ''' Computation of stability properties of the boundary equilibrium points '''
         self.divisor_poly, self.v_poly = self._v_poly()
+
+        # print(f"v(λ) = {self.v_poly}")
+        # print(f"div(λ) = {self.divisor_poly}")
+
         self._stability_matrix()
 
         ''' Computation of compatibility matrix polynomial '''
         self._compatibility_matrix()
 
-        C = self.compatibility_matrix.sos_decomposition()
-        eigC = np.linalg.eigvals(C)
-        print(f"Compatibility eigenvalues = {eigC}")
+        # C = self.compatibility_matrix.sos_decomposition()
+        # eigC = np.linalg.eigvals(C)
+        # print(f"Compatibility eigenvalues = {eigC}")
 
     def _v_poly_derivative(self, order=0) -> tuple[Poly, np.ndarray[Poly]]:
         '''
@@ -107,7 +114,7 @@ class QFunction():
         v = math.factorial(order) * adjoint @ self.w
 
         power = np.eye(self.pencil.shape[0])
-        for k in range(order): 
+        for k in range(order):
             power @= - adjoint @ self.pencil.M
 
         div = det**(order+1)
@@ -124,40 +131,45 @@ class QFunction():
     def _stability_matrix(self) -> MatrixPolynomial:
         ''' Computes the stability polynomial matrix '''
 
-        # nablah = ( self.H @ self.v_poly ).reshape(1,-1)
         nablah = ( self.H @ self.v_poly )
-        null = nullspace( nablah )
+
+        ''' Computes N(λ), the nullspace matrix polynomial to ∇h(λ) of appropriate degree '''
+        S_deg = self.d_poly.degree() - 1
+        null_deg = math.floor(S_deg / 2)
+        Q_matrix = nullspace( nablah, degree=null_deg )[:,0:self.dim-1]
+
+        ''' Computes the stability matrix polynomial from N(λ) '''
         Psym = self.pencil.symmetric()
-        self.stability_matrix.update( null.T @ Psym @ null )
+        S_matrix = Q_matrix.T @ Psym @ Q_matrix
+        self.stability_matrix.update( S_matrix )
 
         if self.stability_pencil is None:
             self.stability_pencil = self.stability_matrix.companion_form()
         else:
             newM, newN = companion_form( self.stability_matrix.poly_array )
-            self.stability_pencil.update(M = newM, N = newN )
-        
+            self.stability_pencil.update( M = newM, N = newN )
+
     def _compatibility_matrix(self) -> MatrixPolynomial:
-        '''  
+        '''
         Compatibility matrix is a sufficient condition for compatibility of the CLF-CBF pair and given Linear System
         '''
         eps1 = self.compatibility_params["eps1"]
         eps2 = self.compatibility_params["eps2"]
 
         safe_zero_poly = self.n_poly - eps1 * self.d_poly
-        safe_zero_poly = safe_zero_poly / max(safe_zero_poly.coef)
         identity_part = np.diag([ safe_zero_poly for _ in range(self.dim-1) ])
 
         symb = self.pencil.symbol
         lambda_poly = np.array([ Poly([0, 1], symbol=symb) ])
         stability_part = eps2 * lambda_poly * self.stability_matrix.poly_array
 
-        compatibility = identity_part + self.stability_matrix.poly_array
+        compatibility = identity_part + stability_part
         self.compatibility_matrix.update(compatibility)
 
-        print(f"Zero poly = {safe_zero_poly}")
-        print(f"Id part = {identity_part}")
-        print(f"eps λ S(λ) = {stability_part}")
-        print(f"C(λ) = {compatibility}")
+        # print(f"n(λ) degree = { self.n_poly.degree() }")
+        # print(f"d(λ) degree = { self.d_poly.degree() }")
+        # print(f"n(λ) - eps1 d(λ) degree = { safe_zero_poly.degree() }")
+        # print(f"S(λ) = {self.stability_matrix}")
 
     def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
         '''
@@ -165,10 +177,10 @@ class QFunction():
         '''
         P = self.pencil(l)
         v = inv(P) @ self.w
-        return v.T @ self.H @ v 
+        return v.T @ self.H @ v
 
     def update(self, **kwargs):
-        ''' 
+        '''
         QFunction update method.
         Inputs: - M, N - pencil matrices for pencil update
                 - H and w - Q-function matrix and constant vector
@@ -189,15 +201,15 @@ class QFunction():
                 continue
 
         self.pencil.update( M=newM, N=newN )
-        self._compute_polys()
+        self._compute_polynomials()
 
     def get_polys(self) -> tuple[Poly, Poly]:
         '''
         Returns: - numerator polynomial n(λ)
-                 - denominator polynomial d(λ) 
+                 - denominator polynomial d(λ)
         '''
         return self.n_poly, self.d_poly
-    
+
     def v(self, l):
         '''
         Compute v(λ) using polynomials
@@ -207,11 +219,11 @@ class QFunction():
         return v / div
 
     def equilibria(self) -> list[dict]:
-        ''' 
-        Boundary equilibrium solutions can be computed from 
+        '''
+        Boundary equilibrium solutions can be computed from
         the q-function by solving q(λ) = n(λ)/d(λ) = 1, or the roots of n(λ) - d(λ).
 
-        Returns: a list of dictionaries with all boundary equilibrium solutions 
+        Returns: a list of dictionaries with all boundary equilibrium solutions
         and their stability numbers (if dim == 2, otherwise stability is None).
         '''
         zeros = self.zero_poly.roots()
@@ -219,7 +231,7 @@ class QFunction():
         real_zeros.sort()
 
         sols = [ {"lambda": z} for z in real_zeros ]
-        for sol in sols:  
+        for sol in sols:
             sol["stability"] = max( self.stability(sol["lambda"]) )
         return sols
 
@@ -232,7 +244,7 @@ class QFunction():
         return stabilityEigs
 
     def orthogonal_nullspace(self) -> MatrixPolynomial:
-        ''' 
+        '''
         Computes the matrix polynomial O(λ) orthogonal to H N(λ),
         where N(λ) is the pencil minimum nullspace polynomial.
         '''
@@ -241,15 +253,15 @@ class QFunction():
 
     def regular_pencil(self):
         '''
-        Computes the regular matrix pencil P(λ) O(λ).T, 
+        Computes the regular matrix pencil P(λ) O(λ).T,
         where O(λ) is the matrix polynomial orthogonal to the nullspace polynomial Λ(λ) Z.
 
         OBS: useful for general polynomial kernels, resulting in singular pencils.
         '''
         if self.pencil.type == "regular":
             return self.pencil
-        
-        # Get slice of polynomial that is orthogonal to the nullspace 
+
+        # Get slice of polynomial that is orthogonal to the nullspace
         O_poly = self.orthogonal_nullspace()
         Or_poly = O_poly[0:self.pencil.shape[0], :]
 
@@ -270,7 +282,7 @@ class QFunction():
 
         ''' Add equilibrium solutions to range '''
         sols = self.equilibria()
-        for sol in sols: 
+        for sol in sols:
             lambdaRange.append(sol["lambda"])
 
         for eig in self.stability_pencil.real_eigen():
@@ -303,7 +315,7 @@ class QFunction():
                 is_insert_nsd = True
             elif is_insert_nsd:
                 nsd_intervals[-1][1] = l
-                is_insert_nsd = False  
+                is_insert_nsd = False
 
             ''' Indefinite (instability) intervals '''
             if np.any( eigS > 0.0 ) and np.any( eigS < 0.0 ):
@@ -312,7 +324,7 @@ class QFunction():
                 is_insert_ind = True
             elif is_insert_ind:
                 ind_intervals[-1][1] = l
-                is_insert_ind = False  
+                is_insert_ind = False
 
             ''' Positive definite (instability) intervals '''
             if np.all( eigS > 0.0 ):
@@ -321,7 +333,7 @@ class QFunction():
                 is_insert_psd = True
             elif is_insert_psd:
                 psd_intervals[-1][1] = l
-                is_insert_psd = False  
+                is_insert_psd = False
 
         strip_size = (q_max - q_min)/40
         strip_alpha = 0.6
@@ -376,7 +388,66 @@ class QFunction():
         ax.set_ylim(q_min, q_max)
         ax.legend()
 
-    def compatibilize(self, plant: DynamicSystem, clf_dict: dict, cbf_dict, p = 1.0):
+    def compatibilize(self, plant: DynamicSystem, clf_dict: dict, p = 1.0):
+        '''
+        Algorithm for finding a compatible CLF shape.
+        '''
+        if isinstance(plant, LinearSystem):
+            A, B = plant._A, plant._B
+            G = B @ B.T
+        else:
+            raise NotImplementedError("Currently, compatibilization is implemented linear systems only.")
+
+        Hvfun = clf_dict["Hv_fun"]      # function for computing Hv
+        x0 = clf_dict["center"]         # clf center
+
+        def cost(var: np.ndarray):
+            '''
+            Objective function: find closest compatible CLF shape.
+            '''
+            eps = 1e-1
+            Hv = Hvfun(var)
+            cost_val = np.linalg.norm( Hv - clf_dict["Hv"] ) + eps*np.linalg.trace(Hv)
+
+            return cost_val
+
+        def compatibility_eigs(var: np.ndarray):
+            '''
+            Returns eigenvalues of
+            '''
+            Hv = Hvfun(var)
+            eigHv = np.linalg.eigvals(Hv)
+            print(f"Eigs of Hv = {eigHv}")
+
+            newN = p * G @ Hv - A
+            self.update( N=newN )
+
+            C = self.compatibility_matrix.sos_decomposition()
+
+            eigC = np.linalg.eigvals(C)
+            eigC.sort()
+            print(f"Eigens of C = {eigC}")
+
+            return eigC
+
+        var0 = sym2vector(clf_dict["Hv"])
+
+        # n = self.dim
+        # ndof = int(n*(n+1)/2)
+        # var0 = np.random.randn(ndof)
+
+        constr = [ {"type": "ineq", "fun": compatibility_eigs} ]
+        sol = minimize( fun=cost, x0=var0, constraints=constr, options={"disp": True, "maxiter": 1000} )
+
+        results = {
+                    "Hv": Hvfun(sol.x),
+                    "cost": cost(sol.x),
+                    "compatibility": compatibility_eigs(sol.x)
+                   }
+
+        return results
+
+    def old_compatibilize(self, plant: DynamicSystem, clf_dict: dict, cbf_dict, p = 1.0):
         '''
         This method computes a compatible Hessian matrix for the CLF,
         It recomputes the pencil and its q-function many times.

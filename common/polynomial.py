@@ -61,13 +61,48 @@ def to_array(coef: list[np.ndarray], symbol='x') -> np.ndarray[Poly]:
 
     return poly_arr
 
-def nullspace(poly_arr: np.ndarray[Poly], max_order = 20) -> np.ndarray[Poly]:
+def nullspace_of_degree(coefs: list[np.ndarray], degree):
+    '''
+    Algorithm for computing the nullspace polynomial N(λ) of degree 'degree' of another polynomial P(λ).
+    Returns the coefficients of N(λ) if such a polynomial exists, otherwise return None.
+
+    Input: - 'coefs' is a list[np.ndarray] with np.ndarray of ndim=2 representing the coefficients of P(λ);
+           - 'degree' is an integer representing the desired degree for N(λ).
+    '''
+    n,m = coefs[0].shape[0], coefs[0].shape[1]
+
+    for c in coefs:
+        if c.shape != (n,m):
+            raise TypeError("Coefficients must be a list of np.ndarray of the same dimensions.")
+
+    coef_deg = len(coefs)-1
+    Vmatrix = np.zeros([ n*(coef_deg + degree + 1), m*(degree+1) ])
+        
+    sliding_list = [ c for c in coefs ]
+    zeros = [ np.zeros((n,m)) for _ in range(degree) ]
+    sliding_list = zeros + sliding_list + zeros
+    
+    for i in range(coef_deg + degree + 1):
+        l = sliding_list[i:i+degree+1]
+        l.reverse()
+        Vmatrix[i*n:(i+1)*n,:] = np.hstack(l)
+
+    Null = sp.linalg.null_space(Vmatrix)
+    if Null.size != 0:
+        return [ Null[i*m:(i+1)*m,:] for i in range(degree+1) ]
+    else:
+        return None
+
+def nullspace(poly_arr: np.ndarray[Poly], max_order = 20, **kwargs) -> np.ndarray[Poly]:
     ''' 
-    Returns the minimum (right) nullspace polynomial of P(λ), that is,
+    Returns the (right) nullspace polynomial of P(λ), that is,
     a new polynomial matrix N(λ) = N0 + λ N1 + λ² N2 + ... of P(λ) satisfying P(λ) N(λ) = 0.
 
-    Inputs: - np.ndarray of numpy Polynomials
-            - max_degree is the maximum possible degree of N(λ)
+    If kwargs is empty, N(λ) is the minimum nullspace polynomial. 
+
+    Inputs: - np.ndarray of numpy Polynomials;
+            - max_degree is the maximum possible degree of N(λ);
+            - if a parameter named 'order' is passed, N(λ) will have the specified order, if possible.
     '''
     if not isinstance(poly_arr, np.ndarray):
         raise TypeError("Input must be a numpy array of Polynomials.")
@@ -76,41 +111,31 @@ def nullspace(poly_arr: np.ndarray[Poly], max_order = 20) -> np.ndarray[Poly]:
         poly_arr = poly_arr.reshape(1,-1)
 
     coefs, symbol = to_coef(poly_arr)
-    degree = len(coefs)-1
 
-    n, m = poly_arr.shape[0], poly_arr.shape[1]
-    for Qdegree in range(0, max_order+1):
+    ''' If order was passed, tries to find N(λ) of that order. Otherwise, tries increasing orders up to max_degree '''
 
-        Vmatrix = np.zeros([ n*(degree + Qdegree + 1), m*(Qdegree+1) ])
-        
-        sliding_list = [ c for c in coefs ]
-        zeros = [ np.zeros((n,m)) for _ in range(Qdegree) ]
-        sliding_list = zeros + sliding_list + zeros
-        
-        for i in range(degree + Qdegree + 1):
-            l = sliding_list[i:i+Qdegree+1]
-            l.reverse()
-            Vmatrix[i*n:(i+1)*n,:] = np.hstack(l)
+    if "degree" in kwargs.keys():
+        degree = kwargs["degree"]
+        null_coefs = nullspace_of_degree(coefs, degree)
+        return to_array(coef=null_coefs, symbol=symbol)
+    else:
+        for Qdegree in range(0, max_order+1):
 
-        Null = sp.linalg.null_space(Vmatrix)
-        if Null.size != 0:
-            break
+            null_coefs = nullspace_of_degree(coefs, Qdegree)
 
-        if Qdegree == max_order:
-            warnings.warn("P(λ) likely does not have a non-trivial right nullspace.")
-            return None
-
-    Ncoefs = [ Null[i*m:(i+1)*m,:] for i in range(Qdegree+1) ]
-    poly_array = to_array(coef=Ncoefs, symbol=symbol)
-
-    return poly_array
+            if null_coefs is not None:
+                return to_array(coef=null_coefs, symbol=symbol)
+            
+            if Qdegree == max_order:
+                warnings.warn("P(λ) likely does not have a non-trivial right nullspace.")
+                return None
 
 def companion_form(matrix_poly: list[np.ndarray] | np.ndarray[Poly]):
     ''' 
     Returns the M and N (deg*n, deg*n)-matrices of a linear matrix pencil λ M - N that is the equivalent companion form of a given matrix polynomial.
     '''
     if isinstance(matrix_poly, np.ndarray):
-        coefs = to_coef( matrix_poly )
+        coefs, symbol = to_coef( matrix_poly )
     elif isinstance(matrix_poly, list):
         coefs = matrix_poly
     else:
@@ -209,7 +234,6 @@ class Eigen():
     eigenvalue: complex
     rightEigenvectors: list | np.ndarray
     leftEigenvectors: list | np.ndarray
-    inertia: float                  # value of z_left' M z_right
 
 class MatrixPolynomial():
     '''
@@ -305,7 +329,7 @@ class MatrixPolynomial():
         ret_str = f"({self.shape[0]}"
         ret_str += "".join([ f"x{self.shape[dim]}" for dim in range(1,self.ndim) ])
         ret_str += "".join([ ')-dim {}'.format(type(self).__name__), f" on {self.symbol}: P({self.symbol}) = P₀"])
-        for k in range(1, self.degree+1):
+        for k in range(1, self._degree+1):
             k_str = str(k)
             power_str = "".join([ MatrixPolynomial.SUPS_INTS[int(k_str[i])] for i in range(len(k_str)) ])
             index_str = "".join([ MatrixPolynomial.SUBS_INTS[int(k_str[i])] for i in range(len(k_str)) ])
@@ -318,12 +342,12 @@ class MatrixPolynomial():
         Print the matrix polynomial P(λ) = P₀ + λ P₁ + λ² P₂ + ... 
         '''
         ret_str = self.__repr__() + ' with\n'
-        for k in range(0, self.degree+1):
+        for k in range(0, self._degree+1):
             k_str = str(k)
             index_str = "".join([ MatrixPolynomial.SUBS_INTS[int(k_str[i])] for i in range(len(k_str)) ])
             ret_str += f'P{index_str} = \n'
             ret_str += f'{self.coef[k]}'
-            if k < self.degree: ret_str += '\n'
+            if k < self._degree: ret_str += '\n'
 
         return ret_str
 
@@ -345,7 +369,7 @@ class MatrixPolynomial():
         closer to the main diagonal of the SOS matrix.
         '''
         # Compute SOS kernel first
-        self.sos_kern_deg = math.ceil(self.degree/2)
+        self.sos_kern_deg = math.ceil(self._degree/2)
         self.sos_locs = [ [] for _ in self.coef ]
         for exp in range(self.num_coef):
 
@@ -361,9 +385,6 @@ class MatrixPolynomial():
         if not self.type == "regular":
             return
         
-        # if self.degree % 2 != 0:
-        #     warnings.warn("Be aware that a polynomial matrix of odd degree can never be p.s.d.")
-
         self._compute_sos_locs()
         dim = self.shape[0]
         self.sos_dim = (self.sos_kern_deg + 1) * dim
@@ -490,6 +511,9 @@ class MatrixPolynomial():
 
         print(f"Test for SOS decomposition finished after {num_samples} random trials with error = {error}.")
 
+    def degree(self):
+        return self._degree
+
     def outer(poly1, poly2):
         ''' Outer product between MatrixPolynomials '''
         return MatrixPolynomial._multiply(poly1, poly2, type = 0)
@@ -549,7 +573,7 @@ class MatrixPolynomial():
         ''' Updates the number of coefs, max degree and reinitiaze sos decomposition if necessary '''
         old_num_coef = self.num_coef
         self.num_coef = len(self.coef)
-        self.degree = self.num_coef - 1
+        self._degree = self.num_coef - 1
         if self.num_coef != old_num_coef:
             self._init_sos_decomposition()
 
@@ -737,15 +761,10 @@ class MatrixPencil(MatrixPolynomial):
             zRight = null_space(P, rcond=1e-11)
             zLeft = null_space(P.T, rcond=1e-11)
 
-            zRight = zRight.reshape(self.shape[0], )
-            zLeft = zLeft.reshape(self.shape[0], )
-
-            inertia = zLeft.T @ self.M @ zRight
-
             if beta != 0:
-                eigens.append( Eigen(alpha, beta, alpha/beta, zRight, zLeft, inertia) )
+                eigens.append( Eigen(alpha, beta, alpha/beta, zRight, zLeft) )
             else:
-                eigens.append( Eigen(alpha, 0.0, np.inf if alpha.real > 0 else -np.inf, zRight, zLeft, inertia) )
+                eigens.append( Eigen(alpha, 0.0, np.inf if alpha.real > 0 else -np.inf, zRight, zLeft) )
 
         return eigens
 
