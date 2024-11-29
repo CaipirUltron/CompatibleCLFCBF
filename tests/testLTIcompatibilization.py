@@ -3,25 +3,39 @@ import matplotlib.pyplot as plt
 
 from dynamic_systems import LinearSystem
 from controllers.compatibility import MatrixPencil, QFunction
-from common import hessian_quadratic, vector2sym, sym2vector, genStableLI, randomR
+from common import hessian_quadratic, vector2sym, sym2vector, genStableLI, randomR, rot2D
 
 n, m = 2, 2
 
 # A, B = genStableLI(n, m, type='int', random_lim=(-10, +10))
-A, B = genStableLI(n, m, stabilize=False, type='float')
-plant = LinearSystem(initial_state=np.zeros(n), initial_control=np.zeros(n), A=A, B=B)
+# A, B = genStableLI(n, m, stabilize=False, type='float')
+
+A = np.zeros((n,n))
+B = np.eye(n)
 
 G = (B @ B.T)
 
+plant = LinearSystem(initial_state=np.zeros(n), initial_control=np.zeros(n), A=A, B=B)
+
 ''' ---------------------------- Define quadratic CLF and CBF ----------------------------------- '''
 
-CLFeigs = np.random.randint(low=1, high=10, size=n)
-CLFcenter = np.random.randn(n)
-Hv = hessian_quadratic(CLFeigs, randomR(n) )
+# CLFeigs = np.random.randint(low=1, high=10, size=n)
+# CLFcenter = np.random.randn(n)
+# Hv = hessian_quadratic(CLFeigs, randomR(n) )
 
-CBFeigs = np.random.randint(low=1, high=10, size=n)
-CBFcenter = np.random.randn(n)
-Hh = hessian_quadratic(CBFeigs, randomR(n) )
+# CBFeigs = np.random.randint(low=1, high=10, size=n)
+# CBFcenter = np.random.randn(n)
+# Hh = hessian_quadratic(CBFeigs, randomR(n) )
+
+CLFeigs = np.array([ 1.0, 1.0 ])
+CLFcenter = np.array([ 0.0, 0.0 ])
+rotCLF = rot2D(np.deg2rad(0))
+Hv = hessian_quadratic(CLFeigs, rotCLF )
+
+CBFeigs = np.array([ 8.0, 1.0 ])
+CBFcenter = np.array([ 0.0, 3.0 ])
+rotCBF = rot2D(np.deg2rad(90))
+Hh = hessian_quadratic(CBFeigs, rotCBF )
 
 p = 1.0
 
@@ -55,15 +69,15 @@ fig.suptitle('Compatibilization of LTI System')
 # Plot before compatibilization
 qfun.plot(ax[0])
 
-results = qfun.compatibilize( plant, clf_dict, p=p )
+# results = qfun.compatibilize( plant, clf_dict, p=p )
 
-newHv = results["Hv"]
-final_cost = results["cost"]
-compatibility = results["compatibility"]
+# newHv = results["Hv"]
+# final_cost = results["cost"]
+# compatibility = results["compatibility"]
 
-print("Results of compatibilization process are:")
-print(f"Original Hv = \n{Hv}, \nCompatible Hv = \n{newHv}")
-print(f"Final cost {final_cost}, compatibility eigenvalues = {compatibility}")
+# print("Results of compatibilization process are:")
+# print(f"Original Hv = \n{Hv}, \nCompatible Hv = \n{newHv}")
+# print(f"Final cost {final_cost}, compatibility eigenvalues = {compatibility}")
 
 # Plot after compatibilization
 qfun.plot(ax[1])

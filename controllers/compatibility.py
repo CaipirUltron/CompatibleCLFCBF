@@ -33,7 +33,7 @@ class QFunction():
         ''' Class parameters '''
         self.trim_tol = 1e-8
         self.real_tol = 1e-6
-        self.compatibility_params = {"eps1": 1.1,        # eps1 should be > 1
+        self.compatibility_params = {"eps1": 1.01,        # eps1 should be > 1
                                      "eps2": 1e-0 }      # eps2 should be small
 
         ''' Stability/compatibility matrices '''
@@ -82,8 +82,8 @@ class QFunction():
         self.n_poly = self.n_poly/norm_coef
         self.d_poly = self.d_poly/norm_coef
 
-        print(f"n(λ) = {self.n_poly}")
-        print(f"d(λ) = {self.d_poly}")
+        print(f"roots of n(λ) = { self.n_poly.roots() }")
+        print(f"roots of d(λ) = { self.d_poly.roots() }")
 
         ''' Computation of the zero-polynomial, for computing the boundary equilibrium points '''
         self.zero_poly = ( self.n_poly - self.d_poly )
@@ -417,7 +417,7 @@ class QFunction():
             '''
             Hv = Hvfun(var)
             eigHv = np.linalg.eigvals(Hv)
-            print(f"Eigs of Hv = {eigHv}")
+            # print(f"Eigs of Hv = {eigHv}")
 
             newN = p * G @ Hv - A
             self.update( N=newN )
@@ -426,7 +426,7 @@ class QFunction():
 
             eigC = np.linalg.eigvals(C)
             eigC.sort()
-            print(f"Eigens of C = {eigC}")
+            # print(f"Eigens of C = {eigC}")
 
             return eigC
 
