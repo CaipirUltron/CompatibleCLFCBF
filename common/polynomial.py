@@ -61,13 +61,17 @@ def to_array(coef: list[np.ndarray], symbol='x') -> np.ndarray[Poly]:
 
     return poly_arr
 
-def nullspace_of_degree(coefs: list[np.ndarray], degree):
+def nullspace_of_degree(coefs: list[np.ndarray], degree, **kwargs):
     '''
     Algorithm for computing the nullspace polynomial N(λ) of degree 'degree' of another polynomial P(λ).
     Returns the coefficients of N(λ) if such a polynomial exists, otherwise return None.
 
     Input: - 'coefs' is a list[np.ndarray] with np.ndarray of ndim=2 representing the coefficients of P(λ);
            - 'degree' is an integer representing the desired degree for N(λ).
+
+    Optional arguments:
+           - kwargs can contain an optional np.ndarray of numpy Polynomials ('poly'). 
+           If passed, computes the closest polynomial to that from the nullspace
     '''
     n,m = coefs[0].shape[0], coefs[0].shape[1]
 
@@ -89,7 +93,22 @@ def nullspace_of_degree(coefs: list[np.ndarray], degree):
 
     Null = sp.linalg.null_space(Vmatrix)
     if Null.size != 0:
-        return [ Null[i*m:(i+1)*m,:] for i in range(degree+1) ]
+
+        # If optional 'poly' argument was passed, computes closest poly to that one
+        for key, ele in kwargs.items():
+            if key.lower() == 'poly' and isinstance(ele, np.ndarray):
+
+                close_coefs, symbol = to_coef(ele)
+                B = np.vstack(close_coefs)
+                A = Null
+                Ap = np.linalg.pinv(A)
+
+                X = Ap @ B
+                Null = A @ X
+
+        coefs = [ Null[i*m:(i+1)*m,:] for i in range(degree+1) ]
+        return coefs
+
     else:
         return None
 
@@ -115,13 +134,14 @@ def nullspace(poly_arr: np.ndarray[Poly], max_order = 20, **kwargs) -> np.ndarra
     ''' If order was passed, tries to find N(λ) of that order. Otherwise, tries increasing orders up to max_degree '''
 
     if "degree" in kwargs.keys():
-        degree = kwargs["degree"]
-        null_coefs = nullspace_of_degree(coefs, degree)
+        degree = kwargs.pop("degree")
+        null_coefs = nullspace_of_degree(coefs, degree, **kwargs)
         return to_array(coef=null_coefs, symbol=symbol)
+    
     else:
         for Qdegree in range(0, max_order+1):
 
-            null_coefs = nullspace_of_degree(coefs, Qdegree)
+            null_coefs = nullspace_of_degree(coefs, Qdegree, **kwargs)
 
             if null_coefs is not None:
                 return to_array(coef=null_coefs, symbol=symbol)
@@ -162,6 +182,26 @@ def companion_form(matrix_poly: list[np.ndarray] | np.ndarray[Poly]):
             N[(i+1)*n:(i+2)*n, i*n:(i+1)*n] = np.eye(n)    # Additional -I's at the diagonal below
 
     return M, N
+
+def from_sos(SOS: np.ndarray, dim):
+    '''
+    Returns a np.ndarray[Poly] of dimension dim corresponding to given symmetric SOS matrix
+    '''
+    if SOS.shape[0] != SOS.shape[1] or np.linalg.norm( SOS - SOS.T ) >= 1e-6:
+        raise TypeError("SOS input matrix must be symmetric.")
+    
+    n = SOS.shape[0]
+    if n%dim != 0:
+        raise TypeError("Input block dimension is not compatible with SOS input matrix dimensions.")
+
+    degree = int(n/dim) - 1
+    coefs = [ np.zeros((dim,dim)) for _ in range(2*degree + 1) ]
+
+    for i in range(degree + 1):
+        for j in range(degree + 1):
+            coefs[i+j] += SOS[i*dim:(i+1)*dim, j*dim:(j+1)*dim]
+
+    return coefs
 
 def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np.ndarray:
     '''
@@ -404,6 +444,7 @@ class MatrixPolynomial():
         self.constraints = [ self.SOS >> 0 ]
         for locs, c_param in zip(self.sos_locs, self.coef_params):
             self.constraints += [ sum([ self.SOSt[index] if index[0]==index[1] else self.SOSt[index] + self.SOSt[index].T for index in locs ]) == c_param ]
+
         self.cost = cvx.norm( self.SOS - cvx.bmat(self.SOSt.tolist()) )
         self.sos_problem = cvx.Problem( cvx.Minimize( self.cost ), self.constraints )
 
@@ -492,11 +533,11 @@ class MatrixPolynomial():
         
         return 0.5 * ( self.poly_array + type * self.poly_array.T )
 
-    def _test_sos_decomposition(self, num_samples):
+    def _test_sos_decomposition(self, num_samples, **kwargs):
         '''
         Test method for SOS decomposition.
         '''
-        sos_matrix = self.sos_decomposition(verbose=True)
+        sos_matrix = self.sos_decomposition(verbose=True, **kwargs)
 
         def call(l):
             Lambda = np.vstack([ (l**k)*np.eye(*self.shape) for k in range(self.sos_kern_deg+1) ])
@@ -577,14 +618,12 @@ class MatrixPolynomial():
         if self.num_coef != old_num_coef:
             self._init_sos_decomposition()
 
-    def nullspace(self) -> np.ndarray[Poly]:
+    def nullspace(self, **kwargs) -> np.ndarray[Poly]:
         ''' 
         Returns the minimum (right) nullspace polynomial of P(λ), that is,
         a new polynomial matrix N(λ) = N0 + λ N1 + λ² N2 + ... of P(λ) satisfying P(λ) N(λ) = 0.
-
-        Inputs: - max_degree is the maximum possible degree of N(λ)
         '''
-        return nullspace(self.poly_array, self.symbol)
+        return nullspace(self.poly_array, **kwargs)
 
     def symmetric(self) -> np.ndarray[Poly]:
         '''
@@ -605,9 +644,12 @@ class MatrixPolynomial():
         M, N = companion_form( self.coef )
         return MatrixPencil( M, N )
 
-    def sos_decomposition(self, verbose=False):
+    def sos_decomposition(self, verbose=False, standard=False):
         '''
-        SOS decomposition of MatrixPolynomial
+        SOS decomposition of MatrixPolynomial.
+
+        Inputs: - verbose = True/False: shows optimization messages
+                - standard = True/False: if True, performs standard sos_decomposition, with 0.5 * (off-diagonal terms)
         '''
         for k, c in enumerate(self.coef):
             self.coef_params[k].value = c
@@ -617,6 +659,18 @@ class MatrixPolynomial():
             print(f"SOS decomposition problem returned with status {self.sos_problem.status}, final cost = {self.cost.value}")
 
         sos_matrix = np.block([[ self.SOSt[i,j].value for j in range(self.sos_kern_deg+1) ] for i in range(self.sos_kern_deg+1) ])
+            
+        # # valid if MatrixPolynomial is symmetric
+        # n, m = self.shape
+        # sos_matrix = np.zeros([self.sos_dim, self.sos_dim])
+        # for i in range(self.sos_kern_deg+1):
+        #     for j in range(self.sos_kern_deg+1):
+        #         if i == j:
+        #             sos_matrix[i*n:(i+1)*n, j*m:(j+1)*m] = 0.5*self.coef[i+j]
+        #         if i < j:
+        #             sos_matrix[i*n:(i+1)*n, j*m:(j+1)*m] = 0.5*self.coef[i+j]
+        # sos_matrix += sos_matrix.T
+
         return sos_matrix
 
     @property

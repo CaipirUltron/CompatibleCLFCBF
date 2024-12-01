@@ -33,13 +33,17 @@ class QFunction():
         ''' Class parameters '''
         self.trim_tol = 1e-8
         self.real_tol = 1e-6
-        self.compatibility_params = {"eps1": 1.01,        # eps1 should be > 1
+        self.compatibility_params = {"eps1": 1.00,        # eps1 should be > 1
                                      "eps2": 1e-0 }      # eps2 should be small
 
-        ''' Stability/compatibility matrices '''
+        ''' Stability matrices '''
         stb_dim = self.dim-1
         self.stability_matrix: MatrixPolynomial = MatrixPolynomial.zeros(size=(stb_dim, stb_dim))
         self.stability_pencil: MatrixPencil = None
+
+        ''' Compatibility matrices '''
+        self.Dmatrix: MatrixPolynomial = MatrixPolynomial.zeros(size=(stb_dim, stb_dim))
+        self.Smatrix: MatrixPolynomial = MatrixPolynomial.zeros(size=(stb_dim, stb_dim))
         self.compatibility_matrix: MatrixPolynomial = MatrixPolynomial.zeros(size=(stb_dim, stb_dim))
 
         self._compute_polynomials()
@@ -82,26 +86,52 @@ class QFunction():
         self.n_poly = self.n_poly/norm_coef
         self.d_poly = self.d_poly/norm_coef
 
-        # print(f"roots of n(λ) = { self.n_poly.roots() }")
-        # print(f"roots of d(λ) = { self.d_poly.roots() }")
+        # print(f"roots of n(λ) = \n{ self.n_poly.roots() }")
+        # print(f"roots of d(λ) = \n{ self.d_poly.roots() }")
 
         ''' Computation of the zero-polynomial, for computing the boundary equilibrium points '''
         self.zero_poly = ( self.n_poly - self.d_poly )
 
         ''' Computation of stability properties of the boundary equilibrium points '''
         self.divisor_poly, self.v_poly = self._v_poly()
-
-        # print(f"v(λ) = {self.v_poly}")
-        # print(f"div(λ) = {self.divisor_poly}")
-
         self._stability_matrix()
 
         ''' Computation of compatibility matrix polynomial '''
         self._compatibility_matrix()
 
-        # C = self.compatibility_matrix.sos_decomposition()
-        # eigC = np.linalg.eigvals(C)
-        # print(f"Compatibility eigenvalues = {eigC}")
+        if self.is_compatible():
+            print("Q-function is compatible.")
+        else:
+            print("Q-function is not compatible.")
+
+    def _init_compatible_matrix_opt(self):
+
+        ''' Setup CVXPY parameters and variables '''
+        self.c_dim = self.Dmatrix.sos_dim
+
+        self.eps = cvx.Variable( nonneg=True )
+        self.delta = cvx.Variable( nonneg=True )
+
+        self.D = cvx.Variable( (self.c_dim, self.c_dim), symmetric=True )
+        self.Seps = cvx.Variable( (self.c_dim, self.c_dim), symmetric=True )
+
+        self.Dparams = [ cvx.Parameter( shape=self.Dmatrix.shape ) for _ in self.Dmatrix.coef ]
+        self.Sparams = [ cvx.Parameter( shape=self.Smatrix.shape ) for _ in self.Smatrix.coef ]
+
+        self.constraints = []
+
+        for locs, Dparam in zip(self.Dmatrix.sos_locs, self.Dparams):
+            self.constraints += [ sum([ self.D[index] if index[0]==index[1] else self.D[index] + self.D[index].T for index in locs ]) == Dparam ]
+
+        for locs, Sparam in zip(self.Smatrix.sos_locs, self.Sparams):
+            self.constraints += [ sum([ self.Seps[index] if index[0]==index[1] else self.Seps[index] + self.Seps[index].T for index in locs ]) == Sparam * self.eps ]
+
+        ''' Setup CVXPY cost, constraints and problem '''
+        self.C = self.D + self.Seps
+        self.constraints += [ self.C + self.delta * np.eye(self.c_dim) >> 0 ]
+
+        self.comp_cost = cvx.norm( self.delta )
+        self.comp_problem = cvx.Problem( cvx.Minimize( self.comp_cost ), constraints=self.constraints )
 
     def _v_poly(self) -> tuple[Poly, np.ndarray[Poly]]:
         '''
@@ -129,21 +159,28 @@ class QFunction():
         return div, v
 
     def _stability_matrix(self) -> MatrixPolynomial:
-        ''' Computes the stability polynomial matrix '''
-
+        ''' 
+        Computes the stability polynomial matrix.
+        '''
         nablah = ( self.H @ self.v_poly )
 
-        ''' Computes N(λ), the nullspace matrix polynomial to ∇h(λ) of appropriate degree '''
+        ''' Computes Q(λ), the nullspace matrix polynomial to ∇h(λ) of appropriate degree '''
         S_deg = self.d_poly.degree() - 1
         null_deg = math.floor(S_deg / 2)
-        Q_matrix = nullspace( nablah, degree=null_deg )[:,0:self.dim-1]
 
-        print(f"Q(λ) of shape {Q_matrix.shape} = \n{Q_matrix}")
+        if hasattr(self, "Q_matrix"):
+            self.Q_matrix = nullspace( nablah, degree=null_deg, poly=self.Q_matrix )
+        else:
+            self.Q_matrix = nullspace( nablah, degree=null_deg )[:,0:self.dim-1]
+
+        # print(f"Q(λ) of shape {self.Q_matrix.shape} = \n{self.Q_matrix}")
 
         ''' Computes the stability matrix polynomial from N(λ) '''
         Psym = self.pencil.symmetric()
-        S_matrix = Q_matrix.T @ Psym @ Q_matrix
+        S_matrix = self.Q_matrix.T @ Psym @ self.Q_matrix
         self.stability_matrix.update( S_matrix )
+
+        # print(f"S(λ) = \n{self.stability_matrix}")
 
         if self.stability_pencil is None:
             self.stability_pencil = self.stability_matrix.companion_form()
@@ -156,22 +193,40 @@ class QFunction():
         Compatibility matrix is a sufficient condition for compatibility of the CLF-CBF pair and given Linear System
         '''
         eps1 = self.compatibility_params["eps1"]
-        eps2 = self.compatibility_params["eps2"]
 
         safe_zero_poly = self.n_poly - eps1 * self.d_poly
-        identity_part = np.diag([ safe_zero_poly for _ in range(self.dim-1) ])
+        self.Dmatrix = MatrixPolynomial( np.diag([ safe_zero_poly for _ in range(self.dim-1) ]) )
 
-        symb = self.pencil.symbol
-        lambda_poly = np.array([ Poly([0, 1], symbol=symb) ])
-        stability_part = eps2 * lambda_poly * self.stability_matrix.poly_array
+        lambda_poly = np.array([ Poly([0, 1], symbol=self.pencil.symbol) ])
+        self.Smatrix = MatrixPolynomial( lambda_poly * self.stability_matrix.poly_array )
 
-        compatibility = identity_part + stability_part
-        self.compatibility_matrix.update(compatibility)
+        if not hasattr(self, 'comp_problem'):
+            self._init_compatible_matrix_opt()
+
+        for k, c in enumerate(self.Dmatrix.coef):
+            self.Dparams[k].value = c
+
+        for k, c in enumerate(self.Smatrix.coef):
+            self.Sparams[k].value = c
+
+        self.comp_problem.solve(solver = 'SCS', verbose=False)
+        print(f"Compatibilization problem returned with status {self.comp_problem.status}, final cost = {self.comp_cost.value}")
+
+        compatibility_coefs = from_sos( self.C.value, dim=self.stability_matrix.shape[0] )
+        self.compatibility_matrix.update( compatibility_coefs )
 
         # print(f"n(λ) degree = { self.n_poly.degree() }")
         # print(f"d(λ) degree = { self.d_poly.degree() }")
         # print(f"n(λ) - eps1 d(λ) degree = { safe_zero_poly.degree() }")
         # print(f"S(λ) = {self.stability_matrix}")
+
+    def is_compatible(self):
+        ''' True/False if Q-function is compatible/not compatible '''
+
+        C = self.compatibility_matrix.sos_decomposition()
+        eigC = np.linalg.eigvals(C)
+
+        return np.all(eigC > 0)
 
     def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
         '''
@@ -409,7 +464,7 @@ class QFunction():
             '''
             eps = 1e-1
             Hv = Hvfun(var)
-            cost_val = np.linalg.norm( Hv - clf_dict["Hv"] ) + eps*np.linalg.trace(Hv)
+            cost_val = np.linalg.norm( Hv - clf_dict["Hv"] )
 
             return cost_val
 
@@ -419,7 +474,7 @@ class QFunction():
             '''
             Hv = Hvfun(var)
             eigHv = np.linalg.eigvals(Hv)
-            # print(f"Eigs of Hv = {eigHv}")
+            print(f"Eigs of Hv = {eigHv}")
 
             newN = p * G @ Hv - A
             self.update( N=newN )
