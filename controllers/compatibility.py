@@ -34,7 +34,7 @@ class QFunction():
         self.trim_tol = 1e-8
         self.real_tol = 1e-6
         self.compatibility_eps = 1.0        # should be > 1
-        self.compatibility_tol = -1e-2      # tolerance on the eigenvalues of C so that the Qfunction is considered compatible
+        self.compatibility_tol = -1e-6      # tolerance on the eigenvalues of C so that the Qfunction is considered compatible
 
         ''' Stability matrices '''
         stb_dim = self.dim-1
@@ -110,10 +110,10 @@ class QFunction():
         Cdim = self.dim-1
         Cshape = ( Cdim, Cdim )
 
-        if self.Dmatrix.degree() != self.Smatrix.degree():
-            raise Exception("Degrees of D(λ) and λS(λ) should be the same.")
+        if self.zero_poly.degree() != self.Smatrix.degree():
+            raise Exception("Degrees of d(λ) and λS(λ) should be the same.")
 
-        Cdegree = self.Dmatrix.degree()
+        Cdegree = self.zero_poly.degree()
         sos_kern_deg = math.ceil(Cdegree/2)
         sos_dim = (sos_kern_deg + 1) * Cdim
 
@@ -125,17 +125,18 @@ class QFunction():
                 else:
                     self.Cblks[i,j] = self.Cblks[j,i].T
 
+        # self.Ivar = cvx.Variable( shape=Cshape, PSD=True )
         self.Eps = cvx.Variable( shape=Cshape, PSD=True )
         self.delta = cvx.Variable()
 
-        self.Dparams = [ cvx.Parameter( shape=Cshape ) for _ in self.Dmatrix.coef ]
+        self.dparams = [ cvx.Parameter() for _ in self.zero_poly.coef ]
         self.Sparams = [ cvx.Parameter( shape=Cshape ) for _ in self.Smatrix.coef ]
 
         ''' Setup CVXPY cost, constraints and problem '''
         self.constraints = []
 
-        for locs, Dparam, Sparam in zip( sos_locations( Cdegree ), self.Dparams, self.Sparams ):
-            self.constraints += [ sum([ self.Cblks[index] if index[0]==index[1] else self.Cblks[index] + self.Cblks[index].T for index in locs ]) == Dparam + self.Eps @ Sparam ]
+        for locs, dparam, Sparam in zip( sos_locations( Cdegree ), self.dparams, self.Sparams ):
+            self.constraints += [ sum([ self.Cblks[index] if index[0]==index[1] else self.Cblks[index] + self.Cblks[index].T for index in locs ]) == dparam * self.Eps + Sparam ]
 
         self.C = cvx.bmat( self.Cblks.tolist() )
         self.constraints += [ self.C >> - self.delta * np.eye(sos_dim) ]
@@ -202,9 +203,10 @@ class QFunction():
         '''
         Compatibility matrix is a sufficient condition for compatibility of the CLF-CBF pair and given Linear System
         '''
-        safe_zero_poly = self.n_poly - self.compatibility_eps * self.d_poly
-        diag_poly = np.array([[ safe_zero_poly if i == j else Poly([0.0],symbol=safe_zero_poly.symbol) for j in range(self.dim-1) ] for i in range(self.dim-1) ])
-        self.Dmatrix = MatrixPolynomial( diag_poly )
+        self.zero_poly = self.n_poly - self.compatibility_eps * self.d_poly
+
+        # diag_poly = np.array([[ safe_zero_poly if i == j else Poly([0.0],symbol=safe_zero_poly.symbol) for j in range(self.dim-1) ] for i in range(self.dim-1) ])
+        # self.Dmatrix = MatrixPolynomial( diag_poly )
 
         lambda_poly = np.array([ Poly([0, 1], symbol=self.pencil.symbol) ])
         self.Smatrix = MatrixPolynomial( lambda_poly * self.stability_matrix.poly_array )
@@ -212,8 +214,8 @@ class QFunction():
         if not hasattr(self, 'comp_problem'):
             self._init_compatible_opt()
 
-        for k, c in enumerate(self.Dmatrix.coef):
-            self.Dparams[k].value = c
+        for k, c in enumerate(self.zero_poly.coef):
+            self.dparams[k].value = c
 
         for k, c in enumerate(self.Smatrix.coef):
             self.Sparams[k].value = c
@@ -229,8 +231,9 @@ class QFunction():
 
         C = self.compatibility_matrix.sos_decomposition()
         eigC = np.linalg.eigvals(C)
-
-        print(f"Eigs of C = {eigC}")
+        eigC.sort()
+        
+        print(f"Eigs of C = \n{eigC}")
         return np.all(eigC > self.compatibility_tol)
 
     def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
