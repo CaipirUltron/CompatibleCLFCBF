@@ -33,8 +33,8 @@ class QFunction():
         ''' Class parameters '''
         self.trim_tol = 1e-8
         self.real_tol = 1e-6
-        self.compatibility_params = {"eps1": 1.00,        # eps1 should be > 1
-                                     "eps2": 1e-0 }      # eps2 should be small
+        self.compatibility_eps = 1.0        # should be > 1
+        self.compatibility_tol = -1e-2      # tolerance on the eigenvalues of C so that the Qfunction is considered compatible
 
         ''' Stability matrices '''
         stb_dim = self.dim-1
@@ -104,31 +104,41 @@ class QFunction():
         else:
             print("Q-function is not compatible.")
 
-    def _init_compatible_matrix_opt(self):
+    def _init_compatible_opt(self):
 
         ''' Setup CVXPY parameters and variables '''
-        self.c_dim = self.Dmatrix.sos_dim
+        Cdim = self.dim-1
+        Cshape = ( Cdim, Cdim )
 
-        self.eps = cvx.Variable( nonneg=True )
-        self.delta = cvx.Variable( nonneg=True )
+        if self.Dmatrix.degree() != self.Smatrix.degree():
+            raise Exception("Degrees of D(λ) and λS(λ) should be the same.")
 
-        self.D = cvx.Variable( (self.c_dim, self.c_dim), symmetric=True )
-        self.Seps = cvx.Variable( (self.c_dim, self.c_dim), symmetric=True )
+        Cdegree = self.Dmatrix.degree()
+        sos_kern_deg = math.ceil(Cdegree/2)
+        sos_dim = (sos_kern_deg + 1) * Cdim
 
-        self.Dparams = [ cvx.Parameter( shape=self.Dmatrix.shape ) for _ in self.Dmatrix.coef ]
-        self.Sparams = [ cvx.Parameter( shape=self.Smatrix.shape ) for _ in self.Smatrix.coef ]
+        self.Cblks = np.zeros((sos_kern_deg+1, sos_kern_deg+1), dtype=object)
+        for i in range(sos_kern_deg+1):
+            for j in range(sos_kern_deg+1):
+                if i <= j:
+                    self.Cblks[i,j] = cvx.Variable( shape=Cshape, symmetric=True if i==j else False )
+                else:
+                    self.Cblks[i,j] = self.Cblks[j,i].T
 
-        self.constraints = []
+        self.Eps = cvx.Variable( shape=Cshape, PSD=True )
+        self.delta = cvx.Variable()
 
-        for locs, Dparam in zip(self.Dmatrix.sos_locs, self.Dparams):
-            self.constraints += [ sum([ self.D[index] if index[0]==index[1] else self.D[index] + self.D[index].T for index in locs ]) == Dparam ]
-
-        for locs, Sparam in zip(self.Smatrix.sos_locs, self.Sparams):
-            self.constraints += [ sum([ self.Seps[index] if index[0]==index[1] else self.Seps[index] + self.Seps[index].T for index in locs ]) == Sparam * self.eps ]
+        self.Dparams = [ cvx.Parameter( shape=Cshape ) for _ in self.Dmatrix.coef ]
+        self.Sparams = [ cvx.Parameter( shape=Cshape ) for _ in self.Smatrix.coef ]
 
         ''' Setup CVXPY cost, constraints and problem '''
-        self.C = self.D + self.Seps
-        self.constraints += [ self.C + self.delta * np.eye(self.c_dim) >> 0 ]
+        self.constraints = []
+
+        for locs, Dparam, Sparam in zip( sos_locations( Cdegree ), self.Dparams, self.Sparams ):
+            self.constraints += [ sum([ self.Cblks[index] if index[0]==index[1] else self.Cblks[index] + self.Cblks[index].T for index in locs ]) == Dparam + self.Eps @ Sparam ]
+
+        self.C = cvx.bmat( self.Cblks.tolist() )
+        self.constraints += [ self.C >> - self.delta * np.eye(sos_dim) ]
 
         self.comp_cost = cvx.norm( self.delta )
         self.comp_problem = cvx.Problem( cvx.Minimize( self.comp_cost ), constraints=self.constraints )
@@ -192,16 +202,15 @@ class QFunction():
         '''
         Compatibility matrix is a sufficient condition for compatibility of the CLF-CBF pair and given Linear System
         '''
-        eps1 = self.compatibility_params["eps1"]
-
-        safe_zero_poly = self.n_poly - eps1 * self.d_poly
-        self.Dmatrix = MatrixPolynomial( np.diag([ safe_zero_poly for _ in range(self.dim-1) ]) )
+        safe_zero_poly = self.n_poly - self.compatibility_eps * self.d_poly
+        diag_poly = np.array([[ safe_zero_poly if i == j else Poly([0.0],symbol=safe_zero_poly.symbol) for j in range(self.dim-1) ] for i in range(self.dim-1) ])
+        self.Dmatrix = MatrixPolynomial( diag_poly )
 
         lambda_poly = np.array([ Poly([0, 1], symbol=self.pencil.symbol) ])
         self.Smatrix = MatrixPolynomial( lambda_poly * self.stability_matrix.poly_array )
 
         if not hasattr(self, 'comp_problem'):
-            self._init_compatible_matrix_opt()
+            self._init_compatible_opt()
 
         for k, c in enumerate(self.Dmatrix.coef):
             self.Dparams[k].value = c
@@ -214,19 +223,15 @@ class QFunction():
 
         compatibility_coefs = from_sos( self.C.value, dim=self.stability_matrix.shape[0] )
         self.compatibility_matrix.update( compatibility_coefs )
-
-        # print(f"n(λ) degree = { self.n_poly.degree() }")
-        # print(f"d(λ) degree = { self.d_poly.degree() }")
-        # print(f"n(λ) - eps1 d(λ) degree = { safe_zero_poly.degree() }")
-        # print(f"S(λ) = {self.stability_matrix}")
-
+ 
     def is_compatible(self):
         ''' True/False if Q-function is compatible/not compatible '''
 
         C = self.compatibility_matrix.sos_decomposition()
         eigC = np.linalg.eigvals(C)
 
-        return np.all(eigC > 0)
+        print(f"Eigs of C = {eigC}")
+        return np.all(eigC > self.compatibility_tol)
 
     def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
         '''

@@ -261,6 +261,27 @@ def solve_poly_linearsys(T: np.ndarray, S: np.ndarray, b_poly: np.ndarray) -> np
 
     return x_poly
 
+def sos_locations(max_deg):
+    '''
+    Computes the index matrix representing the rule for placing the coefficients of an polynomial of degree 'max_deg' 
+    in the correct places on the shape matrix of the SOS representation.
+
+    Input: - deg is the polynomial maximum degree
+    Returns = list with all possible locations for each coef., per degree up to max. degree
+    '''
+    sos_kern_deg = math.ceil(max_deg/2)
+    sos_locs = [ [] for _ in range(max_deg+1) ]
+    
+    for exp in range(max_deg+1):
+
+        # Checks the possible (i,j) locations on SOS matrix where the monomial can be put
+        for (i,j) in product(range(sos_kern_deg+1),range(sos_kern_deg+1)):
+            if i > j: continue
+            if exp == i + j:
+                sos_locs[exp].append( (i,j) )
+
+    return sos_locs
+
 @dataclass
 class Eigen():
     ''' 
@@ -308,7 +329,7 @@ class MatrixPolynomial():
             self.ndim = coef[powers[0]].ndim
             self.shape = coef[powers[0]].shape
         elif isinstance(coef, np.ndarray):
-            degrees = [ c.degree() for index, c in np.ndenumerate(coef) ]
+            degrees = [ c.degree() if isinstance(c, Poly) else 0 for index, c in np.ndenumerate(coef)  ]
             self.num_coef = max(degrees) + 1
             self.ndim = coef.ndim
             self.shape = coef.shape
@@ -402,36 +423,22 @@ class MatrixPolynomial():
             error_msg += f" is not compatible with {np.ndarray} of shape {self.shape}."
             raise TypeError(error_msg)
 
-    def _compute_sos_locs(self):
-        '''
-        Computes the index matrix representing the rule for placing the coefficients in the correct places on the 
-        shape matrix of the SOS representation. Algorithm gives preference for putting the elements of coeffs 
-        closer to the main diagonal of the SOS matrix.
-        '''
-        # Compute SOS kernel first
-        self.sos_kern_deg = math.ceil(self._degree/2)
-        self.sos_locs = [ [] for _ in self.coef ]
-        for exp in range(self.num_coef):
-
-            # Checks the possible (i,j) locations on SOS matrix where the monomial can be put
-            for (i,j) in product(range(self.sos_kern_deg+1),range(self.sos_kern_deg+1)):
-                if i > j: continue
-                if exp == i + j:
-                    self.sos_locs[exp].append( (i,j) )
-
     def _init_sos_decomposition(self):
         ''' Initialization of SOS decomposition '''
 
         if not self.type == "regular":
             return
         
-        self._compute_sos_locs()
         dim = self.shape[0]
-        self.sos_dim = (self.sos_kern_deg + 1) * dim
+        degree = self.degree()
+
+        self.sos_kern_deg = math.ceil(degree/2)
+        sos_dim = (self.sos_kern_deg + 1) * dim
 
         ''' Setup CVXPY parameters and variables '''
         self.coef_params = [ cvx.Parameter( shape=self.shape ) for _ in self.coef ]
-        self.SOS = cvx.Variable( (self.sos_dim, self.sos_dim), symmetric=True )
+        self.SOS = cvx.Variable( (sos_dim, sos_dim), symmetric=True )
+
         self.SOSt = np.zeros((self.sos_kern_deg+1, self.sos_kern_deg+1), dtype=object)
         for i in range(self.sos_kern_deg+1):
             for j in range(self.sos_kern_deg+1):
@@ -442,7 +449,7 @@ class MatrixPolynomial():
 
         ''' Setup CVXPY cost, constraints and problem '''
         self.constraints = [ self.SOS >> 0 ]
-        for locs, c_param in zip(self.sos_locs, self.coef_params):
+        for locs, c_param in zip( sos_locations( degree ) , self.coef_params):
             self.constraints += [ sum([ self.SOSt[index] if index[0]==index[1] else self.SOSt[index] + self.SOSt[index].T for index in locs ]) == c_param ]
 
         self.cost = cvx.norm( self.SOS - cvx.bmat(self.SOSt.tolist()) )
@@ -659,17 +666,6 @@ class MatrixPolynomial():
             print(f"SOS decomposition problem returned with status {self.sos_problem.status}, final cost = {self.cost.value}")
 
         sos_matrix = np.block([[ self.SOSt[i,j].value for j in range(self.sos_kern_deg+1) ] for i in range(self.sos_kern_deg+1) ])
-            
-        # # valid if MatrixPolynomial is symmetric
-        # n, m = self.shape
-        # sos_matrix = np.zeros([self.sos_dim, self.sos_dim])
-        # for i in range(self.sos_kern_deg+1):
-        #     for j in range(self.sos_kern_deg+1):
-        #         if i == j:
-        #             sos_matrix[i*n:(i+1)*n, j*m:(j+1)*m] = 0.5*self.coef[i+j]
-        #         if i < j:
-        #             sos_matrix[i*n:(i+1)*n, j*m:(j+1)*m] = 0.5*self.coef[i+j]
-        # sos_matrix += sos_matrix.T
 
         return sos_matrix
 
