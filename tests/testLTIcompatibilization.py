@@ -6,7 +6,7 @@ from dynamic_systems import LinearSystem
 from controllers.compatibility import MatrixPencil, QFunction
 from common import hessian_quadratic, vector2sym, rot2D, randomR, genStableLTI
 
-n, m = 3, 3
+n, m = 2, 2
 
 # A, B = genStableLTI(n, m, type='float', Alims=(-2, 2), Blims=(-2, 2), place=True)
 
@@ -35,14 +35,14 @@ Hh = hessian_quadratic(CBFeigs, randomR(n) )
 # CBFcenter = np.array([ 0.0, 3.0, 3.0 ])
 # Hh = hessian_quadratic(CBFeigs, randomR(n) )
 
-# CLFeigs = np.array([ 10.0, 1.0 ])
+# CLFeigs = np.array([ 20.0, 1.0 ])
 # CLFcenter = np.array([ 0.0, 0.0 ])
 # rotCLF = rot2D(np.deg2rad(0))
 # Hv = hessian_quadratic(CLFeigs, rotCLF )
 
 # CBFeigs = np.array([ 1.0, 4.0 ])
 # CBFcenter = np.array([ 0.0, 3.0 ])
-# rotCBF = rot2D(np.deg2rad(55.0))
+# rotCBF = rot2D(np.deg2rad(89.0))
 # Hh = hessian_quadratic(CBFeigs, rotCBF )
 
 p = 1.0
@@ -57,8 +57,8 @@ for k, eig in enumerate( pencil.eigens ):
     print(f"{k+1}-th gen. eigenvalue = {eig.eigenvalue}.")
 
 qfun = QFunction(pencil, Hh, w)
-for k, eig in enumerate( qfun.Smatrix_pencil.real_eigen() ):
-    print(f"{k+1}-th real eigenvalue of S(λ) companion form = {eig.eigenvalue}")
+# for k, eig in enumerate( qfun.Smatrix_pencil.real_eigen() ):
+#     print(f"{k+1}-th real eigenvalue of S(λ) companion form = {eig.eigenvalue}")
 
 # C = qfun.compatibility_matrix.sos_decomposition()
 # eigC = np.linalg.eigvals(C)
@@ -76,7 +76,7 @@ clf_dict = {"Hv_fun": Hvfun, "center": CLFcenter, "Hv": Hv }
 ''' ------------------------------------ Plot ----------------------------------- '''
 
 fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10.0, 5.0), layout="constrained")
-fig.suptitle('Q-function')
+fig.suptitle('Q-function plot')
 
 # Plot before compatibilization
 qfun.plot(ax)

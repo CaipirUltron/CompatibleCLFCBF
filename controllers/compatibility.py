@@ -5,6 +5,7 @@ import matplotlib.colors as mcolors
 
 from matplotlib.axes import Axes
 from numpy.polynomial import Polynomial as Poly
+from numpy.polynomial.polynomial import polydiv
 
 from scipy import signal
 from scipy.optimize import fsolve, minimize
@@ -91,7 +92,7 @@ class QFunction():
         # print(f"roots of d(λ) = \n{ self.d_poly.roots() }")
 
         ''' Computation of the zero-polynomial, for computing the boundary equilibrium points '''
-        self.zero_poly = ( self.n_poly - self.d_poly )
+        self.zero_poly = self.n_poly - self.d_poly
 
         ''' Computation of stability properties of the boundary equilibrium points '''
         self.divisor_poly, self.v_poly = self._v_poly()
@@ -100,10 +101,10 @@ class QFunction():
         ''' Computation of compatibility matrix polynomial '''
         self._compatibility_matrix()
 
-        if self.is_compatible():
-            print("Q-function is compatible.")
-        else:
-            print("Q-function is not compatible.")
+        # if self.is_compatible():
+        #     print("Q-function is compatible.")
+        # else:
+        #     print("Q-function is not compatible.")
 
     def _init_comp_convex_opt(self):
 
@@ -172,15 +173,12 @@ class QFunction():
         self.gradNull = nullspace( nablah, degree=null_deg )
 
         self.null_dim = self.gradNull.shape[1]
-        # self.Lambda = np.eye(self.null_dim, self.stb_dim)
         self.Lambda = np.random.randn(self.null_dim, self.stb_dim)
 
         if hasattr(self, "Rmatrix"):
             self.Rmatrix = nullspace( nablah, degree=null_deg, poly=self.Rmatrix )
         else:
             self.Rmatrix = self.gradNull @ self.Lambda
-
-        print(f"Shape pf R(λ) = {self.Rmatrix.shape}")
 
         ''' Computes the stability matrix polynomial from N(λ) '''
         self.Psym = self.pencil.symmetric()
@@ -191,6 +189,19 @@ class QFunction():
             self.Smatrix_pencil.update( M = newM, N = newN )
         else:
             self.Smatrix_pencil = self.Smatrix.companion_form()
+
+        for k, eig in enumerate( self.Smatrix_pencil.real_eigen() ):
+            print(f"{k+1}-th real eigenvalue of S(λ) = {eig.eigenvalue}")
+
+        ''' TEST '''
+
+        Lambda = np.random.randn(self.null_dim, self.stb_dim)
+        Rmatrix = self.gradNull @ Lambda
+
+        Smatrix = MatrixPolynomial( Rmatrix.T @ self.Psym @ self.Rmatrix )
+        Smatrix_pencil = Smatrix.companion_form()
+        for k, eig in enumerate( Smatrix_pencil.real_eigen() ):
+            print(f"{k+1}-th real eigenvalue of new S(λ) = {eig.eigenvalue}")
 
     def _compatibility_matrix(self) -> MatrixPolynomial:
         '''
@@ -230,14 +241,13 @@ class QFunction():
         self.sosC = np.random.randn(*(self.sosC_dim, self.sosC_dim))
         self.sosC = self.sosC.T @ self.sosC
 
-        self._compatibility_opt()
+        # self._compatibility_opt()
 
     def _compatibility_opt(self) -> MatrixPolynomial:
         '''
         Computes compatibility matrix by sequentially solving SDP/nonconvex opt
         '''
         num_tests = 1
-
         for i in range(num_tests):
             self._comp_convex_opt()
             print(f"δ after convex = {self.delta}")
@@ -322,16 +332,14 @@ class QFunction():
             sosCblks = extract_blocks(sosC, self.Cshape)
 
             ''' Each loop constructs one SOS constraint '''
-            matrix_constrs = []
-            for locs, dparam, aug_lSparam in zip( self.sos_locs, self.zero_poly.coef, self.aug_lSmatrix.coef ):
-                CERROR: np.ndarray = sum([ sosCblks[index] if index[0]==index[1] else sosCblks[index] + sosCblks[index].T for index in locs ]) - ( dparam * self.E + Lambda.T @ aug_lSparam @ Lambda )
-                matrix_constrs += CERROR.flatten().tolist()
+            sos_errors = []
+            for locs, d, aug_lScoef in zip( self.sos_locs, self.zero_poly.coef, self.aug_lSmatrix.coef ):
+                CERROR: np.ndarray = sum([ sosCblks[index] if index[0]==index[1] else sosCblks[index] + sosCblks[index].T for index in locs ]) - ( d * self.E + Lambda.T @ aug_lScoef @ Lambda )
+                sos_errors += CERROR.flatten().tolist()
 
-            sos_errors = np.hstack(matrix_constrs)
+            print(f"{sos_errors}")
 
-            print(f"{sos_errors.shape}")
-
-            return sos_errors
+            return np.array(sos_errors)
 
         def PSD_constraint(var: np.ndarray) -> np.ndarray:
             '''
@@ -347,7 +355,6 @@ class QFunction():
 
         constraints = [ {"type": "eq", "fun": sos_constraint} ]
         constraints += [ {"type": "ineq", "fun": PSD_constraint} ]
-
         sol = minimize( fun=cost, x0=toVar(self.delta, self.Lambda, self.sosC), constraints=constraints, method='SLSQP', options={"disp": verbose, "maxiter": 1000} )
         self.delta, self.Lambda, self.sosC = getVariables(sol.x)
 
@@ -413,26 +420,43 @@ class QFunction():
     def equilibria(self) -> list[dict]:
         '''
         Boundary equilibrium solutions can be computed from
-        the q-function by solving q(λ) = n(λ)/d(λ) = 1, or the roots of n(λ) - d(λ).
+        the Q-function by solving q(λ) = n(λ)/|P(λ)|² = 1, that is, by finding real roots of n(λ) - |P(λ)|².
 
-        Returns: a list of dictionaries with all boundary equilibrium solutions
-        and their stability numbers (if dim == 2, otherwise stability is None).
+        Returns: a list of dictionaries with all boundary equilibrium solutios and their stability numbers.
         '''
+
+        # Gets real roots of n(λ) - |P(λ)|² and finds possibly duplicated roots ( canceling poles and zeros of q(λ) ) 
         zeros = self.zero_poly.roots()
         real_zeros = np.array([ z.real for z in zeros if np.abs(z.imag) < self.real_tol and z.real >= 0.0 ])
         real_zeros.sort()
+        duplicates = [ np.any( np.abs(np.delete(real_zeros,k) - z) <= 1e-4 ) for k, z in enumerate(real_zeros) ]
 
-        sols = [ {"lambda": z} for z in real_zeros ]
-        for sol in sols:
-            sol["stability"] = max( self.stability(sol["lambda"]) )
-        return sols
+        # Adds equilibrium solutions, distinguishing degenerate ones ( when poles and zeros of q(λ) cancel each other )
+        equilibrium_sols = []
+        for is_repeated, z in zip(duplicates, real_zeros):
+            if np.any([ sol["lambda"] == z for sol in equilibrium_sols ]):
+                continue
+            if is_repeated:
+                q_n, r_n = polydiv( self.n_poly.coef, Poly.fromroots(z).coef )
+                q_d, r_d = polydiv( self.d_poly.coef, Poly.fromroots(z).coef )
+                q_val = Poly(q_n)(z)/Poly(q_d)(z)
+                if q_val < 1.0:
+                    equilibrium_sols.append( {"lambda": z, "degenerate": True} )
+                continue
+            equilibrium_sols.append( {"lambda": z, "degenerate": False} )
+
+        # Computes stability from the S(λ) matrix ( TO DO: fix stability computation in degenerated cases )
+        for sol in equilibrium_sols:
+            eigS = self.stability(sol["lambda"])
+            sol["stability"] = max(eigS)
+
+        return equilibrium_sols
 
     def stability(self, l):
         '''
-        Returns the eigenvalues of the stability matrix S computed at λ
+        Returns the eigenvalues of the stability matrix S(λ) computed at λ
         '''
-        stabilityEigs = np.array([ eig for eig in np.linalg.eigvals( self.Smatrix(l) )
-                                   if np.abs(eig.imag) < self.real_tol ])
+        stabilityEigs = np.array([ eig for eig in np.linalg.eigvals( self.Smatrix(l) ) if np.abs(eig.imag) < self.real_tol ])
         return stabilityEigs
 
     def orthogonal_nullspace(self) -> MatrixPolynomial:
@@ -527,7 +551,7 @@ class QFunction():
                 psd_intervals[-1][1] = l
                 is_insert_psd = False
 
-        strip_size = (q_max - q_min)/40
+        strip_size = (q_max - q_min)/50
         strip_alpha = 0.6
 
         ''' Plot nsd strips (stable) '''
@@ -561,18 +585,22 @@ class QFunction():
         ''' Plot the solution line q(λ) = 1 '''
         ax.plot( lambdas, [ 1.0 for l in lambdas ], 'r--' )
 
-        ''' Plot the Q-function q(λ) '''
+        ''' Plot the Q-function q(λ) and zero polynomial n(λ) - |P(λ)|² '''
         q_array = [ self.n_poly(l) / self.d_poly(l) for l in lambdas ]
-        ax.plot( lambdas, q_array )
+        z_array = [ self.zero_poly(l) for l in lambdas ]
+        ax.plot( lambdas, q_array, label='q(λ)' )
+        ax.plot( lambdas, z_array, color='g', label='n(λ) - |P(λ)|²' )
 
         ''' Plots equilibrium (stable/unstable) λ solutions satisfying q(λ) = 1 '''
         for k, sol in enumerate(sols):
             stability = sol["stability"]
-            label_txt = f"{k+1} stability = {stability:2.2f}"
+            label_txt = f"{k+1}"
             ax.text(sol["lambda"], 1.0, f"{k+1}", color='k', fontsize=12)
             if stability > 0:
+                label_txt += f" unstable ({stability:1.5f})"
                 ax.plot( sol["lambda"], 1.0, 'bo', label=label_txt) # unstable solutions
             if stability < 0:
+                label_txt += f" stable ({stability:1.5f})"
                 ax.plot( sol["lambda"], 1.0, 'ro', label=label_txt ) # stable solutions
 
         ''' Sets axes limits and legends '''
