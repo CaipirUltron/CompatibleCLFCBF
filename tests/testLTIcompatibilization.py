@@ -1,20 +1,17 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import control
 
 from dynamic_systems import LinearSystem
 from controllers.compatibility import MatrixPencil, QFunction
-from common import hessian_quadratic, vector2sym, randomR, randomGen, genStableLI
+from common import hessian_quadratic, vector2sym, rot2D, randomR, genStableLTI
 
-n, m = 2, 2
+n, m = 3, 3
 
-# A, B = genStableLI(n, m, type='int', random_lim=(-10, +10))
-A, B = genStableLI(n, m, stabilize=True, type='float')
+# A, B = genStableLTI(n, m, type='float', Alims=(-2, 2), Blims=(-2, 2), place=True)
 
-# A = randomGen('matrix', (-10, +10), size=(n,n))
-# B = randomGen('matrix', (1, 5), size=(n,m))
-
-# A = np.zeros((n,n))
-# B = np.eye(n)
+A = np.zeros((n,n))
+B = np.eye(n)
 
 G = (B @ B.T)
 
@@ -27,7 +24,7 @@ CLFcenter = np.zeros(n)
 Hv = hessian_quadratic(CLFeigs, randomR(n) )
 
 CBFeigs = np.random.randint(low=1, high=10, size=n)
-CBFcenter = 10*np.random.randn(n)
+CBFcenter = 5*np.random.randn(n)
 Hh = hessian_quadratic(CBFeigs, randomR(n) )
 
 # CLFeigs = np.array([ 10.0, 1.0, 1.0 ])
@@ -45,7 +42,7 @@ Hh = hessian_quadratic(CBFeigs, randomR(n) )
 
 # CBFeigs = np.array([ 1.0, 4.0 ])
 # CBFcenter = np.array([ 0.0, 3.0 ])
-# rotCBF = rot2D(np.deg2rad(60.0))
+# rotCBF = rot2D(np.deg2rad(55.0))
 # Hh = hessian_quadratic(CBFeigs, rotCBF )
 
 p = 1.0
@@ -60,7 +57,7 @@ for k, eig in enumerate( pencil.eigens ):
     print(f"{k+1}-th gen. eigenvalue = {eig.eigenvalue}.")
 
 qfun = QFunction(pencil, Hh, w)
-for k, eig in enumerate( qfun.stability_pencil.real_eigen() ):
+for k, eig in enumerate( qfun.Smatrix_pencil.real_eigen() ):
     print(f"{k+1}-th real eigenvalue of S(λ) companion form = {eig.eigenvalue}")
 
 # C = qfun.compatibility_matrix.sos_decomposition()

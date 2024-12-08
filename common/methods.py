@@ -40,46 +40,52 @@ def randomGen(type, limits, size=[1]):
     Random array generator.
     '''
     if type == 'int':
-        return np.random.randint(low=limits[0], high=limits[1], size=size)
-    else:
+        return np.random.randint(low=round(limits[0]), high=round(limits[1]), size=size)
+    if type == 'float':
         return (limits[1] - limits[0])*np.random.rand(*size) + limits[0]
+    
+    return NotImplemented
 
-def genStableLI(n, m, **kwargs) -> tuple:
+def genStableLTI(n, m, **kwargs) -> tuple:
     ''' 
     Generates random (A, B) controllable pairs of sizes (n,m)
-    and returns the pair (Acl, B), where Acl = A - B K is a corresponding closed-loop 
-    A matrix that stabilizes the closed-loop system.
+    and returns the pair (Acl, B), where Acl = A - B K is a corresponding Hurwitz closed-loop 
     '''
-    stabilize = False
+    place = True
     typ = 'float'
-    matrixLimits = [ -1, +1 ]
+    Alimits = [ -1, +1 ]
+    Blimits = [ -1, +1 ]
     realLimits = [ -2, -1 ]
     imagLimits = [  0, 1 ]
     for key in kwargs.keys():
-        if key.lower() == 'stabilize':
-            stabilize = kwargs['stabilize']
+        if key.lower() == 'place':
+            place = kwargs['place']
             continue
         if key.lower() == 'type':
             typ = kwargs['type']
             continue
-        # Random limits
-        if key.lower() == 'random_lim':
-            matrixLimits = kwargs['random_lim']
+        # A limits
+        if key.lower() == 'Alims':
+            Alimits = kwargs['Alims']
+            continue
+        # B limits
+        if key.lower() == 'Blims':
+            Blimits = kwargs['Blims']
             continue
         # Real limits
-        if key.lower() == 'real_lim':
-            realLimits = kwargs['real_lim']
+        if key.lower() == 'real_lims':
+            realLimits = kwargs['real_lims']
             continue
         # Imaginary limits
-        if key.lower() == 'imag_lim':
-            imagLimits = kwargs['imag_lim']
+        if key.lower() == 'imag_lims':
+            imagLimits = kwargs['imag_lims']
             continue
 
     # Creates random pairs (A,B) until one is controllable
-    A = randomGen(typ, matrixLimits, size=(n,n))
-    B = randomGen(typ, matrixLimits, size=(n,m))
+    A = randomGen(typ, Alimits, size=(n,n))
+    B = randomGen(typ, Blimits, size=(n,m))
 
-    if not stabilize: return A, B
+    if not place: return A, B
 
     rankC = np.linalg.matrix_rank( control.ctrb(A,B) )
     while rankC < A.shape[0]:
@@ -191,8 +197,7 @@ def vector2sym(vector):
     Transforms numpy vector to corresponding symmetric matrix.
     '''
     dim = len(vector)
-    if dim < 3:
-        raise Exception("The input vector must be of length 3 or higher.")
+    
     n = int((-1 + np.sqrt(1+8*dim))/2)
     sym_basis = symmetric_basis(n)
     S = np.zeros([n,n])
@@ -220,9 +225,10 @@ def sym2vector(S):
     '''
     Stacks the coefficients of a symmetric matrix to a numpy vector.
     '''
+    if np.linalg.norm(S - S.T) > 1e-6:
+        warnings.warn("Passed matrix is not symmetric.")
+
     n = S.shape[0]
-    if n < 2:
-        raise Exception("The input matrix must be of size 2x2 or higher.")
     sym_basis = symmetric_basis(n)
     dim = int((n*(n+1))/2)
     vector = np.zeros(dim)
