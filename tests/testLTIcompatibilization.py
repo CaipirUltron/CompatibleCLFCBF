@@ -5,7 +5,7 @@ from dynamic_systems import LinearSystem
 from controllers.compatibility import MatrixPencil, QFunction
 from common import hessian_quadratic, vector2sym, rot2D, randomR, genStableLTI
 
-n, m = 3, 3
+n, m = 4, 4
 
 A, B = genStableLTI(n, m, type='float', Alims=(-2, 2), Blims=(-2, 2), place=True)
 
@@ -33,7 +33,7 @@ Hh = hessian_quadratic(CBFeigs, randomR(n) )
 
 # CBFeigs = np.array([ 1.0, 4.0 ])
 # CBFcenter = np.array([ 0.0, 3.0 ])
-# rotCBF = rot2D(np.deg2rad(180.0))
+# rotCBF = rot2D(np.deg2rad(80))
 # Hh = hessian_quadratic(CBFeigs, rotCBF )
 
 p = 1.0

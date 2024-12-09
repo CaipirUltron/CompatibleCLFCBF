@@ -103,35 +103,35 @@ class QFunction():
         # else:
         #     print("Q-function is not compatible.")
 
-    # def _init_comp_convex_opt(self):
+    def _init_comp_convex_opt(self):
 
-    #     ''' Setup CVXPY parameters and variables '''
-    #     self.sosCblks = np.zeros((self.sosC_kern_deg+1, self.sosC_kern_deg+1), dtype=object)
-    #     for i in range(self.sosC_kern_deg+1):
-    #         for j in range(self.sosC_kern_deg+1):
-    #             if i <= j:
-    #                 self.sosCblks[i,j] = cvx.Variable( shape=self.Cshape, symmetric=True if i==j else False )
-    #             else:
-    #                 self.sosCblks[i,j] = self.sosCblks[j,i].T
+        ''' Setup CVXPY parameters and variables '''
+        self.sosCblks = np.zeros((self.sosC_kern_deg+1, self.sosC_kern_deg+1), dtype=object)
+        for i in range(self.sosC_kern_deg+1):
+            for j in range(self.sosC_kern_deg+1):
+                if i <= j:
+                    self.sosCblks[i,j] = cvx.Variable( shape=self.Cshape, symmetric=True if i==j else False )
+                else:
+                    self.sosCblks[i,j] = self.sosCblks[j,i].T
 
-    #     self.CVX_delta = cvx.Variable()
-    #     self.CVX_E = cvx.Variable( shape=self.Cshape, PSD=True )
-    #     self.CVX_Lambda = cvx.Variable( shape=(self.null_dim,self.Cdim) )
+        self.CVX_delta = cvx.Variable()
+        self.CVX_E = cvx.Variable( shape=self.Cshape, PSD=True )
+        self.CVX_Lambda = cvx.Variable( shape=(self.null_dim,self.Cdim) )
 
-    #     self.CVX_dparams = [ cvx.Parameter() for _ in self.zero_poly.coef ]
-    #     self.CVX_lSparams = [ cvx.Parameter( shape=self.Cshape ) for _ in self.lSmatrix.coef ]
+        self.CVX_dparams = [ cvx.Parameter() for _ in self.zero_poly.coef ]
+        self.CVX_lSparams = [ cvx.Parameter( shape=self.Cshape ) for _ in self.lSmatrix.coef ]
 
-    #     ''' Setup CVXPY cost, constraints and problem '''
-    #     CVX_constraints = []
+        ''' Setup CVXPY cost, constraints and problem '''
+        CVX_constraints = []
 
-    #     for locs, dparam, lSparam in zip( self.sos_locs, self.CVX_dparams, self.CVX_lSparams ):
-    #         CVX_constraints += [ sum([ self.sosCblks[index] if index[0]==index[1] else self.sosCblks[index] + self.sosCblks[index].T for index in locs ]) == dparam * self.CVX_E + lSparam ]
+        for locs, dparam, lSparam in zip( self.sos_locs, self.CVX_dparams, self.CVX_lSparams ):
+            CVX_constraints += [ sum([ self.sosCblks[index] if index[0]==index[1] else self.sosCblks[index] + self.sosCblks[index].T for index in locs ]) == dparam * self.CVX_E + lSparam ]
 
-    #     self.CVX_sosC = cvx.bmat( self.sosCblks.tolist() )
-    #     CVX_constraints += [ self.CVX_sosC >> - self.CVX_delta * np.eye(self.sosC_dim) ]
+        self.CVX_sosC = cvx.bmat( self.sosCblks.tolist() )
+        CVX_constraints += [ self.CVX_sosC >> - self.CVX_delta * np.eye(self.sosC_dim) ]
 
-    #     self.CVX_cost = cvx.norm( self.CVX_delta )
-    #     self.CVX_problem = cvx.Problem( cvx.Minimize( self.CVX_cost ), constraints=CVX_constraints )
+        self.CVX_cost = cvx.norm( self.CVX_delta )
+        self.CVX_problem = cvx.Problem( cvx.Minimize( self.CVX_cost ), constraints=CVX_constraints )
 
     def _v_poly(self) -> tuple[Poly, np.ndarray[Poly]]:
         '''
@@ -158,6 +158,53 @@ class QFunction():
 
         return div, v
 
+    def _stability_intervals(self):
+        ''' 
+        Compute stability intervals using the gen. eigenvalues of S(λ) (|S(λ)| = 0)
+        '''
+        def definiteness(limits: tuple):
+            '''
+            Computes the definiteness of a given interval.
+            Input: - tuple: limits[0]:  
+            '''
+            if len(limits) != 2 or limits[0] >= limits[1]:
+                raise Exception("Invalid interval limits.")
+
+            displ_dist = 10.0
+            if limits[0] == -np.inf and limits[0] == +np.inf:
+                l = np.random.randn()
+            elif limits[0] == -np.inf:
+                l = limits[1] - displ_dist
+            elif limits[1] == np.inf:
+                l = limits[0] + displ_dist
+            else:
+                l = np.mean(limits)
+            S_at_test_pt = self.Smatrix(l)
+            eigS_at_test_pt = np.linalg.eigvals( S_at_test_pt )
+            if np.all(eigS_at_test_pt > 0):
+                return 'psd'
+            elif np.all(eigS_at_test_pt < 0):
+                return 'nsd'
+            else:
+                return 'indef'
+
+        real_eigS = self.Smatrix_pencil.real_eigen()
+        divisions = [-np.inf] + [ float(eig.eigenvalue) for eig in real_eigS ] + [+np.inf]
+
+        intervals = []
+        for k in range(len(divisions)-1):
+            div1 = divisions[k]
+            div2 = divisions[k+1]
+            limits = (div1, div2)
+            interval = { "limits": limits,
+                         "definiteness": definiteness(limits) }
+            intervals.append( interval )
+
+        for k, interval in enumerate(intervals):
+            limits = interval["limits"]
+            def_type = interval["definiteness"]
+            print(f"Interval {k+1} with limits {limits} is {def_type}")
+
     def _stability_matrix(self) -> MatrixPolynomial:
         ''' 
         Computes the stability polynomial matrix.
@@ -181,163 +228,165 @@ class QFunction():
         else:
             self.Smatrix_pencil = self.Smatrix.companion_form()
 
-    # def _compatibility_matrix(self) -> MatrixPolynomial:
-    #     '''
-    #     C(λ) = ( n(λ) - ε|P(λ)|² ) I + λ S(λ) >> 0 is a sufficient condition for 
-    #     compatibility of the CLF-CBF pair and given Linear System.
-    #     '''
-    #     # First polynomial term n(λ) - ε|P(λ)|²
-    #     self.zero_poly = self.n_poly - self.compatibility_eps * self.d_poly
+        self._stability_intervals()
 
-    #     # Second polynomial term λ S(λ)
-    #     lambda_poly = np.array([ Poly([0, 1], symbol=self.pencil.symbol) ])
-    #     aug_Smatrix = self.gradNull.T @ self.Psym @ self.gradNull
-    #     aug_lSmatrix = lambda_poly * aug_Smatrix
-    #     if hasattr(self, "aug_lSmatrix"):
-    #         self.aug_lSmatrix.update(aug_lSmatrix)
-    #     else:
-    #         self.aug_lSmatrix = MatrixPolynomial(aug_lSmatrix)
+    def _compatibility_matrix(self) -> MatrixPolynomial:
+        '''
+        C(λ) = ( n(λ) - ε|P(λ)|² ) I + λ S(λ) >> 0 is a sufficient condition for 
+        compatibility of the CLF-CBF pair and given Linear System.
+        '''
+        # First polynomial term n(λ) - ε|P(λ)|²
+        self.zero_poly = self.n_poly - self.compatibility_eps * self.d_poly
 
-    #     # Updates λ S(λ)
-    #     lSmatrix = self.Lambda.T @ aug_lSmatrix @ self.Lambda
-    #     self.lSmatrix.update( lSmatrix )
+        # Second polynomial term λ S(λ)
+        lambda_poly = np.array([ Poly([0, 1], symbol=self.pencil.symbol) ])
+        aug_Smatrix = self.gradNull.T @ self.Psym @ self.gradNull
+        aug_lSmatrix = lambda_poly * aug_Smatrix
+        if hasattr(self, "aug_lSmatrix"):
+            self.aug_lSmatrix.update(aug_lSmatrix)
+        else:
+            self.aug_lSmatrix = MatrixPolynomial(aug_lSmatrix)
 
-    #     # Defines dimensions
-    #     self.Cdim = self.stb_dim
-    #     self.Cshape = ( self.Cdim, self.Cdim )
+        # Updates λ S(λ)
+        lSmatrix = self.Lambda.T @ aug_lSmatrix @ self.Lambda
+        self.lSmatrix.update( lSmatrix )
 
-    #     if self.zero_poly.degree() != self.aug_lSmatrix.degree():
-    #         raise Exception("Degrees of n(λ) - ε|P(λ)|² and λS(λ) should be the same.")
+        # Defines dimensions
+        self.Cdim = self.stb_dim
+        self.Cshape = ( self.Cdim, self.Cdim )
 
-    #     self.Cdegree = self.zero_poly.degree()
-    #     self.sos_locs = sos_locations( self.Cdegree )
+        if self.zero_poly.degree() != self.aug_lSmatrix.degree():
+            raise Exception("Degrees of n(λ) - ε|P(λ)|² and λS(λ) should be the same.")
 
-    #     self.sosC_kern_deg = math.ceil(self.Cdegree/2)
-    #     self.sosC_dim = (self.sosC_kern_deg + 1) * self.Cdim
+        self.Cdegree = self.zero_poly.degree()
+        self.sos_locs = sos_locations( self.Cdegree )
 
-    #     # Initialize sosC and compute compatibility matrix
-    #     self.sosC = np.random.randn(*(self.sosC_dim, self.sosC_dim))
-    #     self.sosC = self.sosC.T @ self.sosC
+        self.sosC_kern_deg = math.ceil(self.Cdegree/2)
+        self.sosC_dim = (self.sosC_kern_deg + 1) * self.Cdim
 
-    #     # self._compatibility_opt()
+        # Initialize sosC and compute compatibility matrix
+        self.sosC = np.random.randn(*(self.sosC_dim, self.sosC_dim))
+        self.sosC = self.sosC.T @ self.sosC
 
-    # def _compatibility_opt(self) -> MatrixPolynomial:
-    #     '''
-    #     Computes compatibility matrix by sequentially solving SDP/nonconvex opt
-    #     '''
-    #     num_tests = 1
-    #     for i in range(num_tests):
-    #         self._comp_convex_opt()
-    #         print(f"δ after convex = {self.delta}")
+        # self._compatibility_opt()
 
-    #         self._comp_nonconvex_opt(verbose=True)
-    #         print(f"δ after nonconvex = {self.delta}")
+    def _compatibility_opt(self) -> MatrixPolynomial:
+        '''
+        Computes compatibility matrix by sequentially solving SDP/nonconvex opt
+        '''
+        num_tests = 1
+        for i in range(num_tests):
+            self._comp_convex_opt()
+            print(f"δ after convex = {self.delta}")
 
-    # def _comp_convex_opt(self, verbose=False):
-    #     ''' 
-    #     Convex compatible optimization - uses CVXPY
-    #     '''
-    #     # Initialize optimization, if not yet
-    #     if not hasattr(self, 'CVX_problem'):
-    #         self._init_comp_convex_opt()
+            self._comp_nonconvex_opt(verbose=True)
+            print(f"δ after nonconvex = {self.delta}")
 
-    #     # Load parameters
-    #     for k, c in enumerate(self.zero_poly.coef):
-    #         self.CVX_dparams[k].value = c
+    def _comp_convex_opt(self, verbose=False):
+        ''' 
+        Convex compatible optimization - uses CVXPY
+        '''
+        # Initialize optimization, if not yet
+        if not hasattr(self, 'CVX_problem'):
+            self._init_comp_convex_opt()
 
-    #     for k, C in enumerate(self.lSmatrix.coef):
-    #         self.CVX_lSparams[k].value = C
+        # Load parameters
+        for k, c in enumerate(self.zero_poly.coef):
+            self.CVX_dparams[k].value = c
 
-    #     # Solves CVX problem
-    #     self.CVX_problem.solve(solver = 'SCS', verbose=False)
+        for k, C in enumerate(self.lSmatrix.coef):
+            self.CVX_lSparams[k].value = C
 
-    #     self.delta = self.CVX_delta.value
-    #     self.E = self.CVX_E.value
-    #     self.sosC = self.CVX_sosC.value
+        # Solves CVX problem
+        self.CVX_problem.solve(solver = 'SCS', verbose=False)
 
-    #     if verbose:
-    #         print(f"Compatibilization problem returned with status {self.CVX_problem.status}, final cost = {self.CVX_cost.value}")
-    #         print(f"Convex results: δ = {self.delta}, E = \n{self.E}")
+        self.delta = self.CVX_delta.value
+        self.E = self.CVX_E.value
+        self.sosC = self.CVX_sosC.value
 
-    # def _comp_nonconvex_opt(self, verbose=False):
-    #     ''' 
-    #     Nonconvex compatible optimization.
-    #     Variables:
-    #     - delta: float
-    #     - Lambda: ( seff.null_dim x self.Cdim ) np.ndarray
-    #     - C = C' (compatibility SOS matrix)
-    #     '''
-    #     def getVariables(var: np.ndarray) -> tuple[float, np.ndarray, np.ndarray]:
-    #         ''' var = [ delta, Lambda_flatten, symmC_flatten ] '''
-    #         delta = var[0]
+        if verbose:
+            print(f"Compatibilization problem returned with status {self.CVX_problem.status}, final cost = {self.CVX_cost.value}")
+            print(f"Convex results: δ = {self.delta}, E = \n{self.E}")
 
-    #         Lambda_dim = self.null_dim * self.Cdim
-    #         Lambda_flatten = var[1:Lambda_dim+1]
-    #         Lambda = Lambda_flatten.reshape(self.null_dim, self.Cdim)
+    def _comp_nonconvex_opt(self, verbose=False):
+        ''' 
+        Nonconvex compatible optimization.
+        Variables:
+        - delta: float
+        - Lambda: ( seff.null_dim x self.Cdim ) np.ndarray
+        - C = C' (compatibility SOS matrix)
+        '''
+        def getVariables(var: np.ndarray) -> tuple[float, np.ndarray, np.ndarray]:
+            ''' var = [ delta, Lambda_flatten, symmC_flatten ] '''
+            delta = var[0]
 
-    #         symm_sosC_dim = int(self.sosC_dim*(self.sosC_dim+1)/2)
-    #         symm_sosC_flatten = var[Lambda_dim+1:symm_sosC_dim+Lambda_dim+1]
-    #         sosC = vector2sym(symm_sosC_flatten)
+            Lambda_dim = self.null_dim * self.Cdim
+            Lambda_flatten = var[1:Lambda_dim+1]
+            Lambda = Lambda_flatten.reshape(self.null_dim, self.Cdim)
 
-    #         return delta, Lambda, sosC
+            symm_sosC_dim = int(self.sosC_dim*(self.sosC_dim+1)/2)
+            symm_sosC_flatten = var[Lambda_dim+1:symm_sosC_dim+Lambda_dim+1]
+            sosC = vector2sym(symm_sosC_flatten)
+
+            return delta, Lambda, sosC
         
-    #     def toVar(delta: float, Lambda: np.ndarray, sosC: np.ndarray) -> np.ndarray:
-    #         Lambda_flatten = Lambda.flatten()
-    #         C_flatten = sym2vector(sosC)
-    #         var = np.hstack([ delta, Lambda_flatten, C_flatten ])
-    #         return var
+        def toVar(delta: float, Lambda: np.ndarray, sosC: np.ndarray) -> np.ndarray:
+            Lambda_flatten = Lambda.flatten()
+            C_flatten = sym2vector(sosC)
+            var = np.hstack([ delta, Lambda_flatten, C_flatten ])
+            return var
 
-    #     def extract_blocks(a: np.ndarray, blocksize: tuple, keep_as_view=True) -> np.ndarray:
-    #         M,N = a.shape
-    #         b0, b1 = blocksize
-    #         if keep_as_view==0:
-    #             return a.reshape(M//b0,b0,N//b1,b1).swapaxes(1,2).reshape(-1,b0,b1)
-    #         else:
-    #             return a.reshape(M//b0,b0,N//b1,b1).swapaxes(1,2)
+        def extract_blocks(a: np.ndarray, blocksize: tuple, keep_as_view=True) -> np.ndarray:
+            M,N = a.shape
+            b0, b1 = blocksize
+            if keep_as_view==0:
+                return a.reshape(M//b0,b0,N//b1,b1).swapaxes(1,2).reshape(-1,b0,b1)
+            else:
+                return a.reshape(M//b0,b0,N//b1,b1).swapaxes(1,2)
 
-    #     def cost(var: np.ndarray) -> float:
-    #         '''
-    #         Minimizes square of slack variable (feasibility problem)
-    #         '''
-    #         delta, Lambda, sosC = getVariables(var)
-    #         return delta**2 + np.linalg.norm( Lambda.T @ Lambda )
+        def cost(var: np.ndarray) -> float:
+            '''
+            Minimizes square of slack variable (feasibility problem)
+            '''
+            delta, Lambda, sosC = getVariables(var)
+            return delta**2 + np.linalg.norm( Lambda.T @ Lambda )
 
-    #     def sos_constraint(var: np.ndarray) -> np.ndarray:
-    #         '''
-    #         SOS constraints on problem variables
-    #         '''
-    #         delta, Lambda, sosC = getVariables(var)
-    #         sosCblks = extract_blocks(sosC, self.Cshape)
+        def sos_constraint(var: np.ndarray) -> np.ndarray:
+            '''
+            SOS constraints on problem variables
+            '''
+            delta, Lambda, sosC = getVariables(var)
+            sosCblks = extract_blocks(sosC, self.Cshape)
 
-    #         ''' Each loop constructs one SOS constraint '''
-    #         sos_errors = []
-    #         for locs, d, aug_lScoef in zip( self.sos_locs, self.zero_poly.coef, self.aug_lSmatrix.coef ):
-    #             CERROR: np.ndarray = sum([ sosCblks[index] if index[0]==index[1] else sosCblks[index] + sosCblks[index].T for index in locs ]) - ( d * self.E + Lambda.T @ aug_lScoef @ Lambda )
-    #             sos_errors += CERROR.flatten().tolist()
+            ''' Each loop constructs one SOS constraint '''
+            sos_errors = []
+            for locs, d, aug_lScoef in zip( self.sos_locs, self.zero_poly.coef, self.aug_lSmatrix.coef ):
+                CERROR: np.ndarray = sum([ sosCblks[index] if index[0]==index[1] else sosCblks[index] + sosCblks[index].T for index in locs ]) - ( d * self.E + Lambda.T @ aug_lScoef @ Lambda )
+                sos_errors += CERROR.flatten().tolist()
 
-    #         print(f"{sos_errors}")
+            print(f"{sos_errors}")
 
-    #         return np.array(sos_errors)
+            return np.array(sos_errors)
 
-    #     def PSD_constraint(var: np.ndarray) -> np.ndarray:
-    #         '''
-    #         PSD constraint on compatibility matrix
-    #         '''
-    #         delta, Lambda, sosC = getVariables(var)
+        def PSD_constraint(var: np.ndarray) -> np.ndarray:
+            '''
+            PSD constraint on compatibility matrix
+            '''
+            delta, Lambda, sosC = getVariables(var)
 
-    #         PSD = sosC + delta * np.eye(self.sosC_dim)
-    #         eigPSD = np.linalg.eigvals(PSD)
-    #         eigPSD.sort()
+            PSD = sosC + delta * np.eye(self.sosC_dim)
+            eigPSD = np.linalg.eigvals(PSD)
+            eigPSD.sort()
 
-    #         return eigPSD
+            return eigPSD
 
-    #     constraints = [ {"type": "eq", "fun": sos_constraint} ]
-    #     constraints += [ {"type": "ineq", "fun": PSD_constraint} ]
-    #     sol = minimize( fun=cost, x0=toVar(self.delta, self.Lambda, self.sosC), constraints=constraints, method='SLSQP', options={"disp": verbose, "maxiter": 1000} )
-    #     self.delta, self.Lambda, self.sosC = getVariables(sol.x)
+        constraints = [ {"type": "eq", "fun": sos_constraint} ]
+        constraints += [ {"type": "ineq", "fun": PSD_constraint} ]
+        sol = minimize( fun=cost, x0=toVar(self.delta, self.Lambda, self.sosC), constraints=constraints, method='SLSQP', options={"disp": verbose, "maxiter": 1000} )
+        self.delta, self.Lambda, self.sosC = getVariables(sol.x)
 
-    #     if verbose:
-    #         print(f"Nonvex results: δ = {self.delta}, Λ = \n{self.Lambda}")
+        if verbose:
+            print(f"Nonvex results: δ = {self.delta}, Λ = \n{self.Lambda}")
 
     def is_compatible(self):
         ''' Test if Q-function is compatible or not '''
