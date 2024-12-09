@@ -1,17 +1,16 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import control
 
 from dynamic_systems import LinearSystem
 from controllers.compatibility import MatrixPencil, QFunction
 from common import hessian_quadratic, vector2sym, rot2D, randomR, genStableLTI
 
-n, m = 2, 2
+n, m = 3, 3
 
-# A, B = genStableLTI(n, m, type='float', Alims=(-2, 2), Blims=(-2, 2), place=True)
+A, B = genStableLTI(n, m, type='float', Alims=(-2, 2), Blims=(-2, 2), place=True)
 
-A = np.zeros((n,n))
-B = np.eye(n)
+# A = np.zeros((n,n))
+# B = np.eye(n)
 
 G = (B @ B.T)
 
@@ -27,14 +26,6 @@ CBFeigs = np.random.randint(low=1, high=10, size=n)
 CBFcenter = 5*np.random.randn(n)
 Hh = hessian_quadratic(CBFeigs, randomR(n) )
 
-# CLFeigs = np.array([ 10.0, 1.0, 1.0 ])
-# CLFcenter = np.array([ 0.0, 0.0, 0.0 ])
-# Hv = hessian_quadratic(CLFeigs, randomR(n) )
-
-# CBFeigs = np.array([ 1.0, 4.0, 6.0 ])
-# CBFcenter = np.array([ 0.0, 3.0, 3.0 ])
-# Hh = hessian_quadratic(CBFeigs, randomR(n) )
-
 # CLFeigs = np.array([ 20.0, 1.0 ])
 # CLFcenter = np.array([ 0.0, 0.0 ])
 # rotCLF = rot2D(np.deg2rad(0))
@@ -42,7 +33,7 @@ Hh = hessian_quadratic(CBFeigs, randomR(n) )
 
 # CBFeigs = np.array([ 1.0, 4.0 ])
 # CBFcenter = np.array([ 0.0, 3.0 ])
-# rotCBF = rot2D(np.deg2rad(89.0))
+# rotCBF = rot2D(np.deg2rad(180.0))
 # Hh = hessian_quadratic(CBFeigs, rotCBF )
 
 p = 1.0
@@ -54,16 +45,11 @@ w = N @ ( CBFcenter - CLFcenter )
 
 pencil = MatrixPencil(M, N)
 for k, eig in enumerate( pencil.eigens ):
-    print(f"{k+1}-th gen. eigenvalue = {eig.eigenvalue}.")
+    print(f"{k+1}-th gen. eigenvalue of P(λ) = {eig.eigenvalue}.")
 
 qfun = QFunction(pencil, Hh, w)
-# for k, eig in enumerate( qfun.Smatrix_pencil.real_eigen() ):
-#     print(f"{k+1}-th real eigenvalue of S(λ) companion form = {eig.eigenvalue}")
-
-# C = qfun.compatibility_matrix.sos_decomposition()
-# eigC = np.linalg.eigvals(C)
-# eigC.sort()
-# print(f"Compatibility = {eigC}")
+for k, eig in enumerate( qfun.Smatrix_pencil.real_eigen() ):
+    print(f"{k+1}-th real gen. eigenvalue of S(λ) = {eig.eigenvalue}")
 
 ''' --------------------------------- Test compatibilization ------------------------------------- '''
 def Hvfun(var):
