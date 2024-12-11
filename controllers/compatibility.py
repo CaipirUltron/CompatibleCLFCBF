@@ -104,33 +104,51 @@ class QFunction():
         #     print("Q-function is not compatible.")
 
     def _init_comp_convex_opt(self):
+        ''' 
+        Setup CVXPY parameters and variables.
+        '''
+        zero_deg = self.zero_poly.degree()
+        self.sos_locs = sos_locations(zero_deg)
 
-        ''' Setup CVXPY parameters and variables '''
-        self.sosCblks = np.zeros((self.sosC_kern_deg+1, self.sosC_kern_deg+1), dtype=object)
-        for i in range(self.sosC_kern_deg+1):
-            for j in range(self.sosC_kern_deg+1):
-                if i <= j:
-                    self.sosCblks[i,j] = cvx.Variable( shape=self.Cshape, symmetric=True if i==j else False )
-                else:
-                    self.sosCblks[i,j] = self.sosCblks[j,i].T
+        self.num_polys = 3*self.stb_dim
+        self.sos_dim = int(zero_deg/2) + 1
+        self.sos_shape = (self.sos_dim, self.sos_dim)
+        
+        self.delta_var = cvx.Variable()
+        self.Z_var = cvx.Variable( shape=self.sos_shape, PSD=True )
+        self.c_vars = [ cvx.Variable() for _ in range(self.num_polys) ]
 
-        self.CVX_delta = cvx.Variable()
-        self.CVX_E = cvx.Variable( shape=self.Cshape, PSD=True )
-        self.CVX_Lambda = cvx.Variable( shape=(self.null_dim,self.Cdim) )
+        sosM_vars = []
+        for _ in range(self.num_polys):
+            m_vars = [ cvx.Variable() for _ in range(4) ]
+            Mval = cvx.bmat([[ m_vars[0], m_vars[1], m_vars[2] ]+[ 0.0 for _ in range(self.sos_dim-3) ],
+                             [ m_vars[1], m_vars[3] ]+[ 0.0 for _ in range(self.sos_dim-2) ],   
+                             [ m_vars[2] ]+[ 0.0 for _ in range(self.sos_dim-1) ] ]+
+                             [[0.0 for _ in range(self.sos_dim)] for _ in range(self.sos_dim-3) ])
+            sosM_vars.append( Mval )
 
-        self.CVX_dparams = [ cvx.Parameter() for _ in self.zero_poly.coef ]
-        self.CVX_lSparams = [ cvx.Parameter( shape=self.Cshape ) for _ in self.lSmatrix.coef ]
+        self.z_coefs = [ cvx.Parameter() for _ in self.zero_poly.coef ]
+        self.poly_roots = [ cvx.Parameter(2) for _ in range(self.num_polys) ]
+        self.interval_conc = [ cvx.Parameter() for _ in range(self.num_polys) ]
 
-        ''' Setup CVXPY cost, constraints and problem '''
         CVX_constraints = []
+        for sosM, c_var, root_pair, d in zip( sosM_vars, self.c_vars, self.poly_roots, self.interval_conc ):
+            for locs, z_coef in zip( self.sos_locs, self.z_coefs ):
 
-        for locs, dparam, lSparam in zip( self.sos_locs, self.CVX_dparams, self.CVX_lSparams ):
-            CVX_constraints += [ sum([ self.sosCblks[index] if index[0]==index[1] else self.sosCblks[index] + self.sosCblks[index].T for index in locs ]) == dparam * self.CVX_E + lSparam ]
+                z_lhs = sum([ self.Z_var[index] if index[0]==index[1] else 2*self.Z_var[index] for index in locs ])
+                m_lhs = sum([ sosM[index] if index[0]==index[1] else 2*sosM[index] for index in locs ])
 
-        self.CVX_sosC = cvx.bmat( self.sosCblks.tolist() )
-        CVX_constraints += [ self.CVX_sosC >> - self.CVX_delta * np.eye(self.sosC_dim) ]
+                rhs = d * z_coef
+                if locs[0][0] + locs[0][1] == 0:
+                    rhs+= c_var * root_pair[0]*root_pair[1]
+                if locs[0][0] + locs[0][1] == 1:
+                    rhs+= - c_var * (root_pair[0]+root_pair[1])
+                if locs[0][0] + locs[0][1] == 2:
+                    rhs+= c_var
 
-        self.CVX_cost = cvx.norm( self.CVX_delta )
+                CVX_constraints += [ z_lhs + m_lhs == rhs ]
+
+        self.CVX_cost = cvx.norm( self.delta_var )
         self.CVX_problem = cvx.Problem( cvx.Minimize( self.CVX_cost ), constraints=CVX_constraints )
 
     def _v_poly(self) -> tuple[Poly, np.ndarray[Poly]]:
@@ -191,19 +209,14 @@ class QFunction():
         real_eigS = self.Smatrix_pencil.real_eigen()
         divisions = [-np.inf] + [ float(eig.eigenvalue) for eig in real_eigS ] + [+np.inf]
 
-        intervals = []
+        self.intervals = []
         for k in range(len(divisions)-1):
             div1 = divisions[k]
             div2 = divisions[k+1]
             limits = (div1, div2)
             interval = { "limits": limits,
                          "definiteness": definiteness(limits) }
-            intervals.append( interval )
-
-        for k, interval in enumerate(intervals):
-            limits = interval["limits"]
-            def_type = interval["definiteness"]
-            print(f"Interval {k+1} with limits {limits} is {def_type}")
+            self.intervals.append( interval )
 
     def _stability_matrix(self) -> MatrixPolynomial:
         ''' 
@@ -228,59 +241,16 @@ class QFunction():
         else:
             self.Smatrix_pencil = self.Smatrix.companion_form()
 
+        print(f"Degree of S(λ) = {self.Smatrix.degree()}")
+
         self._stability_intervals()
-
-    def _compatibility_matrix(self) -> MatrixPolynomial:
-        '''
-        C(λ) = ( n(λ) - ε|P(λ)|² ) I + λ S(λ) >> 0 is a sufficient condition for 
-        compatibility of the CLF-CBF pair and given Linear System.
-        '''
-        # First polynomial term n(λ) - ε|P(λ)|²
-        self.zero_poly = self.n_poly - self.compatibility_eps * self.d_poly
-
-        # Second polynomial term λ S(λ)
-        lambda_poly = np.array([ Poly([0, 1], symbol=self.pencil.symbol) ])
-        aug_Smatrix = self.gradNull.T @ self.Psym @ self.gradNull
-        aug_lSmatrix = lambda_poly * aug_Smatrix
-        if hasattr(self, "aug_lSmatrix"):
-            self.aug_lSmatrix.update(aug_lSmatrix)
-        else:
-            self.aug_lSmatrix = MatrixPolynomial(aug_lSmatrix)
-
-        # Updates λ S(λ)
-        lSmatrix = self.Lambda.T @ aug_lSmatrix @ self.Lambda
-        self.lSmatrix.update( lSmatrix )
-
-        # Defines dimensions
-        self.Cdim = self.stb_dim
-        self.Cshape = ( self.Cdim, self.Cdim )
-
-        if self.zero_poly.degree() != self.aug_lSmatrix.degree():
-            raise Exception("Degrees of n(λ) - ε|P(λ)|² and λS(λ) should be the same.")
-
-        self.Cdegree = self.zero_poly.degree()
-        self.sos_locs = sos_locations( self.Cdegree )
-
-        self.sosC_kern_deg = math.ceil(self.Cdegree/2)
-        self.sosC_dim = (self.sosC_kern_deg + 1) * self.Cdim
-
-        # Initialize sosC and compute compatibility matrix
-        self.sosC = np.random.randn(*(self.sosC_dim, self.sosC_dim))
-        self.sosC = self.sosC.T @ self.sosC
-
-        # self._compatibility_opt()
 
     def _compatibility_opt(self) -> MatrixPolynomial:
         '''
         Computes compatibility matrix by sequentially solving SDP/nonconvex opt
         '''
-        num_tests = 1
-        for i in range(num_tests):
-            self._comp_convex_opt()
-            print(f"δ after convex = {self.delta}")
-
-            self._comp_nonconvex_opt(verbose=True)
-            print(f"δ after nonconvex = {self.delta}")
+        self._comp_convex_opt()
+        # print(f"δ after convex = {self.delta}")
 
     def _comp_convex_opt(self, verbose=False):
         ''' 
@@ -292,21 +262,21 @@ class QFunction():
 
         # Load parameters
         for k, c in enumerate(self.zero_poly.coef):
-            self.CVX_dparams[k].value = c
+            self.z_coefs[k].value = c
 
-        for k, C in enumerate(self.lSmatrix.coef):
-            self.CVX_lSparams[k].value = C
+        # for k, C in enumerate(self.lSmatrix.coef):
+        #     self.CVX_lSparams[k].value = C
 
-        # Solves CVX problem
-        self.CVX_problem.solve(solver = 'SCS', verbose=False)
+        # # Solves CVX problem
+        # self.CVX_problem.solve(solver = 'SCS', verbose=False)
 
-        self.delta = self.CVX_delta.value
-        self.E = self.CVX_E.value
-        self.sosC = self.CVX_sosC.value
+        # self.delta = self.CVX_delta.value
+        # self.E = self.CVX_E.value
+        # self.sosC = self.CVX_sosC.value
 
-        if verbose:
-            print(f"Compatibilization problem returned with status {self.CVX_problem.status}, final cost = {self.CVX_cost.value}")
-            print(f"Convex results: δ = {self.delta}, E = \n{self.E}")
+        # if verbose:
+        #     print(f"Compatibilization problem returned with status {self.CVX_problem.status}, final cost = {self.CVX_cost.value}")
+        #     print(f"Convex results: δ = {self.delta}, E = \n{self.E}")
 
     def _comp_nonconvex_opt(self, verbose=False):
         ''' 
@@ -695,128 +665,76 @@ class QFunction():
 
         return results
 
-    def old_compatibilize(self, plant: DynamicSystem, clf_dict: dict, cbf_dict, p = 1.0):
-        '''
-        This method computes a compatible Hessian matrix for the CLF,
-        It recomputes the pencil and its q-function many times.
+    # def _init_comp_convex_opt2(self):
+    #     ''' 
+    #     Setup CVXPY parameters and variables.
+    #     '''
+    #     self.sosCblks = np.zeros((self.sosC_kern_deg+1, self.sosC_kern_deg+1), dtype=object)
+    #     for i in range(self.sosC_kern_deg+1):
+    #         for j in range(self.sosC_kern_deg+1):
+    #             if i <= j:
+    #                 self.sosCblks[i,j] = cvx.Variable( shape=self.Cshape, symmetric=True if i==j else False )
+    #             else:
+    #                 self.sosCblks[i,j] = self.sosCblks[j,i].T
 
-        clf_dict: - dict containing the function for computing the hessian matrix Hv, its degrees of freedom and its center
-        cbf_dict: - dict containing the CBF hessian matrix Hh and its center
+    #     self.CVX_delta = cvx.Variable()
+    #     self.CVX_E = cvx.Variable( shape=self.Cshape, PSD=True )
+    #     self.CVX_Lambda = cvx.Variable( shape=(self.null_dim,self.Cdim) )
 
-        '''
-        if isinstance(plant, LinearSystem):
-            A, B = plant._A, plant._B
-        else:
-            raise NotImplementedError("Currently, compatibilization is implemented linear systems only.")
+    #     self.CVX_dparams = [ cvx.Parameter() for _ in self.zero_poly.coef ]
+    #     self.CVX_lSparams = [ cvx.Parameter( shape=self.Cshape ) for _ in self.lSmatrix.coef ]
 
-        # Stores pencil variables for latter restauration
-        auxM, auxN = self.pencil.M, self.pencil.N
-        old_n_poly, old_d_poly = self.n_poly, self.d_poly
-        oldZ, oldQ = self.Z, self.Q
-        old_computed_from = self.computed_from
+    #     ''' Setup CVXPY cost, constraints and problem '''
+    #     CVX_constraints = []
 
-        ''' ------------------------------ Compatibilization code ------------------------------ '''
-        Hvfun = clf_dict["Hv_fun"]      # function for computing Hv
-        x0 = clf_dict["center"]         # clf center
-        Hv0 = clf_dict["Hv"]             # initial Hv
+    #     for locs, dparam, lSparam in zip( self.sos_locs, self.CVX_dparams, self.CVX_lSparams ):
+    #         CVX_constraints += [ sum([ self.sosCblks[index] if index[0]==index[1] else self.sosCblks[index] + self.sosCblks[index].T for index in locs ]) == dparam * self.CVX_E + lSparam ]
 
-        n = self.shape[0]
-        ndof = int(n*(n+1)/2)
+    #     self.CVX_sosC = cvx.bmat( self.sosCblks.tolist() )
+    #     CVX_constraints += [ self.CVX_sosC >> - self.CVX_delta * np.eye(self.sosC_dim) ]
 
-        Hh = cbf_dict["Hh"]             # cbf Hessian
-        xi = cbf_dict["center"]         # cbf center
+    #     self.CVX_cost = cvx.norm( self.CVX_delta )
+    #     self.CVX_problem = cvx.Problem( cvx.Minimize( self.CVX_cost ), constraints=CVX_constraints )
 
-        M = B @ B.T @ Hh
+    # def _compatibility_matrix(self) -> MatrixPolynomial:
+    #     '''
+    #     C(λ) = ( n(λ) - ε|P(λ)|² ) I + λ S(λ) >> 0 is a sufficient condition for 
+    #     compatibility of the CLF-CBF pair and given Linear System.
+    #     '''
+    #     # First polynomial term n(λ) - ε|P(λ)|²
+    #     self.zero_poly = self.n_poly - self.compatibility_eps * self.d_poly
 
-        def cost(var: np.ndarray):
-            ''' Objective function: find closest compatible CLF '''
-            return np.linalg.norm( Hvfun(var) - Hv0 )
+    #     # Second polynomial term λ S(λ)
+    #     lambda_poly = np.array([ Poly([0, 1], symbol=self.pencil.symbol) ])
+    #     aug_Smatrix = self.gradNull.T @ self.Psym @ self.gradNull
+    #     aug_lSmatrix = lambda_poly * aug_Smatrix
+    #     if hasattr(self, "aug_lSmatrix"):
+    #         self.aug_lSmatrix.update(aug_lSmatrix)
+    #     else:
+    #         self.aug_lSmatrix = MatrixPolynomial(aug_lSmatrix)
 
-        def psd_constr(var: np.ndarray):
-            ''' Returns the eigenvalues of R matrix. '''
-            N = B @ B.T @ Hvfun(var) - A
+    #     # Updates λ S(λ)
+    #     lSmatrix = self.Lambda.T @ aug_lSmatrix @ self.Lambda
+    #     self.lSmatrix.update( lSmatrix )
 
-            # Recompute pencil with new values
-            self.__init__(M, N)
+    #     # Defines dimensions
+    #     self.Cdim = self.stb_dim
+    #     self.Cshape = ( self.Cdim, self.Cdim )
 
-            # Recompute q-function
-            self.inverse()
-            self.qfunction(H = Hh, w = N @ (xi - x0) )
+    #     if self.zero_poly.degree() != self.aug_lSmatrix.degree():
+    #         raise Exception("Degrees of n(λ) - ε|P(λ)|² and λS(λ) should be the same.")
 
-            if self.n_poly.degree() < self.d_poly.degree():
+    #     self.Cdegree = self.zero_poly.degree()
+    #     self.sos_locs = sos_locations( self.Cdegree )
 
-                # NON-SINGULAR CASE
-                leading_c = self.zero_poly.coef[-1]
-                zeros = self.zero_poly.roots()
-                leading_c = self.zero_poly.coef[-1]
-                zeros = self.zero_poly.roots()
+    #     self.sosC_kern_deg = math.ceil(self.Cdegree/2)
+    #     self.sosC_dim = (self.sosC_kern_deg + 1) * self.Cdim
 
-                real_zeros = [ z.real for z in zeros if np.abs(z.imag) < self.real_tol ]
-                real_zeros = [ z.real for z in zeros if np.abs(z.imag) < self.real_tol ]
-                min_zero, max_zero = min(real_zeros), max(real_zeros)
+    #     # Initialize sosC and compute compatibility matrix
+    #     self.sosC = np.random.randn(*(self.sosC_dim, self.sosC_dim))
+    #     self.sosC = self.sosC.T @ self.sosC
 
-                psd_poly = Poly([1.0])
-                for z in zeros:
-                    if z == min_zero or z == max_zero: continue
-                    if z == min_zero or z == max_zero: continue
-                    psd_poly *= Poly([-z, 1.0])
-
-                psd_poly = MultiPoly.from_nppoly( psd_poly )
-            else:
-                # SINGULAR CASE
-                psd_poly = MultiPoly.from_nppoly( self.zero_poly )
-                psd_poly = MultiPoly.from_nppoly( self.zero_poly )
-
-            psd_poly.sos_decomposition()
-            R = psd_poly.sos_matrix
-
-            tol = 0.01
-            eigs = np.linalg.eigvals(R - tol*np.eye(R.shape[0]))
-            return eigs
-
-        def num_constr(var: np.ndarray):
-            ''' Returns the error between the n(λ) polynomials '''
-            N = B @ B.T @ Hvfun(var) - A
-            self.__init__(M,N)
-            self.qfunction(H = Hh, w = N @ (xi - x0) )
-            return np.linalg.norm( old_n_poly.coef - self.n_poly.coef )
-
-        def den_constr(var: np.ndarray):
-            ''' Returns the error between the d(λ) polynomials '''
-            N = B @ B.T @ Hvfun(var) - A
-            self.__init__(M,N)
-            self.qfunction(H = Hh, w = N @ (xi - x0) )
-            return np.linalg.norm( old_d_poly.coef - self.d_poly.coef )
-
-        def const_eigenvec(var: np.ndarray):
-            ''' Constraint for constant pencil eigenvectors '''
-            N = B @ B.T @ Hvfun(var) - A
-            self.__init__(M,N)
-            self.eigen()
-            distZ = np.linalg.norm(oldZ.T @ self.Z - np.eye(n), 'fro')
-            distQ = np.linalg.norm(oldQ.T @ self.Q - np.eye(n), 'fro')
-            return distZ + distQ
-
-        constr = [ {"type": "ineq", "fun": psd_constr} ]
-        # constr += [ {"type": "eq", "fun": const_eigenvec} ]
-
-        if "Hv" in clf_dict.keys(): objective = cost
-        else: objective = lambda var: 0.0
-
-        var0 = np.random.randn(ndof)
-        if "Hv" in clf_dict.keys(): objective = cost
-        else: objective = lambda var: 0.0
-
-        var0 = np.random.randn(ndof)
-        sol = minimize( objective, var0, constraints=constr, options={"disp": True, "maxiter": 1000} )
-        Hv = Hvfun(sol.x)
-
-        # Restores pencil variables
-        # self.M, self.N = auxM, auxN
-        # self.n_poly, self.d_poly = old_n_poly, old_d_poly
-        # self.computed_from = old_computed_from
-
-        return Hv
+    #     # self._compatibility_opt()
 
 class CLFCBFPair():
     '''

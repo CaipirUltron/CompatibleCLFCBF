@@ -5,7 +5,7 @@ from dynamic_systems import LinearSystem
 from controllers.compatibility import MatrixPencil, QFunction
 from common import hessian_quadratic, vector2sym, rot2D, randomR, genStableLTI
 
-n, m = 4, 4
+n, m = 2, 2
 
 A, B = genStableLTI(n, m, type='float', Alims=(-2, 2), Blims=(-2, 2), place=True)
 
@@ -48,8 +48,8 @@ for k, eig in enumerate( pencil.eigens ):
     print(f"{k+1}-th gen. eigenvalue of P(λ) = {eig.eigenvalue}.")
 
 qfun = QFunction(pencil, Hh, w)
-for k, eig in enumerate( qfun.Smatrix_pencil.real_eigen() ):
-    print(f"{k+1}-th real gen. eigenvalue of S(λ) = {eig.eigenvalue}")
+for k, eig in enumerate( qfun.Smatrix_pencil.eigens ):
+    print(f"{k+1}-th gen. eigenvalue of S(λ) = {eig.eigenvalue}")
 
 ''' --------------------------------- Test compatibilization ------------------------------------- '''
 def Hvfun(var):

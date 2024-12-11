@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from common import randomR, genStableLI, hessian_quadratic
 from controllers import MatrixPencil, QFunction
 
-n, m = 3, 3
+n, m = 2, 2
 
 loop = False
 # loop = True
