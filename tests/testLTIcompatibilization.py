@@ -7,10 +7,10 @@ from common import hessian_quadratic, vector2sym, rot2D, randomR, genStableLTI
 
 n, m = 2, 2
 
-A, B = genStableLTI(n, m, type='float', Alims=(-2, 2), Blims=(-2, 2), place=True)
+# A, B = genStableLTI(n, m, type='float', Alims=(-2, 2), Blims=(-2, 2), place=True)
 
-# A = np.zeros((n,n))
-# B = np.eye(n)
+A = np.zeros((n,n))
+B = np.eye(n)
 
 G = (B @ B.T)
 
@@ -18,23 +18,23 @@ plant = LinearSystem(initial_state=np.zeros(n), initial_control=np.zeros(n), A=A
 
 ''' ---------------------------- Define quadratic CLF and CBF ----------------------------------- '''
 
-CLFeigs = np.random.randint(low=1, high=10, size=n)
-CLFcenter = np.zeros(n)
-Hv = hessian_quadratic(CLFeigs, randomR(n) )
+# CLFeigs = np.random.randint(low=1, high=10, size=n)
+# CLFcenter = np.zeros(n)
+# Hv = hessian_quadratic(CLFeigs, randomR(n) )
 
-CBFeigs = np.random.randint(low=1, high=10, size=n)
-CBFcenter = 5*np.random.randn(n)
-Hh = hessian_quadratic(CBFeigs, randomR(n) )
+# CBFeigs = np.random.randint(low=1, high=10, size=n)
+# CBFcenter = 5*np.random.randn(n)
+# Hh = hessian_quadratic(CBFeigs, randomR(n) )
 
-# CLFeigs = np.array([ 20.0, 1.0 ])
-# CLFcenter = np.array([ 0.0, 0.0 ])
-# rotCLF = rot2D(np.deg2rad(0))
-# Hv = hessian_quadratic(CLFeigs, rotCLF )
+CLFeigs = np.array([ 20.0, 1.0 ])
+CLFcenter = np.array([ 0.0, 0.0 ])
+rotCLF = rot2D(np.deg2rad(0))
+Hv = hessian_quadratic(CLFeigs, rotCLF )
 
-# CBFeigs = np.array([ 1.0, 4.0 ])
-# CBFcenter = np.array([ 0.0, 3.0 ])
-# rotCBF = rot2D(np.deg2rad(80))
-# Hh = hessian_quadratic(CBFeigs, rotCBF )
+CBFeigs = np.array([ 1.0, 4.0 ])
+CBFcenter = np.array([ 0.0, 3.0 ])
+rotCBF = rot2D(np.deg2rad(60))
+Hh = hessian_quadratic(CBFeigs, rotCBF )
 
 p = 1.0
 
