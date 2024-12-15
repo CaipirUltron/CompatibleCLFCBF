@@ -89,7 +89,7 @@ def genStableLTI(n, m, **kwargs) -> tuple:
 
     rankC = np.linalg.matrix_rank( control.ctrb(A,B) )
     while rankC < A.shape[0]:
-        B = randomGen(typ, matrixLimits, size=(n,m))
+        B = randomGen(typ, Blimits, size=(n,m))
         rankC = np.linalg.matrix_rank( control.ctrb(A,B) )
 
     # Creates desired poles based on number of states

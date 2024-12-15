@@ -94,16 +94,7 @@ class QFunction():
         self.Smatrix: MatrixPolynomial = MatrixPolynomial.zeros(size=(self.stb_dim, self.stb_dim))
 
         self.delta = np.random.randn()
-        self.E = np.eye(self.stb_dim)
-
-        ''' Compatibility matrix'''
-        self.Cmatrix: MatrixPolynomial = MatrixPolynomial.zeros(size=(self.stb_dim, self.stb_dim))
-
         self._compute_polynomials()
-        self._init_comp_convex_opt( self.zero_poly.degree() )
-
-        # ''' Compatibility optimization '''
-        # self._comp_convex_opt(verbose=True)
 
         if self.is_compatible():
             print("Q-function is compatible.")
@@ -453,8 +444,8 @@ class QFunction():
         Test if Q-function is compatible or not.
         Q-function is compatible iff there exist NO roots of n(λ) - |P(λ)|² inside the stable intervals.
         '''
-        comp = self.compatibility()
-        print(f"Compatibility function returned: {comp}")
+        # comp = self.compatibility()
+        # print(f"Compatibility function returned: {comp}")
 
         for interval in self.stability_intervals:
             if interval["stability"] == 'stable':
@@ -702,9 +693,9 @@ class QFunction():
                 label_txt += f" stable ({stability:1.5f})"
                 ax.plot( sol["lambda"], 1.0, 'ro', label=label_txt ) # stable solutions
 
-        bounding_poly = self.bounding_poly()
-        bp_array = [ bounding_poly(l) for l in lambdas ]
-        ax.plot( lambdas, bp_array, color='b', label='b(λ)' )
+        # bounding_poly = self.bounding_poly()
+        # bp_array = [ bounding_poly(l) for l in lambdas ]
+        # ax.plot( lambdas, bp_array, color='b', label='b(λ)' )
 
         ''' Sets axes limits and legends '''
         ax.set_xlim(l_min, l_max)
@@ -769,77 +760,6 @@ class QFunction():
                    }
 
         return results
-
-    # def _init_comp_convex_opt2(self):
-    #     ''' 
-    #     Setup CVXPY parameters and variables.
-    #     '''
-    #     self.sosCblks = np.zeros((self.sosC_kern_deg+1, self.sosC_kern_deg+1), dtype=object)
-    #     for i in range(self.sosC_kern_deg+1):
-    #         for j in range(self.sosC_kern_deg+1):
-    #             if i <= j:
-    #                 self.sosCblks[i,j] = cvx.Variable( shape=self.Cshape, symmetric=True if i==j else False )
-    #             else:
-    #                 self.sosCblks[i,j] = self.sosCblks[j,i].T
-
-    #     self.CVX_delta = cvx.Variable()
-    #     self.CVX_E = cvx.Variable( shape=self.Cshape, PSD=True )
-    #     self.CVX_Lambda = cvx.Variable( shape=(self.null_dim,self.Cdim) )
-
-    #     self.CVX_dparams = [ cvx.Parameter() for _ in self.zero_poly.coef ]
-    #     self.CVX_lSparams = [ cvx.Parameter( shape=self.Cshape ) for _ in self.lSmatrix.coef ]
-
-    #     ''' Setup CVXPY cost, constraints and problem '''
-    #     CVX_constraints = []
-
-    #     for locs, dparam, lSparam in zip( self.sos_locs, self.CVX_dparams, self.CVX_lSparams ):
-    #         CVX_constraints += [ sum([ self.sosCblks[index] if index[0]==index[1] else self.sosCblks[index] + self.sosCblks[index].T for index in locs ]) == dparam * self.CVX_E + lSparam ]
-
-    #     self.CVX_sosC = cvx.bmat( self.sosCblks.tolist() )
-    #     CVX_constraints += [ self.CVX_sosC >> - self.CVX_delta * np.eye(self.sosC_dim) ]
-
-    #     self.CVX_cost = cvx.norm( self.CVX_delta )
-    #     self.CVX_problem = cvx.Problem( cvx.Minimize( self.CVX_cost ), constraints=CVX_constraints )
-
-    # def _compatibility_matrix(self) -> MatrixPolynomial:
-    #     '''
-    #     C(λ) = ( n(λ) - ε|P(λ)|² ) I + λ S(λ) >> 0 is a sufficient condition for 
-    #     compatibility of the CLF-CBF pair and given Linear System.
-    #     '''
-    #     # First polynomial term n(λ) - ε|P(λ)|²
-    #     self.zero_poly = self.n_poly - self.compatibility_eps * self.d_poly
-
-    #     # Second polynomial term λ S(λ)
-    #     lambda_poly = np.array([ Poly([0, 1], symbol=self.pencil.symbol) ])
-    #     aug_Smatrix = self.gradNull.T @ self.Psym @ self.gradNull
-    #     aug_lSmatrix = lambda_poly * aug_Smatrix
-    #     if hasattr(self, "aug_lSmatrix"):
-    #         self.aug_lSmatrix.update(aug_lSmatrix)
-    #     else:
-    #         self.aug_lSmatrix = MatrixPolynomial(aug_lSmatrix)
-
-    #     # Updates λ S(λ)
-    #     lSmatrix = self.Lambda.T @ aug_lSmatrix @ self.Lambda
-    #     self.lSmatrix.update( lSmatrix )
-
-    #     # Defines dimensions
-    #     self.Cdim = self.stb_dim
-    #     self.Cshape = ( self.Cdim, self.Cdim )
-
-    #     if self.zero_poly.degree() != self.aug_lSmatrix.degree():
-    #         raise Exception("Degrees of n(λ) - ε|P(λ)|² and λS(λ) should be the same.")
-
-    #     self.Cdegree = self.zero_poly.degree()
-    #     self.sos_locs = sos_locations( self.Cdegree )
-
-    #     self.sosC_kern_deg = math.ceil(self.Cdegree/2)
-    #     self.sosC_dim = (self.sosC_kern_deg + 1) * self.Cdim
-
-    #     # Initialize sosC and compute compatibility matrix
-    #     self.sosC = np.random.randn(*(self.sosC_dim, self.sosC_dim))
-    #     self.sosC = self.sosC.T @ self.sosC
-
-    #     # self._compatibility_opt()
 
 class CLFCBFPair():
     '''

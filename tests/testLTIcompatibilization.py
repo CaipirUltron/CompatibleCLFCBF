@@ -1,4 +1,5 @@
 import numpy as np
+import control
 import matplotlib.pyplot as plt
 
 from dynamic_systems import LinearSystem
@@ -8,9 +9,20 @@ from common import hessian_quadratic, vector2sym, rot2D, randomR, genStableLTI
 n, m = 2, 2
 
 # A, B = genStableLTI(n, m, type='float', Alims=(-2, 2), Blims=(-2, 2), place=True)
+# A = np.zeros((n,n))
+# B = np.eye(n)
 
-A = np.zeros((n,n))
-B = np.eye(n)
+A = np.array([[-2, 0],
+              [ 1,-1]])
+
+B = np.array([[2, 0],
+              [1, 1]])
+
+rankC = np.linalg.matrix_rank( control.ctrb(A,B) )
+if rankC < n:
+    print("System is not controllable.")
+else:
+    print("System is controllable.")
 
 G = (B @ B.T)
 
@@ -33,7 +45,7 @@ Hv = hessian_quadratic(CLFeigs, rotCLF )
 
 CBFeigs = np.array([ 1.0, 4.0 ])
 CBFcenter = np.array([ 0.0, 3.0 ])
-rotCBF = rot2D(np.deg2rad(60))
+rotCBF = rot2D(np.deg2rad(20))
 Hh = hessian_quadratic(CBFeigs, rotCBF )
 
 p = 1.0
