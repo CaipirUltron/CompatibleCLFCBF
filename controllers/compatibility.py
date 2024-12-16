@@ -7,65 +7,13 @@ from matplotlib.axes import Axes
 from numpy.polynomial import Polynomial as Poly
 from numpy.polynomial.polynomial import polydiv
 
+from copy import copy
 from scipy import signal
 from scipy.optimize import fsolve, minimize
 from scipy.linalg import null_space, inv
 
 from common import *
 from dynamic_systems import DynamicSystem, LinearSystem
-
-def interval_barrier(poly: Poly, limits):
-    '''
-    Barrier function for a given interval inside limits.
-    Positive and equal to the minimum distance from the polynomial to the interval, if no roots inside the interval exist.
-    Negative and equal to the negative of the minimal distance from the interval limits, if there are roots inside the interval.
-    '''
-    if limits[0] >= limits[1]:
-        raise Exception("Invalid interval.")
-
-    interval_length = limits[1] - limits[0]
-
-    boundaries = [ limit for limit in limits ]
-    extrema = [ root for root in poly.deriv().roots() if np.abs(root.imag) <= 1e-6 and root > limits[0] and root < limits[1] ]
-    roots = [ root for root in poly.roots() if np.abs(root.imag) <= 1e-6 and root > limits[0] and root < limits[1] ]
-
-    # Compute minimum distance to interval
-    boundary_vals = [ np.abs( poly(end_point) ) for end_point in boundaries ]
-    extrema_vals = [ np.abs( poly(extremum) ) for extremum in extrema  ]
-    min_candidates = boundary_vals + extrema_vals
-    if roots:
-        min_candidates += [0.0]
-
-    min_distance = min(min_candidates)
-
-    # Create intervals
-    divisions = np.array(boundaries + roots)
-    divisions.sort()
-    intervals = [ [] for _ in range(len(divisions)-1) ]
-    for k in range(0,len(divisions)-1):
-        start = float(divisions[k])
-        end = float(divisions[k+1])
-        intervals[k] = [start, end]
-    
-    print(f"Intervals: {intervals}")
-
-    # Sum up even/odd interval lengths
-    even_length, odd_length = 0.0, 0.0
-    for k, interval in enumerate(intervals):
-        if k%2 == 0:
-            even_length += interval[1] - interval[0]
-        else:
-            odd_length += interval[1] - interval[0]
-
-    # error = even_length + odd_length - interval_length
-    # print(f'error = {error}')
-
-    contained_distance = min([even_length, odd_length])
-    if contained_distance > 0:
-        return - contained_distance
-
-    if min_distance >= 0:
-        return min_distance
 
 class QFunction():
     '''
@@ -83,17 +31,21 @@ class QFunction():
         self.H = H
         self.w = w
 
+        self.perturbing = False
+
         ''' Class parameters '''
         self.trim_tol = 1e-8
         self.real_tol = 1e-6
-        self.compatibility_k = 2           # should be > 1
+        self.comp_poly_leading_coef = 0.01
         self.compatibility_eps = 1.0       # should be > 1
 
         ''' Stability matrix S(λ) '''
-        self.stb_dim = self.dim-1
+        self.stb_dim = self.dim - 1
         self.Smatrix: MatrixPolynomial = MatrixPolynomial.zeros(size=(self.stb_dim, self.stb_dim))
 
-        self.delta = np.random.randn()
+        # self.N = self.stb_dim - 1
+        # self.num_fixed_pts = 0
+
         self._compute_polynomials()
 
         if self.is_compatible():
@@ -145,56 +97,36 @@ class QFunction():
 
         ''' Computation of stability properties of the boundary equilibrium points '''
         self.divisor_poly, self.v_poly = self._v_poly()
-        self._stability_matrix()
 
-    def _init_comp_convex_opt(self, poly_deg):
+        if not self.perturbing:
+            self._stability_matrix()
+
+    def _init_convex_opt(self, num_factors, fixed_pts):
         ''' 
         Setup CVXPY parameters and variables.
         '''
-        sos_locs = sos_locations(poly_deg)
+        self.sos_dim = num_factors + 1
+        self.sos_shape = (self.sos_dim, self.sos_dim)
 
-        self.sosC_dim = int(poly_deg/2) + 1
-        self.sosB_dim = self.sosC_dim - 1
+        self.sos = cvx.Variable( shape=self.sos_shape, PSD=True )
 
-        self.sosC_shape = (self.sosC_dim, self.sosC_dim)
-        self.sosB_shape = (self.sosB_dim, self.sosB_dim)
+        D = np.diag([k for k in range(1,self.sos_dim)])
+        D = np.hstack([D, np.zeros((self.sos_dim-1,1))])
+        D = np.vstack([np.zeros((1,self.sos_dim)),D])
 
-        self.CVX_slack = cvx.Variable()
-        self.sosC = cvx.Variable( shape=self.sosC_shape, symmetric=True )
-        self.sosB = cvx.Variable( shape=self.sosB_shape, PSD=True )
+        def kern(l:float) -> np.ndarray:
+            return np.array([ l**k for k in range(self.sos_dim) ])
+        
+        # Polynomial must be monic
+        CVX_constraints = [ self.sos[-1,-1] == 1 ]
 
-        self.poly_coefs = cvx.Parameter(poly_deg+1)
-        self.fixed_poly_coefs = cvx.Parameter(3)
-        self.concavity = cvx.Parameter()
+        # This adds the fixed point constraints
+        for pt in fixed_pts:
+            Lambda = kern(pt)
+            CVX_constraints += [ Lambda.T @ ( D.T @ self.sos + self.sos @ D ) @ Lambda == 0 ]
 
-        # This computes every term of the bounding polynomial (Cauchy sum of coefficients from fixed polynomial and SOS polynomial)
-        self.bounding_poly_coefs = [ 0.0 for _ in range(poly_deg+1) ]
-        for i in range(0,poly_deg+1):
-            summation = 0.0
-            for j in range(0,3):
-                for k in range(0,self.sosB_dim):
-                    for l in range(0,self.sosB_dim):
-                        if j+k+l != i:
-                            continue
-                        summation += self.fixed_poly_coefs[j] * self.sosB[k,l]
-            self.bounding_poly_coefs[i] = summation
-
-        # This adds the sosC equality constraints
-        CVX_constraints = []
-        for locs in sos_locs:
-            k = locs[0][0] + locs[0][1]
-            CVX_constraints += [ sum([ self.sosC[index] if index[0]==index[1] else 2*self.sosC[index] for index in locs ]) == self.poly_coefs[k] - self.bounding_poly_coefs[k] ]
-
-        # This adds the sosC inequality constraint
-        CVX_constraints += [ - self.concavity * self.sosC + self.CVX_slack * np.eye(self.sosC_dim) >> 0 ]
-
-        self.CVX_cost = cvx.norm( self.CVX_slack )
+        self.CVX_cost = cvx.norm( self.sos )
         self.CVX_problem = cvx.Problem( cvx.Minimize( self.CVX_cost ), constraints=CVX_constraints )
-
-    def bounding_poly(self):
-        ''' Returns bounding poly '''
-        bounding_poly_coefs = [ float(coef.value) for coef in self.bounding_poly_coefs ]
-        return Poly(bounding_poly_coefs)
 
     def _v_poly(self) -> tuple[Poly, np.ndarray[Poly]]:
         '''
@@ -225,10 +157,9 @@ class QFunction():
         ''' 
         Compute stability intervals using the gen. eigenvalues of S(λ) (|S(λ)| = 0)
         '''
-        def definiteness(limits: tuple):
+        def interval_type(limits: tuple):
             '''
-            Computes the definiteness of a given interval.
-            Input: - tuple: limits[0]:  
+            Returns the amount of positive/negative eigenvalues of S at a given interval.
             '''
             if len(limits) != 2 or limits[0] >= limits[1]:
                 raise Exception("Invalid interval limits.")
@@ -242,58 +173,85 @@ class QFunction():
                 l = limits[0] + displ_dist
             else:
                 l = np.mean(limits)
-            S_at_test_pt = self.Smatrix(l)
-            eigS_at_test_pt = np.linalg.eigvals( S_at_test_pt )
-            if np.all(eigS_at_test_pt > 0):
-                return 'psd'
-            elif np.all(eigS_at_test_pt < 0):
-                return 'nsd'
-            else:
-                return 'indef'
+
+            eigS_at_test_pt = np.linalg.eigvals( self.Smatrix(l) )
+            pos_num = int(np.sum([ 1 for eig in eigS_at_test_pt if eig > 0]))
+            neg_num = self.stb_dim - pos_num
+            return (pos_num, neg_num)
 
         real_eigS = self.Smatrix_pencil.real_eigen()
-        divisions = [-np.inf] + [ float(eig.eigenvalue) for eig in real_eigS ] + [+np.inf]
+        divisions = [-np.inf] + [ float(eig.eigenvalue) for eig in real_eigS if eig.eigenvalue != np.inf ] + [np.inf]
 
-        self.def_intervals = []
+        self.intervals = []
         self.stability_intervals = []
         for k in range(len(divisions)-1):
             div1 = divisions[k]
             div2 = divisions[k+1]
             limits = (div1, div2)
-            interval = { "limits": limits, "definiteness": definiteness(limits) }
-            self.def_intervals.append( interval )
+            interval = { "limits": limits, 
+                         "type": interval_type(limits),
+                         "length": limits[1]-limits[0]
+                         }
+            self.intervals.append( interval )
 
-            if div2 < 0:
-                continue
-
+            if div2 < 0: continue
             if div1 < 0: div1 = 0.0
 
             limits = (div1, div2)
-            defin = definiteness(limits)
-            if defin in ('indef', 'psd'):
+            if interval_type(limits) != (0, self.stb_dim):
                 stability = 'unstable'
             else:
                 stability = 'stable'
-            interval = { "limits": limits, "stability": stability }
+
+            interval = { "limits": limits, 
+                         "stability": stability,
+                         "length": abs(limits[1]-limits[0])
+                         }
             self.stability_intervals.append( interval )
 
-        for k, interval in enumerate(self.stability_intervals):
-            stability = interval["stability"]
-            limits = interval["limits"]
-            print(f"{k+1} interval = {limits} is {stability}")
+        # for k, interval in enumerate(self.intervals):
+        #     typ = interval["type"]
+        #     limits = interval["limits"]
+        #     print(f"{k+1} interval = {limits} is {typ}")
+
+        # for k, interval in enumerate(self.stability_intervals):
+        #     stab = interval["stability"]
+        #     limits = interval["limits"]
+        #     print(f"{k+1} interval = {limits} is {stab}")
 
     def _stability_matrix(self) -> MatrixPolynomial:
         ''' 
         Computes the stability polynomial matrix.
         '''
+
+        ''' Computes R(λ), the nullspace matrix polynomial to ∇h(λ) '''
         nablah = ( self.H @ self.v_poly )
+        gradNull = nullspace( nablah )
+        coefs, symbol = to_coef(gradNull)
+        nullspace_poly_deg = len(coefs)-1
 
-        ''' Computes R(λ), the nullspace matrix polynomial to ∇h(λ) of appropriate degree '''
-        self.gradNull = nullspace( nablah )
-        self.null_dim = self.gradNull.shape[1]
+        # If the nullspace degree is zero (degenerate case), PERTURB the parameters of the Q-function to generate a new nullspace
+        if nullspace_poly_deg == 0:
+            
+            self.perturbing = True
 
-        self.Lambda = np.random.randn(self.null_dim, self.stb_dim)
-        self.Rmatrix = self.gradNull @ self.Lambda
+            perturb = 1e-10
+            self.auxM, self.auxN, self.auxH, self.auxw = self.pencil.M, self.pencil.N, self.H, self.w
+
+            newM = self.pencil.M + perturb*np.random.randn(*self.pencil.shape)
+            newN = self.pencil.N + perturb*np.random.randn(*self.pencil.shape)
+
+            newH = self.H + perturb*np.random.randn(self.dim)
+            neww = self.w + perturb*np.random.randn(self.dim)
+
+            self.update(M=newM, N=newN, H=newH, w=neww)
+            nablah = ( self.H @ self.v_poly )
+            gradNull = nullspace( nablah )
+
+            self.update(M=self.auxM, N=self.auxN, H=self.auxH, w=self.auxw)
+            self.perturbing = False
+
+        self.Rmatrix = gradNull
 
         ''' Computes the stability matrix polynomial from N(λ) '''
         self.Psym = self.pencil.symmetric()
@@ -306,58 +264,91 @@ class QFunction():
             self.Smatrix_pencil = self.Smatrix.companion_form()
 
         self._intervals()
+        self.compatibility_barrier(verbose=True)
 
-    def compatibility(self):
+    def compatibility_barrier(self, verbose=False):
         ''' 
-        Function to measure compatibility 
+        Barrier function for compatibility 
         '''
-        return self._interval_compatibility( [2.9, 3.2], verbose=True )
+        N = self.dim
+        self.compatibility_poly = Poly([self.comp_poly_leading_coef])
+        intervals = copy(self.intervals)            
 
-        # for interval in self.stability_intervals:
-        #     if interval["stability"] == 'unstable':
-        #         continue
+        ''' First, deal with the stable intervals '''
+        to_be_rem = []
+        for interval in intervals:
 
-    def _interval_compatibility(self, limits, verbose=False):
-        ''' 
-        Returns a positive number if n(λ) - |P(λ)|² crosses the given interval
-        and 0 otherwise. This can be achieved through convex optimization
-        using the concept of bounding polynomials.
+            if interval["type"] != (0, self.stb_dim):           # ignores non-nsd intervals
+                continue
 
-        PS: this function is continuous with variations on the system parameters.
-        '''
-        if limits[0] >= limits[1]:
-            raise Exception("Invalid interval limits.")
-        
-        # Load zero polynomial coefficients
-        self.poly_coefs.value = self.zero_poly.coef
+            roots = [ max(l, 0.0) for l in interval["limits"] ]
+            self.compatibility_poly *= Poly.fromroots(roots)
 
-        # Load bounding polynomial roots (at the ends of the interval) and concavity
-        root1, root2 = limits[0], limits[1]
-        fixed_poly = np.array([ root1*root2, -(root1+root2), 1 ])
+            N -= 1
+            to_be_rem.append(interval)
 
-        # Relative to left interval limit...
-        if self.zero_poly(root1) > 0: self.concavity.value = -1
-        if self.zero_poly(root1) < 0: self.concavity.value = +1
-        self.fixed_poly_coefs.value = self.concavity.value * fixed_poly
+        for item in to_be_rem:
+            intervals.remove(item)
 
-        # Solves CVX problem for left interval
-        self.CVX_problem.solve(solver = 'SCS', verbose=False)
-        if verbose:
-            print(f"Compatibilization problem returned with status {self.CVX_problem.status}, final cost = {self.CVX_cost.value}")
-        slack1 = self.CVX_slack.value
+        ''' Next, deal with complex conjugate pairs '''
+        def are_conj(num1, num2):
+            return num1.imag == -num2.imag and num1.real == num2.real
 
-        # Relative to right interval limit...
-        if self.zero_poly(root2) > 0: self.concavity.value = -1
-        if self.zero_poly(root2) < 0: self.concavity.value = +1
-        self.fixed_poly_coefs.value = self.concavity.value * fixed_poly
+        eigS = self.Smatrix_pencil.eigens
+        complex_conjugates = []
+        for eig in eigS:
+            if np.iscomplex(eig.eigenvalue) and not np.any([ are_conj(eig.eigenvalue, num) for num in complex_conjugates ]):
+                complex_conjugates.append(eig.eigenvalue)
 
-        # Solves CVX problem for right interval
-        self.CVX_problem.solve(solver = 'SCS', verbose=False)
-        if verbose:
-            print(f"Compatibilization problem returned with status {self.CVX_problem.status}, final cost = {self.CVX_cost.value}")
-        slack2 = self.CVX_slack.value
-        
-        return float( np.mean([slack1, slack2]) )
+                a = eig.eigenvalue.real
+                b = eig.eigenvalue.imag
+
+                h0 = a**2 + b**2
+                h1 = -2*a
+                self.compatibility_poly *= Poly([h0, h1, 1.0])
+
+        ''' Deal with finite psd intervals '''
+        to_be_rem = []
+        for interval in intervals:
+
+            if interval["type"] != (self.stb_dim, 0) or interval["length"] == np.inf:           # ignores non-psd intervals
+                continue
+
+            a = interval["limits"][0]
+            b = interval["limits"][1]
+            l = interval["length"]
+            
+            h0 = l + ((a+b)/2)**2
+            h1 = -(a+b)
+            self.compatibility_poly *= Poly([h0, h1, 1.0])
+
+            to_be_rem.append(interval)
+
+        for item in to_be_rem:
+            intervals.remove(item)
+
+        ''' Finally, deal with remaining connected intervals '''
+        visited = [ False for _ in range(len(intervals)) ]
+        for k in range(len(intervals)-1):
+            
+            int1 = intervals[k]
+            int2 = intervals[k+1]
+            if not np.all(visited[k:k+2]) and int1["type"] == int2["type"]:
+
+                a = int1[0]
+                b = int2[1]
+                l = b-a
+                
+                h0 = l + (0.5*(a+b))**2
+                h1 = -(a+b)
+                self.compatibility_poly *= Poly([h0, h1, 1.0])
+
+                # fixed_pts.append( np.mean([ int1[0], int2[1] ]) )
+                visited[k] = True
+                visited[k+1] = True
+
+        print(f"Compatibility polynomial: \n{self.compatibility_poly}")
+        print(f" with roots = {self.compatibility_poly.roots()}")
 
     def _comp_nonconvex_opt(self, verbose=False):
         ''' 
@@ -571,7 +562,7 @@ class QFunction():
 
         return self.pencil @ Or_poly.T
 
-    def plot(self, ax: Axes, res: float = 0.0, q_limits=(-10, 500)):
+    def plot(self, ax: Axes, res: float = 0.0, q_limits=(-5, 5)):
         '''
         Plots the Q-function for analysis.
         '''
@@ -693,13 +684,12 @@ class QFunction():
                 label_txt += f" stable ({stability:1.5f})"
                 ax.plot( sol["lambda"], 1.0, 'ro', label=label_txt ) # stable solutions
 
-        # bounding_poly = self.bounding_poly()
-        # bp_array = [ bounding_poly(l) for l in lambdas ]
-        # ax.plot( lambdas, bp_array, color='b', label='b(λ)' )
+        cp_array = [ self.compatibility_poly(l) for l in lambdas ]
+        ax.plot( lambdas, cp_array, color='r', label='h(λ)' )
 
         ''' Sets axes limits and legends '''
         ax.set_xlim(l_min, l_max)
-        # ax.set_ylim(q_min, q_max)
+        ax.set_ylim(q_min, q_max)
         ax.legend()
 
     def compatibilize(self, plant: DynamicSystem, clf_dict: dict, p = 1.0):

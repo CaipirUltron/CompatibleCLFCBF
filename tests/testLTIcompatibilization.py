@@ -13,10 +13,13 @@ n, m = 2, 2
 # B = np.eye(n)
 
 A = np.array([[-2, 0],
-              [ 1,-1]])
+              [ 1,-1]],dtype=float)
 
 B = np.array([[2, 0],
-              [1, 1]])
+              [1, 1]],dtype=float)
+
+A += .1*np.random.randn(n,n)
+B += .1*np.random.randn(n,m)
 
 rankC = np.linalg.matrix_rank( control.ctrb(A,B) )
 if rankC < n:
@@ -45,7 +48,7 @@ Hv = hessian_quadratic(CLFeigs, rotCLF )
 
 CBFeigs = np.array([ 1.0, 4.0 ])
 CBFcenter = np.array([ 0.0, 3.0 ])
-rotCBF = rot2D(np.deg2rad(20))
+rotCBF = rot2D(np.deg2rad(80.0))
 Hh = hessian_quadratic(CBFeigs, rotCBF )
 
 p = 1.0
