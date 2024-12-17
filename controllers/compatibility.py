@@ -1,9 +1,10 @@
 import math
 import numpy as np
+
 import matplotlib.patches as patches
 import matplotlib.colors as mcolors
-
 from matplotlib.axes import Axes
+
 from numpy.polynomial import Polynomial as Poly
 from numpy.polynomial.polynomial import polydiv
 
@@ -14,6 +15,7 @@ from scipy.linalg import null_space, inv
 
 from common import *
 from dynamic_systems import DynamicSystem, LinearSystem
+from typing import Callable
 
 class QFunction():
     '''
@@ -42,9 +44,6 @@ class QFunction():
         ''' Stability matrix S(λ) '''
         self.stb_dim = self.dim - 1
         self.Smatrix: MatrixPolynomial = MatrixPolynomial.zeros(size=(self.stb_dim, self.stb_dim))
-
-        # self.N = self.stb_dim - 1
-        # self.num_fixed_pts = 0
 
         self._compute_polynomials()
 
@@ -209,16 +208,6 @@ class QFunction():
                          }
             self.stability_intervals.append( interval )
 
-        # for k, interval in enumerate(self.intervals):
-        #     typ = interval["type"]
-        #     limits = interval["limits"]
-        #     print(f"{k+1} interval = {limits} is {typ}")
-
-        # for k, interval in enumerate(self.stability_intervals):
-        #     stab = interval["stability"]
-        #     limits = interval["limits"]
-        #     print(f"{k+1} interval = {limits} is {stab}")
-
     def _stability_matrix(self) -> MatrixPolynomial:
         ''' 
         Computes the stability polynomial matrix.
@@ -264,91 +253,15 @@ class QFunction():
             self.Smatrix_pencil = self.Smatrix.companion_form()
 
         self._intervals()
-        self.compatibility_barrier(verbose=True)
+        self.compatibility_barrier()
 
-    def compatibility_barrier(self, verbose=False):
-        ''' 
-        Barrier function for compatibility 
+    def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
         '''
-        N = self.dim
-        self.compatibility_poly = Poly([self.comp_poly_leading_coef])
-        intervals = copy(self.intervals)            
-
-        ''' First, deal with the stable intervals '''
-        to_be_rem = []
-        for interval in intervals:
-
-            if interval["type"] != (0, self.stb_dim):           # ignores non-nsd intervals
-                continue
-
-            roots = [ max(l, 0.0) for l in interval["limits"] ]
-            self.compatibility_poly *= Poly.fromroots(roots)
-
-            N -= 1
-            to_be_rem.append(interval)
-
-        for item in to_be_rem:
-            intervals.remove(item)
-
-        ''' Next, deal with complex conjugate pairs '''
-        def are_conj(num1, num2):
-            return num1.imag == -num2.imag and num1.real == num2.real
-
-        eigS = self.Smatrix_pencil.eigens
-        complex_conjugates = []
-        for eig in eigS:
-            if np.iscomplex(eig.eigenvalue) and not np.any([ are_conj(eig.eigenvalue, num) for num in complex_conjugates ]):
-                complex_conjugates.append(eig.eigenvalue)
-
-                a = eig.eigenvalue.real
-                b = eig.eigenvalue.imag
-
-                h0 = a**2 + b**2
-                h1 = -2*a
-                self.compatibility_poly *= Poly([h0, h1, 1.0])
-
-        ''' Deal with finite psd intervals '''
-        to_be_rem = []
-        for interval in intervals:
-
-            if interval["type"] != (self.stb_dim, 0) or interval["length"] == np.inf:           # ignores non-psd intervals
-                continue
-
-            a = interval["limits"][0]
-            b = interval["limits"][1]
-            l = interval["length"]
-            
-            h0 = l + ((a+b)/2)**2
-            h1 = -(a+b)
-            self.compatibility_poly *= Poly([h0, h1, 1.0])
-
-            to_be_rem.append(interval)
-
-        for item in to_be_rem:
-            intervals.remove(item)
-
-        ''' Finally, deal with remaining connected intervals '''
-        visited = [ False for _ in range(len(intervals)) ]
-        for k in range(len(intervals)-1):
-            
-            int1 = intervals[k]
-            int2 = intervals[k+1]
-            if not np.all(visited[k:k+2]) and int1["type"] == int2["type"]:
-
-                a = int1[0]
-                b = int2[1]
-                l = b-a
-                
-                h0 = l + (0.5*(a+b))**2
-                h1 = -(a+b)
-                self.compatibility_poly *= Poly([h0, h1, 1.0])
-
-                # fixed_pts.append( np.mean([ int1[0], int2[1] ]) )
-                visited[k] = True
-                visited[k+1] = True
-
-        print(f"Compatibility polynomial: \n{self.compatibility_poly}")
-        print(f" with roots = {self.compatibility_poly.roots()}")
+        Computes the q-function value q(λ) = n(λ)/d(λ) for a given λ (for DEBUG only)
+        '''
+        P = self.pencil(l)
+        v = inv(P) @ self.w
+        return v.T @ self.H @ v
 
     def _comp_nonconvex_opt(self, verbose=False):
         ''' 
@@ -430,6 +343,97 @@ class QFunction():
         if verbose:
             print(f"Nonvex results: δ = {self.delta}, Λ = \n{self.Lambda}")
 
+    def compatibility_barrier(self):
+        ''' 
+        Barrier function for compatibility 
+        '''
+        N = self.dim
+        self.compatibility_poly = Poly([self.comp_poly_leading_coef])
+        intervals = copy(self.intervals)
+
+        ''' First, deal with the stable intervals '''
+        to_be_rem = []
+        for interval in intervals:
+
+            if interval["type"] != (0, self.stb_dim):           # ignores non-nsd intervals
+                continue
+
+            roots = [ max(l, 0.0) for l in interval["limits"] ]
+            self.compatibility_poly *= Poly.fromroots(roots)
+            N -= 1
+
+            to_be_rem.append(interval)
+
+        for item in to_be_rem:
+            intervals.remove(item)
+
+        self.complex_conj_pairs = []
+        if N == 0: return
+
+        ''' Next, deal with complex conjugate pairs '''
+        def are_conj(num1, num2):
+            return num1.imag == -num2.imag and num1.real == num2.real
+
+        eigS = self.Smatrix_pencil.eigens
+        for eig in eigS:
+            if np.iscomplex(eig.eigenvalue) and not np.any([ are_conj(eig.eigenvalue, num) for num in self.complex_conj_pairs ]):
+                self.complex_conj_pairs.append(eig.eigenvalue)
+
+                a = eig.eigenvalue.real
+                b = eig.eigenvalue.imag
+
+                h0 = a**2 + b**2
+                h1 = -2*a
+
+                self.compatibility_poly *= Poly([h0, h1, 1.0])
+                N -= 1
+
+        if N == 0: return
+
+        ''' Deal with finite psd intervals '''
+        to_be_rem = []
+        for interval in intervals:
+
+            if interval["type"] != (self.stb_dim, 0) or interval["length"] == np.inf:           # ignores non-psd intervals
+                continue
+
+            a = interval["limits"][0]
+            b = interval["limits"][1]
+            l = interval["length"]
+            
+            h0 = l + ((a+b)/2)**2
+            h1 = -(a+b)
+            self.compatibility_poly *= Poly([h0, h1, 1.0])
+            N -= 1
+
+            to_be_rem.append(interval)
+
+        for item in to_be_rem:
+            intervals.remove(item)
+
+        if N == 0: return
+
+        ''' Finally, deal with remaining connected intervals '''
+        visited = [ False for _ in range(len(intervals)) ]
+        for k in range(len(intervals)-1):
+            
+            int1 = intervals[k]
+            int2 = intervals[k+1]
+            if not np.all(visited[k:k+2]) and int1["type"] == int2["type"]:
+
+                a = int1["limits"][0]
+                b = int2["limits"][1]
+                l = b-a
+                
+                h0 = l + (0.5*(a+b))**2
+                h1 = -(a+b)
+                self.compatibility_poly *= Poly([h0, h1, 1.0])
+                N -= 1
+
+                # fixed_pts.append( np.mean([ int1[0], int2[1] ]) )
+                visited[k] = True
+                visited[k+1] = True
+
     def is_compatible(self):
         ''' 
         Test if Q-function is compatible or not.
@@ -448,14 +452,6 @@ class QFunction():
                         return False
 
         return True
-
-    def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
-        '''
-        Computes the q-function value q(λ) = n(λ)/d(λ) for a given λ (for DEBUG only)
-        '''
-        P = self.pencil(l)
-        v = inv(P) @ self.w
-        return v.T @ self.H @ v
 
     def update(self, **kwargs):
         '''
@@ -562,135 +558,105 @@ class QFunction():
 
         return self.pencil @ Or_poly.T
 
-    def plot(self, ax: Axes, res: float = 0.0, q_limits=(-5, 5)):
+    def init_graphics(self, ax: Axes, res=0.01):
+        ''' Initialize graphical objects '''
+
+        realeigs = [ eig.eigenvalue for eig in self.Smatrix_pencil.real_eigen() ]
+        complexeigs = [ eig.real for eig in self.complex_conj_pairs ]
+        lambda_range = realeigs + complexeigs
+        lmin, lmax = min(lambda_range), max(lambda_range)
+        print(f"Ideal λ range = ({lmin},{lmax})")
+
+        self.plot_limits = {"hor": [lmin-10, lmax+10],
+                            "ver": [-10, 10]}
+
+        self.strip_colors = {"nsd": np.array(mcolors.to_rgb(mcolors.TABLEAU_COLORS['tab:red'])),
+                             "psd": np.array(mcolors.to_rgb(mcolors.TABLEAU_COLORS['tab:cyan'])),
+                             "indef": np.array(mcolors.to_rgb(mcolors.TABLEAU_COLORS['tab:gray']))}
+
+        self.lambda_res = res
+        self.strip_size = 1.0
+
+        hor_limits = self.plot_limits["hor"]
+        # ver_limits = self.plot_limits["ver"]
+        self.lambda_array = np.arange(hor_limits[0], hor_limits[1], self.lambda_res)
+
+        self.z_plot, = ax.plot([],[],'b',lw=0.8, label='z(λ)')
+        self.c_plot, = ax.plot([],[],'r',lw=0.8, label='h(λ)')
+
+        self.equilibrium_pts, = ax.plot([], [], 'or' )
+        self.equilibrium_texts = []
+
+        self.default_rect = patches.Rectangle((0.0, -self.strip_size/2), 0, self.strip_size, facecolor=self.strip_colors["indef"], alpha=.6)
+        self.strip_rects = []
+        for _ in range(len(self.Smatrix_pencil.eigens)+1):
+            handle = ax.add_patch( copy(self.default_rect) )
+            self.strip_rects.append(handle)
+
+        self.real_stability_pts, = ax.plot([], [], '*k', linewidth=1.0 )
+        self.complex_stability_pts, = ax.plot([], [], '|k', linewidth=1.0 )
+
+        ax.grid()
+        ax.set_xlim(*self.plot_limits["hor"])
+        ax.set_ylim(*self.plot_limits["ver"])
+        ax.legend()
+
+    def plot(self):
         '''
         Plots the Q-function for analysis.
         '''
-        q_min, q_max = q_limits[0], q_limits[1]
-        lambdaRange = [0.0]
+        hor_limits = self.plot_limits["hor"]
+        # ver_limits = self.plot_limits["ver"]
+        # l_min, l_max = hor_limits[0], hor_limits[1]
 
-        ''' Add pencil real eigenvalues to range '''
-        realEigens = self.pencil.real_eigen()
-        for eig in realEigens:
-            if np.abs(eig.eigenvalue.real) < np.inf and np.abs(eig.eigenvalue.real) > -np.inf:
-                lambdaRange.append(eig.eigenvalue.real)
+        z_array = [ self.zero_poly(l) for l in self.lambda_array ]
+        self.z_plot.set_data(self.lambda_array, z_array)
 
-        ''' Add equilibrium solutions to range '''
-        sols = self.equilibria()
-        for sol in sols:
-            lambdaRange.append(sol["lambda"])
+        c_array = [ self.compatibility_poly(l) for l in self.lambda_array ]
+        self.c_plot.set_data(self.lambda_array, c_array)
 
-        for eig in self.Smatrix_pencil.real_eigen():
-            if np.abs(eig.eigenvalue) < 1e+12: 
-                lambdaRange.append(eig.eigenvalue)
+        for k, interval in enumerate(self.intervals):
+            limits = interval["limits"]
+            typ = interval["type"]
+            length = interval["length"]
 
-        ''' Using range min, max values, generate λ range to be plotted '''
-        factor = 10
-        l_min, l_max = -100,  100
-        l_min, l_max = min(lambdaRange), max(lambdaRange)
+            lmin, lmax = max(limits[0], hor_limits[0]), min(limits[1], hor_limits[1])
+            limits = (lmin, lmax)
+            length = lmax - lmin
 
-        deltaLambda = l_max - l_min
-        l_min -= deltaLambda/factor
-        l_max += deltaLambda/factor
-        if res == 0.0:
-            res = deltaLambda/1e4
+            self.strip_rects[k].set_x(limits[0])
+            self.strip_rects[k].set_width(length)
 
-        lambdas = np.arange(l_min, l_max, res)
+            strip_color = (1/self.stb_dim) * ( self.strip_colors["psd"]*typ[0] + self.strip_colors["nsd"]*typ[1] )
+            self.strip_rects[k].set_facecolor(strip_color)
 
-        ''' Loops through each λ on range to find stable/unstable intervals '''
-        is_insert_nsd, is_insert_ind, is_insert_psd = False, False, False
-        nsd_intervals, ind_intervals, psd_intervals = [], [], []
-        for l in lambdas:
+        for i in range(k+1, len(self.strip_rects)):
+            self.strip_rects[i].set_width(0)
 
-            eigS = self.stability(l)
+        eig_array = [ eig.eigenvalue for eig in self.Smatrix_pencil.real_eigen() ]
+        self.real_stability_pts.set_data(eig_array, np.zeros(len(eig_array)))
 
-            ''' Negative definite (stability) intervals '''
-            if np.all( eigS < 0.0 ):
-                if not is_insert_nsd:
-                    nsd_intervals.append([ l, np.inf ])
-                is_insert_nsd = True
-            elif is_insert_nsd:
-                nsd_intervals[-1][1] = l
-                is_insert_nsd = False
+        print(self.complex_conj_pairs)
 
-            ''' Indefinite (instability) intervals '''
-            if np.any( eigS > 0.0 ) and np.any( eigS < 0.0 ):
-                if not is_insert_ind:
-                    ind_intervals.append([ l, np.inf ])
-                is_insert_ind = True
-            elif is_insert_ind:
-                ind_intervals[-1][1] = l
-                is_insert_ind = False
+        if self.complex_conj_pairs:
+            hor_array = np.hstack([ [eig.real, eig.real] for eig in self.complex_conj_pairs ])
+            ver_array = np.hstack([ [eig.imag, -eig.imag] for eig in self.complex_conj_pairs ])
+            self.complex_stability_pts.set_data(hor_array, ver_array)
+        else:
+            self.complex_stability_pts.set_data([], [])
 
-            ''' Positive definite (instability) intervals '''
-            if np.all( eigS > 0.0 ):
-                if not is_insert_psd:
-                    psd_intervals.append([ l, np.inf ])
-                is_insert_psd = True
-            elif is_insert_psd:
-                psd_intervals[-1][1] = l
-                is_insert_psd = False
+        eq_array = [ sol["lambda"] for sol in self.equilibria() ]
+        self.equilibrium_pts.set_data( eq_array, np.zeros(len(eq_array)) )
 
-        strip_size = (q_max - q_min)/50
-        strip_alpha = 0.6
+        graphical_elements = []
+        graphical_elements.append( self.z_plot )
+        graphical_elements.append( self.c_plot )
+        graphical_elements += self.strip_rects
+        graphical_elements.append( self.real_stability_pts )
+        graphical_elements.append( self.complex_stability_pts )
+        graphical_elements.append( self.equilibrium_pts )
 
-        ''' Plot nsd strips (stable) '''
-        for interval in nsd_intervals:
-            xy = (interval[0], -strip_size/2)
-            if interval[1] == np.inf: interval[1] = l_max
-            length = interval[1] - interval[0]
-            rect = patches.Rectangle(xy, length, strip_size, facecolor=mcolors.TABLEAU_COLORS['tab:orange'], alpha=strip_alpha)
-            ax.add_patch(rect)
-
-        ''' Plot indefinite strips (instable) '''
-        for interval in ind_intervals:
-            xy = (interval[0], -strip_size/2)
-            if interval[1] == np.inf: interval[1] = l_max
-            length = interval[1] - interval[0]
-            rect = patches.Rectangle(xy, length, strip_size, facecolor=mcolors.TABLEAU_COLORS['tab:gray'], alpha=strip_alpha)
-            ax.add_patch(rect)
-
-        ''' Plot psd strips (instable) '''
-        for interval in psd_intervals:
-            xy = (interval[0], -strip_size/2)
-            if interval[1] == np.inf: interval[1] = l_max
-            length = interval[1] - interval[0]
-            rect = patches.Rectangle(xy, length, strip_size, facecolor=mcolors.TABLEAU_COLORS['tab:cyan'], alpha=strip_alpha)
-            ax.add_patch(rect)
-
-        ''' Plot zero lines '''
-        ax.plot( [l_min, l_max], [ 0.0, 0.0 ], 'k' )       # horizontal axis
-        # ax.plot( [ 0.0, 0.0 ], [ q_min, q_max ], 'k' )          # vertical axis
-
-        ''' Plot the solution line q(λ) = 1 '''
-        ax.plot( lambdas, [ 1.0 for l in lambdas ], 'r--' )
-
-        ''' Plot the Q-function q(λ) and zero polynomial n(λ) - |P(λ)|² '''
-        # q_array = [ self.n_poly(l) / self.d_poly(l) for l in lambdas ]
-        # ax.plot( lambdas, q_array, label='q(λ)' )
-
-        z_array = [ self.zero_poly(l) for l in lambdas ]
-        ax.plot( lambdas, z_array, color='g', label='n(λ) - |P(λ)|²' )
-
-        ''' Plots equilibrium (stable/unstable) λ solutions satisfying q(λ) = 1 '''
-        for k, sol in enumerate(sols):
-            stability = sol["stability"]
-            label_txt = f"{k+1}"
-            ax.text(sol["lambda"], 1.0, f"{k+1}", color='k', fontsize=12)
-            if stability > 0:
-                label_txt += f" unstable ({stability:1.5f})"
-                ax.plot( sol["lambda"], 1.0, 'bo', label=label_txt) # unstable solutions
-            if stability < 0:
-                label_txt += f" stable ({stability:1.5f})"
-                ax.plot( sol["lambda"], 1.0, 'ro', label=label_txt ) # stable solutions
-
-        cp_array = [ self.compatibility_poly(l) for l in lambdas ]
-        ax.plot( lambdas, cp_array, color='r', label='h(λ)' )
-
-        ''' Sets axes limits and legends '''
-        ax.set_xlim(l_min, l_max)
-        ax.set_ylim(q_min, q_max)
-        ax.legend()
+        return graphical_elements
 
     def compatibilize(self, plant: DynamicSystem, clf_dict: dict, p = 1.0):
         '''

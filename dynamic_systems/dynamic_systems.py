@@ -159,6 +159,14 @@ class LinearSystem(AffineSystem):
         self._A = A
         self._B = B
 
+    def update(self, **kwargs):
+
+        if "A" in kwargs.keys():
+            self._A = kwargs["A"]
+
+        if "B" in kwargs.keys():
+            self._B = kwargs["B"]
+
     def f(self):
         self._f = self._A @ self._state
 

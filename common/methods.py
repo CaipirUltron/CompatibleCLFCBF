@@ -114,6 +114,21 @@ def genStableLTI(n, m, **kwargs) -> tuple:
 
     return A, B
 
+def interpolation(A0, A1, type='linear'):
+    ''' Interpolation between A0 and A1 '''
+
+    def linear(t):
+        return A0*(1-t) + A1*t
+
+    def trig(t):
+        return A0*np.cos(t) + A1*np.sin(t)
+
+    if type == 'linear':
+        return linear
+
+    if type == 'trig':
+        return trig
+
 def cofactor(A):
     """
     Calculate cofactor matrix of A
