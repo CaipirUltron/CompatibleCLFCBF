@@ -561,6 +561,8 @@ class QFunction():
     def init_graphics(self, ax: Axes, res=0.01):
         ''' Initialize graphical objects '''
 
+        self.window2data = ax.transData.inverted()
+
         realeigs = [ eig.eigenvalue for eig in self.Smatrix_pencil.real_eigen() ]
         complexeigs = [ eig.real for eig in self.complex_conj_pairs ]
         lambda_range = realeigs + complexeigs
@@ -586,12 +588,15 @@ class QFunction():
 
         self.equilibrium_pts, = ax.plot([], [], 'or' )
         self.equilibrium_texts = []
+        for _ in range(self.zero_poly.degree()):
+            self.equilibrium_texts.append( ax.text(0.0, 0.1, str(""), fontsize=10) )
 
         self.default_rect = patches.Rectangle((0.0, -self.strip_size/2), 0, self.strip_size, facecolor=self.strip_colors["indef"], alpha=.6)
-        self.strip_rects = []
+        self.strip_rects, self.interval_texts = [], []
         for _ in range(len(self.Smatrix_pencil.eigens)+1):
             handle = ax.add_patch( copy(self.default_rect) )
             self.strip_rects.append(handle)
+            self.interval_texts.append( ax.text(0.0, 0.0, str(""), fontsize=10) )
 
         self.real_stability_pts, = ax.plot([], [], '*k', linewidth=1.0 )
         self.complex_stability_pts, = ax.plot([], [], '|k', linewidth=1.0 )
@@ -606,15 +611,15 @@ class QFunction():
         Plots the Q-function for analysis.
         '''
         hor_limits = self.plot_limits["hor"]
-        # ver_limits = self.plot_limits["ver"]
-        # l_min, l_max = hor_limits[0], hor_limits[1]
 
+        # Zero and compatibility polynomial
         z_array = [ self.zero_poly(l) for l in self.lambda_array ]
         self.z_plot.set_data(self.lambda_array, z_array)
 
         c_array = [ self.compatibility_poly(l) for l in self.lambda_array ]
         self.c_plot.set_data(self.lambda_array, c_array)
 
+        # Definiteness intervals
         for k, interval in enumerate(self.intervals):
             limits = interval["limits"]
             typ = interval["type"]
@@ -630,14 +635,25 @@ class QFunction():
             strip_color = (1/self.stb_dim) * ( self.strip_colors["psd"]*typ[0] + self.strip_colors["nsd"]*typ[1] )
             self.strip_rects[k].set_facecolor(strip_color)
 
+            interval_text = self.interval_texts[k]
+
+            # bb = interval_text.get_window_extent()
+            # hor_vec = self.window2data.transform([bb.width, 0.0])
+            # text_size = np.linalg.norm(hor_vec)
+
+            interval_text.set_text(f"{typ}")
+            interval_text.set_x(limits[0]+0.5*length)
+            interval_text.set_y( ((-1)**k)*(self.strip_size/2)*1.2 )
+
         for i in range(k+1, len(self.strip_rects)):
             self.strip_rects[i].set_width(0)
+            self.interval_texts[i].set_text("")
 
+        # Real stability eigenvalues
         eig_array = [ eig.eigenvalue for eig in self.Smatrix_pencil.real_eigen() ]
         self.real_stability_pts.set_data(eig_array, np.zeros(len(eig_array)))
 
-        print(self.complex_conj_pairs)
-
+        # Complex conjugate stability eigenvalues
         if self.complex_conj_pairs:
             hor_array = np.hstack([ [eig.real, eig.real] for eig in self.complex_conj_pairs ])
             ver_array = np.hstack([ [eig.imag, -eig.imag] for eig in self.complex_conj_pairs ])
@@ -645,16 +661,28 @@ class QFunction():
         else:
             self.complex_stability_pts.set_data([], [])
 
-        eq_array = [ sol["lambda"] for sol in self.equilibria() ]
+        # Equilibrium points
+        eq_array = []
+        for k, sol in enumerate(self.equilibria()):
+            l = sol["lambda"]
+            eq_array.append(l)
+            self.equilibrium_texts[k].set_x(l)
+            self.equilibrium_texts[k].set_text(f"{k+1}")
         self.equilibrium_pts.set_data( eq_array, np.zeros(len(eq_array)) )
 
+        for i in range(k+1, len(self.equilibrium_texts)):
+            self.equilibrium_texts[k].set_text(f"{k+1}")
+
+        # Returns graphical handlers
         graphical_elements = []
         graphical_elements.append( self.z_plot )
         graphical_elements.append( self.c_plot )
         graphical_elements += self.strip_rects
+        graphical_elements += self.interval_texts
         graphical_elements.append( self.real_stability_pts )
         graphical_elements.append( self.complex_stability_pts )
         graphical_elements.append( self.equilibrium_pts )
+        graphical_elements += self.equilibrium_texts
 
         return graphical_elements
 
