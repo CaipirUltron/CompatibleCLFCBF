@@ -153,7 +153,7 @@ class QFunction():
 
     def _definitess_intervals(self):
         ''' 
-        Compute stability intervals using the gen. eigenvalues of S(λ) (|S(λ)| = 0)
+        Computes stability intervals using the gen. eigenvalues of S(λ) (|S(λ)| = 0)
         '''
         def interval_type(limits: tuple):
             '''
@@ -179,9 +179,6 @@ class QFunction():
 
         real_eigS = self.Smatrix_pencil.real_eigen()
         divisions = [-np.inf] + [ float(eig.eigenvalue) for eig in real_eigS if eig.eigenvalue != np.inf ] + [np.inf]
-
-        num_nsd_intervals = 0
-        num_isolated_intervals = 0
         
         self.intervals = []
         self.stability_intervals = []
@@ -202,7 +199,6 @@ class QFunction():
                 stability = 'unstable'
             else:
                 stability = 'stable'
-                num_nsd_intervals += 1
 
             interval = { "limits": limits, 
                          "stability": stability,
@@ -210,7 +206,68 @@ class QFunction():
                          }
             self.stability_intervals.append( interval )
 
-        # Detects complex conjugate pairs among the stability eigenvalues
+    def _isolated_intervals(self):
+        '''
+        Computes all isolated intervals.
+        '''
+        def interval_distance(inter1, inter2):
+
+            r1, r2 = inter1["limits"], inter2["limits"]
+            x, y = sorted((r1, r2))
+
+            if x[0] <= x[1] < y[0] and all( y[0] <= y[1] for y in (r1,r2)):
+                return y[0] - x[1]
+            return 0
+
+        intervals = copy(self.intervals)
+        for inter in intervals:
+            inter["limits"] = list(inter["limits"])
+
+        isolated_intervals = [ None ]
+        self.total_isolated_intervals = []
+        while len(isolated_intervals) > 0:
+
+            isolated_intervals = []
+            for k in range(1, len(intervals)-1):
+
+                previous, actual, next = intervals[k-1], intervals[k], intervals[k+1]
+
+                # Ignores intervals that are nsd or are surrounded by nsd neighbours
+                if (0, self.stb_dim) in ( previous["type"], actual["type"], next["type"] ):
+                    continue
+
+                # Ignores non isolated intervals (obviously)
+                if previous["type"] != next["type"]:
+                    continue
+
+                # Add actual interval to last created group
+                isolated_intervals.append( actual )
+
+            for iso_inter in isolated_intervals:
+
+                distances = []
+                for inter in intervals: 
+                    if inter in isolated_intervals:
+                        distances.append( np.inf )
+                    else:
+                        distances.append( interval_distance(iso_inter, inter) )
+
+                closest_index = np.argmin(distances)
+                if intervals.index(iso_inter) > closest_index:
+                    intervals[closest_index]["limits"][1] += iso_inter["length"]
+                else:
+                    intervals[closest_index]["limits"][0] -= iso_inter["length"]
+
+                intervals.remove(iso_inter)
+
+            self.total_isolated_intervals += isolated_intervals
+
+        print(self.total_isolated_intervals)
+
+    def _stability_conj_pairs(self):
+        '''
+        Computes the complex conjugate pairs among the stability eigenvalues
+        '''
         def are_conj(num1, num2):
             return num1.imag == -num2.imag and num1.real == num2.real
 
@@ -218,55 +275,6 @@ class QFunction():
         for eig in self.Smatrix_pencil.eigens:
             if np.iscomplex(eig.eigenvalue) and not np.any([ are_conj(eig.eigenvalue, num) for num in self.stability_conj_pairs ]):
                 self.stability_conj_pairs.append(eig.eigenvalue)
-
-        # Detects isolated intervals
-        self.intervals[0]["isolated"] = False
-        self.intervals[-1]["isolated"] = False
-        for k in range(1, len(self.intervals)-1):
-            
-            # Ignores intervals that are nsd or are surrounded by nsd neighbours
-            if self.intervals[k]["type"] == (0, self.stb_dim):
-                continue
-
-            if self.intervals[k-1]["type"] == (0, self.stb_dim):
-                continue
-
-            if self.intervals[k+1]["type"] == (0, self.stb_dim):
-                continue
-
-            if self.intervals[k-1]["type"] == self.intervals[k+1]["type"]:
-                self.intervals[k]["isolated"] = True
-                num_isolated_intervals += 1
-            else:
-                self.intervals[k]["isolated"] = False
-
-        num_stability_conj_pairs = len(self.stability_conj_pairs)
-        self.conjecture = sum([num_nsd_intervals, num_stability_conj_pairs, num_isolated_intervals])
-
-    def get_isolated_intervals(self, intervals):
-
-        groups = []
-        isolated_intervals = []
-        for k, interval in enumerate(intervals):
-
-            # Ignores first and last intervals 
-            if k == 0 or k == len(intervals):
-                continue
-
-            # Ignores intervals that are nsd or are surrounded by nsd neighbours
-            if intervals[k]["type"] == (0, self.stb_dim):
-                continue
-
-            if intervals[k-1]["type"] == (0, self.stb_dim):
-                continue
-
-            if intervals[k+1]["type"] == (0, self.stb_dim):
-                continue
-
-            if self.intervals[k-1]["type"] == self.intervals[k+1]["type"]:
-                isolated_intervals.append( interval )
-        
-        return isolated_intervals
 
     def _stability_matrix(self) -> MatrixPolynomial:
         ''' 
@@ -312,9 +320,10 @@ class QFunction():
         else:
             self.Smatrix_pencil = self.Smatrix.companion_form()
 
-        # Computes definiteness intervals
         self._definitess_intervals()
-        self.compatibility_barrier()
+        self._isolated_intervals()
+        self._stability_conj_pairs()
+        self._compatibility_barrier()
 
     def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
         '''
@@ -404,7 +413,7 @@ class QFunction():
         if verbose:
             print(f"Nonvex results: δ = {self.delta}, Λ = \n{self.Lambda}")
 
-    def compatibility_barrier(self):
+    def _compatibility_barrier(self):
         ''' 
         Continuous barrier function for compatibility.
         '''
@@ -420,8 +429,19 @@ class QFunction():
             h1 = -2*a
             return Poly([h0, h1, 1.0])
 
-        def isolated_interval_term(length):
-            return Poly([length**2, 0.0, 1.0])
+        def isolated_interval_term(min_bound, max_bound):
+            k = 1
+            t = 0.5
+
+            m = min_bound*(1-t) + max_bound*t
+            length = np.abs(max_bound - min_bound)
+
+            h0 = length**k + m**2
+            h1 = -2*m
+
+            print(Poly([h0, h1, 1.0]).roots())
+
+            return Poly([h0, h1, 1.0])
 
         ''' First, deal with the stable intervals '''
         for interval in self.intervals:
@@ -430,7 +450,7 @@ class QFunction():
                 continue
 
             roots = [ max(l, 0.0) for l in interval["limits"] ]
-            self.compatibility_poly *= nsd_interval_term(roots)
+            self.compatibility_poly *= nsd_interval_term(min_bound=roots[0], max_bound=roots[1])
             N -= 1
 
         if N == 0: return
@@ -443,65 +463,11 @@ class QFunction():
         if N == 0: return
 
         ''' Finally, deal with isolated intervals '''
-        intervals = copy(self.intervals)
-        
-        isolated_intervals = self.get_isolated_intervals(intervals)
-        for interval in isolated_intervals:
-            if interval in intervals:
-                intervals.remove(interval)
-
-
-
-
-
-
-
-
-
-
-
-        to_be_rem = []
-        for interval in intervals:
-
-            if interval["type"] != (self.stb_dim, 0) or interval["length"] == np.inf:           # ignores non-psd intervals
-                continue
-
-            a = interval["limits"][0]
-            b = interval["limits"][1]
-            l = interval["length"]
-            
-            h0 = l + ((a+b)/2)**2
-            h1 = -(a+b)
-            self.compatibility_poly *= Poly([h0, h1, 1.0])
-            N -= 1
-
-            to_be_rem.append(interval)
-
-        for item in to_be_rem:
-            intervals.remove(item)
-
-        if N == 0: return
-
-        ''' Finally, deal with remaining connected intervals '''
-        visited = [ False for _ in range(len(intervals)) ]
-        for k in range(len(intervals)-1):
-            
-            int1 = intervals[k]
-            int2 = intervals[k+1]
-            if not np.all(visited[k:k+2]) and int1["type"] == int2["type"]:
-
-                a = int1["limits"][0]
-                b = int2["limits"][1]
-                l = b-a
-                
-                h0 = l + (0.5*(a+b))**2
-                h1 = -(a+b)
-                self.compatibility_poly *= Poly([h0, h1, 1.0])
-                N -= 1
-
-                # fixed_pts.append( np.mean([ int1[0], int2[1] ]) )
-                visited[k] = True
-                visited[k+1] = True
+        # lengths = [ iso_inter["length"] for iso_inter in self.total_isolated_intervals ]
+        self.total_isolated_intervals.sort( key = lambda interval: interval["length"] )
+        for k in range(N):
+            interval = self.total_isolated_intervals[k]
+            self.compatibility_poly *= isolated_interval_term(*interval["limits"])
 
     def is_compatible(self):
         ''' 
@@ -633,7 +599,7 @@ class QFunction():
         self.window2data = ax.transData.inverted()
 
         realeigs = [ eig.eigenvalue for eig in self.Smatrix_pencil.real_eigen() ]
-        complexeigs = [ eig.real for eig in self.complex_conj_pairs ]
+        complexeigs = [ eig.real for eig in self.stability_conj_pairs ]
         lambda_range = realeigs + complexeigs
         lmin, lmax = min(lambda_range), max(lambda_range)
         print(f"Ideal λ range = ({lmin},{lmax})")
@@ -681,6 +647,14 @@ class QFunction():
         '''
         hor_limits = self.plot_limits["hor"]
 
+        print(f"Comp. poly roots = {self.compatibility_poly.roots()}")
+
+        for complex_root in self.stability_conj_pairs:
+            print(f"Complex conj. = {complex_root}")
+
+        for k, eig in enumerate( self.Smatrix_pencil.eigens ):
+            print(f"{k+1}-th gen. eigenvalue of S(λ) = {eig.eigenvalue}")
+
         # Zero and compatibility polynomial
         z_array = [ self.zero_poly(l) for l in self.lambda_array ]
         self.z_plot.set_data(self.lambda_array, z_array)
@@ -718,9 +692,9 @@ class QFunction():
         self.real_stability_pts.set_data(eig_array, np.zeros(len(eig_array)))
 
         # Complex conjugate stability eigenvalues
-        if self.complex_conj_pairs:
-            hor_array = np.hstack([ [eig.real, eig.real] for eig in self.complex_conj_pairs ])
-            ver_array = np.hstack([ [eig.imag, -eig.imag] for eig in self.complex_conj_pairs ])
+        if self.stability_conj_pairs:
+            hor_array = np.hstack([ [eig.real, eig.real] for eig in self.stability_conj_pairs ])
+            ver_array = np.hstack([ [eig.imag, -eig.imag] for eig in self.stability_conj_pairs ])
             self.complex_stability_pts.set_data(hor_array, ver_array)
         else:
             self.complex_stability_pts.set_data([], [])

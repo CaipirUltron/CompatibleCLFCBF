@@ -110,21 +110,19 @@ qfun.init_graphics(ax)
 
 # start, stop, step = 0.10, 0.4, 0.001
 # start, stop, step = 0.87, 0.95, 0.0001
-start, stop, step = 0.15, 0.2, 0.0005
+start, stop, step = 0.22, 0.25, 0.0001
+# start, stop, step = 0.0, 1.0, 0.01
 
 fps = 60
-# animation = anim.FuncAnimation(fig, func=update_plot, frames=np.arange(start,stop,step), interval=100, repeat=False, blit=True, cache_frame_data=False)
+animation = anim.FuncAnimation(fig, func=update_plot, frames=np.arange(start,stop,step), interval=50, repeat=False, blit=True, cache_frame_data=False)
 
-update_plot(0.1856)
+update_plot(0.248)
 
 for k, eig in enumerate( pencil.eigens ):
     print(f"{k+1}-th gen. eigenvalue of P(λ) = {eig.eigenvalue}")
 print("")
 for k, eig in enumerate( qfun.Smatrix_pencil.eigens ):
     print(f"{k+1}-th gen. eigenvalue of S(λ) = {eig.eigenvalue}")
-
-print(f"Conj. pairs = {qfun.stability_conj_pairs}")
-print(f"Conjecture = {qfun.conjecture}")
 
 qfun.plot()
 
