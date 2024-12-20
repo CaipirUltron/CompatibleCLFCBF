@@ -5,10 +5,10 @@ from controllers.compatibility import MatrixPencil, QFunction
 from common import hessian_quadratic, vector2sym, rot2D, genStableLTI
 
 n, m = 2, 2
-# A, B = genStableLTI(n, m, type='float', Alims=(-2, 2), Blims=(1, 5), place=True)
+A, B = genStableLTI(n, m, type='float', Alims=(-2, 2), Blims=(1, 5), place=True)
 
-A = np.zeros((n,n))
-B = np.eye(n)
+# A = np.zeros((n,n))
+# B = np.eye(n)
 
 ''' ------------------------ Define CLF (varying Hessian eigenvalues) ----------------------- '''
 CLFeigs = np.array([10.0, 1.0])
@@ -54,6 +54,12 @@ results = qfun.compatibilize( A, B, clf_dict, p=p )
 
 print("Compatibilization results:")
 print(results)
+
+Hv = results["Hv"]
+eigHv, Rv = np.linalg.eig(Hv)
+print(f"Eigs Hv = {eigHv}")
+print(f"Rot Hv = {Rv}")
+
 
 qfun.plot()
 plt.show()

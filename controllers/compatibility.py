@@ -46,7 +46,7 @@ class QFunction():
         self.comp_poly_leading_coef = 1e-8
 
         self.imag_tol = 1e0
-        self.composite_kappa = 1e2
+        self.composite_kappa = 1e1
 
         ''' Stability matrix S(λ) '''
         self.stb_dim = self.dim - 1
@@ -437,6 +437,8 @@ class QFunction():
     def compatibility_barrier(self, root):
         ''' Function to be evaluated at each root of z(λ) '''
         barriers = []
+
+        print(self.intervals)
         for interval in self.intervals:
 
             if interval["type"] != (0, self.stb_dim):           # ignores non-nsd intervals
@@ -448,8 +450,11 @@ class QFunction():
             else:
                 barriers.append( self._interval_quadratic_barrier( interval ) )
 
-        return min([ barrier(root) for barrier in barriers ])
-
+        if barriers:
+            return min([ barrier(root) for barrier in barriers ])
+        else:
+            return -1
+        
     def composite_barrier(self):
         ''' Compositive kappa function '''
         k = self.composite_kappa
@@ -800,11 +805,12 @@ class QFunction():
 
         Hvfun = clf_dict["Hv_fun"]      # function for computing Hv
         x0 = clf_dict["center"]         # clf center
+        Hvinit = clf_dict["Hv"]
 
         def cost(var: np.ndarray):
             Hv = Hvfun(var)
-            cost_val = np.linalg.norm( Hv - clf_dict["Hv"], 'fro')
-            cost_val += np.linalg.trace(Hv)
+            cost_val = np.linalg.norm( Hv - Hvinit, 'fro')
+            # cost_val += np.linalg.trace(Hv)
 
             print(f"Eigenvalues of Hv = {np.linalg.eigvals(Hv)}")
 
@@ -814,19 +820,23 @@ class QFunction():
             newN = p * G @ Hvfun(var) - A
             self.update( N=newN )
 
-            # constr = self.composite_barrier()
-            constr = [ self.compatibility_barrier(root) for root in self.zero_poly.roots() ]
+            constr = self.composite_barrier()
+            # constr = [ self.compatibility_barrier(root) for root in self.zero_poly.roots() ]
 
             print(constr)
 
             return constr
+
+        def boundedness(var: np.ndarray):
+            Hv = Hvfun(var)
+            return np.linalg.trace(Hvinit) - np.linalg.trace(Hv)
 
         def callback(var):
             newN = p * G @ Hvfun(var) - A
             self.update( N=newN )
             self.plot()
 
-        var0 = sym2vector(clf_dict["Hv"])
+        var0 = sym2vector(Hvinit)
 
         # n = self.dim
         # ndof = int(n*(n+1)/2)
@@ -834,6 +844,7 @@ class QFunction():
 
         constr = []
         constr += [ {"type": "ineq", "fun": compatibility} ]
+        constr += [ {"type": "ineq", "fun": boundedness} ]
         sol = minimize( fun=cost, x0=var0, constraints=constr, options={"disp": True, "maxiter": 1000} )
 
         results = {"Hv": Hvfun(sol.x),
