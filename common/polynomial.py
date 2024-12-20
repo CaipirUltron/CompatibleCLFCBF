@@ -282,6 +282,21 @@ def sos_locations(max_deg):
 
     return sos_locs
 
+def matrix_minor(m,index):
+    i,j = index
+    m = m.tolist()
+    return np.array([row[:j] + row[j+1:] for row in (m[:i]+m[i+1:])])
+
+def matrix_det(m) -> np.ndarray:
+    #base case for 2x2 matrix
+    if len(m) == 2:
+        return m[0,0]*m[1,1]-m[0,1]*m[1,0]
+
+    determinant = 0
+    for c in range(len(m)):
+        determinant += ((-1)**c)*m[0][c] * matrix_det( matrix_minor(m,(0,c)) )
+    return determinant
+
 @dataclass
 class Eigen():
     ''' 
@@ -558,6 +573,16 @@ class MatrixPolynomial():
             error += np.linalg.norm( val1 - val2 )
 
         print(f"Test for SOS decomposition finished after {num_samples} random trials with error = {error}.")
+
+    def determinant(self) -> np.ndarray:
+        '''
+        Returns the polynomial determinant for a multiply matrix.
+        The algorithm used here is Laplace expansion with recursion.
+        '''
+        if self.shape[0] != self.shape[1]:
+            raise TypeError("Cannot compute the determinant of a non-square matrix polynomial.")
+
+        return matrix_det( self.poly_array )
 
     def degree(self):
         return self._degree

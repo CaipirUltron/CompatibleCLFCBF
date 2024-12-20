@@ -6,7 +6,7 @@ import matplotlib.colors as mcolors
 from matplotlib.axes import Axes
 
 from numpy.polynomial import Polynomial as Poly
-from numpy.polynomial.polynomial import polydiv
+from numpy.polynomial.polynomial import polydiv, polyder
 
 from copy import copy
 from scipy import signal
@@ -15,6 +15,12 @@ from scipy.linalg import null_space, inv
 
 from common import *
 from dynamic_systems import DynamicSystem, LinearSystem
+
+def continuous_composition(k, *args):
+    ''' 
+    Continuously compose any number of functions.
+    '''    
+    return -(1/k)*np.log(sum([ np.exp( -k*arg ) for arg in args ]))
 
 class QFunction():
     '''
@@ -37,8 +43,10 @@ class QFunction():
         ''' Class parameters '''
         self.trim_tol = 1e-8
         self.real_tol = 1e-6
-        self.comp_poly_leading_coef = 0.01
-        self.compatibility_eps = 1.0       # should be > 1
+        self.comp_poly_leading_coef = 1e-8
+
+        self.imag_tol = 1e0
+        self.composite_kappa = 1e2
 
         ''' Stability matrix S(λ) '''
         self.stb_dim = self.dim - 1
@@ -211,7 +219,7 @@ class QFunction():
         Computes all isolated intervals.
         '''
         def interval_distance(inter1, inter2):
-
+            ''' Computes distance between two intervals '''
             r1, r2 = inter1["limits"], inter2["limits"]
             x, y = sorted((r1, r2))
 
@@ -261,8 +269,6 @@ class QFunction():
                 intervals.remove(iso_inter)
 
             self.total_isolated_intervals += isolated_intervals
-
-        print(self.total_isolated_intervals)
 
     def _stability_conj_pairs(self):
         '''
@@ -320,10 +326,13 @@ class QFunction():
         else:
             self.Smatrix_pencil = self.Smatrix.companion_form()
 
+        self.Sdet = self.Smatrix.determinant()
+        self.dSdet = Poly(polyder(self.Sdet.coef))
+
         self._definitess_intervals()
-        self._isolated_intervals()
+        # self._isolated_intervals()
         self._stability_conj_pairs()
-        self._compatibility_barrier()
+        # self._compatibility_poly()
 
     def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
         '''
@@ -413,12 +422,46 @@ class QFunction():
         if verbose:
             print(f"Nonvex results: δ = {self.delta}, Λ = \n{self.Lambda}")
 
-    def _compatibility_barrier(self):
-        ''' 
-        Continuous barrier function for compatibility.
-        '''
+    def _interval_quadratic_barrier(self, interval):
+        ''' Defines quadratic barrier function for interval '''
+
+        min_bound, max_bound = interval[0], interval[1]
+        length = np.abs(max_bound - min_bound)
+        center = (min_bound + max_bound)/2
+
+        a = length/2
+        b = self.imag_tol
+
+        return lambda number: (1/(a**2))*( number.real - center )**2 + (1/(b**2))*( number.imag )**2 - 1
+
+    def compatibility_barrier(self, root):
+        ''' Function to be evaluated at each root of z(λ) '''
+        barriers = []
+        for interval in self.intervals:
+
+            if interval["type"] != (0, self.stb_dim):           # ignores non-nsd intervals
+                continue
+
+            interval = [ max(l,0) for l in interval["limits"] ]
+            if interval[0] == 0:
+                barriers.append( self._interval_quadratic_barrier([ -interval[1], +interval[1] ]) )
+            else:
+                barriers.append( self._interval_quadratic_barrier( interval ) )
+
+        return min([ barrier(root) for barrier in barriers ])
+
+    def composite_barrier(self):
+        ''' Compositive kappa function '''
+        k = self.composite_kappa
+
+        barriers = [ self.compatibility_barrier(root) for root in self.zero_poly.roots() ]
+        return continuous_composition(k, *barriers)
+
+    def _compatibility_poly(self):
+        ''' Computes compatibility roots and polynomial. '''
         N = self.dim
         self.compatibility_poly = Poly([self.comp_poly_leading_coef])
+        self.compatibility_roots = []
 
         def nsd_interval_term(min_bound, max_bound):
             return Poly.fromroots([min_bound, max_bound])
@@ -439,7 +482,9 @@ class QFunction():
             h0 = length**k + m**2
             h1 = -2*m
 
-            print(Poly([h0, h1, 1.0]).roots())
+            root1 = complex( m, np.sqrt(length**k) )
+            root2 = complex( m, -np.sqrt(length**k) )
+            self.compatibility_roots.append( [ root1, root2 ] )
 
             return Poly([h0, h1, 1.0])
 
@@ -451,6 +496,7 @@ class QFunction():
 
             roots = [ max(l, 0.0) for l in interval["limits"] ]
             self.compatibility_poly *= nsd_interval_term(min_bound=roots[0], max_bound=roots[1])
+            self.compatibility_roots.append( roots )
             N -= 1
 
         if N == 0: return
@@ -458,12 +504,12 @@ class QFunction():
         ''' Next, deal with complex conjugate pairs '''
         for complex_root in self.stability_conj_pairs:
             self.compatibility_poly *= complex_conj_term(complex_root)
+            self.compatibility_roots.append( [ complex_root, np.conjugate(complex_root) ] )
             N -= 1
 
         if N == 0: return
 
         ''' Finally, deal with isolated intervals '''
-        # lengths = [ iso_inter["length"] for iso_inter in self.total_isolated_intervals ]
         self.total_isolated_intervals.sort( key = lambda interval: interval["length"] )
         for k in range(N):
             interval = self.total_isolated_intervals[k]
@@ -474,9 +520,6 @@ class QFunction():
         Test if Q-function is compatible or not.
         Q-function is compatible iff there exist NO roots of n(λ) - |P(λ)|² inside the stable intervals.
         '''
-        # comp = self.compatibility()
-        # print(f"Compatibility function returned: {comp}")
-
         for interval in self.stability_intervals:
             if interval["stability"] == 'stable':
                 for root in self.zero_poly.roots():
@@ -605,7 +648,7 @@ class QFunction():
         print(f"Ideal λ range = ({lmin},{lmax})")
 
         self.plot_limits = {"hor": [lmin-10, lmax+10],
-                            "ver": [-3, 3]}
+                            "ver": [-10.0, 10.0]}
 
         self.strip_colors = {"nsd": np.array(mcolors.to_rgb(mcolors.TABLEAU_COLORS['tab:red'])),
                              "psd": np.array(mcolors.to_rgb(mcolors.TABLEAU_COLORS['tab:cyan'])),
@@ -619,9 +662,12 @@ class QFunction():
         self.lambda_array = np.arange(hor_limits[0], hor_limits[1], self.lambda_res)
 
         self.z_plot, = ax.plot([],[],'b',lw=0.8, label='z(λ)')
-        self.c_plot, = ax.plot([],[],'r',lw=0.8, label='h(λ)')
+        # self.c_plot, = ax.plot([],[],'r',lw=0.8, label='h(λ)')
+        # self.Sdet_plot, = ax.plot([],[],'k',lw=0.8, label='|S(λ)|')
+        # self.dSdet_plot, = ax.plot([],[],'g',lw=0.8, label='|S(λ)|\'')
 
-        self.equilibrium_pts, = ax.plot([], [], 'or' )
+        self.stable_pts, = ax.plot([], [], 'or' )
+        self.unstable_pts, = ax.plot([], [], 'ob' )
         self.equilibrium_texts = []
         for _ in range(self.zero_poly.degree()):
             self.equilibrium_texts.append( ax.text(0.0, 0.1, str(""), fontsize=10) )
@@ -636,6 +682,9 @@ class QFunction():
         self.real_stability_pts, = ax.plot([], [], '*k', linewidth=1.0 )
         self.complex_stability_pts, = ax.plot([], [], '|k', linewidth=1.0 )
 
+        self.real_stability_critical, = ax.plot([], [], '*g', linewidth=1.0 )
+        self.complex_stability_critical, = ax.plot([], [], '|g', linewidth=1.0 )
+
         ax.grid()
         ax.set_xlim(*self.plot_limits["hor"])
         ax.set_ylim(*self.plot_limits["ver"])
@@ -646,21 +695,17 @@ class QFunction():
         Plots the Q-function for analysis.
         '''
         hor_limits = self.plot_limits["hor"]
-
-        print(f"Comp. poly roots = {self.compatibility_poly.roots()}")
-
-        for complex_root in self.stability_conj_pairs:
-            print(f"Complex conj. = {complex_root}")
-
-        for k, eig in enumerate( self.Smatrix_pencil.eigens ):
-            print(f"{k+1}-th gen. eigenvalue of S(λ) = {eig.eigenvalue}")
-
+        
         # Zero and compatibility polynomial
         z_array = [ self.zero_poly(l) for l in self.lambda_array ]
-        self.z_plot.set_data(self.lambda_array, z_array)
+        # c_array = [ self.compatibility_poly(l) for l in self.lambda_array ]
+        # Sdet_array = [ self.Sdet(l) for l in self.lambda_array ]
+        # dSdet_array = [ self.dSdet(l) for l in self.lambda_array ]
 
-        c_array = [ self.compatibility_poly(l) for l in self.lambda_array ]
-        self.c_plot.set_data(self.lambda_array, c_array)
+        self.z_plot.set_data(self.lambda_array, z_array)
+        # self.c_plot.set_data(self.lambda_array, c_array)
+        # self.Sdet_plot.set_data(self.lambda_array, Sdet_array)
+        # self.dSdet_plot.set_data(self.lambda_array, dSdet_array)
 
         # Definiteness intervals
         for k, interval in enumerate(self.intervals):
@@ -699,74 +744,87 @@ class QFunction():
         else:
             self.complex_stability_pts.set_data([], [])
 
+        realroot_arr = [ root for root in self.dSdet.roots() if np.isreal(root) ]
+        self.real_stability_critical.set_data( realroot_arr, np.zeros(len(realroot_arr)) )
+
+        complexroot_arr = [ root for root in self.dSdet.roots() if np.iscomplex(root) ]
+        if complexroot_arr:
+            hor_array = np.hstack([ [root.real, root.real] for root in complexroot_arr ])
+            ver_array = np.hstack([ [root.imag, -root.imag] for root in complexroot_arr ])
+            self.complex_stability_critical.set_data(hor_array, ver_array)
+        else:
+            self.complex_stability_critical.set_data([], [])
+
         # Equilibrium points
-        eq_array = []
-        for k, sol in enumerate(self.equilibria()):
+        stable_eq_array = []
+        unstable_eq_array = []
+        for k, sol in enumerate( self.equilibria() ):
             l = sol["lambda"]
-            eq_array.append(l)
+            if sol["stability"] < 0:
+                stable_eq_array.append(l)
+            else:
+                unstable_eq_array.append(l)
             self.equilibrium_texts[k].set_x(l)
             self.equilibrium_texts[k].set_text(f"{k+1}")
-        self.equilibrium_pts.set_data( eq_array, np.zeros(len(eq_array)) )
+
+        self.stable_pts.set_data( stable_eq_array, np.zeros(len(stable_eq_array)) )
+        self.unstable_pts.set_data( unstable_eq_array, np.zeros(len(unstable_eq_array)) )
 
         for i in range(k+1, len(self.equilibrium_texts)):
-            self.equilibrium_texts[k].set_text(f"{k+1}")
-
-        # print(f"c(λ) with roots: \n{self.compatibility_poly.roots()}")
+            self.equilibrium_texts[k].set_text(f"")
 
         # Returns graphical handlers
         graphical_elements = []
         graphical_elements.append( self.z_plot )
-        graphical_elements.append( self.c_plot )
+        # graphical_elements.append( self.c_plot )
+        # graphical_elements.append( self.Sdet_plot )
+        # graphical_elements.append( self.dSdet_plot )
+
         graphical_elements += self.strip_rects
         graphical_elements += self.interval_texts
         graphical_elements.append( self.real_stability_pts )
         graphical_elements.append( self.complex_stability_pts )
-        graphical_elements.append( self.equilibrium_pts )
+        graphical_elements.append( self.stable_pts )
+        graphical_elements.append( self.unstable_pts )
+        graphical_elements.append( self.real_stability_critical )
+        graphical_elements.append( self.complex_stability_critical )
         graphical_elements += self.equilibrium_texts
 
         return graphical_elements
 
-    def compatibilize(self, plant: DynamicSystem, clf_dict: dict, p = 1.0):
+    def compatibilize(self, A, B, clf_dict: dict, p = 1.0):
         '''
         Algorithm for finding a compatible CLF shape.
         '''
-        if isinstance(plant, LinearSystem):
-            A, B = plant._A, plant._B
-            G = B @ B.T
-        else:
-            raise NotImplementedError("Currently, compatibilization is implemented linear systems only.")
+        G = B @ B.T
 
         Hvfun = clf_dict["Hv_fun"]      # function for computing Hv
         x0 = clf_dict["center"]         # clf center
 
         def cost(var: np.ndarray):
-            '''
-            Objective function: find closest compatible CLF shape.
-            '''
-            eps = 1e-1
             Hv = Hvfun(var)
-            cost_val = np.linalg.norm( Hv - clf_dict["Hv"] )
+            cost_val = np.linalg.norm( Hv - clf_dict["Hv"], 'fro')
+            cost_val += np.linalg.trace(Hv)
+
+            print(f"Eigenvalues of Hv = {np.linalg.eigvals(Hv)}")
 
             return cost_val
 
-        def compatibility_eigs(var: np.ndarray):
-            '''
-            Returns eigenvalues of
-            '''
-            Hv = Hvfun(var)
-            eigHv = np.linalg.eigvals(Hv)
-            print(f"Eigs of Hv = {eigHv}")
-
-            newN = p * G @ Hv - A
+        def compatibility(var: np.ndarray):
+            newN = p * G @ Hvfun(var) - A
             self.update( N=newN )
 
-            C = self.augCmatrix.sos_decomposition()
+            # constr = self.composite_barrier()
+            constr = [ self.compatibility_barrier(root) for root in self.zero_poly.roots() ]
 
-            eigC = np.linalg.eigvals(C)
-            eigC.sort()
-            # print(f"Eigens of C = {eigC}")
+            print(constr)
 
-            return eigC
+            return constr
+
+        def callback(var):
+            newN = p * G @ Hvfun(var) - A
+            self.update( N=newN )
+            self.plot()
 
         var0 = sym2vector(clf_dict["Hv"])
 
@@ -774,14 +832,13 @@ class QFunction():
         # ndof = int(n*(n+1)/2)
         # var0 = np.random.randn(ndof)
 
-        constr = [ {"type": "ineq", "fun": compatibility_eigs} ]
+        constr = []
+        constr += [ {"type": "ineq", "fun": compatibility} ]
         sol = minimize( fun=cost, x0=var0, constraints=constr, options={"disp": True, "maxiter": 1000} )
 
-        results = {
-                    "Hv": Hvfun(sol.x),
-                    "cost": cost(sol.x),
-                    "compatibility": compatibility_eigs(sol.x)
-                   }
+        results = {"Hv": Hvfun(sol.x),
+                   "cost": cost(sol.x),
+                   "compatibility": compatibility(sol.x)}
 
         return results
 

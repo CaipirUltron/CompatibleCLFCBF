@@ -1,4 +1,4 @@
-import json
+import json, sys
 
 import control
 import numpy as np
@@ -31,6 +31,7 @@ CBFcenter = 5*np.random.randn(n)
 p = 1.0
 
 if load:
+    
     with open("logs/interesting.json") as file:
         print("Loading interesting example...")
         example = json.load(file)
@@ -45,7 +46,7 @@ if load:
     CLFeigs2 = np.array(example["CLFeigs2"])
     Rv = np.array(example["Rv"])
     CLFcenter = np.array(example["CLFcenter"])
-    
+
     # Load CBF parameters
     CBFeigs1 = np.array(example["CBFeigs1"])
     CBFeigs2 = np.array(example["CBFeigs2"])
@@ -91,16 +92,20 @@ qfun = QFunction(pencil, Hfun(0), wfun(0))
 ''' ------------------------------- Interpolation ----------------------------------- '''
 def update_plot(t):
 
-    print(f"t = {t}")
+    # print(f"t = {t}")
 
     rankC = np.linalg.matrix_rank( control.ctrb(Afun(t), Bfun(t)) )
     if rankC < n:
         raise Exception("Systems are not controllable.")
 
     qfun.update(M = Mfun(t), N = Nfun(t), H = Hfun(t), w = wfun(t))
+
+    h = qfun.composite_barrier()
+    print(f"h = {h}")
+
     return qfun.plot()
 
-''' --------------------------------- Animation ------------------------------------- '''
+''' --------------------------------- Animation ------[------------------------------- '''
 
 fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10.0, 5.0), layout="constrained")
 fig.suptitle('Q-function plot')
@@ -110,19 +115,25 @@ qfun.init_graphics(ax)
 
 # start, stop, step = 0.10, 0.4, 0.001
 # start, stop, step = 0.87, 0.95, 0.0001
-start, stop, step = 0.22, 0.25, 0.0001
-# start, stop, step = 0.0, 1.0, 0.01
+# start, stop, step = 0.22, 0.25, 0.0001
+start, stop, step = 0.72, 1.0, 0.001
 
 fps = 60
-animation = anim.FuncAnimation(fig, func=update_plot, frames=np.arange(start,stop,step), interval=50, repeat=False, blit=True, cache_frame_data=False)
+animation = anim.FuncAnimation(fig, func=update_plot, frames=np.arange(start,stop,step), interval=300, repeat=False, blit=True, cache_frame_data=False)
 
-update_plot(0.248)
+# update_plot(0.8953)
+# update_plot(0.725)
 
 for k, eig in enumerate( pencil.eigens ):
     print(f"{k+1}-th gen. eigenvalue of P(λ) = {eig.eigenvalue}")
+
 print("")
 for k, eig in enumerate( qfun.Smatrix_pencil.eigens ):
     print(f"{k+1}-th gen. eigenvalue of S(λ) = {eig.eigenvalue}")
+
+print("")
+for k, root in enumerate( qfun.dSdet.roots() ):
+    print(f"{k+1}-th root of |S(λ)|' = {root}")
 
 qfun.plot()
 

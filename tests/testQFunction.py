@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from common import randomR, genStableLI, hessian_quadratic
+from common import randomR, genStableLTI, hessian_quadratic
 from controllers import MatrixPencil, QFunction
 
 n, m = 2, 2
@@ -13,8 +13,7 @@ def generateAndPlot(ax):
     '''
     Generates new example and plot it into ax
     '''
-    # A, B = genStableLI(n, m, stabilize=False, type='int', random_lim=(-10, +10), real_lim=(-10, -1), imag_lim=(0, 1))
-    A, B = genStableLI(n, m, stabilize=False, type='float')
+    A, B = genStableLTI(n, m, type='float', Alims=(-2, 2), Blims=(1, 5), place=True)
 
     G = (B @ B.T)
 
@@ -36,10 +35,11 @@ def generateAndPlot(ax):
         print(f"{k+1}-th gen. eigenvalue = {eig.eigenvalue}.")
 
     qfun = QFunction(pencil, Hh, w)
-    for k, eig in enumerate( qfun.stability_pencil.real_eigen() ):
+    for k, eig in enumerate( qfun.Smatrix_pencil.real_eigen() ):
         print(f"{k+1}-th real eigenvalue of S(λ) companion form = {eig.eigenvalue}")
 
-    qfun.plot(ax)
+    qfun.init_graphics(ax)
+    qfun.plot()
 
 if not loop:
     fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10.0, 5.0), layout="constrained")
