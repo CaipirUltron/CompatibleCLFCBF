@@ -1,12 +1,14 @@
 import math
 import numpy as np
+import itertools
+import contourpy as ctp
 
 import matplotlib.patches as patches
 import matplotlib.colors as mcolors
-from matplotlib.axes import Axes
 
+from matplotlib.axes import Axes
 from numpy.polynomial import Polynomial as Poly
-from numpy.polynomial.polynomial import polydiv, polyder
+from numpy.polynomial.polynomial import polydiv, polyder, polyint
 
 from copy import copy
 from scipy import signal
@@ -19,8 +21,31 @@ from dynamic_systems import DynamicSystem, LinearSystem
 def continuous_composition(k, *args):
     ''' 
     Continuously compose any number of functions.
-    '''    
-    return -(1/k)*np.log(sum([ np.exp( -k*arg ) for arg in args ]))
+    '''
+    if len(args) > 0:
+        return -(1/k)*np.log(sum([ np.exp( -k*arg ) for arg in args ]))
+    else:
+        return 1.0
+
+def integrate_poly(poly, interval, type='normal'):
+    '''
+    Integrate polynomial on a given interval.
+    '''
+    int_poly = Poly( polyint( poly.coef ) )
+
+    if type == 'normal':
+        integral = int_poly(interval[1]) - int_poly(interval[0])
+        return integral
+
+    integral = 0.0
+    if type == 'abs':
+        roots_inside = [ r for r in poly.roots() if np.isreal(r) and r.real >= interval[0] and r.real <= interval[1] ]
+        roots_inside.sort()
+        divs = [ interval[0] ] + roots_inside + [ interval[1] ]
+        for k in range(len(divs)-1):
+            div1, div2 = divs[k], divs[k+1]
+            integral += np.abs( int_poly(div2) - int_poly(div1) )
+        return integral
 
 class QFunction():
     '''
@@ -43,13 +68,16 @@ class QFunction():
         ''' Class parameters '''
         self.trim_tol = 1e-8
         self.real_tol = 1e-6
-        self.comp_poly_leading_coef = 1e-8
 
-        self.imag_tol = 1e0
-        self.composite_kappa = 1e1
+        self.leading_coef = 1e-2
+        self.imag_tol = 5e-1
+        self.composite_kappa = 2e2
+        self.length_tol = 1e-2
+        self.bexponent = 1
+        self.neg_dist = 1e-1
 
         ''' Stability matrix S(λ) '''
-        self.stb_dim = self.dim - 1
+        self.stb_dim = self.dim-1
         self.Smatrix: MatrixPolynomial = MatrixPolynomial.zeros(size=(self.stb_dim, self.stb_dim))
 
         self._compute_polynomials()
@@ -332,6 +360,7 @@ class QFunction():
         self._definitess_intervals()
         # self._isolated_intervals()
         self._stability_conj_pairs()
+        self._barrier_funs()
         # self._compatibility_poly()
 
     def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
@@ -422,8 +451,33 @@ class QFunction():
         if verbose:
             print(f"Nonvex results: δ = {self.delta}, Λ = \n{self.Lambda}")
 
-    def _interval_quadratic_barrier(self, interval):
-        ''' Defines quadratic barrier function for interval '''
+    def _interval_cost(self, interval):
+        '''
+        Computes the compatibility cost of a given interval.
+        '''
+        int_poly = integrate_poly(self.zero_poly, interval, 'normal')
+        int_abs_poly = integrate_poly(self.zero_poly, interval, 'abs')
+
+        C1 = int_abs_poly - int_poly
+        # C2 = int_abs_poly + int_poly
+        return C1
+
+    def _compatibility_cost(self):
+        '''
+        Returns total cost on stable intervals.
+        '''
+        cost = 0.0
+        for interval in self.intervals:
+            if interval["type"] != (0, self.stb_dim):           # ignores non-nsd intervals
+                continue
+
+            interval = [ max(l,0) for l in interval["limits"] ]
+            cost += self._interval_cost(interval)
+
+        return cost
+
+    def _interval_barrier(self, interval):
+        ''' Defines barrier function for interval '''
 
         min_bound, max_bound = interval[0], interval[1]
         length = np.abs(max_bound - min_bound)
@@ -431,41 +485,15 @@ class QFunction():
 
         a = length/2
         b = self.imag_tol
+        m = self.bexponent
 
-        return lambda number: (1/(a**2))*( number.real - center )**2 + (1/(b**2))*( number.imag )**2 - 1
-
-    def compatibility_barrier(self, root):
-        ''' Function to be evaluated at each root of z(λ) '''
-        barriers = []
-
-        print(self.intervals)
-        for interval in self.intervals:
-
-            if interval["type"] != (0, self.stb_dim):           # ignores non-nsd intervals
-                continue
-
-            interval = [ max(l,0) for l in interval["limits"] ]
-            if interval[0] == 0:
-                barriers.append( self._interval_quadratic_barrier([ -interval[1], +interval[1] ]) )
-            else:
-                barriers.append( self._interval_quadratic_barrier( interval ) )
-
-        if barriers:
-            return min([ barrier(root) for barrier in barriers ])
-        else:
-            return -1
-        
-    def composite_barrier(self):
-        ''' Compositive kappa function '''
-        k = self.composite_kappa
-
-        barriers = [ self.compatibility_barrier(root) for root in self.zero_poly.roots() ]
-        return continuous_composition(k, *barriers)
+        barrier_fun = lambda vec: self.leading_coef * ( (1/(a**(2*m)))*( vec[0] - center )**(2*m) + (1/(b**(2*m)))*( vec[1] )**(2*m) - 1 )
+        return barrier_fun
 
     def _compatibility_poly(self):
         ''' Computes compatibility roots and polynomial. '''
         N = self.dim
-        self.compatibility_poly = Poly([self.comp_poly_leading_coef])
+        self.compatibility_poly = Poly([self.leading_coef])
         self.compatibility_roots = []
 
         def nsd_interval_term(min_bound, max_bound):
@@ -519,6 +547,64 @@ class QFunction():
         for k in range(N):
             interval = self.total_isolated_intervals[k]
             self.compatibility_poly *= isolated_interval_term(*interval["limits"])
+
+    def _barrier_funs(self):
+        '''
+        Computes barrier functions for each relevant interval.
+        '''
+        def inside(num, interval):
+            return num >= interval[0] and num <= interval[1]
+
+        barrier_limits = []
+        # barrier_limits.append([ -self.neg_dist, self.neg_dist ])
+        for interval in self.intervals:
+
+            if interval["type"] != (0, self.stb_dim):           # ignores non-nsd intervals
+                continue
+
+            limits = interval["limits"]
+
+            # Checks for complex conj. pairs with real part inside interval
+            inner_divs = []
+            for conj_pair in self.stability_conj_pairs:
+                if inside(conj_pair.real, limits):
+                    inner_divs.append(conj_pair.real)
+            inner_divs.sort()
+
+            # Divide into more intervals if necessary 
+            divisions = [ limits[0] ] + [ float(div) for div in inner_divs ] + [ limits[1] ]
+            for k in range(len(divisions)-1):
+                div1 = divisions[k]
+                div2 = divisions[k+1]
+
+                if div2 < 0:
+                    min_bound, max_bound = 0.0, 0.0
+                elif div1 == -np.inf: 
+                    # min_bound, max_bound = 0.0, div2
+                    min_bound, max_bound = -div2, div2
+                else:
+                    min_bound, max_bound = div1, div2
+
+                barrier_limits.append( [min_bound, max_bound] )
+
+        # From here on we have all barrier limits
+        self.barrier_funs = []
+        for barrier_limit in barrier_limits:
+            length = np.abs(barrier_limit[1] - barrier_limit[0])
+            if length > self.length_tol:
+                barrier_fun = self._interval_barrier(barrier_limit)
+                self.barrier_funs.append( barrier_fun )
+
+    def composite_barrier(self, root):
+        '''
+        Continuous barrier function: negative around n bounded regions on the complex plane
+        around the stable intervals on the real line.
+        To be evaluated at each root of z(λ).
+        '''
+        k = self.composite_kappa
+        vec = [ root.real, root.imag ]
+        barrier_vals = [ barrier_fun(vec) for barrier_fun in self.barrier_funs ]
+        return continuous_composition(k, *barrier_vals)
 
     def is_compatible(self):
         ''' 
@@ -641,6 +727,58 @@ class QFunction():
 
         return self.pencil @ Or_poly.T
 
+    def compatibilization(self, A, B, clf_dict: dict, p = 1.0):
+        '''
+        Algorithm for finding a compatible CLF shape.
+        '''
+        G = B @ B.T
+
+        Hvfun = clf_dict["Hv_fun"]      # function for computing Hv
+        x0 = clf_dict["center"]         # clf center
+        Hvinit = clf_dict["Hv"]
+
+        def cost(var: np.ndarray):
+            Hv = Hvfun(var)
+            # newN = p * G @ Hv - A
+            # self.update( N=newN )
+
+            print( f"Eigenvalues of Hv = { np.linalg.eigvals(Hv) }" )
+            cost = np.linalg.norm( Hv - Hvinit, 'fro' )
+            return cost
+
+        def compatibility(var: np.ndarray):
+            Hv = Hvfun(var)
+            newN = p * G @ Hv - A
+            self.update( N=newN )
+            constr = np.array([ self.composite_barrier(root) for root in self.zero_poly.roots() ])
+            return constr
+
+        def boundedness(var: np.ndarray):
+            Hv = Hvfun(var)
+            return np.linalg.trace(Hvinit) - np.linalg.trace(Hv)
+
+        def callback(var):
+            newN = p * G @ Hvfun(var) - A
+            self.update( N=newN )
+            self.plot()
+
+        var0 = sym2vector(Hvinit)
+
+        # n = self.dim
+        # ndof = int(n*(n+1)/2)
+        # var0 = np.random.randn(ndof)
+
+        constr = []
+        constr += [ {"type": "ineq", "fun": compatibility} ]
+        # constr += [ {"type": "ineq", "fun": boundedness} ]
+        sol = minimize( fun=cost, x0=var0, constraints=constr, method='SLSQP', options={"disp": True, "maxiter": 1000} )
+
+        results = {"Hv": Hvfun(sol.x),
+                   "cost": cost(sol.x),
+                   "compatibility": compatibility(sol.x)}
+
+        return results
+
     def init_graphics(self, ax: Axes, res=0.01):
         ''' Initialize graphical objects '''
 
@@ -694,6 +832,8 @@ class QFunction():
         ax.set_xlim(*self.plot_limits["hor"])
         ax.set_ylim(*self.plot_limits["ver"])
         ax.legend()
+
+        self._generate_contour()
 
     def plot(self):
         '''
@@ -797,61 +937,32 @@ class QFunction():
 
         return graphical_elements
 
-    def compatibilize(self, A, B, clf_dict: dict, p = 1.0):
+    def _generate_contour(self):
         '''
-        Algorithm for finding a compatible CLF shape.
-        '''
-        G = B @ B.T
+        Create contour generator object for the given function.
+        Parameters: limits (2x2 array) - min/max limits for x,y coords
+                    spacing - grid spacing for contour generation
+        '''    
+        x_min, x_max = (-1, 15)
+        y_min, y_max = (-1, 1)
+        res = 0.01
 
-        Hvfun = clf_dict["Hv_fun"]      # function for computing Hv
-        x0 = clf_dict["center"]         # clf center
-        Hvinit = clf_dict["Hv"]
+        x = np.arange(x_min, x_max, res)
+        y = np.arange(y_min, y_max, res)
+        xg, yg = np.meshgrid(x,y)
+        
+        fvalues = np.zeros(xg.shape)
+        for i,j in itertools.product(range(xg.shape[0]), range(xg.shape[1])):
+            pt = complex( xg[i,j], yg[i,j] )
+            barrier_val = self.composite_barrier(pt)
+            fvalues[i,j] = barrier_val
+        
+        self.contour = ctp.contour_generator(x=xg, y=yg, z=fvalues )
 
-        def cost(var: np.ndarray):
-            Hv = Hvfun(var)
-            cost_val = np.linalg.norm( Hv - Hvinit, 'fro')
-            # cost_val += np.linalg.trace(Hv)
-
-            print(f"Eigenvalues of Hv = {np.linalg.eigvals(Hv)}")
-
-            return cost_val
-
-        def compatibility(var: np.ndarray):
-            newN = p * G @ Hvfun(var) - A
-            self.update( N=newN )
-
-            constr = self.composite_barrier()
-            # constr = [ self.compatibility_barrier(root) for root in self.zero_poly.roots() ]
-
-            print(constr)
-
-            return constr
-
-        def boundedness(var: np.ndarray):
-            Hv = Hvfun(var)
-            return np.linalg.trace(Hvinit) - np.linalg.trace(Hv)
-
-        def callback(var):
-            newN = p * G @ Hvfun(var) - A
-            self.update( N=newN )
-            self.plot()
-
-        var0 = sym2vector(Hvinit)
-
-        # n = self.dim
-        # ndof = int(n*(n+1)/2)
-        # var0 = np.random.randn(ndof)
-
-        constr = []
-        constr += [ {"type": "ineq", "fun": compatibility} ]
-        constr += [ {"type": "ineq", "fun": boundedness} ]
-        sol = minimize( fun=cost, x0=var0, constraints=constr, options={"disp": True, "maxiter": 1000} )
-
-        results = {"Hv": Hvfun(sol.x),
-                   "cost": cost(sol.x),
-                   "compatibility": compatibility(sol.x)}
-
-        return results
+    def plot_contours(self, ax):
+        level = self.contour.lines(0.0)
+        for k, segment in enumerate(level):
+            ax.plot( segment[:,0], segment[:,1], 'r')
 
 class CLFCBFPair():
     '''

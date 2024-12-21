@@ -73,8 +73,9 @@ def update_plot(t):
 
     qfun.update(M = Mfun(t), N = Nfun(t), H = Hfun(t), w = wfun(t))
 
+    print("")
     for k, root in enumerate(qfun.zero_poly.roots()):
-        h = qfun.compatibility_barrier(root)
+        h = qfun.composite_barrier(root)
         print(f"h(λ{k+1}) = {h}")
 
     return qfun.plot()
@@ -90,7 +91,7 @@ qfun.init_graphics(ax)
 start, stop, step = 0.0, 1.0, 0.001
 animation = anim.FuncAnimation(fig, func=update_plot, frames=np.arange(start,stop,step), interval=300, repeat=False, blit=True, cache_frame_data=False)
 
-update_plot(0.0)
+update_plot(0.1)
 
 for k, eig in enumerate( pencil.eigens ):
     print(f"{k+1}-th gen. eigenvalue of P(λ) = {eig.eigenvalue}")

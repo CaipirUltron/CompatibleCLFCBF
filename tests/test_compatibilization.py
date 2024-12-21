@@ -5,14 +5,14 @@ from controllers.compatibility import MatrixPencil, QFunction
 from common import hessian_quadratic, vector2sym, rot2D, genStableLTI
 
 n, m = 2, 2
-A, B = genStableLTI(n, m, type='float', Alims=(-2, 2), Blims=(1, 5), place=True)
+# A, B = genStableLTI(n, m, type='float', Alims=(-2, 2), Blims=(1, 5), place=True)
 
-# A = np.zeros((n,n))
-# B = np.eye(n)
+A = np.zeros((n,n))
+B = np.eye(n)
 
 ''' ------------------------ Define CLF (varying Hessian eigenvalues) ----------------------- '''
 CLFeigs = np.array([10.0, 1.0])
-Rv = rot2D(np.deg2rad(1.0))
+Rv = rot2D(np.deg2rad(3))
 Hv = hessian_quadratic( CLFeigs, Rv )
 CLFcenter = np.zeros(n)
 
@@ -34,32 +34,34 @@ pencil = MatrixPencil(M, N)
 qfun = QFunction(pencil, Hh, w)
 
 ''' --------------------------------- Animation ------------------------------------- '''
+
 fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10.0, 5.0), layout="constrained")
 fig.suptitle('Q-function plot')
 qfun.init_graphics(ax)
-qfun.plot()
-plt.pause(0.001)
+# qfun.plot()
 
 ''' ----------------------------- Compatibilization --------------------------------- '''
-h = qfun.composite_barrier()
-print(f"h = {h}")
+
+for k, root in enumerate(qfun.zero_poly.roots()):
+    h = qfun.composite_barrier(root)
+    print(f"h(λ{k+1}) = {h}")
 
 def Hvfun(var):
     eps = 1e-3
     L = vector2sym(var)
     return L @ L.T + eps * np.eye(n)
-
 clf_dict = {"Hv_fun": Hvfun, "center": CLFcenter, "Hv": Hv }
-results = qfun.compatibilize( A, B, clf_dict, p=p )
 
-print("Compatibilization results:")
-print(results)
+# results = qfun.compatibilization( A, B, clf_dict, p=p )
+# print("Compatibilization results:")
+# print(results)
 
-Hv = results["Hv"]
-eigHv, Rv = np.linalg.eig(Hv)
-print(f"Eigs Hv = {eigHv}")
-print(f"Rot Hv = {Rv}")
-
+# Hv = results["Hv"]
+# eigHv, Rv = np.linalg.eig(Hv)
+# print(f"Eigs Hv = {eigHv}")
+# print(f"Rot Hv = {Rv}")
 
 qfun.plot()
+qfun.plot_contours(ax)
+
 plt.show()
