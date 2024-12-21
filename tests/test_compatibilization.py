@@ -12,7 +12,7 @@ B = np.eye(n)
 
 ''' ------------------------ Define CLF (varying Hessian eigenvalues) ----------------------- '''
 CLFeigs = np.array([10.0, 1.0])
-Rv = rot2D(np.deg2rad(3))
+Rv = rot2D(np.deg2rad(1.0))
 Hv = hessian_quadratic( CLFeigs, Rv )
 CLFcenter = np.zeros(n)
 
@@ -37,14 +37,10 @@ qfun = QFunction(pencil, Hh, w)
 
 fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10.0, 5.0), layout="constrained")
 fig.suptitle('Q-function plot')
-qfun.init_graphics(ax)
-# qfun.plot()
 
 ''' ----------------------------- Compatibilization --------------------------------- '''
-
-for k, root in enumerate(qfun.zero_poly.roots()):
-    h = qfun.composite_barrier(root)
-    print(f"h(λ{k+1}) = {h}")
+h = qfun.composite_barrier()
+print(f"h(Hv) = {h}")
 
 def Hvfun(var):
     eps = 1e-3
@@ -52,16 +48,17 @@ def Hvfun(var):
     return L @ L.T + eps * np.eye(n)
 clf_dict = {"Hv_fun": Hvfun, "center": CLFcenter, "Hv": Hv }
 
-# results = qfun.compatibilization( A, B, clf_dict, p=p )
-# print("Compatibilization results:")
-# print(results)
+results = qfun.compatibilization( A, B, clf_dict, p=p )
+print("Compatibilization results:")
+print(results)
 
-# Hv = results["Hv"]
-# eigHv, Rv = np.linalg.eig(Hv)
-# print(f"Eigs Hv = {eigHv}")
-# print(f"Rot Hv = {Rv}")
+Hv = results["Hv"]
+eigHv, Rv = np.linalg.eig(Hv)
+print(f"Eigs Hv = {eigHv}")
+print(f"Rot Hv = {Rv}")
 
+qfun.init_graphics(ax)
 qfun.plot()
-qfun.plot_contours(ax)
+# qfun.plot_contours(ax)
 
 plt.show()
