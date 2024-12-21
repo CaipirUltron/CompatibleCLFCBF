@@ -10,13 +10,13 @@ from matplotlib.axes import Axes
 from numpy.polynomial import Polynomial as Poly
 from numpy.polynomial.polynomial import polydiv, polyder, polyint
 
+from typing import Callable
 from copy import copy
 from scipy import signal
 from scipy.optimize import fsolve, minimize
 from scipy.linalg import null_space, inv
 
 from common import *
-from dynamic_systems import DynamicSystem, LinearSystem
 
 def inside(num, interval):
     t1 = num >= interval[0] and num <= interval[1]
@@ -86,7 +86,7 @@ class QFunction():
         self.length_tol = 1e-2
         self.bexponent = 1
         self.neg_dist = 1e-1
-        self.comptol = 0.1          # Should be a small positive value
+        self.comptol = 0.2          # Should be a small positive value
 
         ''' Stability matrix S(λ) '''
         self.stb_dim = self.dim-1
@@ -805,28 +805,22 @@ class QFunction():
 
         return self.pencil @ Or_poly.T
 
-    def compatibilization(self, A, B, clf_dict: dict, p = 1.0):
+    def compatibilize(self, A, B, param2Hv: Callable, Hv2param: Callable, Hv0=None, p=1.0):
         '''
         Algorithm for finding a compatible CLF shape.
         '''
-        G = B @ B.T
-
-        Hvfun = clf_dict["Hv_fun"]      # function for computing Hv
-        x0 = clf_dict["center"]         # clf center
-        Hvinit = clf_dict["Hv"]
-
         def cost(var: np.ndarray):
-            Hv = Hvfun(var)
+            Hv = param2Hv(var)
             print( f"Eigenvalues of Hv = { np.linalg.eigvals(Hv) }" )
-            cost = np.linalg.norm( Hv - Hvinit, 'fro' )
-            # cost += 1/np.linalg.trace(Hv)
+            cost = np.linalg.norm( Hv - Hv0, 'fro' )
+            cost += - np.log(np.linalg.det(Hv))
             return cost
 
         def compatibility(var: np.ndarray):
-            Hv = Hvfun(var)
+            G = B @ B.T
+            Hv = param2Hv(var)
             newN = p * G @ Hv - A
             self.update( N=newN )
-
             constr = self.composite_barrier()
             return constr
 
@@ -839,12 +833,6 @@ class QFunction():
             self.update( N=newN )
             self.plot()
 
-        var0 = sym2vector(Hvinit)
-
-        # n = self.dim
-        # ndof = int(n*(n+1)/2)
-        # var0 = np.random.randn(ndof)
-
         constr = []
         constr += [ {"type": "ineq", "fun": compatibility} ]
         # constr += [ {"type": "ineq", "fun": boundedness} ]
@@ -852,9 +840,9 @@ class QFunction():
         method = 'SLSQP'
         # method = 'trust-constr'
         # method = 'COBYLA'
-        sol = minimize( fun=cost, x0=var0, constraints=constr, method=method, options={"disp": True, "maxiter": 1000} )
+        sol = minimize( fun=cost, x0=Hv2param(Hv0), constraints=constr, method=method, options={"disp": True, "maxiter": 1000} )
 
-        results = {"Hv": Hvfun(sol.x),
+        results = {"Hv": param2Hv(sol.x),
                    "cost": cost(sol.x),
                    "compatibility": compatibility(sol.x)}
 
@@ -882,13 +870,8 @@ class QFunction():
         self.strip_size = 1.0
 
         hor_limits = self.plot_limits["hor"]
-        # ver_limits = self.plot_limits["ver"]
         self.lambda_array = np.arange(hor_limits[0], hor_limits[1], self.lambda_res)
-
         self.z_plot, = ax.plot([],[],'b',lw=0.8, label='z(λ)')
-        # self.c_plot, = ax.plot([],[],'r',lw=0.8, label='h(λ)')
-        # self.Sdet_plot, = ax.plot([],[],'k',lw=0.8, label='|S(λ)|')
-        # self.dSdet_plot, = ax.plot([],[],'g',lw=0.8, label='|S(λ)|\'')
 
         self.stable_pts, = ax.plot([], [], 'or' )
         self.unstable_pts, = ax.plot([], [], 'ob' )
@@ -914,8 +897,6 @@ class QFunction():
         ax.set_ylim(*self.plot_limits["ver"])
         ax.legend()
 
-        # self._generate_contour()
-
     def plot(self):
         '''
         Plots the Q-function for analysis.
@@ -924,14 +905,7 @@ class QFunction():
         
         # Zero and compatibility polynomial
         z_array = [ self.zero_poly(l) for l in self.lambda_array ]
-        # c_array = [ self.compatibility_poly(l) for l in self.lambda_array ]
-        # Sdet_array = [ self.Sdet(l) for l in self.lambda_array ]
-        # dSdet_array = [ self.dSdet(l) for l in self.lambda_array ]
-
         self.z_plot.set_data(self.lambda_array, z_array)
-        # self.c_plot.set_data(self.lambda_array, c_array)
-        # self.Sdet_plot.set_data(self.lambda_array, Sdet_array)
-        # self.dSdet_plot.set_data(self.lambda_array, dSdet_array)
 
         # Definiteness intervals
         for k, interval in enumerate(self.intervals):
@@ -1002,10 +976,6 @@ class QFunction():
         # Returns graphical handlers
         graphical_elements = []
         graphical_elements.append( self.z_plot )
-        # graphical_elements.append( self.c_plot )
-        # graphical_elements.append( self.Sdet_plot )
-        # graphical_elements.append( self.dSdet_plot )
-
         graphical_elements += self.strip_rects
         graphical_elements += self.interval_texts
         graphical_elements.append( self.real_stability_pts )
@@ -1017,33 +987,6 @@ class QFunction():
         graphical_elements += self.equilibrium_texts
 
         return graphical_elements
-
-    def _generate_contour(self):
-        '''
-        Create contour generator object for the given function.
-        Parameters: limits (2x2 array) - min/max limits for x,y coords
-                    spacing - grid spacing for contour generation
-        '''    
-        x_min, x_max = (-1, 15)
-        y_min, y_max = (-1, 1)
-        res = 0.08
-
-        x = np.arange(x_min, x_max, res)
-        y = np.arange(y_min, y_max, res)
-        xg, yg = np.meshgrid(x,y)
-        
-        fvalues = np.zeros(xg.shape)
-        for i,j in itertools.product(range(xg.shape[0]), range(xg.shape[1])):
-            pt = complex( xg[i,j], yg[i,j] )
-            barrier_val = self.composite_barrier(pt)
-            fvalues[i,j] = barrier_val
-        
-        self.contour = ctp.contour_generator(x=xg, y=yg, z=fvalues )
-
-    def plot_contours(self, ax):
-        level = self.contour.lines(0.0)
-        for k, segment in enumerate(level):
-            ax.plot( segment[:,0], segment[:,1], 'r')
 
 class CLFCBFPair():
     '''

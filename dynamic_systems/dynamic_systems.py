@@ -2,6 +2,9 @@ import scipy
 import numpy as np
 
 from abc import ABC, abstractmethod
+from typing import Callable
+
+import scipy.linalg
 
 class DynamicSystem(ABC):
     '''
@@ -172,6 +175,25 @@ class LinearSystem(AffineSystem):
 
     def g(self):
         self._g = self._B
+
+class DriftLess(AffineSystem):
+    '''
+    Implements driftless nonlinear system dx = g(x) u, where g(x) must be a full rank matrix.
+    '''
+    def __init__(self, initial_state, initial_control, g: Callable):
+        super().__init__(initial_state, initial_control)
+        self.tol = 1e-3
+        self.gfun = g
+
+    def f(self):
+        self._f = np.zeros(self.n)
+
+    def g(self):
+        gval = self.gfun(self._state)
+        if np.linalg.matrix_rank(gval) < self.n:
+            raise Exception("g(x) must have full rank.") 
+        
+        self._g = gval
 
 class Periodic(AffineSystem):
     '''

@@ -211,102 +211,88 @@ class Quadratic(Function):
     '''
     Class for quadratic function representing x'Ax + b'x + c = 0.5 (x - p)'H(x-p) + height = 0.5 x'Hx - 0.5 p'(H + H')x + 0.5 p'Hp + height
     '''
-    def __init__(self, *args):
+    def to_factored(A,b,c):
+        H = 2*A
+        x0 = - np.linalg.inv(H) @ b
+        min = c - 0.5 * x0.T @ H @ x0
+        return H, x0, min
+    
+    def from_factored(H,x0,min):
+        A = 0.5*H
+        b = - H @ x0
+        c = 0.5 * x0.T @ H @ x0 + min
+        return A, b, c
+
+    def __init__(self, **kwargs):
 
         # Set parameters
-        super().__init__(*args)
+        super().__init__(**kwargs)
 
-        if self._dim > 1:
-            self.A = np.zeros([self._dim,self._dim])
-            self.b = np.zeros(self._dim)
-            self.critical_point = np.zeros(self._dim)
-            self.dcritical = np.zeros(self._dim)
-        else:
-            self.A = 0.0
-            self.b = 0.0
-            self.critical_point = 0.0
-            self.dcritical = 0.0
-        self.c = 0.0
-        self.height = 0.0
-
-        # self.set_param(kwargs)
+        # if self._dim > 1:
+        #     self.A = np.zeros([self._dim,self._dim])
+        #     self.b = np.zeros(self._dim)
+        #     self.critical_point = np.zeros(self._dim)
+        #     self.dcritical = np.zeros(self._dim)
+        # else:
+        #     self.A = 0.0
+        #     self.b = 0.0
+        #     self.critical_point = 0.0
+        #     self.dcritical = 0.0
+        # self.c = 0.0
+        # self.height = 0.0
 
         # Set eigenbasis for hessian matrix
-        _, _, Q = self.compute_eig()
-        self.eigen_basis = np.zeros([self._dim, self._dim, self._dim])
-        for k in range(self._dim):
-            self.eigen_basis[:][:][k] = np.outer( Q[:,k], Q[:,k] )
+        # _, _, Q = self.compute_eig()
+        # self.eigen_basis = np.zeros([self._dim, self._dim, self._dim])
+        # for k in range(self._dim):
+        #     self.eigen_basis[:][:][k] = np.outer( Q[:,k], Q[:,k] )
 
-    def set_param(self, **kwargs):
+    def set_params(self, **kwargs):
         '''
         Sets the quadratic function parameters.
         '''
+        super().set_params(**kwargs)
         for key in kwargs:
             if key == "hessian":
-                self._hessian = np.array(kwargs[key])
-            if key == "critical":
-                self.critical_point = np.array(kwargs[key])
+                self.H = np.array(kwargs[key])
+                continue
+            if key == "center":
+                self.center = np.array(kwargs[key])
+                continue
             if key == "height":
                 self.height = kwargs[key]
-            if key == "dcritical":
-                self.dcritical = np.array(kwargs[key])
+                continue
 
-        self.A = 0.5 * self._hessian
-        self.b = - 0.5*( self._hessian + self._hessian.T ) @ self.critical_point
-        self.c = 0.5 * self.critical_point @ ( self._hessian @ self.critical_point ) + self.height
+        self.A, self.b, self.c = Quadratic.from_factored( self.H, self.center, self.height )
 
-        for key in kwargs:
-            if key == "A":
-                self.A = kwargs[key]
-            if key == "b":
-                self.b = kwargs[key]
-            if key == "c":
-                self.c = kwargs[key]
-
-    def function(self, point):
+    def _function(self, pt):
         '''
         General quadratic function.
         '''
-        return np.array(point) @ ( self.A @ np.array(point) ) + self.b @ np.array(point) + self.c
+        return np.array(pt) @ self.A @ np.array(pt) + self.b @ np.array(pt) + self.c
 
-    def gradient(self, point):
+    def _gradient(self, pt):
         '''
         Gradient of general quadratic function.
         '''
-        return ( self.A + self.A.T ) @ np.array(point) + self.b
+        return ( self.A + self.A.T ) @ np.array(pt) + self.b
 
-    def hessian(self, point):
+    def _jacobian(self, pt):
+        return self._gradient(pt)
+
+    def _hessian(self, pt):
         '''
         Hessian of general quadratic function.
         '''
         return ( self.A + self.A.T )
 
-    def eigen2hessian(self, eigen):
-        '''
-        Returns hessian matrix from a given set of eigenvalues.
-        '''
-        if self._dim != len(eigen):
-            raise Exception("Dimension mismatch.")
+    def eig(self):
+        eigs, Q = np.linalg.eig(self.H)
+        return eigs, Q
 
-        H = np.zeros(self._dim)
-        for k in range(self._dim):
-            H = H + eigen[k] * self.eigen_basis[:][:][k]
-
-        return H
-
-    def get_critical(self):
-        return self.critical_point
-
-    def get_height(self):
-        return self.height
-
-    def get_critical_derivative(self):
-        return self.dcritical
-
-    def compute_eig(self):
-        eigen, Q = np.linalg.eig(self.hessian(0))
-        angle = np.arctan2(Q[0, 1], Q[0, 0])
-        return eigen, angle, Q
+    def eigvals(self):
+        eigs, Q = self.eig()
+        return eigs
 
 class Gaussian(Function):
     '''

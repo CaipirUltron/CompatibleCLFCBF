@@ -26,69 +26,58 @@ class QuadraticLyapunov(Quadratic):
     '''
     def __init__(self, *args, **kwargs):
 
-        from dynamic_systems import Integrator
-        super().__init__(*args)
-        super().set_param(**kwargs)
-        super().set_param(height=0.0)
+        self.epsilon = 1e-3
+        kwargs["height"] = 0.0
+        super().__init__(*args, **kwargs)
 
-        self.epsilon = 0.0
-        self.Lv = sym2triangular( self._hessian-self.epsilon*np.eye(self._dim) )
-        self.param = triangular2vector( self.Lv )
-        self.dynamics = Integrator(self.param,np.zeros(len(self.param)))
+        # from dynamic_systems import Integrator
+        # self.L = sym2triangular( self.H - self.epsilon * np.eye(self._dim) )
+        # self.param = triangular2vector( self.L )
+        # self.dynamics = Integrator(self.param,np.zeros(len(self.param)))
 
-    def get_param(self):
-        '''
-        This function gets the params corresponding to the Lyapunov Hessian matrix.
-        '''
-        return self.param
+    def param2Hv(self, param):
+        ''' Function to compute Hv from parameters '''
+        L = vector2sym(param)
+        return L.T @ L + self.epsilon * np.eye(self._dim)
 
-    def set_epsilon(self, epsilon):
-        '''
-        Sets the minimum eigenvalue for the Lyapunov Hessian matrix.
-        '''
-        self.epsilon = epsilon
-        self.set_param(self.param)
+    def Hv2param(self, Hv):
+        ''' Function to compute parameters from Hv '''
+        R = Hv - self.epsilon * np.eye(self._dim)
+        eigR = np.linalg.eigvals(R) 
+        if np.any(eigR) < 0.0:
+            warnings.warn("Non-invertible transformation.")
+        L = sp.linalg.sqrtm(R)
+        return sym2vector( L )
 
-    def set_param(self, param):
-        '''
-        Sets the Lyapunov function parameters.
-        '''
-        self.param = param
-        Lv = vector2triangular(param)
-        Hv = Lv.T @ Lv + self.epsilon*np.eye(self._dim)
-        super().set_param(hessian = Hv)
+    def set_params(self, **kwargs):
+        super().set_params(**kwargs)
 
-    def set_critical(self, pt):
-        '''
-        Sets the Lyapunov function critical point.
-        '''
-        super().set_param(critical = pt)
+        if "epsilon" in kwargs.keys():
+            self.epsilon = kwargs["epsilon"]
 
-    def set_critical_derivative(self, dcritical):
-        '''
-        Sets the derivative of the Lyapunov function critical point.
-        '''
-        super().set_param(dcritical = dcritical)
+        # if "param" in kwargs.keys():
+        #     self.param = kwargs["param"]
+        #     self.H = self.Hvfun(self.param)
+        #     self.A, self.b, self.c = Quadratic.from_factored(self.H, self.center, self.height)
 
-    def update(self, param_ctrl, dt):
-        '''
-        Integrates the parameters.
-        '''
-        self.dynamics.set_control(param_ctrl)
-        self.dynamics.actuate(dt)
-        self.set_param(self.dynamics.get_state())
+    # def update(self, param_ctrl, dt):
+    #     '''
+    #     Integrates the parameters.
+    #     '''
+    #     self.dynamics.set_control(param_ctrl)
+    #     self.dynamics.actuate(dt)
+    #     self.set_params( param = self.dynamics.get_state())
 
-    def get_partial_Hv(self):
-        '''
-        Returns the partial derivatives of Hv wrt to the parameters.
-        '''
-        tri_basis = triangular_basis(self._dim)
-        partial_Hv = np.zeros([ len(self.param), self._dim, self._dim ])
-        for i in range(len(self.param)):
-            for j in range(len(self.param)):
-                partial_Hv[i,:,:] = partial_Hv[i,:,:] + ( tri_basis[i].T @ tri_basis[j] + tri_basis[j].T @ tri_basis[i] )*self.param[j]
+    @classmethod
+    def geometry2D(cls, semiaxes: tuple, angle: float, center: list | np.ndarray, level: float, **kwargs):
+        ''' Create Quadratic from geometric parameters '''
+        a, b = semiaxes
+        R = rot2D(np.deg2rad(angle))
 
-        return partial_Hv
+        lamb1 = 2*level/(a**2)
+        lamb2 = 2*level/(b**2)
+        H = R.T @ np.diag([lamb1, lamb2]) @ R
+        return cls(hessian=H, center=center, height=0.0, **kwargs)
 
 class QuadraticBarrier(Quadratic):
     '''
@@ -96,78 +85,74 @@ class QuadraticBarrier(Quadratic):
     The symmetric Hessian is parametrized by Hh(pi) = sum^n_i Li pi_i, where {Li} is the canonical basis of the space of (n,n) symmetric matrices.
     '''
     def __init__(self, *args, **kwargs):
-        super().__init__(*args)
-        super().set_param(**kwargs)
-        super().set_param(height = -0.5)
 
-        from dynamic_systems import Integrator
+        kwargs["height"] = -1.0
+        super().__init__(*args, **kwargs)
 
-        self.param = sym2vector(self._hessian)
-        self.dynamics = Integrator(self.param,np.zeros(len(self.param)))
-        self.last_gamma_sol = 0.0
-        self.gamma_min = -np.pi/2
-        self.gamma_max = +np.pi/2
+        # from dynamic_systems import Integrator
+        # self.param = sym2vector(self._hessian)
+        # self.dynamics = Integrator(self.param,np.zeros(len(self.param)))
+        # self.last_gamma_sol = 0.0
+        # self.gamma_min = -np.pi/2
+        # self.gamma_max = +np.pi/2
 
-    def get_param(self):
-        '''
-        This function gets the params corresponding to the barrier Hessian matrix.
-        '''
-        return self.param
+    @classmethod
+    def geometry2D(cls, semiaxes: tuple, angle: float, center: list | np.ndarray, **kwargs):
+        ''' Create Quadratic from geometric parameters '''
+        a, b = semiaxes
+        R = rot2D(np.deg2rad(angle))
+        H = R.T @ np.diag([1/a**2, 1/b**2]) @ R
+        return cls(hessian=H, center=center, height=-1.0, **kwargs)
 
-    def set_param(self, param):
-        '''
-        Sets the barrier function parameters.
-        '''
-        self.param = param
-        super().set_param(hessian = vector2sym(param))
+    # def set_params(self, param):
+    #     '''
+    #     Sets the barrier function parameters.
+    #     '''
+    #     self.param = param
+    #     super().set_params(hessian = vector2sym(param))
 
-    def set_critical(self, pt):
-        '''
-        Sets the barrier function critical point.
-        '''
-        super().set_param(critical = pt)
+    # def update(self, param_ctrl, dt):
+    #     '''
+    #     Integrates the barrier function parameters.
+    #     '''
+    #     self.dynamics.set_control(param_ctrl)
+    #     self.dynamics.actuate(dt)
+    #     self.set_param(self.dynamics.get_state())
 
-    def update(self, param_ctrl, dt):
-        '''
-        Integrates the barrier function parameters.
-        '''
-        self.dynamics.set_control(param_ctrl)
-        self.dynamics.actuate(dt)
-        self.set_param(self.dynamics.get_state())
+    # @classmethod
+    # def from_parameters(self, set_parameters):
+    #     '''
+    #     Computes the barrier with respect to a set defined by set_parameters
+    #     '''
+    #     r = set_parameters["radius"]
+    #     p_center = set_parameters["center"]
+    #     theta = set_parameters["orientation"]
 
-    def barrier_set(self, set_parameters):
-        '''
-        Computes the barrier with respect to a set define by set_parameters
-        '''
-        r = set_parameters["radius"]
-        p_center = set_parameters["center"]
-        theta = set_parameters["orientation"]
+    #     def compute_pt(gamma):
+    #         return np.array(p_center) + r*rot2D(theta) @ np.array([np.cos(gamma), np.sin(gamma)]).reshape(2)
 
-        def compute_pt(gamma):
-            return np.array(p_center) + r*rot2D(theta) @ np.array([np.cos(gamma), np.sin(gamma)]).reshape(2)
+    #     def necessary_cond(gamma):
+    #         p_gamma = compute_pt( gamma )
+    #         nablah = self.evaluate_gradient(*p_gamma)[0]
+    #         return nablah.dot(np.array([-np.sin(theta+gamma), np.cos(theta+gamma)]))
 
-        def necessary_cond(gamma):
-            p_gamma = compute_pt( gamma )
-            nablah = self.evaluate_gradient(*p_gamma)[0]
-            return nablah.dot(np.array([-np.sin(theta+gamma), np.cos(theta+gamma)]))
+    #     def cost(gamma):
+    #         p_gamma = compute_pt(gamma)
+    #         return self.evaluate_function(*p_gamma)[0]
 
-        def cost(gamma):
-            p_gamma = compute_pt(gamma)
-            return self.evaluate_function(*p_gamma)[0]
+    #     # Solve optimization problem
+    #     import scipy.optimize as opt
+    #     results = opt.minimize( cost, self.last_gamma_sol )
+    #     gamma_opt = results.x[0]
 
-        # Solve optimization problem
-        import scipy.optimize as opt
-        results = opt.minimize( cost, self.last_gamma_sol )
-        gamma_opt = results.x[0]
+    #     h = cost(gamma_opt)
 
-        h = cost(gamma_opt)
+    #     p_gamma_opt = compute_pt( gamma_opt )
+    #     nablah = self.evaluate_gradient(*p_gamma_opt)[0]
 
-        p_gamma_opt = compute_pt( gamma_opt )
-        nablah = self.evaluate_gradient(*p_gamma_opt)[0]
+    #     self.last_gamma_sol = gamma_opt
 
-        self.last_gamma_sol = gamma_opt
-
-        return h, nablah, p_gamma_opt, gamma_opt
+    #     return h, nablah, p_gamma_opt, gamma_opt
 
 class KernelLyapunov(KernelQuadratic):
     '''
