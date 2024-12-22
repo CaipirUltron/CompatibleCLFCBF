@@ -41,9 +41,6 @@ class CompatibleQP():
         if np.any([ cbfs[0]._dim != cbf._dim for cbf in cbfs ]):
             raise Exception("CBF dimensions are not equal.")
 
-        self.Qfunctions: list[QFunction] = [ None for cbf in cbfs ]
-        self.compatible_Hv: list[np.ndarray] = [ None for cbf in cbfs ]
-
         self.state_dim = clf._dim
         self.control_dim = self.plant.m
         self.sym_dim = int(( self.state_dim * ( self.state_dim + 1 ) )/2)
@@ -101,26 +98,10 @@ class CompatibleQP():
         if type(self.plant) == Unicycle:
             self.radius = 1.0
 
-        self.createQfunctions()
+        self.Qfunctions = [ QFunction(self.plant, self.clf, cbf, self.p[0]) for cbf in self.cbfs ]
+        self.compatible_Hv = [ None for _ in self.Qfunctions ]
 
-    def createQfunctions(self):
-        ''' Computes Qfunctions for each CBF. '''
-
-        for k, cbf in enumerate(self.cbfs):
-            if isinstance(self.plant, LinearSystem):
-                A, B = self.plant._A, self.plant._B
-                G = B @ B.T
-                Hh = cbf.H
-                M, N = G @ Hh, self.p[0] * G @ self.Hv - A
-            if isinstance(self.plant, DriftLess):
-                Hh = cbf.H
-                M, N = Hh, self.p[0] @ self.Hv
-
-            w = N @ ( cbf.center - self.clf.center )
-            pencil = MatrixPencil(M, N)
-            self.Qfunctions[k] = QFunction(pencil, Hh, w)
-
-    def compatibilize(self):
+    def compatibilize(self, verbose=False):
         ''' 
         Tries to compatibilize all QFunctions.
         Finds N CLF Hessians, one for each CBF, resulting in no 
@@ -133,11 +114,10 @@ class CompatibleQP():
             if isinstance(self.plant, DriftLess):
                 A, B = np.zeros((self.n, self.n)), np.eye(self.n)
 
-            results = qfun.compatibilize(A, B, self.clf.param2Hv, self.clf.Hv2param, self.Hv, self.p[0] )
-            # if results["compatibility"] < 0:
-            #     raise Exception(f"Compatibility failed.")
-            # else:
-            print(f"Compatibilization results = {results}")
+            results = qfun.compatibilize(verbose=verbose)
+            if results["compatibility"] < -1e-2:
+                raise Exception(f"Compatibility failed.")
+
             self.compatible_Hv[k] = results["Hv"]
 
         return self.compatible_Hv

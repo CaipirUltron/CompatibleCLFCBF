@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from controllers.compatibility import MatrixPencil, QFunction
 from controllers import CompatibleQP
 
 from dynamic_systems import LinearSystem, DriftLess
@@ -12,16 +11,17 @@ limits = 12*np.array((-1,1,-1,1))
 ''' ----------------------------------- Define LTI system ---------------------------------- '''
 n = 2
 x0 = np.array([2,6])
+
 A = np.zeros((n,n))
 B = np.eye(n)
-
 plant = LinearSystem(x0, np.zeros(2), A=A, B=B)
 
 ''' ------------------------ Define CLF (varying Hessian eigenvalues) ----------------------- '''
-CLFaxes = np.array([1.0, 8.0])
+CLFaxes = np.array([1.0, 4.0])
 CLFangle = 0.0
 CLFcenter = np.zeros(2)
 clf = QuadraticLyapunov.geometry2D(CLFaxes, CLFangle, CLFcenter, level=1, limits=limits)
+
 Hv = clf.H
 
 ''' ------------------------ Define CBF (varying Hessian eigenvalues) ----------------------- '''
@@ -36,9 +36,15 @@ num_cbfs = len(cbfs)
 ''' ----------------------------- Compatibilization --------------------------------- '''
 
 controller = CompatibleQP(plant, clf, cbfs)
+Hvs = controller.compatibilize(verbose=True)
+Hv = Hvs[0]
 
-Hvs = controller.compatibilize()
-clf.set_params(hessian=Hvs[0])
+for k, qfun in enumerate(controller.Qfunctions):
+    h = qfun.composite_barrier()
+    print(f"Found Hv = \n {Hv}")
+    print(f"{k+1} Q-function h = {h}")
+
+clf.set_params(hessian=Hv)
 clf.generate_contour()
 
 ''' --------------------------------- Plot ------------------------------------- '''
@@ -49,8 +55,7 @@ clf.plot_levels(axes[0], levels=[20.0], color='b')
 cbf.plot_levels(axes[0], levels=[0.0], color='g')
 
 axes[0].set_xlim(limits[0:2])
-axes[0].set_ylim(limits[2:])
-axes[0].legend()
+axes[0].set_ylim(limits[2:4])
 
 for k, qfun in enumerate(controller.Qfunctions):
     qfun.init_graphics(axes[k+1])
