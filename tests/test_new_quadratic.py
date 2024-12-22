@@ -3,12 +3,11 @@ import matplotlib.pyplot as plt
 from controllers import CompatibleQP
 
 from dynamic_systems import LinearSystem, DriftLess
-from common import hessian_quadratic, rot2D, vector2sym
 from functions import QuadraticLyapunov, QuadraticBarrier
 
 limits = 12*np.array((-1,1,-1,1))
 
-''' ----------------------------------- Define LTI system ---------------------------------- '''
+''' --------------------------------- Define LTI system ------------------------------------- '''
 n = 2
 x0 = np.array([2,6])
 
@@ -21,7 +20,6 @@ CLFaxes = np.array([1.0, 4.0])
 CLFangle = 0.0
 CLFcenter = np.zeros(2)
 clf = QuadraticLyapunov.geometry2D(CLFaxes, CLFangle, CLFcenter, level=1, limits=limits)
-
 Hv = clf.H
 
 ''' ------------------------ Define CBF (varying Hessian eigenvalues) ----------------------- '''
@@ -33,9 +31,10 @@ Hh = cbf.H
 
 cbfs = [cbf]
 num_cbfs = len(cbfs)
-''' ----------------------------- Compatibilization --------------------------------- '''
 
+''' ----------------------------- Compatibilization --------------------------------- '''
 controller = CompatibleQP(plant, clf, cbfs)
+
 Hvs = controller.compatibilize(verbose=True)
 Hv = Hvs[0]
 

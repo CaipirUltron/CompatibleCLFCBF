@@ -25,13 +25,18 @@ def inside(num, interval):
     t2 = num >= interval[1] and num <= interval[0]
     return t1 or t2
 
-def continuous_composition(k, *args):
+def continuous_composition(k, *args, **kwargs):
     ''' 
-    Continuously compose any number of functions.
+    Continuously compose any number of functions (with weights).
     '''
+    weigths = [ 1.0 for _ in args ]
+    if "weights" in kwargs.keys():
+        weigths = kwargs["weights"]
+        if len(weigths) != len(args):
+            raise TypeError("Number of weigths must be the same as passed arguments.")
+
     if len(args) > 0:
-        exps = [ np.exp( -k*arg ) for arg in args ]
-        # print(exps)
+        exps = [ w * np.exp( -k*arg ) for arg, w in zip(args, weigths) ]
         return -(1/k)*np.log(sum(exps))
     else:
         return 1.0
@@ -78,8 +83,8 @@ class QFunction():
         ''' Class parameters '''
         self.real_tol = 1e-6
         self.epsilon = 1e-3
-        self.composite_kappa = 20
-        self.comptol = 0.1          # Should be a small positive value
+        self.composite_kappa = 80
+        self.comptol = 0.1                  # Should be a small positive value
 
         ''' Stability matrix S(λ) '''
         self.stb_dim = self.dim-1
@@ -247,7 +252,7 @@ class QFunction():
         Computes the stability polynomial matrix.
         '''
 
-        ''' Computes R(λ), the nullspace matrix polynomial to ∇h(λ) '''
+        # Computes R(λ), the nullspace matrix polynomial to ∇h(λ)
         nablah = ( self.H @ self.v_poly )
         gradNull = nullspace( nablah )
         coefs, symbol = to_coef(gradNull)
@@ -276,7 +281,7 @@ class QFunction():
 
         self.Rmatrix = gradNull
 
-        ''' Computes the stability matrix polynomial from N(λ) '''
+        # Computes the stability matrix polynomial from N(λ)
         self.Psym = self.pencil.symmetric()
         self.Smatrix.update( self.Rmatrix.T @ self.Psym @ self.Rmatrix )
 
@@ -346,11 +351,39 @@ class QFunction():
 
         maximum, minimum = max(extremal_candidates), min(extremal_candidates)
         length = np.abs(interval[1] - interval[0])
-        k = 1e-2
+        k = 1e-1
         if typ == 'above':
-            return math.tanh( + k * length * minimum )
+            return math.tanh( + k * minimum ), length
         if typ == 'below':
-            return math.tanh( - k * length * maximum )
+            return math.tanh( - k * maximum ), length
+
+    def composite_barrier(self):
+
+        barrier_limits = []
+        for interval in self.intervals:
+
+            if interval["type"] != (0, self.stb_dim):           # ignores non-nsd intervals
+                continue
+
+            limits = interval["limits"]
+            if limits[1] < 0:
+                min_bound, max_bound = 0.0, 0.0
+            elif limits[0] == -np.inf: 
+                min_bound, max_bound = 0.0, limits[1]
+            else:
+                min_bound, max_bound =  limits[0], limits[1]
+            barrier_limits.append( [min_bound, max_bound] )      
+
+        if self.zero_poly(0) >= 0: typ = 'above'
+        else: typ = 'below'
+
+        barrier_vals, weights = [], []
+        for barrier_lim in barrier_limits:
+            h, length = self._interval_barrier(barrier_lim, typ)
+            barrier_vals.append(h)
+            weights.append(length)
+
+        return continuous_composition(self.composite_kappa, *barrier_vals, weights=weights)
 
     def update(self, **kwargs):
         '''
@@ -375,29 +408,6 @@ class QFunction():
 
         self.pencil.update( M=newM, N=newN )
         self._compute_polynomials()
-
-    def composite_barrier(self):
-
-        barrier_limits = []
-        for interval in self.intervals:
-
-            if interval["type"] != (0, self.stb_dim):           # ignores non-nsd intervals
-                continue
-
-            limits = interval["limits"]
-            if limits[1] < 0:
-                min_bound, max_bound = 0.0, 0.0
-            elif limits[0] == -np.inf: 
-                min_bound, max_bound = 0.0, limits[1]
-            else:
-                min_bound, max_bound =  limits[0], limits[1]
-            barrier_limits.append( [min_bound, max_bound] )      
-
-        if self.zero_poly(0) >= 0: typ = 'above'
-        else: typ = 'below'
-
-        barrier_vals = [ self._interval_barrier(barrier_lim, typ) for barrier_lim in barrier_limits ]
-        return continuous_composition(self.composite_kappa, *barrier_vals)
 
     def is_compatible(self):
         ''' 
