@@ -1,17 +1,39 @@
+import warnings
 import numpy as np
+
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
 import matplotlib.colors as mcolors
 
 from matplotlib import gridspec
-from matplotlib.patches import Rectangle
-from functions import KernelLyapunov
+from matplotlib.patches import Rectangle, Ellipse
+from functions import Quadratic, QuadraticLyapunov, QuadraticBarrier
 
 class Plot2DSimulation():
     '''
     Class for matplotlib-based simulation of a point-like 2D dynamical system.
     '''
-    def __init__(self, logs, triplet, **kwargs):
+    def get_ellipse(quad: Quadratic, level: float):
+        ''' Returns the ellipse parameters for plotting the elliptical level set of a given quadratic.'''
+
+        if level < quad.height:
+            warnings.warn("Level set is empty.")
+            return [0,0], 0, 0, 0
+        
+        term = 2*( level - quad.height )
+
+        eigs, R = np.linalg.eig(quad.H)
+        if np.any(eigs <= 0):
+            raise Exception("Non-psd Hessian for ellipse.")
+        
+        angle = np.rad2deg(np.arctan2(R[1,0],R[0,0]))
+
+        a = np.sqrt(term/eigs[0])
+        b = np.sqrt(term/eigs[1])
+
+        return quad.center, 2*a, 2*b, angle
+
+    def __init__(self, logs, plant, clf, cbfs, **kwargs):
         
         self.plot_config = {
             "figsize": (5,5),
@@ -32,19 +54,13 @@ class Plot2DSimulation():
             self.plot_config = kwargs["plot_config"]
         
         self.logs = logs
-        self.triplet = triplet
-        self.robot = triplet.plant
+        self.robot = plant
 
         contour_spacing = 0.5
-        if triplet.tclf is not None:
-            self.clf = KernelLyapunov.from_multipoly( triplet.tclf, limits=self.plot_config["limits"], spacing=contour_spacing )
-        elif triplet.clf is not None:
-            self.clf = triplet.clf
-            self.clf.set_params( limits=self.plot_config["limits"], spacing=contour_spacing )
-        else:
-            raise NotImplementedError("Triplet must have a valid CLF or transformed CLF.")
+        self.clf = clf
+        self.clf.set_params( limits=self.plot_config["limits"], spacing=contour_spacing )
 
-        self.cbfs = triplet.cbfs
+        self.cbfs = cbfs
         self.n_cbfs = len(self.cbfs)
         for cbf in self.cbfs:
             cbf.set_params( limits=self.plot_config["limits"], spacing=contour_spacing )
@@ -100,9 +116,7 @@ class Plot2DSimulation():
             else:
                 self.main_ax = self.fig.add_subplot(gs[i[0]:(i[-1]+1),j[0]:(j[-1]+1)])
 
-        '''
-        Configures plot
-        '''
+        # Configures plot
         self.x_lim = self.plot_config["limits"][0:2]
         self.y_lim = self.plot_config["limits"][2:]
 
@@ -125,10 +139,6 @@ class Plot2DSimulation():
         self.sample_time = self.logs["sample_time"]
         self.time = np.array(self.logs["time"])
         self.state_log = self.logs["state"]
-        if "clf_log" in self.logs.keys():
-            self.clf_log = self.logs["clf_log"]
-            self.clf_param_dim = np.shape(np.array(self.clf_log))[0]
-
         self.equilibria = self.logs["equilibria"]
 
         self.num_steps = len(self.state_log[0])
@@ -138,32 +148,39 @@ class Plot2DSimulation():
 
         self.num_cbfs = len(self.cbfs)
 
+        # Initialize CLF/CBF level sets
+        self.clf_color = mcolors.TABLEAU_COLORS['tab:blue']
+        self.cbf_color = mcolors.TABLEAU_COLORS['tab:red']
+
+        self.clf_levelset = Ellipse(xy=[0,0], width=0, height=0, angle=0, color=self.clf_color, alpha=0.2)
+        self.cbf_levelsets = [ Ellipse(xy=[0,0], width=0, height=0, angle=0, color=self.cbf_color, alpha=0.2) for _ in range(self.num_cbfs) ]
+
+        if "clf_log" in self.logs.keys():
+            self.clf_log = self.logs["clf_log"]
+
+        self.cbf_logs = []
+        if "cbf_logs" in self.logs.keys():
+            self.cbf_logs = self.logs["cbf_logs"]
+            if len(self.cbf_logs) != self.num_cbfs:
+                raise Exception("Number of CBF parameters is not the same as the number of CBFs.")
+
         # Initalize some graphical objects
         self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str("Time = "), fontsize=14)
         self.trajectory, = self.main_ax.plot([],[],lw=2)
-        # self.init_state, = self.main_ax.plot([],[],'bo', lw=2, alpha=0.5)
-        # self.actual_state, = self.main_ax.plot([],[],'bo', lw=1.2, alpha=0.5)
+        self.clf_center, = self.main_ax.plot([],[],'kx',lw=2)
 
         eq_x_coors, eq_y_coors, eq_colors = [], [], []
         for eq in self.equilibria:
-            eq_pt = eq["x"]
+            eq_pt = eq["point"]
             eq_x_coors.append(eq_pt[0])
             eq_y_coors.append(eq_pt[1])
-            if eq["equilibrium"] == "stable": eq_colors.append("red")
-            if eq["equilibrium"] == "unstable": eq_colors.append("green")
-        self.equilibria_plot = self.main_ax.scatter( eq_x_coors, eq_y_coors, c=eq_colors, alpha=0.8 )
+            if eq["stability"] <= 0: eq_colors.append("red")
+            if eq["stability"] >  0: eq_colors.append("green")
 
+        self.equilibria_plot = self.main_ax.scatter( eq_x_coors, eq_y_coors, c=eq_colors, alpha=0.8 )
         self.clf_grad_arrow, = self.main_ax.plot([],[],'b',lw=0.8)
         self.cbf_grad_arrow, = self.main_ax.plot([],[],'r',lw=0.8)
         self.f_arrow, = self.main_ax.plot([],[],'r',lw=0.8)
-
-        self.clf_contour_color = mcolors.TABLEAU_COLORS['tab:blue']
-        self.cbf_contour_color = mcolors.TABLEAU_COLORS['tab:red']
-
-        self.clf_contours = self.clf.plot_levels(ax=self.main_ax, levels=[0.0], colors=self.clf_contour_color)
-        self.cbf_contours = []
-
-        self.invariant_lines = []
 
     def init(self):
 
@@ -172,40 +189,56 @@ class Plot2DSimulation():
         self.time_text.text = str("Time = ")
         self.trajectory.set_data([],[])
 
-        # x_init, y_init = self.state_log[0][0], self.state_log[1][0]
-        # self.init_state.set_data([x_init], [y_init])
-
-        for cbf_index, cbf in enumerate(self.cbfs):
-            self.cbf_contours.append( cbf.plot_levels(ax=self.main_ax, levels=[-0.1*k for k in range(4,-1,-1)], colors=self.cbf_contour_color, alpha=0.5) )
-            if self.plot_config["invariant"]:
-                self.triplet.plot_invariant( self.main_ax, cbf_index )
-                self.invariant_lines += self.triplet.invariant_lines_plot[cbf_index]
+        x0, y0 = self.clf.center
+        self.clf_center.set_data([x0],[y0])
+        self.update_levelsets(0)
 
         graphical_elements = []
         graphical_elements.append(self.time_text)
         graphical_elements.append(self.trajectory)
-        # graphical_elements.append(self.init_state)
-        # graphical_elements.append(self.actual_state)
+        graphical_elements.append(self.clf_center)
         if self.plot_config["equilibria"]: 
             graphical_elements.append(self.equilibria_plot)
         graphical_elements.append(self.clf_grad_arrow)
         graphical_elements.append(self.cbf_grad_arrow)
         graphical_elements.append(self.f_arrow)
-        graphical_elements += self.clf_contours
-        graphical_elements += self.invariant_lines
-        for cbf_countour in self.cbf_contours:
-            graphical_elements += cbf_countour
+        graphical_elements.append(self.clf_levelset)
+        graphical_elements += self.cbf_levelsets
 
         return graphical_elements
 
+    def update_levelsets(self, i):
+
+        curr_state = [ self.state_log[0][i], self.state_log[1][i] ]
+        curr_clf_state = [ self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i] ]
+
+        V = self.clf(curr_state)
+
+        self.clf.set_params( param=curr_clf_state )
+        xy, width, height, angle = Plot2DSimulation.get_ellipse(self.clf, V)
+        self.clf_levelset.set_center(xy)
+        self.clf_levelset.set_width(width)
+        self.clf_levelset.set_height(height)
+        self.clf_levelset.set_angle(angle)
+
+        for k, cbf in enumerate(self.cbfs):
+            
+            if self.cbf_logs:
+                curr_cbf_state = [ self.cbf_logs[k][0][i], self.cbf_logs[k][1][i], self.cbf_logs[k][2][i] ]
+                cbf.set_params( param=curr_cbf_state )
+            
+            xy, width, height, angle = Plot2DSimulation.get_ellipse(cbf, 0.0)
+            self.cbf_levelsets[k].set_center(xy)
+            self.cbf_levelsets[k].set_width(width)
+            self.cbf_levelsets[k].set_height(height)
+            self.cbf_levelsets[k].set_angle(angle)
+
     def update(self, i):
 
-        if i <= self.num_steps:
+        if i < self.num_steps:
 
             xdata, ydata = self.state_log[0][0:i], self.state_log[1][0:i]
             self.trajectory.set_data(xdata, ydata)
-
-            # if len(xdata) > 0: self.actual_state.set_data([xdata[-1]], [ydata[-1]])
 
             current_time = np.around(self.time[i], decimals = 2)
             current_state = [ self.state_log[0][i], self.state_log[1][i] ]
@@ -228,23 +261,15 @@ class Plot2DSimulation():
                 self.f_arrow.set_data( 
                     [ current_state[0], current_state[0] + f_norm[0] ], 
                     [ current_state[1], current_state[1] + f_norm[1] ] )
-            
-            if hasattr(self, 'clf_log'):
-                current_piv_state = [ self.clf_log[k][i] for k in range(self.clf_param_dim) ]
-                self.clf.set_params( P=current_piv_state )
 
             self.time_text.set_text("Time = " + str(current_time) + "s")
 
             if self.draw_level:
-                V = self.clf.function(current_state)
-                for coll in self.clf_contours:
-                    coll.remove()
+                self.update_levelsets(i)
+                self.main_ax.add_patch(self.clf_levelset)
+                for cbf_levelset in self.cbf_levelsets:
+                    self.main_ax.add_patch(cbf_levelset)
 
-                self.clf_contours = self.clf.plot_levels(levels=[V], 
-                                                         colors=self.clf_contour_color, 
-                                                         ax=self.main_ax,
-                                                         limits=self.plot_config["limits"], 
-                                                         spacing=0.5 )
         else:
             self.runs = False
             # self.animation.event_source.stop()
@@ -252,16 +277,14 @@ class Plot2DSimulation():
         graphical_elements = []
         graphical_elements.append(self.time_text)
         graphical_elements.append(self.trajectory)
-        # graphical_elements.append(self.init_state)
-        # graphical_elements.append(self.actual_state)
-        if self.plot_config["equilibria"]: graphical_elements.append(self.equilibria_plot)
+        graphical_elements.append(self.clf_center)
+        if self.plot_config["equilibria"]: 
+            graphical_elements.append(self.equilibria_plot)
         graphical_elements.append(self.clf_grad_arrow)
         graphical_elements.append(self.cbf_grad_arrow)
         graphical_elements.append(self.f_arrow)
-        graphical_elements += self.clf_contours
-        graphical_elements += self.invariant_lines
-        for cbf_countour in self.cbf_contours:
-            graphical_elements += cbf_countour
+        graphical_elements.append(self.clf_levelset)
+        graphical_elements += self.cbf_levelsets
 
         return graphical_elements
 

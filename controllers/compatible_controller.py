@@ -1,4 +1,5 @@
 import numpy as np
+from copy import copy
 
 from quadratic_program import QuadraticProgram
 from functions import QuadraticLyapunov, QuadraticBarrier
@@ -28,53 +29,30 @@ class CompatibleQP():
             if not isinstance(cbf, QuadraticBarrier):
                 raise Exception("Compatible controller only implemented for quadratic CBFs.")
 
+        if clf._dim != cbfs[0]._dim: 
+            raise Exception("CLF and CBF dimensions are not equal.")
+        if np.any([ cbfs[0]._dim != cbf._dim for cbf in cbfs ]):
+            raise Exception("CBF dimensions are not equal.")
+
         self.plant = plant
         self.clf = clf
         self.cbfs = cbfs
         self.num_cbfs = len(self.cbfs)
 
         self.n, self.m = self.plant.n, self.plant.m
-        self.Hv = self.clf.H
+        self.sym_dim = int(( self.n * ( self.n + 1 ) )/2)
 
-        if clf._dim != cbfs[0]._dim: 
-            raise Exception("CLF and CBF dimensions are not equal.")
-        if np.any([ cbfs[0]._dim != cbf._dim for cbf in cbfs ]):
-            raise Exception("CBF dimensions are not equal.")
-
-        self.state_dim = clf._dim
-        self.control_dim = self.plant.m
-        self.sym_dim = int(( self.state_dim * ( self.state_dim + 1 ) )/2)
-        self.skewsym_dim = int(( self.state_dim * ( self.state_dim - 1 ) )/2)
-
-        # Initialize rate CLF
+        # Initialize rate CLF parameters
+        self.clf.set_params(epsilon=0.01)
+        self.Hv_ref = copy(self.clf.H)
         self.Vpi = 0.0
         self.gradient_Vpi = np.zeros(self.sym_dim)
-
-        self.mode_log = []                   # mode = 1 for compatibility, mode = 0 for rate
-        self.pencil_dict = {}
-        self.f_params_dict = {
-            "epsilon": 0.1,
-            "min_CLF_eigenvalue": 0.2
-        }
-        self.clf.set_params(epsilon=self.f_params_dict["min_CLF_eigenvalue"])
-
-        # Create CLF-CBF pairs
-        # self.active_pair = None
-        # self.clf_cbf_pairs = []
-        # self.ref_clf_cbf_pairs = []
-        # self.equilibrium_points = np.zeros([0,self.state_dim])
-        # for cbf in cbfs:
-        #     self.clf_cbf_pairs.append( CLFCBFPair(self.clf, cbf) )
-        #     ref_clf_cbf_pair = CLFCBFPair(self.ref_clf, cbf)
-        #     self.ref_clf_cbf_pairs.append( ref_clf_cbf_pair )
-        #     self.equilibrium_points = np.vstack([ self.equilibrium_points, ref_clf_cbf_pair.equilibrium_points.T ])
-        # self.h_gamma = np.zeros(self.state_dim-1)
 
         # Parameters for the inner and outer QPs
         self.alpha, self.beta, self.p = alpha, beta, p
 
         # Parameters for the inner QP controller (QP1)
-        self.QP1_dim = self.control_dim + 1
+        self.QP1_dim = self.m + 1
         P1 = np.eye(self.QP1_dim)
         P1[-1,-1] = self.p[0]
         q1 = np.zeros(self.QP1_dim)
@@ -92,14 +70,19 @@ class CompatibleQP():
         # Variable initialization
         self.ctrl_dt = dt
         self.V = 0.0
-        self.u = np.zeros(self.control_dim)
+        self.u = np.zeros(self.m)
         self.u_v = np.zeros(self.sym_dim)
 
-        if type(self.plant) == Unicycle:
+        if type(self.plant) == Unicycle: 
             self.radius = 1.0
 
-        self.Qfunctions = [ QFunction(self.plant, self.clf, cbf, self.p[0]) for cbf in self.cbfs ]
+        self.Qfunctions: list[QFunction] = [ QFunction(self.plant, self.clf, cbf, self.p[0]) for cbf in self.cbfs ]
         self.compatible_Hv = [ None for _ in self.Qfunctions ]
+
+        # Create CLF-CBF pairs
+        self.active_index = None
+        self.compatibilized = False
+        self.get_equilibria()
 
     def compatibilize(self, verbose=False):
         ''' 
@@ -109,18 +92,34 @@ class CompatibleQP():
         '''
         for k, qfun in enumerate(self.Qfunctions):
 
-            if isinstance(self.plant, LinearSystem):
-                A, B = self.plant._A, self.plant._B
-            if isinstance(self.plant, DriftLess):
-                A, B = np.zeros((self.n, self.n)), np.eye(self.n)
+            # Only compatibilize if Q-function is not initially already compatible.
+            if qfun.is_compatible():
+                continue
 
+            # Compatibilize each Q-function and store resulting shapes
             results = qfun.compatibilize(verbose=verbose)
             if results["compatibility"] < -1e-2:
                 raise Exception(f"Compatibility failed.")
 
             self.compatible_Hv[k] = results["Hv"]
 
+        self.get_equilibria()
+        self.compatibilized = True
+
         return self.compatible_Hv
+
+    def get_cbf_equilibria(self, index):
+        ''' Returns equilibrium points of CBF index '''
+        if index < 0 or index >= self.num_cbfs:
+            raise Exception("Invalid index.")
+        return [ eq for eq in self.Qfunctions[index].equilibrium_sols ]
+
+    def get_equilibria(self):
+        ''' Returns equilibrium points for all Q-functions '''
+
+        self.equilibrium_points = []
+        for index in range(0, self.num_cbfs):
+            self.equilibrium_points += self.get_cbf_equilibria(index)
 
     def get_control(self):
         '''
@@ -135,10 +134,9 @@ class CompatibleQP():
             b = np.hstack( [ b, b_cbf ])
 
         # Solve inner loop QP
-        self.QP1.initialize()
         self.QP1.set_inequality_constraints(A, b)
         self.QP1_sol = self.QP1.get_solution()
-        self.u = self.QP1_sol[0:self.control_dim]
+        self.u = self.QP1_sol[0:self.m]
 
         return self.u
 
@@ -146,27 +144,9 @@ class CompatibleQP():
         '''
         Computes the solution of the outer QP.
         '''
-        self.QP2.initialize()
         a_rate, b_rate = self.get_rate_constraint()
-
-        # Adds compatibility/rate constraints
-        if self.active_pair:
-            '''
-            Compatibility constraints are added if an active CBF exists
-            '''
-            self.mode_log.append(1.0)
-            a_clf_rot, b_clf_rot = self.get_eigenvector_constraints()
-            a_cbf_pi, b_cbf_pi = self.get_compatibility_constraints()
-            A_outer = np.vstack([a_rate, a_cbf_pi])
-            b_outer = np.hstack([b_rate, b_cbf_pi])
-            self.QP2.set_equality_constraints(a_clf_rot, b_clf_rot)
-        else:
-            '''
-            Instead, rate constraints are added if no active CBF exists
-            '''
-            self.mode_log.append(0.0)
-            A_outer = a_rate
-            b_outer = np.array([ b_rate ])
+        A_outer = a_rate
+        b_outer = np.array([ b_rate ])
 
         self.QP2.set_inequality_constraints(A_outer, b_outer)
 
@@ -192,26 +172,27 @@ class CompatibleQP():
 
         # Lyapunov function and gradient
         self.V = self.clf(state)
-        nablaV = self.clf(state)
+        nablaV = self.clf.gradient(state)
 
         # Lie derivatives
         LfV = nablaV.dot(f)
         LgV = g.T.dot(nablaV)
 
         # Gradient w.r.t. pi
-        # partial_Hv = self.clf.get_partial_Hv()
-        # self.nablaV_pi = np.zeros(self.sym_dim)
-        # delta_x = ( state - self.clf.get_critical() ).reshape(self.state_dim,1)
-        # for k in range(self.sym_dim):
-        #     self.nablaV_pi[k] = 0.5 * ( delta_x.T @ partial_Hv[k] @ delta_x )[0,0]
+        partial_Hv = self.clf.partial_Hv()
+        self.nablaV_pi = np.zeros(self.sym_dim)
+        delta_x = ( state - self.clf.center ).reshape(self.n,1)
+        for k in range(self.sym_dim):
+            self.nablaV_pi[k] = 0.5 * ( delta_x.T @ partial_Hv[k] @ delta_x )[0,0]
 
         # CLF constraint for the first QP
         a_clf = np.hstack([ LgV, -1.0 ])
-        b_clf = - self.alpha[0]*self.V - LfV
+        b_clf = - self.alpha[0] * self.V - LfV 
+        b_clf += - self.nablaV_pi.T @ self.u_v
 
         return a_clf, b_clf
 
-    def get_cbf_constraint(self, cbf):
+    def get_cbf_constraint(self, cbf: QuadraticBarrier):
         '''
         Sets the barrier constraint.
         '''
@@ -222,7 +203,7 @@ class CompatibleQP():
 
         # Barrier function and gradient
         h = cbf(state)
-        nablah = cbf(state)
+        nablah = cbf.gradient(state)
 
         Lfh = nablah.dot(f)
         Lgh = g.T.dot(nablah)
@@ -239,23 +220,16 @@ class CompatibleQP():
         '''
         self.clf.update(piv_ctrl, self.ctrl_dt)
 
-        index = self.active_cbf_index()
-        if index >= 0:
-            # self.active_cbf = self.cbfs[index]
-            self.active_pair = self.clf_cbf_pairs[index]
-            self.active_pair.update( clf = self.clf )
-        else:
-            # self.active_cbf = None
-            self.active_pair = None        
+        # index = self.active_cbf_index()
+        # if index >= 0:
+        #     # self.active_cbf = self.cbfs[index]
+        #     self.active_pair = self.clf_cbf_pairs[index]
+        #     self.active_pair.update( clf = self.clf )
+        # else:
+        #     # self.active_cbf = None
+        #     self.active_pair = None        
         
         # print(self.active_pair)
-
-    # def update_cbf_dynamics(self, pih_ctrl):
-    #     '''
-    #     Integrates the dynamic system for the CBF Hessian matrix.
-    #     '''
-    #     self.active_cbf.update(pih_ctrl, self.ctrl_dt)
-    #     self.active_pair.update( cbf = self.cbf )
 
     def active_cbf_index(self):
         '''
@@ -288,11 +262,19 @@ class CompatibleQP():
         '''
         Sets the Lyapunov rate constraint.
         '''
-        # Computes rate Lyapunov and gradient
-        deltaHv = self.clf.get_hessian() - self.ref_clf.get_hessian()
-        partial_Hv = self.clf.get_partial_Hv()
+        ref_Hv = self.Hv_ref
 
-        self.Vpi = 0.5 * np.trace( deltaHv @ deltaHv )
+        # If some CBF is active, get the corresponding compatible shape as reference;
+        # Otherwise, use original CLF instead
+        if self.compatibilized:
+            active_index = self.active_cbf_index()
+            if active_index >= 0:
+                ref_Hv = self.compatible_Hv[active_index]
+
+        deltaHv = self.clf.H - ref_Hv
+        partial_Hv = self.clf.partial_Hv()
+
+        self.Vpi = 0.5 * np.trace( deltaHv.T @ deltaHv )
         for k in range(self.sym_dim):
             self.gradient_Vpi[k] = np.trace( deltaHv @ partial_Hv[k] )
 
@@ -301,76 +283,6 @@ class CompatibleQP():
         b_clf_pi = -self.alpha[1] * self.Vpi
 
         return a_clf_pi, b_clf_pi
-
-    def get_eigenvector_constraints(self):
-        '''
-        Sets the constraint for fixing the pencil eigenvectors.
-        '''
-        JacobianV = np.zeros([self.skewsym_dim, self.sym_dim])
-        Z = self.active_pair.pencil.eigenvectors
-        partial_Hv = self.active_pair.clf.get_partial_Hv()
-
-        for l in range(self.sym_dim):
-            diag_matrix = Z.T @ partial_Hv[l] @ Z
-            m = 0
-            for i in range(self.state_dim):
-                for j in range(self.state_dim):
-                    if i < j:
-                        JacobianV[m,l] = diag_matrix[i,j]
-                        m += 1
-
-        a_clf_rot = np.hstack( [ JacobianV, np.zeros([self.skewsym_dim, 1]) ])
-        b_clf_rot = np.zeros(self.skewsym_dim)
-
-        return a_clf_rot, b_clf_rot
-
-    def get_compatibility_constraints(self):
-        '''
-        Sets the barrier constraints for compatibility.
-        '''
-        self.h_gamma, Lg_h_gamma, Lf_h_gamma = self.compatibility_barrier()
-        a_cbf_pi = -np.hstack([ Lg_h_gamma, np.zeros([self.state_dim-1, 1]) ])
-        b_cbf_pi = self.beta[1]*self.h_gamma + Lf_h_gamma
-
-        return a_cbf_pi, b_cbf_pi
-
-    def compatibility_barrier(self):
-        '''
-        Computes compatibility barrier constraint, for keeping the critical values of f above 1.
-        '''
-        Hv = self.active_pair.clf.get_hessian()
-        partial_Hv = self.active_pair.clf.get_partial_Hv()
-        pencil_eig = self.active_pair.pencil.eigenvalues
-        Z = self.active_pair.pencil.eigenvectors
-
-        # Compatibility barrier
-        h_gamma = np.zeros(self.state_dim-1)
-        Lg_h_gamma = np.zeros([self.state_dim-1, self.sym_dim])
-        Lf_h_gamma = np.zeros(self.state_dim-1)
-
-        # Barrier function
-        for k in range(self.state_dim-1):
-            residues = np.sqrt( np.array([ (Z[:,k].T @ self.active_pair.v0)**2, (Z[:,k+1].T @ self.active_pair.v0)**2 ]) )
-            max_index = np.argmax(residues)
-            residue = residues[max_index]
-            delta_lambda = pencil_eig[k+1] - pencil_eig[k]
-            h1 = (residue**2)/(delta_lambda**2)
-            h_gamma[k] = np.log(h1) - self.f_params_dict["epsilon"]
-            
-            # Barrier function gradient
-            # C = 2*residue/(delta_lambda**2)/h1
-            C = 2/residue
-            for i in range(self.sym_dim):
-                term1 = ( Z[:,max_index].T @ partial_Hv[i] @ ( self.active_pair.p0 - self.active_pair.x0 ) )
-                term2 = (residue/delta_lambda)*( Z[:,k+1].T @ partial_Hv[i] @ Z[:,k+1] - Z[:,k].T @ partial_Hv[i] @ Z[:,k] )
-                Lg_h_gamma[k,i] = C*(term1 - term2)
-
-            dx0 = self.active_pair.clf.get_critical_derivative()
-            dp0 = self.active_pair.cbf.get_critical_derivative()
-            Lf_h_gamma[k] = C * Z[:,max_index].T @ Hv @ ( dp0 - dx0 )
-
-        return h_gamma, Lg_h_gamma, Lf_h_gamma
-    
 
 class CompatiblePF(CompatibleQP):
     '''

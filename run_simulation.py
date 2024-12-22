@@ -26,7 +26,7 @@ for step in range(0, num_steps):
     upi_control = sim.controller.get_clf_control()
 
     # Send actuation commands
-    # sim.controller.update_clf_dynamics(upi_control)
+    sim.controller.update_clf_dynamics(upi_control)
     sim.plant.set_control(u_control) 
     sim.plant.actuate(sim.sample_time)
 
@@ -34,8 +34,8 @@ for step in range(0, num_steps):
 sim.logs["time"] = time_list
 sim.logs["state"] = sim.plant.state_log
 sim.logs["control"] = sim.plant.control_log
-# sim.logs["clf_log"] = sim.controller.clf.dynamics.state_log
-sim.logs["equilibria"] = sim.kerneltriplet.boundary_equilibria + sim.kerneltriplet.interior_equilibria
+sim.logs["clf_log"] = sim.controller.clf.dynamics.state_log
+sim.logs["equilibria"] = sim.controller.equilibrium_points
 sim.logs["tracking"] = None
 
 if hasattr(sim, 'path'):

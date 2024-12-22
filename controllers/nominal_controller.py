@@ -5,7 +5,7 @@ from functions import Poly
 from common import kernel_quadratic, sontag_formula
 from dynamic_systems import Unicycle
 from quadratic_program import QuadraticProgram
-from controllers.compatibility import CLFCBFPair
+# from controllers.compatibility import CLFCBFPair
 from controllers.equilibrium_algorithms import equilibrium_field, compute_equilibria, S, L, is_equilibria
 
 class SontagController():

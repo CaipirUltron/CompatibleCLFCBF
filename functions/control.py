@@ -30,13 +30,13 @@ class QuadraticLyapunov(Quadratic):
         kwargs["height"] = 0.0
         super().__init__(*args, **kwargs)
 
-        # from dynamic_systems import Integrator
-        # self.L = sym2triangular( self.H - self.epsilon * np.eye(self._dim) )
-        # self.param = triangular2vector( self.L )
-        # self.dynamics = Integrator(self.param,np.zeros(len(self.param)))
+        from dynamic_systems import Integrator
+        self.param = self.Hv2param( self.H )
+        self.dynamics = Integrator(self.param,np.zeros(len(self.param)))
 
     def param2Hv(self, param):
         ''' Function to compute Hv from parameters '''
+
         L = vector2sym(param)
         return L.T @ L + self.epsilon * np.eye(self._dim)
 
@@ -47,7 +47,7 @@ class QuadraticLyapunov(Quadratic):
         if np.any(eigR) < 0.0:
             warnings.warn("Non-invertible transformation.")
         L = sp.linalg.sqrtm(R)
-        return sym2vector( L )
+        return sym2vector(L)
 
     def set_params(self, **kwargs):
         super().set_params(**kwargs)
@@ -55,18 +55,28 @@ class QuadraticLyapunov(Quadratic):
         if "epsilon" in kwargs.keys():
             self.epsilon = kwargs["epsilon"]
 
-        # if "param" in kwargs.keys():
-        #     self.param = kwargs["param"]
-        #     self.H = self.Hvfun(self.param)
-        #     self.A, self.b, self.c = Quadratic.from_factored(self.H, self.center, self.height)
+        if "param" in kwargs.keys():
+            self.param = kwargs["param"]
+            self.H = self.param2Hv(self.param)
 
-    # def update(self, param_ctrl, dt):
-    #     '''
-    #     Integrates the parameters.
-    #     '''
-    #     self.dynamics.set_control(param_ctrl)
-    #     self.dynamics.actuate(dt)
-    #     self.set_params( param = self.dynamics.get_state())
+    def partial_Hv(self):
+        '''
+        Returns the partial derivatives of Hv wrt to the parameters.
+        '''
+        sym_basis = symmetric_basis(self._dim)
+        partial_Hv = np.zeros([ len(self.param), self._dim, self._dim ])
+        for i,j in zip(range(len(self.param)), range(len(self.param))):
+                partial_Hv[i,:,:] = partial_Hv[i,:,:] + ( sym_basis[i].T @ sym_basis[j] + sym_basis[j].T @ sym_basis[i] )*self.param[j]
+
+        return partial_Hv
+
+    def update(self, param_ctrl, dt):
+        '''
+        Integrates the parameters.
+        '''
+        self.dynamics.set_control(param_ctrl)
+        self.dynamics.actuate(dt)
+        self.set_params( param = self.dynamics.get_state())
 
     @classmethod
     def geometry2D(cls, semiaxes: tuple, angle: float, center: list | np.ndarray, level: float, **kwargs):
@@ -76,7 +86,7 @@ class QuadraticLyapunov(Quadratic):
 
         lamb1 = 2*level/(a**2)
         lamb2 = 2*level/(b**2)
-        H = R.T @ np.diag([lamb1, lamb2]) @ R
+        H = R @ np.diag([lamb1, lamb2]) @ R.T
         return cls(hessian=H, center=center, height=0.0, **kwargs)
 
 class QuadraticBarrier(Quadratic):
@@ -86,7 +96,7 @@ class QuadraticBarrier(Quadratic):
     '''
     def __init__(self, *args, **kwargs):
 
-        kwargs["height"] = -1.0
+        kwargs["height"] = -0.5
         super().__init__(*args, **kwargs)
 
         # from dynamic_systems import Integrator
@@ -101,8 +111,10 @@ class QuadraticBarrier(Quadratic):
         ''' Create Quadratic from geometric parameters '''
         a, b = semiaxes
         R = rot2D(np.deg2rad(angle))
-        H = R.T @ np.diag([1/a**2, 1/b**2]) @ R
-        return cls(hessian=H, center=center, height=-1.0, **kwargs)
+        lamb1 = 1/(a**2) 
+        lamb2 = 1/(b**2)
+        H = R @ np.diag([lamb1, lamb2]) @ R.T
+        return cls(hessian=H, center=center, height=-0.5, **kwargs)
 
     # def set_params(self, param):
     #     '''

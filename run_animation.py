@@ -17,12 +17,12 @@ except IOError:
 print('Animating simulation...')
 time.sleep(1.5)
 
-if hasattr(sim, 'path'):
+if not hasattr(sim, 'path'):
+    plotSim = Plot2DSimulation( logs, sim.plant, sim.clf, sim.cbfs, plot_config = sim.plot_config )
+else:
     plotSim = PlotPFSimulation( sim.path, logs, sim.plant, sim.clf, sim.cbfs, plot_config = sim.plot_config )
     plotSim.main_ax.set_title("Path Following with Obstacle Avoidance using CLF-CBFs", fontsize=12)
-else:
-    plotSim = Plot2DSimulation( logs, sim.kerneltriplet, plot_config = sim.plot_config )
-
+    
 initial_time = 0
 if len(sys.argv) > 2:
     initial_time = float(sys.argv[2])
