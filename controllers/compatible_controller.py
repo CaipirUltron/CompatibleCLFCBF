@@ -4,7 +4,7 @@ from copy import copy
 from quadratic_program import QuadraticProgram
 from functions import QuadraticLyapunov, QuadraticBarrier
 from dynamic_systems import LinearSystem, DriftLess, Unicycle
-from controllers.compatibility import MatrixPencil, QFunction
+from controllers.compatibility import QFunction
 
 class CompatibleQP():
     '''
@@ -13,37 +13,43 @@ class CompatibleQP():
     def __init__(self, 
                  plant: LinearSystem | DriftLess, 
                  clf: QuadraticLyapunov, 
-                 cbfs: QuadraticBarrier, 
+                 cbfs: QuadraticBarrier=[], 
                  alpha = [1.0, 1.0], beta = [1.0, 1.0], p = [10.0, 10.0], dt = 0.001,
                  **kwargs):
 
         if not isinstance(plant, (LinearSystem, DriftLess) ):
             raise Exception("Compatible controller only implemented for LTI and driftless full-rank systems.")
         
+        self.plant = plant
+
         if not isinstance(clf, QuadraticLyapunov):
             raise Exception("Compatible controller only implemented for quadratic CLFs.")
 
-        if not isinstance(cbfs, list) or len(cbfs) == 0:
-            raise Exception("Must pass a non-empty list of CBFs.")
+        self.clf = clf
+
+        if not isinstance(cbfs, list):
+            raise Exception("Must pass a list of CBFs.")
 
         for cbf in cbfs:
             if not isinstance(cbf, QuadraticBarrier):
                 raise Exception("Compatible controller only implemented for quadratic CBFs.")
-
-        if clf._dim != cbfs[0]._dim: 
-            raise Exception("CLF and CBF dimensions are not equal.")
-        if np.any([ cbfs[0]._dim != cbf._dim for cbf in cbfs ]):
-            raise Exception("CBF dimensions are not equal.")
-
-        self.plant = plant
-        self.clf = clf
+        
         self.cbfs = cbfs
         self.num_cbfs = len(self.cbfs)
 
+        if self.num_cbfs > 0:
+            if clf._dim != cbfs[0]._dim: 
+                raise Exception("CLF and CBF dimensions are not equal.")
+            if np.any([ cbfs[0]._dim != cbf._dim for cbf in cbfs ]):
+                raise Exception("CBF dimensions are not equal.")
+
+        self.active = True
         self.compatibilization = True
+        if "active" in kwargs.keys():
+            self.active = kwargs["active"]
         if "compatibilization" in kwargs.keys():
             self.compatibilization = kwargs["compatibilization"]
-
+        
         self.n, self.m = self.plant.n, self.plant.m
         self.sym_dim = int(( self.n * ( self.n + 1 ) )/2)
 
@@ -88,7 +94,7 @@ class CompatibleQP():
         self.active_index = None
         self.compatibilized = False
 
-        if self.compatibilization:
+        if self.active and self.compatibilization:
             self.compatibilize(verbose=True)
 
         self.get_equilibria()
@@ -99,27 +105,31 @@ class CompatibleQP():
         Finds N CLF Hessians, one for each CBF, resulting in no 
         boundary equilibrium points.
         '''
+        if verbose:
+            print(f"Initializing compatibilization of {self.num_cbfs} CLF-CBF pairs...")
+
         for k, qfun in enumerate(self.Qfunctions):
 
             # Only compatibilize if Q-function is not initially already compatible.
             if qfun.is_compatible():
-                self.compatible_Hv[k] = copy(self.clf.H)
+                Hv = copy(self.clf.H)
+                self.compatible_Hv[k] = Hv
                 if verbose:
-                    print(f"CLF is already compatible with the {k+1}-th CBF. Bypassing compatibilization...")
+                    print(f"{k+1}-th CLF-CBF pair is already compatible with \nHv{k+1} = \n{Hv}, moving on...")
                 continue
 
             if verbose:
-                print(f"Initializing compatibilization of CLF with the {k+1}-th CBF...")
+                print(f"Initializing compatibilization of the {k+1}-th CLF-CBF pair...")
 
             # Compatibilize each Q-function and store resulting shapes
-            results = qfun.compatibilize(verbose=verbose)
+            results = qfun.compatibilize(verbose=False)
             if results["compatibility"] < -1e-2:
                 raise Exception(f"Compatibility failed.")
 
             Hv = results["Hv"]
             self.compatible_Hv[k] = Hv
             if verbose:
-                print(f"{k+1}-th compatibilization sucessfull with Hv = \n{Hv}")
+                print(f"{k+1}-th CLF-CBF pair sucessfully compatibilized!\nHv{k+1} = \n{Hv}")
 
         if verbose:
             print(f"Compatibilization sucessfull for all {self.num_cbfs} CLF-CBF pairs!")
@@ -146,8 +156,12 @@ class CompatibleQP():
         '''
         Computes the solution of the inner QP.
         '''
+        if not self.active:
+            return np.zeros(len(self.u))
+
         # Configure constraints
         A, b = self.get_clf_constraint()
+        b = np.array([b])
 
         for cbf in self.cbfs:
             a_cbf, b_cbf = self.get_cbf_constraint(cbf)
@@ -194,6 +208,8 @@ class CompatibleQP():
             g = self.plant.get_g()
             state = self.plant.get_state()
 
+        # print(f"x = {state}")
+
         # Lyapunov function and gradient
         self.V = self.clf(state)
         nablaV = self.clf.gradient(state)
@@ -201,6 +217,9 @@ class CompatibleQP():
         # Lie derivatives
         LfV = nablaV.dot(f)
         LgV = g.T.dot(nablaV)
+
+        # print(f"LfV = {LfV}")
+        # print(f"LgV = {LgV}")
 
         # Gradient w.r.t. pi
         partial_Hv = self.clf.partial_Hv()
@@ -211,7 +230,7 @@ class CompatibleQP():
 
         # CLF constraint for the first QP
         a_clf = np.hstack([ LgV, -1.0 ])
-        b_clf = - self.alpha[0] * self.V - LfV 
+        b_clf = - self.alpha[0] * self.V - LfV
         b_clf += - self.nablaV_pi.T @ self.u_v
 
         return a_clf, b_clf
@@ -234,7 +253,7 @@ class CompatibleQP():
 
         # CBF contraint for the QP
         a_cbf = -np.hstack([ Lgh, 0.0 ])
-        b_cbf = self.beta[0] * h + Lfh
+        b_cbf = self.beta * h + Lfh
 
         return a_cbf, b_cbf
 

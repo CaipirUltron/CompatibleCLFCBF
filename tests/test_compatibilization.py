@@ -12,6 +12,7 @@ n, m = 2, 2
 x0 = np.array([2,6])
 A = np.zeros((n,n))
 B = np.eye(n)
+
 plant = LinearSystem(x0, np.zeros(2), A=A, B=B)
 
 ''' ------------------------ Define CLF (varying Hessian eigenvalues) ----------------------- '''
@@ -25,10 +26,6 @@ CLFangle = 0.0
 CLFcenter = np.zeros(2)
 clf = QuadraticLyapunov.geometry2D(CLFaxes, CLFangle, CLFcenter, level=1)
 Hv = clf.H
-
-# Hv = np.array([[ 2.03310231, -0.8125457 ],
-#                [-0.8125457 ,  1.59365754]])
-# clf = QuadraticLyapunov(hessian=Hv, center=CLFcenter)
 
 ''' ------------------------ Define CBF (varying Hessian eigenvalues) ----------------------- '''
 # CBFeigs = np.array([1.0, 10.0])

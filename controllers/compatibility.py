@@ -1,7 +1,5 @@
 import math
 import numpy as np
-import itertools
-import contourpy as ctp
 
 import matplotlib.patches as patches
 import matplotlib.colors as mcolors
@@ -83,8 +81,8 @@ class QFunction():
         ''' Class parameters '''
         self.real_tol = 1e-6
         self.epsilon = 1e-3
-        self.composite_kappa = 80
-        self.normalization_kappa = 1e-2
+        self.composite_kappa = 20
+        self.normalization_kappa = 1e-4
         self.comptol = 1.0                  # Should be a small positive value
 
         ''' Stability matrix S(λ) '''
@@ -208,7 +206,7 @@ class QFunction():
             return (pos_num, neg_num)
 
         real_eigS = self.Smatrix_pencil.real_eigen()
-        divisions = [-np.inf] + [ float(eig.eigenvalue) for eig in real_eigS if eig.eigenvalue != np.inf ] + [np.inf]
+        divisions = [-np.inf] + [ float(eig.eigenvalue) for eig in real_eigS if np.abs(eig.eigenvalue) != np.inf ] + [np.inf]
         
         self.intervals = []
         self.stability_intervals = []
@@ -495,7 +493,7 @@ class QFunction():
         def cost(var: np.ndarray):
             ''' Seeks to minimize the distance from reference CLF and ellipsoid volume '''
             Hv = self.clf.param2Hv(var)
-            # print( f"Eigenvalues of Hv = { np.linalg.eigvals(Hv) }" )
+            print( f"Eigenvalues of Hv = { np.linalg.eigvals(Hv) }" )
 
             cost = np.linalg.norm( Hv - Hv0, 'fro' )
             cost += ellipsoid_vol(Hv)
@@ -538,28 +536,34 @@ class QFunction():
         ''' Initialize graphical objects '''
 
         # Get horizontal and vertical ranges for plotting
+
         eq_sols = [ root.real for root in self.zero_poly.roots() if np.isreal(root) ]
-        realeigs = [ eig.eigenvalue for eig in self.Smatrix_pencil.real_eigen() ]
+        realeigs = [ eig.eigenvalue for eig in self.Smatrix_pencil.real_eigen() if np.abs(eig.eigenvalue) != np.inf ]
         complexeigs = [ eig.real for eig in self.stability_conj_pairs ]
         lambda_range = [0.0] + eq_sols + realeigs + complexeigs
-        lmin, lmax = min(lambda_range), max(lambda_range)
+
+        lmin, lmax = max(min(lambda_range), -100), min(max(lambda_range), +100)
 
         z_range = [ self.zero_poly(root.real) for root in self.diff_zero_poly.roots() if np.isreal(root) ]
-        zmin, zmax = min(z_range), max(z_range)
+        z_range += [ self.zero_poly(lmin) ]
+        z_range += [ self.zero_poly(lmax) ]
+        zmin, zmax = max(min(z_range),-100), min(max(z_range),+100)
 
-        self.plot_limits = {"hor": [lmin-5, lmax+5],
-                            "ver": [zmin-10, zmax+10]}
+        self.plot_configs = {"hor": [lmin-5, lmax+5],
+                             "ver": [zmin-10, zmax+10],
+                             "inertia": False }
 
         self.strip_colors = {"nsd": np.array(mcolors.to_rgb(mcolors.TABLEAU_COLORS['tab:red'])),
                              "psd": np.array(mcolors.to_rgb(mcolors.TABLEAU_COLORS['tab:cyan'])),
                              "indef": np.array(mcolors.to_rgb(mcolors.TABLEAU_COLORS['tab:gray']))}
 
         self.lambda_res = res
-        self.strip_size = np.abs(zmax-zmin)/10
+        zmin, zmax = self.plot_configs["ver"]
+        self.strip_size = np.abs(zmax-zmin)/20
 
-        hor_limits = self.plot_limits["hor"]
+        hor_limits = self.plot_configs["hor"]
         self.lambda_array = np.arange(hor_limits[0], hor_limits[1], self.lambda_res)
-        self.z_plot, = ax.plot([],[],'b',lw=0.8, label='z(λ)')
+        self.z_plot, = ax.plot([],[],'b',lw=0.8, label='$z(\lambda)$')
 
         self.stable_pts, = ax.plot([], [], 'or' )
         self.unstable_pts, = ax.plot([], [], 'ob' )
@@ -578,42 +582,49 @@ class QFunction():
         self.complex_stability_pts, = ax.plot([], [], '|k', linewidth=1.0 )
 
         ax.grid()
-        ax.set_xlim(*self.plot_limits["hor"])
-        ax.set_ylim(*self.plot_limits["ver"])
+        ax.set_xlim(*self.plot_configs["hor"])
+        ax.set_ylim(*self.plot_configs["ver"])
+        ax.set_xlabel('$\lambda$', fontsize = 'small')
+        ax.set_ylabel('', fontsize = 'small')
         ax.legend()
 
     def plot(self):
         '''
         Plots the Q-function for analysis.
         '''
-        hor_limits = self.plot_limits["hor"]
+        hor_limits = self.plot_configs["hor"]
         
         # Zero and compatibility polynomial
         z_array = [ self.zero_poly(l) for l in self.lambda_array ]
         self.z_plot.set_data(self.lambda_array, z_array)
 
         # Definiteness intervals
+        num_updated = 0
         for k, interval in enumerate(self.intervals):
-            limits = interval["limits"]
-            typ = interval["type"]
-            length = interval["length"]
 
-            lmin, lmax = max(limits[0], hor_limits[0]), min(limits[1], hor_limits[1])
-            limits = (lmin, lmax)
+            limits = interval["limits"]
+            # if limits[1] < hor_limits[0] or hor_limits[1] < limits[0]:
+            #     continue
+
+            typ = interval["type"]
+            lmin = max(limits[0], hor_limits[0])
+            lmax = min(limits[1], hor_limits[1])
             length = lmax - lmin
 
-            self.strip_rects[k].set_x(limits[0])
+            self.strip_rects[k].set_x(lmin)
             self.strip_rects[k].set_width(length)
+            num_updated += 1
 
             strip_color = (1/self.stb_dim) * ( self.strip_colors["psd"]*typ[0] + self.strip_colors["nsd"]*typ[1] )
             self.strip_rects[k].set_facecolor(strip_color)
 
-            interval_text = self.interval_texts[k]
-            interval_text.set_text(f"{typ}")
-            interval_text.set_x(limits[0]+0.5*length)
-            interval_text.set_y( ((-1)**k)*(self.strip_size/2)*1.2 )
+            if self.plot_configs["inertia"]:
+                interval_text = self.interval_texts[k]
+                interval_text.set_text(f"{typ}")
+                interval_text.set_x(lmin+0.5*length)
+                interval_text.set_y( ((-1)**k)*(self.strip_size/2)*1.2 )
 
-        for i in range(k+1, len(self.strip_rects)):
+        for i in range(num_updated, len(self.strip_rects)):
             self.strip_rects[i].set_width(0)
             self.interval_texts[i].set_text("")
 

@@ -1,6 +1,6 @@
 import sys, importlib
-import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 from common import optimal_arrangement
 
@@ -12,7 +12,7 @@ num_steps = int(sim.T/sim.sample_time)
 time_list = []
 
 ''' --------------------------------- Plot ------------------------------------- '''
-fig = plt.figure(figsize=(6.0*sim.num_cbfs, 5.0), layout='constrained')
+fig = plt.figure(figsize=(4.0*sim.num_cbfs, 4.0), layout='constrained')
 fig.suptitle('Q-functions')
 
 axes = []

@@ -224,28 +224,8 @@ class Quadratic(Function):
         return A, b, c
 
     def __init__(self, **kwargs):
-
-        # Set parameters
+        ''' Initialize it with hessian, center and height '''
         super().__init__(**kwargs)
-
-        # if self._dim > 1:
-        #     self.A = np.zeros([self._dim,self._dim])
-        #     self.b = np.zeros(self._dim)
-        #     self.critical_point = np.zeros(self._dim)
-        #     self.dcritical = np.zeros(self._dim)
-        # else:
-        #     self.A = 0.0
-        #     self.b = 0.0
-        #     self.critical_point = 0.0
-        #     self.dcritical = 0.0
-        # self.c = 0.0
-        # self.height = 0.0
-
-        # Set eigenbasis for hessian matrix
-        # _, _, Q = self.compute_eig()
-        # self.eigen_basis = np.zeros([self._dim, self._dim, self._dim])
-        # for k in range(self._dim):
-        #     self.eigen_basis[:][:][k] = np.outer( Q[:,k], Q[:,k] )
 
     def set_params(self, **kwargs):
         '''

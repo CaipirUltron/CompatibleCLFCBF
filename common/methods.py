@@ -57,6 +57,19 @@ def randomGen(type, limits, size=[1]):
     
     return NotImplemented
 
+def is_controllable(A,B):
+    ''' Returns True if the (A,B) pair is controllable. '''
+
+    if A.shape[0] != A.shape[1]:
+        raise TypeError("A must be a square matrix.")
+
+    n = A.shape[0]
+    if n != B.shape[0]:
+        raise TypeError("B must be have the same number of lines as the system dimension.")
+
+    rankC = np.linalg.matrix_rank( control.ctrb(A,B) )
+    return rankC == n
+
 def genStableLTI(n, m, **kwargs) -> tuple:
     ''' 
     Generates random (A, B) controllable pairs of sizes (n,m)
