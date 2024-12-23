@@ -91,6 +91,11 @@ class QFunction():
 
         self._compute_polynomials()
 
+        if self.satisfy_clf():
+            print("Passed V satisfies the CLF conditon.")
+        else:
+            print("Passed V does not satisfies the CLF conditon.")
+
         if self.is_compatible():
             print("Q-function is compatible.")
         else:
@@ -411,6 +416,20 @@ class QFunction():
         self.pencil.update( M=newM, N=newN )
         self._compute_polynomials()
 
+    def satisfy_clf(self):
+        ''' Checks if given CLF satisfy the CLF condition '''
+
+        if isinstance(self.plant, LinearSystem):
+            A, B = self.plant._A, self.plant._B
+        else:
+            raise NotImplementedError("CLF condition test not implemented for non-LTI systems.")
+        
+        Hv = self.clf.H
+        Q = Hv @ A + A.T @ Hv
+        eigsQ = np.linalg.eigvals(Q)
+
+        return np.all(eigsQ < 0)
+
     def is_compatible(self):
         ''' 
         Test if Q-function is compatible or not.
@@ -510,9 +529,17 @@ class QFunction():
             constr = self.composite_barrier()
             return constr
 
+        def clf_condition(var: np.ndarray):
+            ''' Satisfies the CLF condition '''
+
+            Hv = self.clf.param2Hv(var)
+            eigs = np.linalg.eigvals( Hv @ A + A.T @ Hv )
+            return - eigs
+
         var0 = self.clf.param
         constr = []
         constr += [ {"type": "ineq", "fun": compatibility} ]
+        constr += [ {"type": "ineq", "fun": clf_condition} ]
         sol = minimize( fun=cost, x0=var0, constraints=constr, method='SLSQP', options={"disp": True, "maxiter": 1000} )
 
         # DO NOT update the self.clf after compatibilization;
@@ -524,7 +551,8 @@ class QFunction():
 
         results = {"Hv": Hv,
                    "cost": cost(sol.x),
-                   "compatibility": compatibility(sol.x)}
+                   "compatibility": compatibility(sol.x),
+                   "clf_conditon": clf_condition(sol.x)}
         
         if verbose:
             print("Compatibilization results: ")

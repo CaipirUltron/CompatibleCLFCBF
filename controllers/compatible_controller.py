@@ -43,12 +43,15 @@ class CompatibleQP():
             if np.any([ cbfs[0]._dim != cbf._dim for cbf in cbfs ]):
                 raise Exception("CBF dimensions are not equal.")
 
+        self.verbose = False
         self.active = True
         self.compatibilization = True
         if "active" in kwargs.keys():
             self.active = kwargs["active"]
         if "compatibilization" in kwargs.keys():
             self.compatibilization = kwargs["compatibilization"]
+        if "verbose" in kwargs.keys():
+            self.verbose = kwargs["verbose"]
         
         self.n, self.m = self.plant.n, self.plant.m
         self.sym_dim = int(( self.n * ( self.n + 1 ) )/2)
@@ -95,34 +98,42 @@ class CompatibleQP():
         self.compatibilized = False
 
         if self.active and self.compatibilization:
-            self.compatibilize(verbose=True)
+            self.compatibilize(verbose=self.verbose)
 
         self.get_equilibria()
 
-    def compatibilize(self, verbose=False):
+    def compatibilize(self, **kwargs):
         ''' 
         Tries to compatibilize all QFunctions.
         Finds N CLF Hessians, one for each CBF, resulting in no 
         boundary equilibrium points.
         '''
+        verbose = self.verbose
+        if "verbose" in kwargs.keys():
+            verbose = kwargs["verbose"]
+
         if verbose:
             print(f"Initializing compatibilization of {self.num_cbfs} CLF-CBF pairs...")
 
         for k, qfun in enumerate(self.Qfunctions):
 
             # Only compatibilize if Q-function is not initially already compatible.
-            if qfun.is_compatible():
+            if qfun.is_compatible() and qfun.satisfy_clf():
                 Hv = copy(self.clf.H)
                 self.compatible_Hv[k] = Hv
                 if verbose:
-                    print(f"{k+1}-th CLF-CBF pair is already compatible with \nHv{k+1} = \n{Hv}, moving on...")
+                    print(f"{k+1}-th CLF-CBF pair is already compatible with \nHv{k+1} = \n{Hv} and satisfies the CLF condition, moving on...")
                 continue
 
             if verbose:
                 print(f"Initializing compatibilization of the {k+1}-th CLF-CBF pair...")
 
             # Compatibilize each Q-function and store resulting shapes
-            results = qfun.compatibilize(verbose=False)
+            try:
+                results = qfun.compatibilize(verbose=self.verbose)
+            except Exception as e:
+                print(e)
+
             if results["compatibility"] < -1e-2:
                 raise Exception(f"Compatibility failed.")
 

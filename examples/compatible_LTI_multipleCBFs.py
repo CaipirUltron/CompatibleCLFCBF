@@ -8,14 +8,16 @@ from functions import QuadraticLyapunov, QuadraticBarrier
 limits = 12*np.array((-1,1,-1,1))
 
 ''' --------------------------------- Define LTI system ------------------------------------- '''
-x0 = np.array([-2,2])
+x0 = np.array([-1,8])
 
-# A = np.zeros((n,n))
+# A = np.array([[0,0],
+#               [0,0]])
 # B = np.eye(n)
 
 # A = np.array([[-2, 0],
 #               [ 0,-2]])
-# B = np.eye(n)
+# B = np.array([[1,0],
+#               [0,1]])
 
 A = np.array([[ 0, 1],
               [-1,-1]])
@@ -54,7 +56,7 @@ clf = QuadraticLyapunov.geometry2D(CLFaxes, CLFangle, CLFcenter, level=1, limits
 Hv = clf.H
 
 ''' ------------------------ Define CBF (varying Hessian eigenvalues) ----------------------- '''
-CBFaxes = [2.0, 1.0]
+CBFaxes = [5.0, 1.0]
 CBFangle = 10.0
 CBFcenter = np.array([0.0, 5.0])
 cbf1 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter, limits=limits)
@@ -74,12 +76,9 @@ T = 10
 sample_time = 5e-3
 controller = CompatibleQP(plant, clf, cbfs, 
                           alpha = [1.0, 10.0], beta = 1.0, p = [1.0, 1.0], dt = sample_time, 
-                          compatibilization=False,
-                          active=True)
-
-dotVmatrix = 0.5*(Hv @ A + A.T @ Hv) + 1.0 * Hv
-eigsdotVmatrix = np.linalg.eigvals(dotVmatrix)
-print(f"CLF condition = {eigsdotVmatrix}")
+                          compatibilization=True,
+                          active=True,
+                          verbose=True)
 
 ''' ------------------------------ Configure plot ----------------------------------- '''
 plot_config = {
