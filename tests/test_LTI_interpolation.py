@@ -25,7 +25,7 @@ Bfun = lambda t: B
 plant = LinearSystem(np.zeros(n), np.zeros(m), A=A, B=B)
 
 ''' ------------------------ Define CLF (varying Hessian eigenvalues) ----------------------- '''
-CLFeigs = np.array([1.0, 4.0])
+CLFeigs = np.array([1.0, 8.0])
 angle1, angle2 = np.deg2rad(0.0), np.deg2rad(180.0)
 angle_fun = interpolation(angle1, angle2)
 CLFcenter = np.zeros(n)
@@ -80,7 +80,10 @@ def update_plot(t):
         raise Exception("System is not controllable.")
 
     Hv = Hvfun(t)
-    print(Hv)
+    dotVmatrix = 0.5*(Hv @ A + A.T @ Hv) + p * Hv 
+    eigsdotVmatrix = np.linalg.eigvals(dotVmatrix)
+    eigsdotVmatrix.sort()
+    print(f"CLF condition = {eigsdotVmatrix}")
 
     qfun.update(M = Mfun(t), N = Nfun(t), H = Hfun(t), w = wfun(t))
     return qfun.plot()
@@ -92,10 +95,14 @@ fig.suptitle('Q-function Interpolation')
 # Initialize plot 
 qfun.init_graphics(ax)
 
-start, stop, step = 0.5, 1.0, 0.001
-# animation = anim.FuncAnimation(fig, func=update_plot, frames=np.arange(start,stop,step), interval=100, repeat=False, blit=True, cache_frame_data=False)
+start, stop, step = 0.0, 1.0, 0.01
+animation = anim.FuncAnimation(fig, func=update_plot, frames=np.arange(start,stop,step), interval=80, repeat=False, blit=True, cache_frame_data=False)
 
-update_plot(0.612)
+t = 0.148
+update_plot(t)
+
+Hv = Hvfun(t)
+print(Hv)
 
 qfun.plot()
 plt.show()

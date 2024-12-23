@@ -41,13 +41,17 @@ CLFangle = 0.0
 # Hv = np.array([[ 3.64366377, -0.97058394],
 #                [-0.97058394,  1.35633623]])
 
-Hv = np.array([[ 5.77406682, -3.43962905],
-               [-3.43962905,  2.20449257]])
+# Hv = np.array([[ 5.77406682, -3.43962905],
+#                [-3.43962905,  2.20449257]])
+
+# Hv = np.array([[3.20628505, 2.40470095],
+#                 [2.40470095, 6.79371495]])
 
 CLFcenter = np.zeros(2)
 
-# clf = QuadraticLyapunov.geometry2D(CLFaxes, CLFangle, CLFcenter, level=1, limits=limits)
-clf = QuadraticLyapunov(hessian=Hv, center=CLFcenter, limits=limits)
+clf = QuadraticLyapunov.geometry2D(CLFaxes, CLFangle, CLFcenter, level=1, limits=limits)
+# clf = QuadraticLyapunov(hessian=Hv, center=CLFcenter, limits=limits)
+Hv = clf.H
 
 ''' ------------------------ Define CBF (varying Hessian eigenvalues) ----------------------- '''
 CBFaxes = [2.0, 1.0]
@@ -70,8 +74,12 @@ T = 10
 sample_time = 5e-3
 controller = CompatibleQP(plant, clf, cbfs, 
                           alpha = [1.0, 10.0], beta = 1.0, p = [1.0, 1.0], dt = sample_time, 
-                          compatibilization=True,
-                          active=False)
+                          compatibilization=False,
+                          active=True)
+
+dotVmatrix = 0.5*(Hv @ A + A.T @ Hv) + 1.0 * Hv
+eigsdotVmatrix = np.linalg.eigvals(dotVmatrix)
+print(f"CLF condition = {eigsdotVmatrix}")
 
 ''' ------------------------------ Configure plot ----------------------------------- '''
 plot_config = {
