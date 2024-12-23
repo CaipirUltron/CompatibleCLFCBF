@@ -122,7 +122,7 @@ class CompatibleQP():
                 Hv = copy(self.clf.H)
                 self.compatible_Hv[k] = Hv
                 if verbose:
-                    print(f"{k+1}-th CLF-CBF pair is already compatible with \nHv{k+1} = \n{Hv} and satisfies the CLF condition, moving on...")
+                    print(f"{k+1}-th CLF-CBF pair is already compatible with \nHv{k+1} = \n{Hv}\n and satisfies the CLF condition, moving on...")
                 continue
 
             if verbose:
@@ -219,8 +219,6 @@ class CompatibleQP():
             g = self.plant.get_g()
             state = self.plant.get_state()
 
-        # print(f"x = {state}")
-
         # Lyapunov function and gradient
         self.V = self.clf(state)
         nablaV = self.clf.gradient(state)
@@ -228,9 +226,6 @@ class CompatibleQP():
         # Lie derivatives
         LfV = nablaV.dot(f)
         LgV = g.T.dot(nablaV)
-
-        # print(f"LfV = {LfV}")
-        # print(f"LgV = {LgV}")
 
         # Gradient w.r.t. pi
         partial_Hv = self.clf.partial_Hv()

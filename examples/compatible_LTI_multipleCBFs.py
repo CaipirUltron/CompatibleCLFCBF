@@ -14,15 +14,15 @@ x0 = np.array([-1,8])
 #               [0,0]])
 # B = np.eye(n)
 
-# A = np.array([[-2, 0],
-#               [ 0,-2]])
-# B = np.array([[1,0],
-#               [0,1]])
+A = np.array([[-2, 0],
+              [ 0,-2]])
+B = np.array([[1,0],
+              [0,1]])
 
-A = np.array([[ 0, 1],
-              [-1,-1]])
-B = np.array([[0],
-              [1]])
+# A = np.array([[ 0, 1],
+#               [-1,-1]])
+# B = np.array([[0],
+#               [1]])
 
 n = A.shape[0]
 m = B.shape[1]
@@ -67,13 +67,13 @@ CBFcenter = np.array([6.0, 0.0])
 cbf2 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter, limits=limits)
 
 # cbfs = []
-cbfs = [cbf2]
+cbfs = [cbf1]
 # cbfs = [cbf1, cbf2]
 num_cbfs = len(cbfs)
 
 ''' --------------------------- Compatible controller --------------------------------- '''
 T = 10
-sample_time = 5e-3
+sample_time = 1e-3
 controller = CompatibleQP(plant, clf, cbfs, 
                           alpha = [1.0, 10.0], beta = 1.0, p = [1.0, 1.0], dt = sample_time, 
                           compatibilization=True,
