@@ -14,7 +14,8 @@ class CompatibleQP():
                  plant: LinearSystem | DriftLess, 
                  clf: QuadraticLyapunov, 
                  cbfs: QuadraticBarrier, 
-                 alpha = [1.0, 1.0], beta = [1.0, 1.0], p = [10.0, 10.0], dt = 0.001):
+                 alpha = [1.0, 1.0], beta = [1.0, 1.0], p = [10.0, 10.0], dt = 0.001,
+                 **kwargs):
 
         if not isinstance(plant, (LinearSystem, DriftLess) ):
             raise Exception("Compatible controller only implemented for LTI and driftless full-rank systems.")
@@ -38,6 +39,10 @@ class CompatibleQP():
         self.clf = clf
         self.cbfs = cbfs
         self.num_cbfs = len(self.cbfs)
+
+        self.compatibilization = True
+        if "compatibilization" in kwargs.keys():
+            self.compatibilization = kwargs["compatibilization"]
 
         self.n, self.m = self.plant.n, self.plant.m
         self.sym_dim = int(( self.n * ( self.n + 1 ) )/2)
@@ -82,6 +87,10 @@ class CompatibleQP():
         # Create CLF-CBF pairs
         self.active_index = None
         self.compatibilized = False
+
+        if self.compatibilization:
+            self.compatibilize(verbose=True)
+
         self.get_equilibria()
 
     def compatibilize(self, verbose=False):
@@ -94,14 +103,26 @@ class CompatibleQP():
 
             # Only compatibilize if Q-function is not initially already compatible.
             if qfun.is_compatible():
+                self.compatible_Hv[k] = copy(self.clf.H)
+                if verbose:
+                    print(f"CLF is already compatible with the {k+1}-th CBF. Bypassing compatibilization...")
                 continue
+
+            if verbose:
+                print(f"Initializing compatibilization of CLF with the {k+1}-th CBF...")
 
             # Compatibilize each Q-function and store resulting shapes
             results = qfun.compatibilize(verbose=verbose)
             if results["compatibility"] < -1e-2:
                 raise Exception(f"Compatibility failed.")
 
-            self.compatible_Hv[k] = results["Hv"]
+            Hv = results["Hv"]
+            self.compatible_Hv[k] = Hv
+            if verbose:
+                print(f"{k+1}-th compatibilization sucessfull with Hv = \n{Hv}")
+
+        if verbose:
+            print(f"Compatibilization sucessfull for all {self.num_cbfs} CLF-CBF pairs!")
 
         self.get_equilibria()
         self.compatibilized = True
@@ -144,6 +165,9 @@ class CompatibleQP():
         '''
         Computes the solution of the outer QP.
         '''
+        if not self.compatibilization:
+            return np.zeros(len(self.u_v))
+
         a_rate, b_rate = self.get_rate_constraint()
         A_outer = a_rate
         b_outer = np.array([ b_rate ])

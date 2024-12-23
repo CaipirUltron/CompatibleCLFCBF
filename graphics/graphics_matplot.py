@@ -175,9 +175,9 @@ class Plot2DSimulation():
             eq_x_coors.append(eq_pt[0])
             eq_y_coors.append(eq_pt[1])
             if eq["stability"] <= 0: eq_colors.append("red")
-            if eq["stability"] >  0: eq_colors.append("green")
+            if eq["stability"] >  0: eq_colors.append("blue")
 
-        self.equilibria_plot = self.main_ax.scatter( eq_x_coors, eq_y_coors, c=eq_colors, alpha=0.8 )
+        self.equilibria_plot = self.main_ax.scatter( eq_x_coors, eq_y_coors, c=eq_colors, alpha=0.8, marker='o', linewidths=0.01 )
         self.clf_grad_arrow, = self.main_ax.plot([],[],'b',lw=0.8)
         self.cbf_grad_arrow, = self.main_ax.plot([],[],'r',lw=0.8)
         self.f_arrow, = self.main_ax.plot([],[],'r',lw=0.8)

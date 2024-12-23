@@ -420,7 +420,7 @@ class QFunction():
         '''
         for interval in self.stability_intervals:
             if interval["stability"] == 'stable':
-                for root in self.zero_poly.roots():
+                for root in self.safe_zero_poly.roots():
                     if np.abs(root.imag) > 1e-6:
                         continue
                     limits = interval["limits"]
@@ -495,7 +495,7 @@ class QFunction():
         def cost(var: np.ndarray):
             ''' Seeks to minimize the distance from reference CLF and ellipsoid volume '''
             Hv = self.clf.param2Hv(var)
-            print( f"Eigenvalues of Hv = { np.linalg.eigvals(Hv) }" )
+            # print( f"Eigenvalues of Hv = { np.linalg.eigvals(Hv) }" )
 
             cost = np.linalg.norm( Hv - Hv0, 'fro' )
             cost += ellipsoid_vol(Hv)

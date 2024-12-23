@@ -24,6 +24,17 @@ class Op():
     def op(self, M):
         return self.Ak.T @ M + M.T @ self.Ak
 
+def optimal_arrangement(n):
+    ''' Finds optimal number of rows and columns for placing n objects in a matrix '''
+
+    num = np.ceil(2*np.sqrt(n))
+    if num % 2 == 0:
+        num_rows, num_cols = int(num/2), int(num/2)
+    else:
+        num_rows, num_cols = int(0.5*(num - 1)), int(0.5*(num + 1))
+
+    return num_rows, num_cols
+
 def timeit(func):
     @wraps(func)
     def timeit_wrapper(*args, **kwargs):
