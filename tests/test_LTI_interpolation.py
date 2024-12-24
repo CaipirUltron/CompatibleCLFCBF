@@ -15,10 +15,15 @@ n, m = 2, 1
 # A = np.zeros((n,n))
 # B = np.eye(n)
 
-A = np.array([[ 0, 1],
-              [-1,-1]])
-B = np.array([[0],
-              [1]])
+A = np.array([[-2, 0],
+              [ 0,-2]])
+B = np.array([[1,0],
+              [0,1]])
+
+# A = np.array([[ 0, 1],
+#               [-1,-1]])
+# B = np.array([[0],
+#               [1]])
 
 Afun = lambda t: A
 Bfun = lambda t: B
@@ -89,20 +94,24 @@ def update_plot(t):
     return qfun.plot()
 
 ''' --------------------------------- Animation ------[------------------------------- '''
-fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10.0, 5.0), layout="constrained")
-fig.suptitle('Q-function Interpolation')
+size = 3.5
+fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(1.4*size, size), layout="constrained")
+fig.suptitle('Q-function')
 
 # Initialize plot 
 qfun.init_graphics(ax)
 
 start, stop, step = 0.0, 1.0, 0.01
-animation = anim.FuncAnimation(fig, func=update_plot, frames=np.arange(start,stop,step), interval=80, repeat=False, blit=True, cache_frame_data=False)
+# animation = anim.FuncAnimation(fig, func=update_plot, frames=np.arange(start,stop,step), interval=80, repeat=False, blit=True, cache_frame_data=False)
 
-t = 0.148
+t = 0.0
 update_plot(t)
 
 Hv = Hvfun(t)
-print(Hv)
+print(f"Hv = {Hv}")
+
+Hh = Hhfun(t)
+print(f"Hh = {Hh}")
 
 qfun.plot()
 plt.show()

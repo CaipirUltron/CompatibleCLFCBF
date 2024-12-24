@@ -12,7 +12,8 @@ num_steps = int(sim.T/sim.sample_time)
 time_list = []
 
 ''' --------------------------------- Plot ------------------------------------- '''
-fig = plt.figure(figsize=(4.0*sim.num_cbfs, 4.0), layout='constrained')
+size = 3.0
+fig = plt.figure(figsize=(size*sim.num_cbfs, size), layout='constrained')
 fig.suptitle('Q-functions')
 
 axes = []

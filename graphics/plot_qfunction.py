@@ -1,10 +1,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import fsolve
+from common import rot3D
 
 radius = 1.0
 
-sigmas = [ 1.0, 3.0, 5.0 ]
+sigmas = [ 0.5, 2.8, 6.0 ]
 x_i = [ 1.0, 1.0, 0.5 ]
 
 # sigmas = [ 5.0, 1.2, 2. ]
@@ -74,7 +75,7 @@ rvx, rvy, rvz = 1/np.sqrt(coefs)
 # (this is the equation of an ellipsoid):
 x_v = rvx * np.outer(np.cos(u), np.sin(v))
 y_v = rvy * np.outer(np.sin(u), np.sin(v))
-z_v = rvz * np.outer(np.ones_like(u), np.cos(v))
+z_v = rvz * np.outer(np.ones_like(u), np.cos(v))    
 
 coefs = [1.0/(radius**2) for sigma in sigmas ]
 rhx, rhy, rhz = 1/np.sqrt(coefs)
@@ -86,7 +87,7 @@ z_h = rhz * np.outer(np.ones_like(u), np.cos(v)) + x_i[2]
 # Plot:
 ax.plot_surface(x_v, y_v, z_v, rstride=4, cstride=4, color='b', alpha=0.1)
 ax.plot_surface(x_h, y_h, z_h, rstride=4, cstride=4, color='g', alpha=0.4)
-ax.scatter(*eq_point.tolist(), color='r', linewidth=2.8, alpha=1.0)
+ax.scatter(*eq_point.tolist(), color='b', linewidth=2.8, alpha=1.0)
 ax.text(*(eq_point+np.array([0.2,0.2,0.2])).tolist(), "$x^\star$")
 
 ax.set_xlabel("$x_1$")
@@ -106,7 +107,7 @@ for axis in 'xyz':
 ax = fig.add_subplot(122)
 ax.plot(lambda_p, q, color='blue', linewidth=0.8)
 ax.plot([p_min, p_max], [1, 1], '--', color='green', linewidth=2.0)
-ax.plot(lambda_sol, 1.0, 'o', color = "red")
+ax.plot(lambda_sol, 1.0, 'o', color = "blue")
 ax.plot(0.0, q_function(0.0), 'o', color="black")
 
 for eig in pencil_eigen:
@@ -115,10 +116,10 @@ for eig in pencil_eigen:
 ax.set_xlim([p_min, p_max])
 ax.set_ylim([q_min, q_max])
 ax.set_xlabel("$\lambda$")
-ax.legend(["$q_i(\lambda)$"], fontsize=12)
+ax.legend(["$q(\lambda)$"], fontsize=10, loc="upper right")
 
 ax.set_box_aspect(1)
-ax.set_title('(b) Corresponding $q_i$-function', fontsize=12)
+ax.set_title('(b) Q-function', fontsize=12)
 
 plt.subplots_adjust(wspace = 0.5)
 

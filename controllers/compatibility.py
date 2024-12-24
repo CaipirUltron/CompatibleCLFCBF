@@ -591,7 +591,9 @@ class QFunction():
 
         hor_limits = self.plot_configs["hor"]
         self.lambda_array = np.arange(hor_limits[0], hor_limits[1], self.lambda_res)
-        self.z_plot, = ax.plot([],[],'b',lw=0.8, label='$z(\lambda)$')
+        self.q_plot, = ax.plot([],[],'b',lw=0.8, label='$q(\lambda) = \dfrac{n(\lambda)}{|P(\lambda)|^2}$')
+        self.z_plot, = ax.plot([],[],'g',lw=0.8, label='$z(\lambda) = n(\lambda) - |P(\lambda)|^2$')
+        self.ones_plot, = ax.plot(self.lambda_array,[ 1.0 for l in self.lambda_array ],'k--',lw=1.0)
 
         self.stable_pts, = ax.plot([], [], 'or' )
         self.unstable_pts, = ax.plot([], [], 'ob' )
@@ -614,7 +616,7 @@ class QFunction():
         ax.set_ylim(*self.plot_configs["ver"])
         ax.set_xlabel('$\lambda$', fontsize = 'small')
         ax.set_ylabel('', fontsize = 'small')
-        ax.legend()
+        ax.legend(loc='upper right', fontsize = 'small')
 
     def plot(self):
         '''
@@ -622,9 +624,13 @@ class QFunction():
         '''
         hor_limits = self.plot_configs["hor"]
         
-        # Zero and compatibility polynomial
+        # Zero polynomial
         z_array = [ self.zero_poly(l) for l in self.lambda_array ]
         self.z_plot.set_data(self.lambda_array, z_array)
+
+        # Q-function polynomial
+        q_array = [ self.n_poly(l)/self.d_poly(l) for l in self.lambda_array ]
+        self.q_plot.set_data(self.lambda_array, q_array)
 
         # Definiteness intervals
         num_updated = 0
@@ -688,7 +694,9 @@ class QFunction():
 
         # Returns graphical handlers
         graphical_elements = []
+        graphical_elements.append( self.ones_plot )
         graphical_elements.append( self.z_plot )
+        graphical_elements.append( self.q_plot )
         graphical_elements += self.strip_rects
         graphical_elements += self.interval_texts
         graphical_elements.append( self.real_stability_pts )
