@@ -4,9 +4,10 @@ from .multipoly import MultiPoly, Poly
 from .kernel import Kernel, KernelQuadratic
 
 from time import perf_counter
-from scipy.optimize import minimize, LinearConstraint, NonlinearConstraint
+from scipy.optimize import minimize, least_squares, LinearConstraint, NonlinearConstraint
 from shapely import geometry, intersection
 
+from numpy.polynomial import Polynomial as npPoly
 from numpy.polynomial.polynomial import polyder, polyint
 
 import warnings
@@ -77,6 +78,63 @@ class QuadraticLyapunov(Quadratic):
         self.dynamics.set_control(param_ctrl)
         self.dynamics.actuate(dt)
         self.set_params( param = self.dynamics.get_state())
+
+    def gamma_transform(self, x: np.ndarray, gamma: npPoly):
+        ''' 
+        Using a K infinity gamma polynomial, 
+        returns the function, gradient and Hessian values of 
+        the integral transformation.
+        '''
+        if not isinstance(gamma, npPoly):
+            raise TypeError("Gamma function is not a polynomial.")
+        
+        gamma_der = npPoly( polyder(gamma.coef) )
+        gamma_int = npPoly( polyint(gamma.coef) )
+
+        V = self(x)
+        gradV = self.gradient(x)
+        HV = self.hessian(x)
+
+        gammaV = gamma(V)
+        gammaV_der = gamma_der(V)
+        barV = gamma_int(V)
+        bar_gradV = gammaV * gradV
+        barHv = gammaV * HV + gammaV_der * np.outer(gradV, gradV)
+
+        return barV, bar_gradV, barHv
+
+    def inverse_gamma_transform(self, x: np.ndarray, gamma: npPoly):
+        '''
+        Using a K infinity gamma polynomial, 
+        returns the function, gradient and Hessian values of 
+        the inverse integral transformation.
+        '''
+        if not isinstance(gamma, npPoly):
+            raise TypeError("Gamma function is not a polynomial.")
+        
+        gamma_der = npPoly( polyder(gamma.coef) )
+        gamma_int = npPoly( polyint(gamma.coef) )
+        
+        # Get transformed V(x), nablaV and Hessian
+        barV = self(x)
+        bar_gradV = self.gradient(x)
+        bar_Hv = self.hessian(x)
+
+        # Compute original V, nablaV and Hessian
+        V0 = 100*np.random.rand()
+        sol = least_squares( lambda V: barV - gamma_int( V ), V0 )
+        V = sol.x[0]
+
+        if sol.fun >= 1e-10:
+            raise ValueError("Optimization did not converge.")
+        
+        gammaV = gamma(V)
+        gradV = bar_gradV / gammaV
+
+        gammaderV = gamma_der(V)
+        Hv = ( 1/gammaV ) * ( bar_Hv - gammaderV * np.outer( gradV,gradV ) )
+
+        return V, gradV, Hv
 
     @classmethod
     def geometry2D(cls, semiaxes: tuple, angle: float, center: list | np.ndarray, level: float, **kwargs):

@@ -102,7 +102,7 @@ fig.suptitle('Q-function')
 qfun.init_graphics(ax)
 
 start, stop, step = 0.0, 1.0, 0.01
-# animation = anim.FuncAnimation(fig, func=update_plot, frames=np.arange(start,stop,step), interval=80, repeat=False, blit=True, cache_frame_data=False)
+animation = anim.FuncAnimation(fig, func=update_plot, frames=np.arange(start,stop,step), interval=80, repeat=False, blit=True, cache_frame_data=False)
 
 t = 0.0
 update_plot(t)

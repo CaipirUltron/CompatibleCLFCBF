@@ -1,5 +1,6 @@
 import numpy as np
 from copy import copy
+from numpy.polynomial import Polynomial as Poly
 
 from quadratic_program import QuadraticProgram
 from functions import QuadraticLyapunov, QuadraticBarrier
@@ -14,7 +15,7 @@ class CompatibleQP():
                  plant: LinearSystem | DriftLess, 
                  clf: QuadraticLyapunov, 
                  cbfs: QuadraticBarrier=[], 
-                 alpha = [1.0, 1.0], beta = [1.0, 1.0], p = [10.0, 10.0], dt = 0.001,
+                 alpha = [1.0, 1.0], beta = 1.0, p = [1.0, 1.0], dt = 0.001,
                  **kwargs):
 
         if not isinstance(plant, (LinearSystem, DriftLess) ):
@@ -64,6 +65,7 @@ class CompatibleQP():
 
         # Parameters for the inner and outer QPs
         self.alpha, self.beta, self.p = alpha, beta, p
+        self.gamma_poly = Poly([0.0, self.p[0]])               # gamma_poly is a linear function; TO DO: generalize to class K
 
         # Parameters for the inner QP controller (QP1)
         self.QP1_dim = self.m + 1
@@ -219,9 +221,16 @@ class CompatibleQP():
             g = self.plant.get_g()
             state = self.plant.get_state()
 
+        print(f"State = {state}")
+
         # Lyapunov function and gradient
-        self.V = self.clf(state)
-        nablaV = self.clf.gradient(state)
+        # self.V = self.clf(state)
+        # nablaV = self.clf.gradient(state)
+
+        self.V, nablaV, Hv = self.clf.inverse_gamma_transform(state, self.gamma_poly)
+
+        # print(self.V)
+        # print(nablaV)
 
         # Lie derivatives
         LfV = nablaV.dot(f)

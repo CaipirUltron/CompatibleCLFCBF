@@ -6,8 +6,224 @@ import matplotlib.animation as anim
 import matplotlib.colors as mcolors
 
 from matplotlib import gridspec
+from matplotlib.axes import Axes
 from matplotlib.patches import Rectangle, Ellipse
 from functions import Quadratic, QuadraticLyapunov, QuadraticBarrier
+
+class PlotQuadraticSim():
+    '''
+    Class for matplotlib-based simulation of the quadratic QP CLF-CBF controller
+    '''
+    def get_ellipse(quad: Quadratic, level: float):
+        ''' Returns the ellipse parameters for plotting the elliptical level set of a given quadratic.'''
+
+        if level < quad.height:
+            warnings.warn("Level set is empty.")
+            return [0,0], 0, 0, 0
+        
+        term = 2*( level - quad.height )
+
+        eigs, R = np.linalg.eig(quad.H)
+        if np.any(eigs <= 0):
+            raise Exception("Non-psd Hessian for ellipse.")
+        
+        angle = np.rad2deg(np.arctan2(R[1,0],R[0,0]))
+
+        a = np.sqrt(term/eigs[0])
+        b = np.sqrt(term/eigs[1])
+
+        return quad.center, 2*a, 2*b, angle
+
+    def __init__(self, logs, plant, clf, cbfs, **kwargs):
+        
+        # Default plot parameters
+        self.plot_config = {
+            "xlimits": (-6,6),
+            "ylimits": (-6,6),
+            "drawlevel": True,
+            "resolution": 50,
+            "fps":60,
+            "equilibria": False,
+            }
+        
+        if "plot_config" in kwargs.keys():
+            self.plot_config = kwargs["plot_config"]
+        
+        # Get plant, CLF and CBF
+        self.robot = plant
+        self.clf = clf
+        self.cbfs = cbfs
+        self.num_cbfs = len(self.cbfs)
+
+        # Get logs
+        self.sample_time = logs["sample_time"]
+        self.time = logs["time"]
+        self.num_steps = len(self.time)
+        self.initial_time = self.time[0]
+        self.final_time = self.time[1]
+
+        self.state_log = logs["state"]
+        self.initial_state = [ self.state_log[0][0], self.state_log[1][0] ]
+        self.final_state = [ self.state_log[0][-1], self.state_log[1][-1] ]
+
+        if "clf_log" in logs.keys():
+            self.clf_log = logs["clf_log"]
+
+        self.cbf_logs = []
+        if "cbf_logs" in logs.keys():
+            self.cbf_logs = logs["cbf_logs"]
+            if len(self.cbf_logs) != self.num_cbfs:
+                raise Exception("Number of CBF parameters is not the same as the number of CBFs.")
+
+        self.equilibria = logs["equilibria"]
+
+        self.fps = self.plot_config["fps"]
+        self.anim_step = (self.num_steps/self.final_time)/self.fps
+
+        self.xlimits = self.plot_config["xlimits"]
+        self.ylimits = self.plot_config["ylimits"]
+        
+        self.running = False
+
+    def init_graphics(self, ax: Axes):
+        '''
+        Create graphical objects into the passed ax.
+        '''
+        # Initialize CLF/CBF level sets
+        self.clf_color = mcolors.TABLEAU_COLORS['tab:blue']
+        self.cbf_color = mcolors.TABLEAU_COLORS['tab:red']
+
+        self.clf_levelset = Ellipse(xy=[0,0], width=4, height=4, angle=0, color=self.clf_color, alpha=0.2)
+        self.cbf_levelsets = [ Ellipse(xy=[0,0], width=0, height=0, angle=0, color=self.cbf_color, alpha=0.2) for _ in range(self.num_cbfs) ]
+
+        ax.add_patch(self.clf_levelset)
+        for cbf_levelset in self.cbf_levelsets:
+            ax.add_patch(cbf_levelset)
+
+        # Initalize some graphical objects
+        self.time_text = ax.text(0.7, 0.95, s = str("Time"), fontsize=8, horizontalalignment='center', verticalalignment='center', transform=ax.transAxes)
+
+        self.trajectory, = ax.plot([],[],lw=2)
+        self.init_state_pt, = ax.plot([self.initial_state[0]],[self.initial_state[1]],'b*',lw=2)
+        self.clf_center, = ax.plot([self.clf.center[0]],[self.clf.center[1]],'kx',lw=2)
+
+        eq_x_coors, eq_y_coors, eq_colors = [], [], []
+        for eq in self.equilibria:
+            eq_pt = eq["point"]
+            eq_x_coors.append(eq_pt[0])
+            eq_y_coors.append(eq_pt[1])
+            if eq["stability"] <= 0: eq_colors.append("red")
+            if eq["stability"] > 0: eq_colors.append("blue")
+
+        self.equilibria_plot = ax.scatter( eq_x_coors, eq_y_coors, c=eq_colors, alpha=0.8, marker='o', linewidths=0.01 )
+        self.update_plot_state(0)
+
+        ax.set_xlim(self.xlimits)
+        ax.set_ylim(self.ylimits)
+        ax.set_aspect('equal', adjustable='box')
+
+        self.running = True
+
+        return self.blit()
+
+    def blit(self):
+        ''' Returns all graphical elements being plotted to ax '''
+
+        graphical_elements = []
+        graphical_elements.append(self.time_text)
+        graphical_elements.append(self.trajectory)
+        graphical_elements.append(self.clf_center)
+        graphical_elements.append(self.init_state_pt)
+        if self.plot_config["equilibria"]: 
+            graphical_elements.append(self.equilibria_plot)
+        graphical_elements.append(self.clf_levelset)
+        graphical_elements += self.cbf_levelsets
+
+        return graphical_elements
+
+    def update_levelsets(self):
+
+        self.clf.set_params( param=self.curr_clf_state )
+
+        V = self.clf(self.curr_state)
+        xy, width, height, angle = Plot2DSimulation.get_ellipse(self.clf, V)
+        self.clf_levelset.set_center(xy)
+        self.clf_levelset.set_width(width)
+        self.clf_levelset.set_height(height)
+        self.clf_levelset.set_angle(angle)
+
+        for k, cbf in enumerate(self.cbfs):
+
+            if self.cbf_logs:
+                cbf.set_params( param=self.curr_cbf_state )
+            
+            xy, width, height, angle = Plot2DSimulation.get_ellipse(cbf, 0.0)
+            self.cbf_levelsets[k].set_center(xy)
+            self.cbf_levelsets[k].set_width(width)
+            self.cbf_levelsets[k].set_height(height)
+            self.cbf_levelsets[k].set_angle(angle)
+
+    def update_plot_state(self, i):
+        ''' Updates the state of every relevant data for plotting '''
+        
+        self.curr_time = np.around(self.time[i], decimals = 2)
+        self.curr_state = [ self.state_log[0][i], self.state_log[1][i] ]
+        self.curr_trajectory = [ self.state_log[0][0:i], self.state_log[1][0:i] ]
+
+        self.curr_clf_state = [ self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i] ]
+
+        for k in range(self.num_cbfs):
+            if self.cbf_logs:
+                self.curr_cbf_state = [ self.cbf_logs[k][0][i], self.cbf_logs[k][1][i], self.cbf_logs[k][2][i] ]
+
+    def update(self, i):
+
+        if i < self.num_steps:
+
+            self.update_plot_state(i)
+
+            self.trajectory.set_data(self.curr_trajectory[0] , self.curr_trajectory[1])
+            self.time_text.set_text("Time = " + str(self.curr_time) + "s")
+            if self.plot_config["drawlevel"]:
+                self.update_levelsets()
+        else:
+            self.running = False
+
+        return self.blit()
+
+    def gen_function(self, initial_step):
+
+        curr_step = initial_step
+        while self.running:
+            yield curr_step
+            # curr_step += int(max(1,np.ceil(self.anim_step)))
+            curr_step += 1
+        final_step = self.to_step(self.final_time)
+        yield final_step
+
+    def to_step(self, t):
+        ''' Convert from time in seconds to simulation steps '''
+        # return int(np.floor((t/self.final_time)*self.num_steps))
+        return int(np.floor(t/self.sample_time))
+
+    def animation(self, fig, *args):
+        '''
+        Show animation starting from specific time (passed as optional argument)
+        '''
+        start = self.to_step(self.initial_time)
+        if len(args) > 0:
+            start = self.to_step(args[0])
+            
+        animation = anim.FuncAnimation(fig, func=self.update, frames=self.gen_function(start), init_func=self.blit, interval=1000/self.fps, repeat=True, blit=True, cache_frame_data=False)
+
+        return animation
+
+    def plot_frame(self, t):
+        '''
+        Returns graphical elements at time t.
+        '''
+        step = self.to_step(t)
+        return self.update(step)
 
 class Plot2DSimulation():
     '''
@@ -70,7 +286,7 @@ class Plot2DSimulation():
 
         self.configure()
         
-        # self.fig.tight_layout(pad=plot_config["pad"])
+        self.fig.tight_layout(pad=self.plot_config["pad"])
         self.animation = None
 
     def configure(self):
@@ -154,6 +370,9 @@ class Plot2DSimulation():
 
         self.clf_levelset = Ellipse(xy=[0,0], width=0, height=0, angle=0, color=self.clf_color, alpha=0.2)
         self.cbf_levelsets = [ Ellipse(xy=[0,0], width=0, height=0, angle=0, color=self.cbf_color, alpha=0.2) for _ in range(self.num_cbfs) ]
+        self.main_ax.add_patch(self.clf_levelset)
+        for cbf_levelset in self.cbf_levelsets:
+            self.main_ax.add_patch(cbf_levelset)
 
         if "clf_log" in self.logs.keys():
             self.clf_log = self.logs["clf_log"]
@@ -165,9 +384,10 @@ class Plot2DSimulation():
                 raise Exception("Number of CBF parameters is not the same as the number of CBFs.")
 
         # Initalize some graphical objects
-        self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str("Time = "), fontsize=14)
+        self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str(""), fontsize=14)
         self.trajectory, = self.main_ax.plot([],[],lw=2)
         self.clf_center, = self.main_ax.plot([],[],'kx',lw=2)
+        self.init_state, = self.main_ax.plot([],[],'b*',lw=2)
 
         eq_x_coors, eq_y_coors, eq_colors = [], [], []
         for eq in self.equilibria:
@@ -186,8 +406,11 @@ class Plot2DSimulation():
 
         self.runs = True
 
-        self.time_text.text = str("Time = ")
+        self.time_text.text = str("")
         self.trajectory.set_data([],[])
+
+        x0, y0 = self.state_log[0][0], self.state_log[1][0]
+        self.init_state.set_data([x0],[y0])
 
         x0, y0 = self.clf.center
         self.clf_center.set_data([x0],[y0])
@@ -197,6 +420,7 @@ class Plot2DSimulation():
         graphical_elements.append(self.time_text)
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.clf_center)
+        graphical_elements.append(self.init_state)
         if self.plot_config["equilibria"]: 
             graphical_elements.append(self.equilibria_plot)
         graphical_elements.append(self.clf_grad_arrow)
@@ -262,13 +486,13 @@ class Plot2DSimulation():
                     [ current_state[0], current_state[0] + f_norm[0] ], 
                     [ current_state[1], current_state[1] + f_norm[1] ] )
 
-            self.time_text.set_text("Time = " + str(current_time) + "s")
+            # self.time_text.set_text("Time = " + str(current_time) + "s")
 
             if self.draw_level:
                 self.update_levelsets(i)
-                self.main_ax.add_patch(self.clf_levelset)
-                for cbf_levelset in self.cbf_levelsets:
-                    self.main_ax.add_patch(cbf_levelset)
+                # self.main_ax.add_patch(self.clf_levelset)
+                # for cbf_levelset in self.cbf_levelsets:
+                    # self.main_ax.add_patch(cbf_levelset)
 
         else:
             self.runs = False
@@ -278,6 +502,7 @@ class Plot2DSimulation():
         graphical_elements.append(self.time_text)
         graphical_elements.append(self.trajectory)
         graphical_elements.append(self.clf_center)
+        graphical_elements.append(self.init_state)
         if self.plot_config["equilibria"]: 
             graphical_elements.append(self.equilibria_plot)
         graphical_elements.append(self.clf_grad_arrow)
@@ -405,7 +630,7 @@ class PlotUnicycleSimulation(Plot2DSimulation):
         self.num_cbfs = len(self.cbfs)
 
         # Initalize some graphical objects
-        self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str("Time = "), fontsize=14)
+        self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str(""), fontsize=14)
         self.cbf_text_numbers = [ self.main_ax.text(0, 0, "", fontsize=10) for k in range(self.num_cbfs) ]
         self.cbf_text_numbers_closests = [ self.main_ax.text(0, 0, "", fontsize=10) for k in range(self.num_cbfs) ]
 

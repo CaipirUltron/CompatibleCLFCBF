@@ -321,19 +321,19 @@ class QFunction():
                 q_d, r_d = polydiv( self.d_poly.coef, Poly.fromroots(z).coef )
                 q_val = Poly(q_n)(z)/Poly(q_d)(z)
                 if q_val < 1.0:
-                    self.equilibrium_sols.append( {"lambda": z, "degenerate": True} )
+                    self.equilibrium_sols.append( {"lambda": float(z), "degenerate": True} )
                 continue
             self.equilibrium_sols.append( {"lambda": float(z), "degenerate": False} )
+
+            l = self.equilibrium_sols[-1]["lambda"]
+            v_array = np.array([ poly(l) for poly in self.v_poly ])
+            self.equilibrium_sols[-1]["point"] = ( v_array/self.divisor_poly(l) + self.cbf.center ).tolist()
 
         # Computes stability from the S(λ) matrix ( TO DO: fix stability computation in degenerated cases )
         for sol in self.equilibrium_sols:
             l = sol["lambda"]
             eigS = self.stability(l)
             sol["stability"] = float(max(eigS))
-            v_array = np.array([ poly(l) for poly in self.v_poly ])
-            # invP = np.linalg.inv( self.pencil(l) )
-            # sol["point"] = ( invP @ self.w + self.cbf.center ).tolist()
-            sol["point"] = ( v_array/self.divisor_poly(l) + self.cbf.center ).tolist()
 
     def _qvalue(self, l: float, H: list | np.ndarray, w: list | np.ndarray) -> float:
         '''
@@ -437,7 +437,7 @@ class QFunction():
         '''
         for interval in self.stability_intervals:
             if interval["stability"] == 'stable':
-                for root in self.safe_zero_poly.roots():
+                for root in self.zero_poly.roots():
                     if np.abs(root.imag) > 1e-6:
                         continue
                     limits = interval["limits"]
@@ -512,7 +512,7 @@ class QFunction():
         def cost(var: np.ndarray):
             ''' Seeks to minimize the distance from reference CLF and ellipsoid volume '''
             Hv = self.clf.param2Hv(var)
-            print( f"Eigenvalues of Hv = { np.linalg.eigvals(Hv) }" )
+            # print( f"Eigenvalues of Hv = { np.linalg.eigvals(Hv) }" )
 
             cost = np.linalg.norm( Hv - Hv0, 'fro' )
             cost += ellipsoid_vol(Hv)

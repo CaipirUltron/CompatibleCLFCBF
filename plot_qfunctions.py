@@ -12,9 +12,9 @@ num_steps = int(sim.T/sim.sample_time)
 time_list = []
 
 ''' --------------------------------- Plot ------------------------------------- '''
-size = 3.0
-fig = plt.figure(figsize=(size*sim.num_cbfs, size), layout='constrained')
-fig.suptitle('Q-functions')
+size = 4.0
+fig = plt.figure(figsize=(1.5*size*sim.num_cbfs, size), layout='constrained')
+fig.suptitle('Q-function')
 
 axes = []
 nrows, ncols = optimal_arrangement(sim.num_cbfs)

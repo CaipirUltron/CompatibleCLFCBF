@@ -2,7 +2,7 @@ import sys
 import json
 import importlib
 import matplotlib.pyplot as plt
-from graphics import Plot2DSimulation
+from graphics import PlotQuadraticSim
 
 # Load simulation file
 if len(sys.argv) < 2:
@@ -18,7 +18,15 @@ try:
 except IOError:
     print("Couldn't locate " + simulation_file + ".json")
 
-time = float(sys.argv[2])
-plotSim = Plot2DSimulation( logs, sim.plant, sim.clf, [sim.cbf], plot_config = sim.plot_config )
-plotSim.plot_frame(time)
+figsize= (5, 5)
+fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize, layout="constrained")
+fig.suptitle('CLF-CBF-QP Controller')
+
+plotSim = PlotQuadraticSim( logs, sim.plant, sim.clf, sim.cbfs, plot_config = sim.plot_config )
+
+plotSim.init_graphics(ax)
+
+t = float(sys.argv[2])
+plotSim.plot_frame(t)
+
 plt.show()
