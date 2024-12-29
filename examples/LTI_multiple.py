@@ -1,9 +1,16 @@
+'''
+Simulation example. Has to define the following objects:
+1) plant - system dynamics (LinearSystem, DriftLess)
+2) clf: QuadraticLyapunov - CLF moding the stabilization requirement
+3) cbfs: list[QuadraticBarrier] - list of quadratic CBFs modeling the safety requirements
+'''
 import numpy as np
 
 from common import is_controllable
-from controllers import CompatibleQP
 from dynamic_systems import LinearSystem, DriftLess
 from functions import QuadraticLyapunov, QuadraticBarrier
+
+limits = 9*np.array((-1,1,-1,1))
 
 ''' --------------------------------- Define LTI system ------------------------------------- '''
 x0 = np.array([1,8])
@@ -20,11 +27,10 @@ B = np.array([[1,0],
 
 # A = np.array([[ 0, 1],
 #               [-1,-1]])
-
-# A = np.array([[ 0,-1],
-#               [-1,-1]])
-# B = np.array([[0],
-#               [1]])
+# # B = np.array([[0],
+# #               [1]])
+# B = np.array([[1,0],
+#               [0,1]])
 
 n = A.shape[0]
 m = B.shape[1]
@@ -43,37 +49,28 @@ CLFaxes = np.array([1.0, 4.0])
 CLFangle = 0.0
 CLFcenter = np.zeros(2)
 
-clf = QuadraticLyapunov.geometry2D(CLFaxes, CLFangle, CLFcenter, level=1)
+clf = QuadraticLyapunov.geometry2D(CLFaxes, CLFangle, CLFcenter, level=1, limits=limits)
 
 ''' ------------------------ Define CBF (varying Hessian eigenvalues) ----------------------- '''
 CBFaxes = [4.0, 1.0]
 CBFangle = 10.0
 CBFcenter = np.array([0.0, 5.0])
-cbf1 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter)
+cbf1 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter, limits=limits)
 
 CBFaxes = [1.0, 3.0]
 CBFangle = -10.0
 CBFcenter = np.array([6.0, 0.0])
-cbf2 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter)
+cbf2 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter, limits=limits)
 
 CBFaxes = [1.0, 2.0]
 CBFangle = -10.0
 CBFcenter = np.array([-6.0, 2.0])
-cbf3 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter)
+cbf3 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter, limits=limits)
 
 # cbfs = []
 # cbfs = [cbf1]
 cbfs = [cbf1, cbf2, cbf3]
 num_cbfs = len(cbfs)
-
-''' --------------------------- Compatible controller --------------------------------- '''
-T = 10
-sample_time = 5e-3
-controller = CompatibleQP(plant, clf, cbfs, 
-                          alpha = [1.0, 1.0], beta = 1.0, p = [1.0, 1.0], dt = sample_time, 
-                          compatibilization=True,
-                          active=True,
-                          verbose=True)
 
 ''' ------------------------------ Configure plot ----------------------------------- '''
 plot_config = {
@@ -84,5 +81,3 @@ plot_config = {
     "fps":60,
     "equilibria": False,
     }
-
-logs = { "sample_time": sample_time }
