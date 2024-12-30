@@ -7,26 +7,31 @@ from controllers import CompatibleQP
 sim_config = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples."+sim_config, package=None)
 
-''' ---------------------------- Load controller ---------------------------------- '''
+''' ---------------------------- Load control mode ---------------------------------- '''
+available_ctrl_modes = ["no_control", "nominal", "compatible"]
+
+# control_mode = 'no_control'
 control_mode = 'nominal'
 # control_mode = 'compatible'
-# control_mode = 'no_control'
 
 if len(sys.argv) > 2:
-    control_mode = float(sys.argv[2])
-
-if control_mode == 'nominal':
-    control_opts = {"compatibilization": False, 
-                    "active": True}
-
-if control_mode == 'nominal':
-    control_opts = {"compatibilization": False, 
-                    "active": True}
+    control_mode = sys.argv[2]
+    if control_mode not in available_ctrl_modes:
+        raise Exception("Invalid control mode.")
     
 if control_mode == 'no_control':
     control_opts = {"compatibilization": False, 
                     "active": False}
-    
+
+if control_mode == 'nominal':
+    control_opts = {"compatibilization": False, 
+                    "active": True}
+
+if control_mode == 'compatible':
+    control_opts = {"compatibilization": True, 
+                    "active": True}
+
+''' ---------------------------- Load controller ---------------------------------- '''
 sample_time = 2e-2
 controller = CompatibleQP(sim.plant, sim.clf, sim.cbfs, alpha = [1.0, 10.0], beta = 1.0, p = [1.0, 1.0], 
                           dt = sample_time,
@@ -39,7 +44,7 @@ if len(sys.argv) > 3:
     T = float(sys.argv[3])
 
 logs = { "sample_time": sample_time }
-num_steps = int(sim.T/sample_time)
+num_steps = int(T/sample_time)
 time_list = []
 
 print('Running simulation...')
@@ -64,16 +69,18 @@ for step in range(0, num_steps):
     sim.plant.actuate(sample_time)
 
 # Collect simulation logs and save in .json file ------------------------------------
-sim.logs["time"] = time_list
-sim.logs["state"] = sim.plant.state_log
-sim.logs["control"] = sim.plant.control_log
-sim.logs["clf_log"] = controller.clf.dynamics.state_log
-sim.logs["equilibria"] = controller.equilibrium_points
-sim.logs["tracking"] = None
+logs = {"dt": sample_time,
+        "time": time_list,
+        "state": sim.plant.state_log,
+        "control": sim.plant.control_log,
+        "clf_log": controller.clf.dynamics.state_log,
+        "equilibria": controller.equilibrium_points,
+        "tracking": None
+        }
 
 if hasattr(sim, 'path'):
-    sim.logs["gamma_log"] = sim.path.logs["gamma"]
+    logs["gamma_log"] = sim.path.logs["gamma"]
 
-with open("logs/"+sim_config+"-"+control_mode+".json", "w") as file:
+with open("logs/"+sim_config+"_"+control_mode+".json", "w") as file:
     print("Saving simulation data...")
-    json.dump(sim.logs, file, indent=4)
+    json.dump(logs, file, indent=4)

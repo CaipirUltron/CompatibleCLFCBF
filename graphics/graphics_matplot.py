@@ -8,7 +8,7 @@ import matplotlib.colors as mcolors
 from matplotlib import gridspec
 from matplotlib.axes import Axes
 from matplotlib.patches import Rectangle, Ellipse
-from functions import Quadratic, QuadraticLyapunov, QuadraticBarrier
+from functions import Quadratic
 
 class PlotQuadraticSim():
     '''
@@ -56,7 +56,7 @@ class PlotQuadraticSim():
         self.num_cbfs = len(self.cbfs)
 
         # Get logs
-        self.sample_time = logs["sample_time"]
+        self.sample_time = logs["dt"]
         self.time = logs["time"]
         self.num_steps = len(self.time)
         self.initial_time = self.time[0]

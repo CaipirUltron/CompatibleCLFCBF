@@ -1,204 +1,145 @@
 import scipy
+import inspect 
+
 import numpy as np
 import scipy.linalg
 
-from abc import ABC, abstractmethod
 from typing import Callable
 
-def fun_signature( method: Callable ):
-    ''' Tests output values returned by a vector transformation method. '''
-
-    if not isinstance(method, Callable):
-        raise TypeError("Input is not a callable method.")
-    
-    max_dim = 100
-    for dim in range(1, max_dim):
-        try:
-            dummy_input = np.zeros(dim)
-            dummy_output = method( dummy_input )
-            break
-        except Exception as exc:
-            pass
-
-    method.ndim = dummy_output.ndim
-    method.shape = dummy_output.shape
-
-class DynamicSystem(ABC):
+class ControlSystem():
     '''
-    Abstract class for dynamic systems. This class has all the functionality for simulating dynamic systems using scipy integration methods.
-    The abstract functionality that needs to be implemented by the child classes is the flow computation.
+    General class  for control system.
+    Has all the functionality for simulating dynamic systems using scipy integration methods.
+    Child classes for specific control system dynamics can be easily build from this one. 
     '''
     def __init__(self, **kwargs):
         
-        # Input and output dimension:
-        if "n" in kwargs.keys():
-            self.n = kwargs["n"]
-            x0 = np.zeros(self.n)
-
-        if "m" in kwargs.keys():
-            self.m = kwargs["m"]
-            u0 = np.zeros(self.m)
-
-        for key in kwargs:
-            if key.lower() == "state":
-                x0 = kwargs["state"]
-                self.n = len(x0)
-                self.set_state(x0)
-                continue
-            if key.lower() == "control":
-                u0 = kwargs["control"]
-                self.m = len(u0)
-                self.set_control(u0)
-                continue
-
-        if not hasattr(self, "n"):
-            raise Exception("State dimension was not specified!")
-        if not hasattr(self, "m"):
-            raise Exception("Control dimension was not specified!")
-
-        self.n = len(x0)
-        self.m = len(u0)
-
         from scipy.integrate import ode
         self.mODE = ode(self.get_flow).set_integrator('dopri5')
 
+        # Specify initial state
+        if "n" in kwargs.keys():
+            x0 = np.zeros(kwargs["n"])
+        if "state" in kwargs.keys():
+            x0 = kwargs["state"]
+
+        self.n = len(x0)
+        self.set_state(x0)
+
+        # Specify initial control
+        if "m" in kwargs.keys():
+            u0 = np.zeros(kwargs["m"])
+        if "control" in kwargs.keys():
+            u0 = kwargs["control"]
+        
+        self.m = len(u0)
+        self.set_control(u0)
+
+        # Specify system dynamics
+        if "dynamics" in kwargs.keys():
+            self.dynamics = kwargs["dynamics"]
+            iscallable = isinstance(self.dynamics, Callable)
+            signature = inspect.signature(self.dynamics)
+            hassignature = "x" in signature.parameters.keys() and "u" in signature.parameters.keys()
+            if (not iscallable) or (not hassignature):
+                raise TypeError("Passed dynamics must be a callable method with 'x' and 'u' input variables.")
+                
+        if not hasattr(self, "n"):
+            raise Exception("State dimension was not specified!")
+        
+        if not hasattr(self, "m"):
+            raise Exception("Control dimension was not specified!")
+        
+        if not hasattr(self, "dynamics"):
+            raise Exception("Control dynamics was not specified!")
+
+        # Initialize state logs
         self.state_log = []
         for _ in range(0, self.n):
             self.state_log.append([])
 
+        # Initialize control logs
         self.control_log = []
         for _ in range(0, self.m):
             self.control_log.append([])
 
     def set_state(self, state):
-        '''
-        Sets system state.
-        '''
-        if isinstance(state, list):
-            self._state = np.array(state)
+        ''' Sets system state '''
 
-        self._dstate = np.zeros(self.n)
+        if isinstance(state, list):
+            state = np.array(state)
+            
+        self._state = state
         self.mODE.set_initial_value(self._state)
 
     def set_control(self, control_input):
-        '''
-        Sets system control.
-        '''
+        '''Sets system control '''
+
         if isinstance(control_input, list):
-            self._control = np.array(control_input)
-        if isinstance(control_input, float | int):
-            self._control = np.array([control_input])
+            control_input = np.array(control_input)
+        self._control = control_input
 
     def actuate(self, dt):
-        '''
-        Sends the control inputs.
-        '''
-        self.dynamics()
+        ''' Integrates the state vector '''
         self._state = self.mODE.integrate(self.mODE.t+dt)
         self.log_state()
         self.log_control()
 
     def log_state(self):
-        '''
-        Logs the state.
-        '''
+        ''' Logs the state '''
         for state_dim in range(0, self.n):
             self.state_log[state_dim].append(self._state[state_dim])
 
     def log_control(self):
-        '''
-        Logs the control.
-        '''
+        ''' Logs the control '''
         for ctrl_dim in range(0, self.m):
             self.control_log[ctrl_dim].append(self._control[ctrl_dim])
 
     def get_flow(self, t):
-        '''
-        Gets the current system flow, or state derivative.
-        '''
-        return self._dstate
+        ''' Returns current system flow, that is, its state derivative '''
+        return self.dynamics(x = self._state, u = self._control)
 
     def get_state(self):
-        '''
-        Gets the current system state.
-        '''
+        ''' Returns the current system state '''
         return self._state
 
     def get_control(self):
-        '''
-        Gets the last control input.
-        '''
+        ''' Gets the last control input '''
         return self._control
 
-    @abstractmethod
-    def dynamics(self):
-        '''
-        Abstract method to implement system dynamics.
-        Must return self._dstate with the correct computation for the system flow.
-        '''
-        pass
-
-class AffineSystem(DynamicSystem):
+class AffineSystem(ControlSystem):
     '''
-    General class for an affine system dx = f(x) + g(x) u.
+    General class for an affine control system dx = f(x) + g(x) u.
     '''
     def __init__(self, f=Callable, g=Callable, **kwargs):
 
         if not isinstance(f, Callable) or not isinstance(g, Callable):
             raise TypeError("f(x) and g(x) must be callable methods.")
 
-        fun_signature(f)
-        fun_signature(g)
-
-        if f.ndim != 1:
-            raise TypeError("Invalid f(x) (must be an n-dimensional array).")
-        n = f.shape[0]
-
-        if n != g.shape[0]:
-            raise TypeError("Invalid g(x) (number of rows must be the same as the state dimension).")
-        
-        if g.ndim == 1: 
-            m = 1
-        else:
-            m = g.shape[1]
-
-        super().__init__(n=n, m=m, **kwargs)
         self.f_fun = f
         self.g_fun = g
 
+        affine_dynamics = lambda x,u: self.f(x) + self.g(x) @ u
+        super().__init__(dynamics = affine_dynamics, **kwargs)
+
     def f(self, state):
-        '''
-        Gets the current value of f(x).
-        '''
+        ''' Gets f(x) value for the given state '''
         return self.f_fun(state)
 
     def g(self, state):
-        '''
-        Gets the current value of g(x).
-        '''
+        ''' Gets g(x) value for the given state '''
         return self.g_fun(state)
-
-    def dynamics(self):
-        ''' General affine system dynamics '''
-
-        self._dstate = self.f(self._state) + self.g(self._state) @ self._control
 
 class Integrator(AffineSystem):
     '''
     Implements a simple n-order integrator. State dimension must be the same as the input dimension.
     '''
-    def __init__(self, **kwargs):
-
-        if "n" not in kwargs.keys():
-            raise Exception("Integrator dimension must be specified.")
-        n = kwargs["n"]
+    def __init__(self, n, **kwargs):
 
         f = lambda x: np.zeros(n)
         g = lambda x: np.eye(n)
 
-        super().__init__(f=f, g=g, **kwargs)
-        if len(self.n) != len(self.m):
-            raise Exception('State dimension must be the same as the input dimension.')
+        super().__init__(n=n, m=n, f=f, g=g, **kwargs)
 
 class LinearSystem(AffineSystem):
     '''
@@ -206,24 +147,24 @@ class LinearSystem(AffineSystem):
     '''
     def __init__(self, A, B, **kwargs):
         
-        if not isinstance(A, np.ndarray) or A.shape != 2:
+        if not isinstance(A, np.ndarray) or A.ndim != 2:
             raise TypeError("A must be a n x n square matrix.")
 
-        if not isinstance(B, np.ndarray) or B.shape != 2:
+        if not isinstance(B, np.ndarray) or B.ndim != 2:
             raise TypeError("B must be a n x m square matrix.")
 
         if A.shape[0] != A.shape[1]:
             return TypeError("A matrix must be square.")
         n = A.shape[0]
 
-        if self.n != B.shape[0]:
+        if n != B.shape[0]:
             return TypeError("B matrix must have the same number os rows as the state dimension.")
         m = B.shape[1]
 
         f = lambda x: A @ x
         g = lambda x: B
 
-        super().__init__(f=f, g=g, n=n, m=m **kwargs)
+        super().__init__(n=n, m=m, f=f, g=g, **kwargs)
         self.A = A
         self.B = B
 
@@ -232,24 +173,28 @@ class LinearSystem(AffineSystem):
         if "A" in kwargs.keys():
             self.A = kwargs["A"]
             self.f_fun = lambda x: self.A @ x
+            self.dynamics = lambda x,u: self.A @ x + self.B @ u
 
         if "B" in kwargs.keys():
             self.B = kwargs["B"]
-            self.g_fun = lambda x: self.B
+            self.dynamics = lambda x,u: self.A @ x + self.B @ u
 
 class DriftLess(AffineSystem):
     '''
-    Implements driftless nonlinear system dx = g(x) u, where g(x) must be a full rank matrix.
+    Implements driftless nonlinear system dx = g(x) u.
     '''
     def __init__(self, g: Callable, **kwargs):
-        super().__init__(**kwargs)
-        self.gfun = g
 
-    def f(self):
-        self._f = np.zeros(self.n)
+        fun_signature(g)
+        n = g.shape[0]
 
-    def g(self):
-        self._g = self.gfun(self._state)
+        # if g.ndim == 1: m = 1
+        # else: m = g.shape[1]
+
+        f = lambda x: np.zeros(n)
+        super().__init__(f=f, g=g, **kwargs)
+
+''' ------------------------ Code below was not refactored yet ----------------------------------- '''
 
 class Periodic(AffineSystem):
     '''

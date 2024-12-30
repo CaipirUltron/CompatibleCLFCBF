@@ -42,7 +42,7 @@ if is_controllable(A,B):
 else: 
     print(msg+'not controllable.')
 
-plant = LinearSystem(x0, np.zeros(m), A=A, B=B)
+plant = LinearSystem(A=A, B=B, state = x0)
 
 ''' ------------------------ Define CLF (varying Hessian eigenvalues) ----------------------- '''
 CLFaxes = np.array([1.0, 4.0])

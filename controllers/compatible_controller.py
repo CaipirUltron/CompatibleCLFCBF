@@ -213,13 +213,13 @@ class CompatibleQP():
         '''
         # Affine plant dynamics
         if type(self.plant) == Unicycle:
-            f = self.plant.get_f()[:2]
-            g = self.plant.get_g()[:2,:]
             state = self.plant.get_state()[:2]
+            f = self.plant.f(state)[:2]
+            g = self.plant.g(state)[:2,:]
         else:
-            f = self.plant.get_f()
-            g = self.plant.get_g()
             state = self.plant.get_state()
+            f = self.plant.f(state)
+            g = self.plant.g(state)
 
         print(f"State = {state}")
 
@@ -255,9 +255,9 @@ class CompatibleQP():
         Sets the barrier constraint.
         '''
         # Affine plant dynamics
-        f = self.plant.get_f()
-        g = self.plant.get_g()
         state = self.plant.get_state()
+        f = self.plant.f(state)
+        g = self.plant.g(state)
 
         # Barrier function and gradient
         h = cbf(state)

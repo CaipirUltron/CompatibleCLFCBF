@@ -33,7 +33,7 @@ class QuadraticLyapunov(Quadratic):
 
         from dynamic_systems import Integrator
         self.param = self.Hv2param( self.H )
-        self.dynamics = Integrator(self.param,np.zeros(len(self.param)))
+        self.dynamics = Integrator(n=len(self.param), state = self.param)
 
     def param2Hv(self, param):
         ''' Function to compute Hv from parameters '''

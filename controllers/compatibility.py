@@ -8,9 +8,7 @@ from matplotlib.axes import Axes
 from numpy.polynomial import Polynomial as Poly
 from numpy.polynomial.polynomial import polydiv, polyder, polyint
 
-from typing import Callable
 from copy import copy
-from scipy import signal
 from scipy.optimize import fsolve, minimize
 from scipy.linalg import null_space, inv
 
@@ -64,7 +62,7 @@ class QFunction():
         self.H = self.cbf.H
 
         if isinstance(self.plant, LinearSystem):
-            A, B = self.plant._A, self.plant._B
+            A, B = self.plant.A, self.plant.B
             G = B @ B.T
             self.M = G @ self.H
             self.N = self.p * G @ self.Hv - A
@@ -420,7 +418,7 @@ class QFunction():
         ''' Checks if given CLF satisfy the CLF condition '''
 
         if isinstance(self.plant, LinearSystem):
-            A, B = self.plant._A, self.plant._B
+            A, B = self.plant.A, self.plant.B
         else:
             raise NotImplementedError("CLF condition test not implemented for non-LTI systems.")
         
@@ -499,7 +497,7 @@ class QFunction():
         Hv0 = self.Hv
 
         if isinstance(self.plant, LinearSystem):
-            A, B = self.plant._A, self.plant._B
+            A, B = self.plant.A, self.plant.B
         if isinstance(self.plant, DriftLess):
             A, B = np.zeros((self.plant.n)), self.eye(self.plant.n)
 
