@@ -78,6 +78,8 @@ class QFunction():
 
         ''' Class parameters '''
         self.real_tol = 1e-6
+        self.infty_tol = 1e+8
+
         self.epsilon = 1e-3
         self.composite_kappa = 20
         self.normalization_kappa = 1e-4
@@ -209,7 +211,7 @@ class QFunction():
             return (pos_num, neg_num)
 
         real_eigS = self.Smatrix_pencil.real_eigen()
-        divisions = [-np.inf] + [ float(eig.eigenvalue) for eig in real_eigS if np.abs(eig.eigenvalue) != np.inf ] + [np.inf]
+        divisions = [-np.inf] + [ float(eig.eigenvalue) for eig in real_eigS if np.abs(eig.eigenvalue) <= self.infty_tol ] + [np.inf]
         
         self.intervals = []
         self.stability_intervals = []
@@ -558,39 +560,55 @@ class QFunction():
 
         return results
 
-    def init_graphics(self, ax: Axes, res=0.01):
-        ''' Initialize graphical objects '''
+    def configure_plot(self):
+        ''' Initializes plot config '''
 
-        # Get horizontal and vertical ranges for plotting
+        self.plot_configs = {"inertia": True,
+                             "qfunction": False,
+                             "zfunction": True }
+
+        max_hor_lim = 1000
+        max_ver_lim = 1000
 
         eq_sols = [ root.real for root in self.zero_poly.roots() if np.isreal(root) ]
-        realeigs = [ eig.eigenvalue for eig in self.Smatrix_pencil.real_eigen() if np.abs(eig.eigenvalue) != np.inf ]
+        realeigs = [ eig.eigenvalue for eig in self.Smatrix_pencil.real_eigen() if np.abs(eig.eigenvalue) < self.infty_tol ]
         complexeigs = [ eig.real for eig in self.stability_conj_pairs ]
         lambda_range = [0.0] + eq_sols + realeigs + complexeigs
 
-        lmin, lmax = max(min(lambda_range), -100), min(max(lambda_range), +100)
+        lmin, lmax = max(min(lambda_range), -max_hor_lim), min(max(lambda_range), +max_hor_lim)
 
         z_range = [ self.zero_poly(root.real) for root in self.diff_zero_poly.roots() if np.isreal(root) ]
         z_range += [ self.zero_poly(lmin) ]
         z_range += [ self.zero_poly(lmax) ]
-        zmin, zmax = max(min(z_range),-100), min(max(z_range),+100)
+        zmin, zmax = max(min(z_range),-max_ver_lim), min(max(z_range),+max_ver_lim)
 
-        self.plot_configs = {"hor": [lmin-5, lmax+5],
-                             "ver": [zmin-10, zmax+10],
-                             "inertia": False }
+        self.plot_configs["hor"] = [lmin-5, lmax+5]
+        self.plot_configs["ver"] = [zmin-10, zmax+10]
+
+    def init_graphics(self, ax: Axes, res=0.01):
+        ''' Initialize graphical objects '''
+
+        # Get horizontal and vertical ranges for plotting
+        self.configure_plot()
+        hor_limits = self.plot_configs["hor"]
+        ver_limits = self.plot_configs["ver"]
 
         self.strip_colors = {"nsd": np.array(mcolors.to_rgb(mcolors.TABLEAU_COLORS['tab:red'])),
                              "psd": np.array(mcolors.to_rgb(mcolors.TABLEAU_COLORS['tab:cyan'])),
                              "indef": np.array(mcolors.to_rgb(mcolors.TABLEAU_COLORS['tab:gray']))}
 
         self.lambda_res = res
+        self.lambda_array = np.arange(hor_limits[0], hor_limits[1], self.lambda_res)
+
         zmin, zmax = self.plot_configs["ver"]
         self.strip_size = np.abs(zmax-zmin)/20
 
-        hor_limits = self.plot_configs["hor"]
-        self.lambda_array = np.arange(hor_limits[0], hor_limits[1], self.lambda_res)
-        self.q_plot, = ax.plot([],[],'b',lw=0.8, label='$q(\lambda) = \dfrac{n(\lambda)}{|P(\lambda)|^2}$')
-        self.z_plot, = ax.plot([],[],'g',lw=0.8, label='$z(\lambda) = n(\lambda) - |P(\lambda)|^2$')
+        if self.plot_configs["qfunction"]:
+            self.q_plot, = ax.plot([],[],'b',lw=0.8, label='$q(\lambda) = \dfrac{n(\lambda)}{|P(\lambda)|^2}$')
+
+        if self.plot_configs["zfunction"]:
+            self.z_plot, = ax.plot([],[],'g',lw=0.8, label='$z(\lambda) = n(\lambda) - |P(\lambda)|^2$')
+
         self.ones_plot, = ax.plot(self.lambda_array,[ 1.0 for l in self.lambda_array ],'k--',lw=1.0)
 
         self.stable_pts, = ax.plot([], [], 'or' )
@@ -616,19 +634,31 @@ class QFunction():
         ax.set_ylabel('', fontsize = 'small')
         ax.legend(loc='upper right', fontsize = 'small')
 
-    def plot(self):
+    def plot(self, ax=None):
         '''
         Plots the Q-function for analysis.
         '''
+        self.configure_plot()
+        graphical_elements = []
+
         hor_limits = self.plot_configs["hor"]
-        
-        # Zero polynomial
-        z_array = [ self.zero_poly(l) for l in self.lambda_array ]
-        self.z_plot.set_data(self.lambda_array, z_array)
+        ver_limits = self.plot_configs["ver"]
+        self.lambda_array = np.arange(hor_limits[0], hor_limits[1], self.lambda_res)
+
+        # Plot of 1.0 solution line
+        self.ones_plot.set_data(self.lambda_array, [ 1.0 for l in self.lambda_array ])
 
         # Q-function polynomial
-        q_array = [ self.n_poly(l)/self.d_poly(l) for l in self.lambda_array ]
-        self.q_plot.set_data(self.lambda_array, q_array)
+        if self.plot_configs["qfunction"]:
+            q_array = [ self.n_poly(l)/self.d_poly(l) for l in self.lambda_array ]
+            self.q_plot.set_data(self.lambda_array, q_array)
+            graphical_elements.append( self.q_plot )
+
+        # Zero polynomial
+        if self.plot_configs["zfunction"]:
+            z_array = [ self.zero_poly(l) for l in self.lambda_array ]
+            self.z_plot.set_data(self.lambda_array, z_array)
+            graphical_elements.append( self.z_plot )
 
         # Definiteness intervals
         num_updated = 0
@@ -690,11 +720,12 @@ class QFunction():
         for i in range(k+1, len(self.equilibrium_texts)):
             self.equilibrium_texts[k].set_text(f"")
 
+        if ax:
+            ax.set_xlim(xmin=hor_limits[0], xmax=hor_limits[1])
+            ax.set_ylim(ymin=ver_limits[0], ymax=ver_limits[1])
+
         # Returns graphical handlers
-        graphical_elements = []
         graphical_elements.append( self.ones_plot )
-        graphical_elements.append( self.z_plot )
-        graphical_elements.append( self.q_plot )
         graphical_elements += self.strip_rects
         graphical_elements += self.interval_texts
         graphical_elements.append( self.real_stability_pts )

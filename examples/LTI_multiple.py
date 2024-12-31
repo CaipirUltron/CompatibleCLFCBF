@@ -4,6 +4,7 @@ Simulation example. Has to define the following objects:
 2) clf: QuadraticLyapunov - CLF moding the stabilization requirement
 3) cbfs: list[QuadraticBarrier] - list of quadratic CBFs modeling the safety requirements
 '''
+
 import numpy as np
 
 from common import is_controllable
@@ -27,10 +28,8 @@ B = np.array([[1,0],
 
 # A = np.array([[ 0, 1],
 #               [-1,-1]])
-# # B = np.array([[0],
-# #               [1]])
-# B = np.array([[1,0],
-#               [0,1]])
+# B = np.array([[0],
+#               [1]])
 
 n = A.shape[0]
 m = B.shape[1]
@@ -68,8 +67,8 @@ CBFcenter = np.array([-6.0, 2.0])
 cbf3 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter, limits=limits)
 
 # cbfs = []
-# cbfs = [cbf1]
-cbfs = [cbf1, cbf2, cbf3]
+cbfs = [cbf3]
+# cbfs = [cbf1, cbf2, cbf3]
 num_cbfs = len(cbfs)
 
 ''' ------------------------------ Configure plot ----------------------------------- '''

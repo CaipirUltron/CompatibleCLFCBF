@@ -1,3 +1,8 @@
+'''
+Simulation of a multibody system under Newtonian gravity.
+Why did I do this? Dunno, don't care.
+'''
+
 import platform, os
 import numpy as np
 

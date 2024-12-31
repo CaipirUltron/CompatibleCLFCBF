@@ -3,8 +3,11 @@ import math
 import json
 import control
 import warnings
+import quaternion
 
 import numpy as np
+from scipy.spatial import geometric_slerp
+from scipy.spatial.transform import Rotation as R
 
 from itertools import product, combinations
 from functools import wraps
@@ -138,20 +141,59 @@ def genStableLTI(n, m, **kwargs) -> tuple:
 
     return A, B
 
-def interpolation(A0, A1, type='linear'):
-    ''' Interpolation between A0 and A1 '''
+def interpolation( start, end ):
+    '''
+    Interpolation between 'start' and 'end'.
+        - if input is a scalar or vector, return LERP
+        - if input is a 2D or 3D rotation matrix, return SLERP
+    
+    Returns: callable method with input t, representing the normalized time variable between 0 and 1 for interpolation.
+    '''
+    if type(start) != type(end):
+        raise TypeError("Interpolated start and ending points are of different data types!")
+    
+    if isinstance(start, np.ndarray) and start.ndim != end.ndim:
+        raise TypeError("Interpolated start and ending matrices are not the same size!")
 
-    def linear(t):
-        return A0*(1-t) + A1*t
+    # If scalar or vector, interpolate linearly
+    if isinstance( start, (float,int) ) or ( isinstance( start, np.ndarray ) and start.ndim == 1 ):
+        return lambda t: start*(1-t) + end*t
+    
+    # If matrix, interpolate as rotation matrix
+    elif isinstance( start, np.ndarray ) and start.ndim == 2:
 
-    def trig(t):
-        return A0*np.cos(t) + A1*np.sin(t)
+        shape = start.shape
 
-    if type == 'linear':
-        return linear
+        # SLERP is implemented for 2D and 3D rotations
+        if shape == (2,2):
+            start = np.hstack([start, np.zeros([2,1])])
+            start = np.vstack([start, np.eye(3)[2,:] ])
 
-    if type == 'trig':
-        return trig
+            end = np.hstack([end, np.zeros([2,1])])
+            end = np.vstack([end, np.eye(3)[2,:] ])
+
+        elif shape != (3,3):
+            raise NotImplementedError("SLERP not implemented for dimensions n > 3")
+
+        r1 = R.from_matrix(start)
+        q1 = np.quaternion(*r1.as_quat(scalar_first=True))
+
+        r2 = R.from_matrix(end)
+        q2 = np.quaternion(*r2.as_quat(scalar_first=True))
+
+        def rot_slerp(t):
+            quat = q1*(((1/q1)*q2)**t)
+
+            rot = quaternion.as_rotation_matrix(quat)
+            if shape == (3,3):
+                return rot
+            if shape == (2,2):
+                return rot[:2,:2]
+
+        return rot_slerp
+    
+    else:
+        raise NotImplementedError("Unsupported input data types.")
 
 def cofactor(A):
     """
@@ -344,20 +386,23 @@ def hat(omega):
 
 def rot2D(theta):
     '''
-    Standard 2D rotation matrix (theta is given in radians)
+    Standard 2D rotation matrix (theta is given in degrees)
     '''
+    theta = np.deg2rad(theta)
     c, s = np.cos(theta), np.sin(theta)
     R = np.array(((c,-s),(s,c)))
     return R
 
 def rot3D(theta, axis):
     '''
-    Angle and axis 3D rotation matrix.
+    Angle and axis 3D rotation matrix (theta is given in degrees)
     '''
     axis_norm = np.linalg.norm(axis)
     u = axis/axis_norm
     uut = np.outer(u, u)
     u_cross = np.cross(u,np.identity(u.shape[0])*-1)
+
+    theta = np.deg2rad(theta)
     cos, sin = np.cos(theta), np.sin(theta)
     R = cos*np.eye(3) + sin*u_cross + (1-cos)*uut
     return R
