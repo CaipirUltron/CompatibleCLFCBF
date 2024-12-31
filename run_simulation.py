@@ -5,7 +5,7 @@ from controllers import CompatibleQP
 
 ''' ------------------------- Load simulation example ------------------------------ '''
 sim_config = sys.argv[1].replace(".json","")
-sim = importlib.import_module("examples."+sim_config, package=None)
+sim = importlib.import_module("examples.simulation."+sim_config, package=None)
 
 ''' ---------------------------- Load control mode ---------------------------------- '''
 available_ctrl_modes = ["no_control", "nominal", "compatible"]

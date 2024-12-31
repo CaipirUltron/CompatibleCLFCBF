@@ -65,6 +65,10 @@ This project is structured in the following way:
 
     Runs simulation of the CLF-CBF-QP nominal controller for an LTI system with specified CLF and CBF list in examples/LTI_multiple.py and stores results in logs/LTI_multiple.json
 
-    $ python plot_animation.py LTI_multiple nominal
+    $ python run_animation.py LTI_multiple nominal
 
-    Plots corresponding animation
+    Runs corresponding animation
+
+    $ python interp_Qfunction.py example1 animate
+
+    Runs animation of Q-function with interpolated parameters defined in /examples/interpolation/example1.py
