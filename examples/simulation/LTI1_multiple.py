@@ -34,20 +34,20 @@ else:
 plant = LinearSystem(A=A, B=B, state = x0)
 
 ''' ------------------------ Define CLF (varying Hessian eigenvalues) ----------------------- '''
-CLFaxes = np.array([1.0, 4.0])
-CLFangle = 0.0
+CLFaxes = np.array([1.0, 2.0])
+CLFangle = 10.0
 CLFcenter = np.zeros(2)
 
 clf = QuadraticLyapunov.geometry2D(CLFaxes, CLFangle, CLFcenter, level=1, limits=limits)
 
 ''' ------------------------ Define CBF (varying Hessian eigenvalues) ----------------------- '''
 CBFaxes = [4.0, 1.0]
-CBFangle = 10.0
+CBFangle = 5.0
 CBFcenter = np.array([0.0, 5.0])
 cbf1 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter, limits=limits)
 
-CBFaxes = [1.0, 3.0]
-CBFangle = -10.0
+CBFaxes = [4.0, 1.0]
+CBFangle = 5.0
 CBFcenter = np.array([6.0, 0.0])
 cbf2 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter, limits=limits)
 
@@ -57,7 +57,7 @@ CBFcenter = np.array([-6.0, 2.0])
 cbf3 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter, limits=limits)
 
 # cbfs = []
-cbfs = [cbf3]
+cbfs = [cbf1]
 # cbfs = [cbf1, cbf2, cbf3]
 num_cbfs = len(cbfs)
 

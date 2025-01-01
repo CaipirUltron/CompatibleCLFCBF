@@ -140,7 +140,7 @@ class QuadraticLyapunov(Quadratic):
     def geometry2D(cls, semiaxes: tuple, angle: float, center: list | np.ndarray, level: float, **kwargs):
         ''' Create Quadratic from geometric parameters '''
         a, b = semiaxes
-        R = rot2D(np.deg2rad(angle))
+        R = rot2D(angle)
 
         lamb1 = 2*level/(a**2)
         lamb2 = 2*level/(b**2)
@@ -168,7 +168,7 @@ class QuadraticBarrier(Quadratic):
     def geometry2D(cls, semiaxes: tuple, angle: float, center: list | np.ndarray, **kwargs):
         ''' Create Quadratic from geometric parameters '''
         a, b = semiaxes
-        R = rot2D(np.deg2rad(angle))
+        R = rot2D(angle)
         lamb1 = 1/(a**2) 
         lamb2 = 1/(b**2)
         H = R @ np.diag([lamb1, lamb2]) @ R.T

@@ -6,6 +6,8 @@ import warnings
 import quaternion
 
 import numpy as np
+
+from numpy.polynomial import Polynomial as Poly
 from scipy.spatial import geometric_slerp
 from scipy.spatial.transform import Rotation as R
 
@@ -17,6 +19,8 @@ from shapely.geometry import LineString, LinearRing, Polygon
 from shapely.ops import unary_union
 from shapely import is_geometry
 
+from common.polynomial import sos_locations
+
 class Op():
     '''
     Symmetric operator on Ak matrix
@@ -26,6 +30,47 @@ class Op():
     
     def op(self, M):
         return self.Ak.T @ M + M.T @ self.Ak
+
+def to_poly(P: np.ndarray, symbol='x'):
+    ''' Transforms an SoS matrix P into a polynomial '''
+
+    if P.shape[0] != P.shape[1]:
+        raise TypeError("P matrix must be square.")
+
+    dim = P.shape[0]
+    deg = 2*(dim-1)
+
+    coefs = []
+    for locs in sos_locations(deg):
+        coef = sum([ P[index] if index[0]==index[1] else P[index]+P[index[::-1]] for index in locs ])
+        coefs.append(coef)
+
+    return Poly(coefs, symbol=symbol)
+
+def cauchy_sum(seq1, seq2):
+    ''' Returns the Cauchy sum of two sequences: seq1 and seq2 can be of different data types '''
+
+    # data_type1 = any( type(it) != type(seq1[0]) for it in seq1 )
+    # data_type2 = any( type(it) != type(seq2[0]) for it in seq2 )
+
+    # if data_type1 or data_type2:
+    #     raise TypeError("Sequences must have the same data type!")
+
+    output_seq = []
+    for k1, item1 in enumerate(seq1):
+        for k2, item2 in enumerate(seq2):
+
+            try:
+                result = item1 * item2
+            except Exception as e:
+                print(e)
+
+            if len(output_seq) <= k1+k2:
+                output_seq.append(result)
+            else:
+                output_seq[k1+k2] += result
+
+    return output_seq
 
 def optimal_arrangement(n):
     ''' Finds optimal number of rows and columns for placing n objects in a matrix '''

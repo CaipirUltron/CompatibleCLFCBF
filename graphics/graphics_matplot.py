@@ -24,6 +24,7 @@ class PlotQuadraticSim():
         term = 2*( level - quad.height )
 
         eigs, R = np.linalg.eig(quad.H)
+
         if np.any(eigs <= 0):
             raise Exception("Non-psd Hessian for ellipse.")
         
@@ -146,7 +147,7 @@ class PlotQuadraticSim():
         self.clf.set_params( param=self.curr_clf_state )
 
         V = self.clf(self.curr_state)
-        xy, width, height, angle = Plot2DSimulation.get_ellipse(self.clf, V)
+        xy, width, height, angle = PlotQuadraticSim.get_ellipse(self.clf, V)
         self.clf_levelset.set_center(xy)
         self.clf_levelset.set_width(width)
         self.clf_levelset.set_height(height)
@@ -157,7 +158,7 @@ class PlotQuadraticSim():
             if self.cbf_logs:
                 cbf.set_params( param=self.curr_cbf_state )
             
-            xy, width, height, angle = Plot2DSimulation.get_ellipse(cbf, 0.0)
+            xy, width, height, angle = PlotQuadraticSim.get_ellipse(cbf, 0.0)
             self.cbf_levelsets[k].set_center(xy)
             self.cbf_levelsets[k].set_width(width)
             self.cbf_levelsets[k].set_height(height)
@@ -186,6 +187,7 @@ class PlotQuadraticSim():
             self.time_text.set_text("Time = " + str(self.curr_time) + "s")
             if self.plot_config["drawlevel"]:
                 self.update_levelsets()
+
         else:
             self.running = False
 
@@ -225,329 +227,329 @@ class PlotQuadraticSim():
         step = self.to_step(t)
         return self.update(step)
 
-class Plot2DSimulation():
-    '''
-    Class for matplotlib-based simulation of a point-like 2D dynamical system.
-    '''
-    def get_ellipse(quad: Quadratic, level: float):
-        ''' Returns the ellipse parameters for plotting the elliptical level set of a given quadratic.'''
+# class Plot2DSimulation():
+#     '''
+#     Class for matplotlib-based simulation of a point-like 2D dynamical system.
+#     '''
+#     def get_ellipse(quad: Quadratic, level: float):
+#         ''' Returns the ellipse parameters for plotting the elliptical level set of a given quadratic.'''
 
-        if level < quad.height:
-            warnings.warn("Level set is empty.")
-            return [0,0], 0, 0, 0
+#         if level < quad.height:
+#             warnings.warn("Level set is empty.")
+#             return [0,0], 0, 0, 0
         
-        term = 2*( level - quad.height )
+#         term = 2*( level - quad.height )
 
-        eigs, R = np.linalg.eig(quad.H)
-        if np.any(eigs <= 0):
-            raise Exception("Non-psd Hessian for ellipse.")
+#         eigs, R = np.linalg.eig(quad.H)
+#         if np.any(eigs <= 0):
+#             raise Exception("Non-psd Hessian for ellipse.")
         
-        angle = np.rad2deg(np.arctan2(R[1,0],R[0,0]))
+#         angle = np.rad2deg(np.arctan2(R[1,0],R[0,0]))
 
-        a = np.sqrt(term/eigs[0])
-        b = np.sqrt(term/eigs[1])
+#         a = np.sqrt(term/eigs[0])
+#         b = np.sqrt(term/eigs[1])
 
-        return quad.center, 2*a, 2*b, angle
+#         return quad.center, 2*a, 2*b, angle
 
-    def __init__(self, logs, plant, clf, cbfs, **kwargs):
+#     def __init__(self, logs, plant, clf, cbfs, **kwargs):
         
-        self.plot_config = {
-            "figsize": (5,5),
-            "gridspec": (1,1,1),
-            "widthratios": [1],
-            "heightratios": [1],
-            "limits": (-6,6,-6,6),
-            "drawlevel": False,
-            "resolution": 50,
-            "fps":50,
-            "pad":2.0,
-            "invariant": False,
-            "equilibria": False,
-            "arrows": False        
-            }
+#         self.plot_config = {
+#             "figsize": (5,5),
+#             "gridspec": (1,1,1),
+#             "widthratios": [1],
+#             "heightratios": [1],
+#             "limits": (-6,6,-6,6),
+#             "drawlevel": False,
+#             "resolution": 50,
+#             "fps":50,
+#             "pad":2.0,
+#             "invariant": False,
+#             "equilibria": False,
+#             "arrows": False        
+#             }
         
-        if "plot_config" in kwargs.keys():
-            self.plot_config = kwargs["plot_config"]
+#         if "plot_config" in kwargs.keys():
+#             self.plot_config = kwargs["plot_config"]
         
-        self.logs = logs
-        self.robot = plant
+#         self.logs = logs
+#         self.robot = plant
 
-        contour_spacing = 0.5
-        self.clf = clf
-        self.clf.set_params( limits=self.plot_config["limits"], spacing=contour_spacing )
+#         contour_spacing = 0.5
+#         self.clf = clf
+#         self.clf.set_params( limits=self.plot_config["limits"], spacing=contour_spacing )
 
-        self.cbfs = cbfs
-        self.n_cbfs = len(self.cbfs)
-        for cbf in self.cbfs:
-            cbf.set_params( limits=self.plot_config["limits"], spacing=contour_spacing )
+#         self.cbfs = cbfs
+#         self.n_cbfs = len(self.cbfs)
+#         for cbf in self.cbfs:
+#             cbf.set_params( limits=self.plot_config["limits"], spacing=contour_spacing )
         
-        # self.fig = plt.figure(figsize = self.plot_config["figsize"], constrained_layout=True)
-        self.fig = plt.figure(figsize = self.plot_config["figsize"])
+#         # self.fig = plt.figure(figsize = self.plot_config["figsize"], constrained_layout=True)
+#         self.fig = plt.figure(figsize = self.plot_config["figsize"])
 
-        self.configure()
+#         self.configure()
         
-        self.fig.tight_layout(pad=self.plot_config["pad"])
-        self.animation = None
+#         self.fig.tight_layout(pad=self.plot_config["pad"])
+#         self.animation = None
 
-    def configure(self):
-        '''
-        Configure axes.
-        '''
-        self.ax_struct = self.plot_config["gridspec"][0:2]
-        width_ratios = self.plot_config["widthratios"]
-        height_ratios = self.plot_config["heightratios"]
-        gs = gridspec.GridSpec(self.ax_struct[0], self.ax_struct[1], width_ratios = width_ratios, height_ratios = height_ratios)
+#     def configure(self):
+#         '''
+#         Configure axes.
+#         '''
+#         self.ax_struct = self.plot_config["gridspec"][0:2]
+#         width_ratios = self.plot_config["widthratios"]
+#         height_ratios = self.plot_config["heightratios"]
+#         gs = gridspec.GridSpec(self.ax_struct[0], self.ax_struct[1], width_ratios = width_ratios, height_ratios = height_ratios)
 
-        # Specify main ax
-        main_ax = self.plot_config["gridspec"][-1]
+#         # Specify main ax
+#         main_ax = self.plot_config["gridspec"][-1]
 
-        ''' honestly I don't know wtf is this '''
-        def order2indexes(k, m):
-            i = int((k-1)/m)
-            j = int(np.mod(k-1, m))
-            return i,j
+#         ''' honestly I don't know wtf is this '''
+#         def order2indexes(k, m):
+#             i = int((k-1)/m)
+#             j = int(np.mod(k-1, m))
+#             return i,j
 
-        if isinstance(main_ax, list):
-            i_list, j_list = [], []
-            for axes in main_ax:
-                i,j = order2indexes(axes, self.ax_struct[1])
-                i_list.append(i)
-                j_list.append(j)
-            i = np.sort(i_list).tolist()
-            j = np.sort(j_list).tolist()
-            if i[0] == i[-1]: i = i[0]
-            if j[0] == j[-1]: j = j[0]
+#         if isinstance(main_ax, list):
+#             i_list, j_list = [], []
+#             for axes in main_ax:
+#                 i,j = order2indexes(axes, self.ax_struct[1])
+#                 i_list.append(i)
+#                 j_list.append(j)
+#             i = np.sort(i_list).tolist()
+#             j = np.sort(j_list).tolist()
+#             if i[0] == i[-1]: i = i[0]
+#             if j[0] == j[-1]: j = j[0]
         
-        if isinstance(main_ax, int):
-            i,j = order2indexes(main_ax, self.ax_struct[1])
+#         if isinstance(main_ax, int):
+#             i,j = order2indexes(main_ax, self.ax_struct[1])
 
-        if isinstance(i, int):
-            if isinstance(j, int):
-                self.main_ax = self.fig.add_subplot(gs[i,j])
-            else:
-                self.main_ax = self.fig.add_subplot(gs[i,j[0]:(j[-1]+1)])
-        else:
-            if isinstance(j, int):
-                self.main_ax = self.fig.add_subplot(gs[i[0]:(i[-1]+1),j])
-            else:
-                self.main_ax = self.fig.add_subplot(gs[i[0]:(i[-1]+1),j[0]:(j[-1]+1)])
+#         if isinstance(i, int):
+#             if isinstance(j, int):
+#                 self.main_ax = self.fig.add_subplot(gs[i,j])
+#             else:
+#                 self.main_ax = self.fig.add_subplot(gs[i,j[0]:(j[-1]+1)])
+#         else:
+#             if isinstance(j, int):
+#                 self.main_ax = self.fig.add_subplot(gs[i[0]:(i[-1]+1),j])
+#             else:
+#                 self.main_ax = self.fig.add_subplot(gs[i[0]:(i[-1]+1),j[0]:(j[-1]+1)])
 
-        # Configures plot
-        self.x_lim = self.plot_config["limits"][0:2]
-        self.y_lim = self.plot_config["limits"][2:]
+#         # Configures plot
+#         self.x_lim = self.plot_config["limits"][0:2]
+#         self.y_lim = self.plot_config["limits"][2:]
 
-        self.main_ax.set_xlim(*self.x_lim)
-        self.main_ax.set_ylim(*self.y_lim)
-        self.main_ax.set_title("CLF-CBF QP-Control Simulation", fontsize=12)
-        self.main_ax.set_aspect('equal', adjustable='box')
+#         self.main_ax.set_xlim(*self.x_lim)
+#         self.main_ax.set_ylim(*self.y_lim)
+#         self.main_ax.set_title("CLF-CBF QP-Control Simulation", fontsize=12)
+#         self.main_ax.set_aspect('equal', adjustable='box')
 
-        self.draw_level = self.plot_config["drawlevel"]
-        self.fps = self.plot_config["fps"]
-        self.numpoints = self.plot_config["resolution"]
+#         self.draw_level = self.plot_config["drawlevel"]
+#         self.fps = self.plot_config["fps"]
+#         self.numpoints = self.plot_config["resolution"]
 
-        self.create_graphical_objs()
+#         self.create_graphical_objs()
 
-    def create_graphical_objs(self):
-        '''
-        Create graphical objects into the correct axes.
-        '''
-        # Get logs
-        self.sample_time = self.logs["sample_time"]
-        self.time = np.array(self.logs["time"])
-        self.state_log = self.logs["state"]
-        self.equilibria = self.logs["equilibria"]
+#     def create_graphical_objs(self):
+#         '''
+#         Create graphical objects into the correct axes.
+#         '''
+#         # Get logs
+#         self.sample_time = self.logs["sample_time"]
+#         self.time = np.array(self.logs["time"])
+#         self.state_log = self.logs["state"]
+#         self.equilibria = self.logs["equilibria"]
 
-        self.num_steps = len(self.state_log[0])
-        self.anim_step = (self.num_steps/self.time[-1])/self.fps
-        self.current_step = 0
-        self.runs = False
+#         self.num_steps = len(self.state_log[0])
+#         self.anim_step = (self.num_steps/self.time[-1])/self.fps
+#         self.current_step = 0
+#         self.runs = False
 
-        self.num_cbfs = len(self.cbfs)
+#         self.num_cbfs = len(self.cbfs)
 
-        # Initialize CLF/CBF level sets
-        self.clf_color = mcolors.TABLEAU_COLORS['tab:blue']
-        self.cbf_color = mcolors.TABLEAU_COLORS['tab:red']
+#         # Initialize CLF/CBF level sets
+#         self.clf_color = mcolors.TABLEAU_COLORS['tab:blue']
+#         self.cbf_color = mcolors.TABLEAU_COLORS['tab:red']
 
-        self.clf_levelset = Ellipse(xy=[0,0], width=0, height=0, angle=0, color=self.clf_color, alpha=0.2)
-        self.cbf_levelsets = [ Ellipse(xy=[0,0], width=0, height=0, angle=0, color=self.cbf_color, alpha=0.2) for _ in range(self.num_cbfs) ]
-        self.main_ax.add_patch(self.clf_levelset)
-        for cbf_levelset in self.cbf_levelsets:
-            self.main_ax.add_patch(cbf_levelset)
+#         self.clf_levelset = Ellipse(xy=[0,0], width=0, height=0, angle=0, color=self.clf_color, alpha=0.2)
+#         self.cbf_levelsets = [ Ellipse(xy=[0,0], width=0, height=0, angle=0, color=self.cbf_color, alpha=0.2) for _ in range(self.num_cbfs) ]
+#         self.main_ax.add_patch(self.clf_levelset)
+#         for cbf_levelset in self.cbf_levelsets:
+#             self.main_ax.add_patch(cbf_levelset)
 
-        if "clf_log" in self.logs.keys():
-            self.clf_log = self.logs["clf_log"]
+#         if "clf_log" in self.logs.keys():
+#             self.clf_log = self.logs["clf_log"]
 
-        self.cbf_logs = []
-        if "cbf_logs" in self.logs.keys():
-            self.cbf_logs = self.logs["cbf_logs"]
-            if len(self.cbf_logs) != self.num_cbfs:
-                raise Exception("Number of CBF parameters is not the same as the number of CBFs.")
+#         self.cbf_logs = []
+#         if "cbf_logs" in self.logs.keys():
+#             self.cbf_logs = self.logs["cbf_logs"]
+#             if len(self.cbf_logs) != self.num_cbfs:
+#                 raise Exception("Number of CBF parameters is not the same as the number of CBFs.")
 
-        # Initalize some graphical objects
-        self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str(""), fontsize=14)
-        self.trajectory, = self.main_ax.plot([],[],lw=2)
-        self.clf_center, = self.main_ax.plot([],[],'kx',lw=2)
-        self.init_state, = self.main_ax.plot([],[],'b*',lw=2)
+#         # Initalize some graphical objects
+#         self.time_text = self.main_ax.text(0.5, self.y_lim[0]+0.5, str(""), fontsize=14)
+#         self.trajectory, = self.main_ax.plot([],[],lw=2)
+#         self.clf_center, = self.main_ax.plot([],[],'kx',lw=2)
+#         self.init_state, = self.main_ax.plot([],[],'b*',lw=2)
 
-        eq_x_coors, eq_y_coors, eq_colors = [], [], []
-        for eq in self.equilibria:
-            eq_pt = eq["point"]
-            eq_x_coors.append(eq_pt[0])
-            eq_y_coors.append(eq_pt[1])
-            if eq["stability"] <= 0: eq_colors.append("red")
-            if eq["stability"] >  0: eq_colors.append("blue")
+#         eq_x_coors, eq_y_coors, eq_colors = [], [], []
+#         for eq in self.equilibria:
+#             eq_pt = eq["point"]
+#             eq_x_coors.append(eq_pt[0])
+#             eq_y_coors.append(eq_pt[1])
+#             if eq["stability"] <= 0: eq_colors.append("red")
+#             if eq["stability"] >  0: eq_colors.append("blue")
 
-        self.equilibria_plot = self.main_ax.scatter( eq_x_coors, eq_y_coors, c=eq_colors, alpha=0.8, marker='o', linewidths=0.01 )
-        self.clf_grad_arrow, = self.main_ax.plot([],[],'b',lw=0.8)
-        self.cbf_grad_arrow, = self.main_ax.plot([],[],'r',lw=0.8)
-        self.f_arrow, = self.main_ax.plot([],[],'r',lw=0.8)
+#         self.equilibria_plot = self.main_ax.scatter( eq_x_coors, eq_y_coors, c=eq_colors, alpha=0.8, marker='o', linewidths=0.01 )
+#         self.clf_grad_arrow, = self.main_ax.plot([],[],'b',lw=0.8)
+#         self.cbf_grad_arrow, = self.main_ax.plot([],[],'r',lw=0.8)
+#         self.f_arrow, = self.main_ax.plot([],[],'r',lw=0.8)
 
-    def init(self):
+#     def init(self):
 
-        self.runs = True
+#         self.runs = True
 
-        self.time_text.text = str("")
-        self.trajectory.set_data([],[])
+#         self.time_text.text = str("")
+#         self.trajectory.set_data([],[])
 
-        x0, y0 = self.state_log[0][0], self.state_log[1][0]
-        self.init_state.set_data([x0],[y0])
+#         x0, y0 = self.state_log[0][0], self.state_log[1][0]
+#         self.init_state.set_data([x0],[y0])
 
-        x0, y0 = self.clf.center
-        self.clf_center.set_data([x0],[y0])
-        self.update_levelsets(0)
+#         x0, y0 = self.clf.center
+#         self.clf_center.set_data([x0],[y0])
+#         self.update_levelsets(0)
 
-        graphical_elements = []
-        graphical_elements.append(self.time_text)
-        graphical_elements.append(self.trajectory)
-        graphical_elements.append(self.clf_center)
-        graphical_elements.append(self.init_state)
-        if self.plot_config["equilibria"]: 
-            graphical_elements.append(self.equilibria_plot)
-        graphical_elements.append(self.clf_grad_arrow)
-        graphical_elements.append(self.cbf_grad_arrow)
-        graphical_elements.append(self.f_arrow)
-        graphical_elements.append(self.clf_levelset)
-        graphical_elements += self.cbf_levelsets
+#         graphical_elements = []
+#         graphical_elements.append(self.time_text)
+#         graphical_elements.append(self.trajectory)
+#         graphical_elements.append(self.clf_center)
+#         graphical_elements.append(self.init_state)
+#         if self.plot_config["equilibria"]: 
+#             graphical_elements.append(self.equilibria_plot)
+#         graphical_elements.append(self.clf_grad_arrow)
+#         graphical_elements.append(self.cbf_grad_arrow)
+#         graphical_elements.append(self.f_arrow)
+#         graphical_elements.append(self.clf_levelset)
+#         graphical_elements += self.cbf_levelsets
 
-        return graphical_elements
+#         return graphical_elements
 
-    def update_levelsets(self, i):
+#     def update_levelsets(self, i):
 
-        curr_state = [ self.state_log[0][i], self.state_log[1][i] ]
-        curr_clf_state = [ self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i] ]
+#         curr_state = [ self.state_log[0][i], self.state_log[1][i] ]
+#         curr_clf_state = [ self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i] ]
 
-        V = self.clf(curr_state)
+#         V = self.clf(curr_state)
 
-        self.clf.set_params( param=curr_clf_state )
-        xy, width, height, angle = Plot2DSimulation.get_ellipse(self.clf, V)
-        self.clf_levelset.set_center(xy)
-        self.clf_levelset.set_width(width)
-        self.clf_levelset.set_height(height)
-        self.clf_levelset.set_angle(angle)
+#         self.clf.set_params( param=curr_clf_state )
+#         xy, width, height, angle = Plot2DSimulation.get_ellipse(self.clf, V)
+#         self.clf_levelset.set_center(xy)
+#         self.clf_levelset.set_width(width)
+#         self.clf_levelset.set_height(height)
+#         self.clf_levelset.set_angle(angle)
 
-        for k, cbf in enumerate(self.cbfs):
+#         for k, cbf in enumerate(self.cbfs):
             
-            if self.cbf_logs:
-                curr_cbf_state = [ self.cbf_logs[k][0][i], self.cbf_logs[k][1][i], self.cbf_logs[k][2][i] ]
-                cbf.set_params( param=curr_cbf_state )
+#             if self.cbf_logs:
+#                 curr_cbf_state = [ self.cbf_logs[k][0][i], self.cbf_logs[k][1][i], self.cbf_logs[k][2][i] ]
+#                 cbf.set_params( param=curr_cbf_state )
             
-            xy, width, height, angle = Plot2DSimulation.get_ellipse(cbf, 0.0)
-            self.cbf_levelsets[k].set_center(xy)
-            self.cbf_levelsets[k].set_width(width)
-            self.cbf_levelsets[k].set_height(height)
-            self.cbf_levelsets[k].set_angle(angle)
+#             xy, width, height, angle = Plot2DSimulation.get_ellipse(cbf, 0.0)
+#             self.cbf_levelsets[k].set_center(xy)
+#             self.cbf_levelsets[k].set_width(width)
+#             self.cbf_levelsets[k].set_height(height)
+#             self.cbf_levelsets[k].set_angle(angle)
 
-    def update(self, i):
+#     def update(self, i):
 
-        if i < self.num_steps:
+#         if i < self.num_steps:
 
-            xdata, ydata = self.state_log[0][0:i], self.state_log[1][0:i]
-            self.trajectory.set_data(xdata, ydata)
+#             xdata, ydata = self.state_log[0][0:i], self.state_log[1][0:i]
+#             self.trajectory.set_data(xdata, ydata)
 
-            current_time = np.around(self.time[i], decimals = 2)
-            current_state = [ self.state_log[0][i], self.state_log[1][i] ]
+#             current_time = np.around(self.time[i], decimals = 2)
+#             current_state = [ self.state_log[0][i], self.state_log[1][i] ]
 
-            if self.plot_config["arrows"]:
-                nablaV = self.clf.gradient(current_state)
-                nablaV_norm = nablaV/np.linalg.norm(nablaV)
-                self.clf_grad_arrow.set_data( 
-                    [ current_state[0], current_state[0] + nablaV_norm[0] ], 
-                    [ current_state[1], current_state[1] + nablaV_norm[1] ] )
+#             if self.plot_config["arrows"]:
+#                 nablaV = self.clf.gradient(current_state)
+#                 nablaV_norm = nablaV/np.linalg.norm(nablaV)
+#                 self.clf_grad_arrow.set_data( 
+#                     [ current_state[0], current_state[0] + nablaV_norm[0] ], 
+#                     [ current_state[1], current_state[1] + nablaV_norm[1] ] )
 
-                nablah = self.cbfs[0].gradient(current_state)
-                nablah_norm = nablah/np.linalg.norm(nablah)
-                self.cbf_grad_arrow.set_data( 
-                    [ current_state[0], current_state[0] + nablah_norm[0] ], 
-                    [ current_state[1], current_state[1] + nablah_norm[1] ] )
+#                 nablah = self.cbfs[0].gradient(current_state)
+#                 nablah_norm = nablah/np.linalg.norm(nablah)
+#                 self.cbf_grad_arrow.set_data( 
+#                     [ current_state[0], current_state[0] + nablah_norm[0] ], 
+#                     [ current_state[1], current_state[1] + nablah_norm[1] ] )
 
-                f = self.robot.get_f(current_state)
-                f_norm = f/np.linalg.norm(f)
-                self.f_arrow.set_data( 
-                    [ current_state[0], current_state[0] + f_norm[0] ], 
-                    [ current_state[1], current_state[1] + f_norm[1] ] )
+#                 f = self.robot.get_f(current_state)
+#                 f_norm = f/np.linalg.norm(f)
+#                 self.f_arrow.set_data( 
+#                     [ current_state[0], current_state[0] + f_norm[0] ], 
+#                     [ current_state[1], current_state[1] + f_norm[1] ] )
 
-            # self.time_text.set_text("Time = " + str(current_time) + "s")
+#             # self.time_text.set_text("Time = " + str(current_time) + "s")
 
-            if self.draw_level:
-                self.update_levelsets(i)
-                # self.main_ax.add_patch(self.clf_levelset)
-                # for cbf_levelset in self.cbf_levelsets:
-                    # self.main_ax.add_patch(cbf_levelset)
+#             if self.draw_level:
+#                 self.update_levelsets(i)
+#                 # self.main_ax.add_patch(self.clf_levelset)
+#                 # for cbf_levelset in self.cbf_levelsets:
+#                     # self.main_ax.add_patch(cbf_levelset)
 
-        else:
-            self.runs = False
-            # self.animation.event_source.stop()
+#         else:
+#             self.runs = False
+#             # self.animation.event_source.stop()
             
-        graphical_elements = []
-        graphical_elements.append(self.time_text)
-        graphical_elements.append(self.trajectory)
-        graphical_elements.append(self.clf_center)
-        graphical_elements.append(self.init_state)
-        if self.plot_config["equilibria"]: 
-            graphical_elements.append(self.equilibria_plot)
-        graphical_elements.append(self.clf_grad_arrow)
-        graphical_elements.append(self.cbf_grad_arrow)
-        graphical_elements.append(self.f_arrow)
-        graphical_elements.append(self.clf_levelset)
-        graphical_elements += self.cbf_levelsets
+#         graphical_elements = []
+#         graphical_elements.append(self.time_text)
+#         graphical_elements.append(self.trajectory)
+#         graphical_elements.append(self.clf_center)
+#         graphical_elements.append(self.init_state)
+#         if self.plot_config["equilibria"]: 
+#             graphical_elements.append(self.equilibria_plot)
+#         graphical_elements.append(self.clf_grad_arrow)
+#         graphical_elements.append(self.cbf_grad_arrow)
+#         graphical_elements.append(self.f_arrow)
+#         graphical_elements.append(self.clf_levelset)
+#         graphical_elements += self.cbf_levelsets
 
-        return graphical_elements
+#         return graphical_elements
 
-    def gen_function(self, initial_step):
-        self.current_step = initial_step
-        while self.runs:
-            yield self.current_step
-            self.current_step += int(max(1,np.ceil(self.anim_step)))
-        final_step = int(np.floor(self.time[-1]/self.sample_time))
-        yield final_step
+#     def gen_function(self, initial_step):
+#         self.current_step = initial_step
+#         while self.runs:
+#             yield self.current_step
+#             self.current_step += int(max(1,np.ceil(self.anim_step)))
+#         final_step = int(np.floor(self.time[-1]/self.sample_time))
+#         yield final_step
 
-    def animate(self, *args):
-        '''
-        Show animation starting from specific time (passed as optional argument)
-        '''
-        initial_time = 0
-        if len(args) > 0:
-            initial_time = args[0]
-        initial_step = int(np.floor(initial_time/self.sample_time))
-        self.animation = anim.FuncAnimation(self.fig, func=self.update, frames=self.gen_function(initial_step), init_func=self.init, interval=1000/self.fps, repeat=False, blit=True, cache_frame_data=False)
+#     def animate(self, *args):
+#         '''
+#         Show animation starting from specific time (passed as optional argument)
+#         '''
+#         initial_time = 0
+#         if len(args) > 0:
+#             initial_time = args[0]
+#         initial_step = int(np.floor(initial_time/self.sample_time))
+#         self.animation = anim.FuncAnimation(self.fig, func=self.update, frames=self.gen_function(initial_step), init_func=self.init, interval=1000/self.fps, repeat=False, blit=True, cache_frame_data=False)
 
-    def get_frame(self, t):
-        '''
-        Returns graphical elements at time t.
-        '''
-        self.init()
-        step = int(np.floor(t/self.sample_time))
-        graphical_elements = self.update(step)
+#     def get_frame(self, t):
+#         '''
+#         Returns graphical elements at time t.
+#         '''
+#         self.init()
+#         step = int(np.floor(t/self.sample_time))
+#         graphical_elements = self.update(step)
 
-        return graphical_elements
+#         return graphical_elements
 
-    def plot_frame(self, t):
-        '''
-        Updates frame at time t.
-        '''
-        self.get_frame(t)
+#     def plot_frame(self, t):
+#         '''
+#         Updates frame at time t.
+#         '''
+#         self.get_frame(t)
 
-class PlotPFSimulation(Plot2DSimulation):
+class PlotPFSimulation(PlotQuadraticSim):
     '''
     Class for matplotlib-based simulation of the vehicle performing path following.
     '''
@@ -603,7 +605,7 @@ class PlotPFSimulation(Plot2DSimulation):
 
         return graphical_elements
     
-class PlotUnicycleSimulation(Plot2DSimulation):
+class PlotUnicycleSimulation(PlotQuadraticSim):
     '''
     Class for matplotlib-based simulation of the unicycle robot.
     '''

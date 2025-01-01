@@ -6,7 +6,7 @@ from controllers import CompatibleQP
 from controllers.compatibility import QFunction
 
 sim_config = sys.argv[1].replace(".json","")
-sim = importlib.import_module("examples."+sim_config, package=None)
+sim = importlib.import_module("examples.simulation."+sim_config, package=None)
 
 Qfunctions = [ QFunction(sim.plant, sim.clf, cbf, p=1.0) for cbf in sim.cbfs ]
 

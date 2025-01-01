@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 from graphics import PlotQuadraticSim
 
-simulation = "LTI_multiple"
+simulation = "LTI1_multiple"
 file_names = [simulation+"_nominal", simulation+"_compatible"]
 
 times = [ 0.0, 6.8, 7.5 ]
@@ -23,7 +23,7 @@ fig.tight_layout(pad=0.1)
 for f_index, file_name in enumerate(file_names):
     for t_index, time in enumerate(times):
 
-        file_path = "examples." + simulation
+        file_path = "examples.simulation." + simulation
         sim = importlib.import_module(file_path, package=None)
 
         try:

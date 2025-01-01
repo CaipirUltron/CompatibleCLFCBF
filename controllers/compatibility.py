@@ -84,6 +84,7 @@ class QFunction():
         self.composite_kappa = 20
         self.normalization_kappa = 1e-4
         self.comptol = 1.0                  # Should be a small positive value
+        self.epsilon_comp = 1e-1
 
         ''' Stability matrix S(λ) '''
         self.stb_dim = self.dim-1
@@ -159,6 +160,134 @@ class QFunction():
 
         ''' Computation of equilibrium points and their stability '''
         self._equilibria()
+
+    def _init_compatible_opt(self):
+
+        ''' Setup CVXPY parameters and variables '''
+        decomp_deg = 2*self.zero_poly.degree()
+
+        Rdeg = decomp_deg
+        Rkern_deg = int(Rdeg/2)
+        Rdim = Rkern_deg + 1
+        Rshape = ( Rdim, Rdim )
+
+        Sdeg = decomp_deg - 2
+        Skern_deg = int(Sdeg/2)
+        Sdim = Skern_deg + 1
+        Sshape = ( Sdim, Sdim )
+
+        self.delta_var = cvx.Variable(self.dim)
+        self.Rvars = [ cvx.Variable( shape=Rshape, symmetric=True ) for _ in range(self.dim) ]
+        self.Svars = [ cvx.Variable( shape=Sshape, symmetric=True ) for _ in range(self.dim) ]
+
+        self.z2params = cvx.Parameter(Rdeg+1)
+        self.q_params = [ cvx.Parameter(2) for _ in range(self.dim) ]
+
+        ''' Setup CVXPY cost, constraints and problem '''
+        self.constraints = []
+        for k in range(self.dim):
+            
+            Rvar = self.Rvars[k]
+            Svar = self.Svars[k]
+            delta = self.delta_var[k]
+
+            q_param = self.q_params[k]
+            
+            r_coefs = []
+            for locs in sos_locations(Rdeg):
+                r_coefs.append( sum([ Rvar[index] if index[0]==index[1] else 2*Rvar[index] for index in locs ]) )
+
+            s_coefs = []
+            for locs in sos_locations(Sdeg):
+                s_coefs.append( sum([ Svar[index] if index[0]==index[1] else 2*Svar[index] for index in locs ]) )
+
+            q_coefs = [ q_param[0]*q_param[1], -(q_param[0] + q_param[1]), 1 ]
+            qs_coefs = cauchy_sum(q_coefs, s_coefs)
+
+            if len(r_coefs) != len(qs_coefs):
+                raise Exception("Number of coeffs of r and qs is different. This should never happen.")
+
+            for i, (r_coef, qs_coef) in enumerate( zip(r_coefs, qs_coefs) ):
+                self.constraints += [ r_coef - qs_coef + delta == self.z2params[i] ]
+                # self.constraints += [ r_coef - qs_coef == self.z2params[i] ]
+
+        # self.constraints += [ Rvar + (self.delta_var[k] - self.epsilon_comp) * np.eye(Rdim) >> 0 for k, Rvar in enumerate(self.Rvars) ]
+        # self.constraints += [ Svar + (self.delta_var[k] - self.epsilon_comp) * np.eye(Sdim) >> 0 for k, Svar in enumerate(self.Svars) ]
+
+        # self.constraints += [ Rvar + (self.delta_var[k]) * np.eye(Rdim) >> 0 for k, Rvar in enumerate(self.Rvars) ]
+        # self.constraints += [ Svar + (self.delta_var[k]) * np.eye(Sdim) >> 0 for k, Svar in enumerate(self.Svars) ]
+
+        self.constraints += [ Rvar >> 0 for k, Rvar in enumerate(self.Rvars) ]
+        self.constraints += [ Svar >> 0 for k, Svar in enumerate(self.Svars) ]
+
+        self.cost = 0.0
+        # self.cost += cvx.norm( self.delta_var ) 
+        self.cost += cvx.sum( self.delta_var )
+
+        self.problem = cvx.Problem( cvx.Maximize( self.cost ), constraints=self.constraints )
+
+    def solve_compatibility_opt(self):
+
+        # Load z(λ) - e parameters
+        zSquared = self.zero_poly**2 - self.epsilon_comp
+        self.z2params.value = zSquared.coef
+
+        # self.z2params.value = self.zero_poly.coef
+
+        # Load q(λ) parameters (interval bounding polynomial)
+        k = 0
+        for interval in self.intervals:
+            if interval["type"] != (0, self.stb_dim):   # ignores non-nsd intervals
+                continue
+
+            limits = interval["limits"]
+            if limits[1] < 0:                           # ignores negative intervals
+                continue
+
+            if limits[0] == -np.inf: 
+                min_bound, max_bound = 0.0, limits[1]
+            else:
+                min_bound, max_bound = limits[0], limits[1]
+
+            self.q_params[k].value = np.array([min_bound, max_bound])
+            k += 1
+
+        for i in range(k,self.dim): 
+            self.q_params[i].value = np.zeros(2)
+
+        for qparam in self.q_params:
+            print(qparam.value)
+
+        # Solves CVX problem
+        self.problem.solve(solver = 'SCS', verbose=True)
+
+        print(f"delta = {self.delta_var.value}")
+        # print(f"cost = {self.cost.value}")
+
+        # Debug
+        for k in range(self.dim):
+            Rvar = self.Rvars[k]
+            Svar = self.Svars[k]
+            q_param = self.q_params[k].value
+
+            q_coefs = [ q_param[0]*q_param[1], -(q_param[0] + q_param[1]), 1 ]
+            q_poly = Poly(q_coefs, symbol='λ')
+
+            print(f"{k+1}-th roots = {q_poly.roots()}")
+
+            eigsR = np.linalg.eigvals(Rvar.value)
+            eigsS = np.linalg.eigvals(Svar.value)
+            print(f"Eigs of R = \n{eigsR}")
+            print(f"Eigs of S = \n{eigsS}")
+
+            r_poly = to_poly( Rvar.value, symbol='λ' )
+            s_poly = to_poly( Svar.value, symbol='λ' )
+
+            decomp_poly = r_poly - q_poly * s_poly
+            error_poly = decomp_poly - zSquared
+            # error_poly = decomp_poly - self.zero_poly
+
+            print(f"{k+1}-th error = {sum(error_poly.coef)}")
 
     def _v_poly(self) -> tuple[Poly, np.ndarray[Poly]]:
         '''
@@ -377,7 +506,8 @@ class QFunction():
             elif limits[0] == -np.inf: 
                 min_bound, max_bound = 0.0, limits[1]
             else:
-                min_bound, max_bound =  limits[0], limits[1]
+                min_bound, max_bound = limits[0], limits[1]
+
             barrier_limits.append( [min_bound, max_bound] )      
 
         if self.zero_poly(0) >= 0: typ = 'above'
@@ -564,7 +694,7 @@ class QFunction():
         ''' Initializes plot config '''
 
         self.plot_configs = {"inertia": True,
-                             "qfunction": False,
+                             "qfunction": True,
                              "zfunction": True }
 
         max_hor_lim = 1000
@@ -648,9 +778,13 @@ class QFunction():
         # Plot of 1.0 solution line
         self.ones_plot.set_data(self.lambda_array, [ 1.0 for l in self.lambda_array ])
 
+        print(self.epsilon_comp)
+
         # Q-function polynomial
         if self.plot_configs["qfunction"]:
-            q_array = [ self.n_poly(l)/self.d_poly(l) for l in self.lambda_array ]
+            # q_array = [ self.n_poly(l)/self.d_poly(l) for l in self.lambda_array ]
+            q_array = [ self.zero_poly(l)**2 - self.epsilon_comp for l in self.lambda_array ]
+
             self.q_plot.set_data(self.lambda_array, q_array)
             graphical_elements.append( self.q_plot )
 
