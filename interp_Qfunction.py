@@ -1,4 +1,4 @@
-import sys
+import sys, os
 import importlib
 
 import numpy as np
@@ -53,12 +53,21 @@ ax.set_aspect('auto')
 ''' --------------------------- Interpolation update -------------------------------- '''
 def update_plot(t):
 
+    os.system('cls' if os.name == 'nt' else 'clear')
+
     print(f"t = {t}")
 
     if not is_controllable(ex.Afun(t), ex.Bfun(t)):
         raise Exception("System is not controllable.")
 
+    # Hv = ex.Hvfun(t)
+    # print(Hv)
+
     qfun.update(M = Mfun(t), N = Nfun(t), H = Hfun(t), w = wfun(t))
+
+    lower = qfun.lowerbound_dS_SoS()
+    print(f"Lowerbound on dS = {lower}")
+
     return qfun.plot(ax)
 
 ''' ------------------------------- Visualization ----------------------------------- '''
@@ -66,8 +75,8 @@ mode = 'animate'
 # mode = 'step'
 # mode = 'instant'
 
-start, stop, step = 0.92, 1.0, 0.001
-t = 0.017
+t = 0.0
+start, stop, step = 0.0, 1.0, 0.001
 
 if len(sys.argv) > 2:
      mode = sys.argv[2]
@@ -75,9 +84,11 @@ if len(sys.argv) > 2:
 qfun.init_graphics(ax)
 
 if mode == 'animate':
-    animation = anim.FuncAnimation(fig, func=update_plot, frames=np.arange(start,stop,step), interval=40, repeat=False, blit=False, cache_frame_data=False)
+
+    animation = anim.FuncAnimation(fig, func=update_plot, frames=np.arange(start,stop,step), interval=20, repeat=False, blit=False, cache_frame_data=False)
 
 elif mode == 'step':
+
     t = start
     while t < stop:
         t += step
@@ -88,6 +99,8 @@ elif mode == 'step':
             sys.exit()
 
 elif mode == 'instant':
+
+    if len(sys.argv) > 3: t = float(sys.argv[3])
     update_plot(t)
 
 plt.show()

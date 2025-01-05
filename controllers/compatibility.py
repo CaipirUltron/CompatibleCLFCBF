@@ -1,4 +1,4 @@
-import math
+import math, os
 import numpy as np
 
 import matplotlib.patches as patches
@@ -10,7 +10,7 @@ from numpy.polynomial.polynomial import polydiv, polyder, polyint
 
 from copy import copy
 from scipy.optimize import fsolve, minimize
-from scipy.linalg import null_space, inv
+from scipy.linalg import sqrtm, null_space, inv, solve_continuous_lyapunov
 
 from common import *
 from dynamic_systems import LinearSystem, DriftLess
@@ -76,31 +76,34 @@ class QFunction():
 
         self.perturbing = False
 
-        ''' Class parameters '''
+        # Class parameters
         self.real_tol = 1e-6
-        self.infty_tol = 1e+8
+        self.infty_tol = 1e+7
 
-        self.epsilon = 1e-3
-        self.composite_kappa = 20
-        self.normalization_kappa = 1e-4
-        self.comptol = 1.0                  # Should be a small positive value
-        self.epsilon_comp = 1e-1
+        self.safe_tol = 1.5                  # Should be a bigger than one
 
-        ''' Stability matrix S(λ) '''
+        # Initialize stability matrix S(λ)
         self.stb_dim = self.dim-1
         self.Smatrix: MatrixPolynomial = MatrixPolynomial.zeros(size=(self.stb_dim, self.stb_dim))
 
+        # Compute all needed polynomials
         self._compute_polynomials()
 
-        if self.satisfy_clf():
-            print("Passed V satisfies the CLF conditon.")
-        else:
-            print("Passed V does not satisfies the CLF conditon.")
+        if isinstance(self.plant, LinearSystem):
+            if self.clf.satisfy_clf( self.plant.A ):
+                print("Passed V satisfies the CLF conditon.")
+            else:
+                print(f"Passed V does not satisfies the CLF conditon. A new CLF was computed.")
 
         if self.is_compatible():
             print("Q-function is compatible.")
         else:
             print("Q-function is not compatible.")
+
+        if self.is_monotonic():
+            print("S(λ) is monotonically increasing.")
+        else:
+            print("S(λ) is not monotonically increasing.")
 
     def __call__(self, l):
         ''' Calling method '''
@@ -144,12 +147,7 @@ class QFunction():
         self.zero_poly = self.n_poly - self.d_poly
         self.diff_zero_poly = self.zero_poly.deriv()
 
-        if self.zero_poly(0) >= 0: 
-            tol = 1 + self.comptol
-        else: 
-            tol = 1 - self.comptol
-
-        self.safe_zero_poly = self.n_poly - tol * self.d_poly
+        self.safe_zero_poly = self.n_poly - self.safe_tol * self.d_poly
         self.diff_safe_zero_poly = self.safe_zero_poly.deriv()
 
         ''' Computation of stability properties of the boundary equilibrium points '''
@@ -160,134 +158,6 @@ class QFunction():
 
         ''' Computation of equilibrium points and their stability '''
         self._equilibria()
-
-    def _init_compatible_opt(self):
-
-        ''' Setup CVXPY parameters and variables '''
-        decomp_deg = 2*self.zero_poly.degree()
-
-        Rdeg = decomp_deg
-        Rkern_deg = int(Rdeg/2)
-        Rdim = Rkern_deg + 1
-        Rshape = ( Rdim, Rdim )
-
-        Sdeg = decomp_deg - 2
-        Skern_deg = int(Sdeg/2)
-        Sdim = Skern_deg + 1
-        Sshape = ( Sdim, Sdim )
-
-        self.delta_var = cvx.Variable(self.dim)
-        self.Rvars = [ cvx.Variable( shape=Rshape, symmetric=True ) for _ in range(self.dim) ]
-        self.Svars = [ cvx.Variable( shape=Sshape, symmetric=True ) for _ in range(self.dim) ]
-
-        self.z2params = cvx.Parameter(Rdeg+1)
-        self.q_params = [ cvx.Parameter(2) for _ in range(self.dim) ]
-
-        ''' Setup CVXPY cost, constraints and problem '''
-        self.constraints = []
-        for k in range(self.dim):
-            
-            Rvar = self.Rvars[k]
-            Svar = self.Svars[k]
-            delta = self.delta_var[k]
-
-            q_param = self.q_params[k]
-            
-            r_coefs = []
-            for locs in sos_locations(Rdeg):
-                r_coefs.append( sum([ Rvar[index] if index[0]==index[1] else 2*Rvar[index] for index in locs ]) )
-
-            s_coefs = []
-            for locs in sos_locations(Sdeg):
-                s_coefs.append( sum([ Svar[index] if index[0]==index[1] else 2*Svar[index] for index in locs ]) )
-
-            q_coefs = [ q_param[0]*q_param[1], -(q_param[0] + q_param[1]), 1 ]
-            qs_coefs = cauchy_sum(q_coefs, s_coefs)
-
-            if len(r_coefs) != len(qs_coefs):
-                raise Exception("Number of coeffs of r and qs is different. This should never happen.")
-
-            for i, (r_coef, qs_coef) in enumerate( zip(r_coefs, qs_coefs) ):
-                self.constraints += [ r_coef - qs_coef + delta == self.z2params[i] ]
-                # self.constraints += [ r_coef - qs_coef == self.z2params[i] ]
-
-        # self.constraints += [ Rvar + (self.delta_var[k] - self.epsilon_comp) * np.eye(Rdim) >> 0 for k, Rvar in enumerate(self.Rvars) ]
-        # self.constraints += [ Svar + (self.delta_var[k] - self.epsilon_comp) * np.eye(Sdim) >> 0 for k, Svar in enumerate(self.Svars) ]
-
-        # self.constraints += [ Rvar + (self.delta_var[k]) * np.eye(Rdim) >> 0 for k, Rvar in enumerate(self.Rvars) ]
-        # self.constraints += [ Svar + (self.delta_var[k]) * np.eye(Sdim) >> 0 for k, Svar in enumerate(self.Svars) ]
-
-        self.constraints += [ Rvar >> 0 for k, Rvar in enumerate(self.Rvars) ]
-        self.constraints += [ Svar >> 0 for k, Svar in enumerate(self.Svars) ]
-
-        self.cost = 0.0
-        # self.cost += cvx.norm( self.delta_var ) 
-        self.cost += cvx.sum( self.delta_var )
-
-        self.problem = cvx.Problem( cvx.Maximize( self.cost ), constraints=self.constraints )
-
-    def solve_compatibility_opt(self):
-
-        # Load z(λ) - e parameters
-        zSquared = self.zero_poly**2 - self.epsilon_comp
-        self.z2params.value = zSquared.coef
-
-        # self.z2params.value = self.zero_poly.coef
-
-        # Load q(λ) parameters (interval bounding polynomial)
-        k = 0
-        for interval in self.intervals:
-            if interval["type"] != (0, self.stb_dim):   # ignores non-nsd intervals
-                continue
-
-            limits = interval["limits"]
-            if limits[1] < 0:                           # ignores negative intervals
-                continue
-
-            if limits[0] == -np.inf: 
-                min_bound, max_bound = 0.0, limits[1]
-            else:
-                min_bound, max_bound = limits[0], limits[1]
-
-            self.q_params[k].value = np.array([min_bound, max_bound])
-            k += 1
-
-        for i in range(k,self.dim): 
-            self.q_params[i].value = np.zeros(2)
-
-        for qparam in self.q_params:
-            print(qparam.value)
-
-        # Solves CVX problem
-        self.problem.solve(solver = 'SCS', verbose=True)
-
-        print(f"delta = {self.delta_var.value}")
-        # print(f"cost = {self.cost.value}")
-
-        # Debug
-        for k in range(self.dim):
-            Rvar = self.Rvars[k]
-            Svar = self.Svars[k]
-            q_param = self.q_params[k].value
-
-            q_coefs = [ q_param[0]*q_param[1], -(q_param[0] + q_param[1]), 1 ]
-            q_poly = Poly(q_coefs, symbol='λ')
-
-            print(f"{k+1}-th roots = {q_poly.roots()}")
-
-            eigsR = np.linalg.eigvals(Rvar.value)
-            eigsS = np.linalg.eigvals(Svar.value)
-            print(f"Eigs of R = \n{eigsR}")
-            print(f"Eigs of S = \n{eigsS}")
-
-            r_poly = to_poly( Rvar.value, symbol='λ' )
-            s_poly = to_poly( Svar.value, symbol='λ' )
-
-            decomp_poly = r_poly - q_poly * s_poly
-            error_poly = decomp_poly - zSquared
-            # error_poly = decomp_poly - self.zero_poly
-
-            print(f"{k+1}-th error = {sum(error_poly.coef)}")
 
     def _v_poly(self) -> tuple[Poly, np.ndarray[Poly]]:
         '''
@@ -424,8 +294,13 @@ class QFunction():
         else:
             self.Smatrix_pencil = self.Smatrix.companion_form()
 
+        # Computes definiteness intervals
         self._definitess_intervals()
         self._stability_conj_pairs()
+
+        # Computes S(λ) critical points
+        self.dSmatrix = self.Smatrix.deriv()
+        self.dSmatrix_pencil = self.dSmatrix.companion_form()
 
     def _equilibria(self) -> list[dict]:
         '''
@@ -472,55 +347,32 @@ class QFunction():
         v = inv(P) @ self.w
         return v.T @ self.H @ v
 
-    def _interval_barrier(self, interval, typ='above'):
-        ''' Defines barrier function for interval '''
+    def compatibility_barrier(self):
+        ''' Novel compatibility barrier with minimum value of z(λ) on first stable interval (Automatica paper) '''
 
-        val1 = float(self.safe_zero_poly(interval[0]))
-        val2 = float(self.safe_zero_poly(interval[1]))
+        # boundary of root barrier is the right limit of the first (and hopefully, only) n.s.d. interval
+        boundary = self.intervals[0]["limits"][1]
+        stable_interval = [ 0, boundary ]
+        criticals = stable_interval
+        criticals += [ root.real for root in self.diff_safe_zero_poly.roots() if np.isreal(root) and inside(root.real, stable_interval) ]
 
-        extremal_candidates = [ val1, val2 ]
-        for root in self.diff_safe_zero_poly.roots():
-            if np.isreal(root) and inside(root.real, interval):
-                val = float(self.safe_zero_poly(root.real))
-                extremal_candidates.append( val )
+        critical_vals = [ self.safe_zero_poly(crit) for crit in criticals ]
+        return min(critical_vals)
 
-        maximum, minimum = max(extremal_candidates), min(extremal_candidates)
-        length = np.abs(interval[1] - interval[0])
-        k = self.normalization_kappa
-        if typ == 'above':
-            return math.tanh( + k * length * minimum ), length
-        if typ == 'below':
-            return math.tanh( - k * length * maximum ), length
+    def lowerbound_dS_SoS(self):
+        ''' Compute lowerbound on S'(λ) '''
 
-    def composite_barrier(self):
+        dScoefs = self.dSmatrix.coef
+        dS00 = dScoefs[0]
+        dS01 = 0.5 * dScoefs[1]
+        dS11 = dScoefs[2]
 
-        barrier_limits = []
-        for interval in self.intervals:
-
-            if interval["type"] != (0, self.stb_dim):           # ignores non-nsd intervals
-                continue
-
-            limits = interval["limits"]
-            if limits[1] < 0:
-                min_bound, max_bound = 0.0, 0.0
-            elif limits[0] == -np.inf: 
-                min_bound, max_bound = 0.0, limits[1]
-            else:
-                min_bound, max_bound = limits[0], limits[1]
-
-            barrier_limits.append( [min_bound, max_bound] )      
-
-        if self.zero_poly(0) >= 0: typ = 'above'
-        else: typ = 'below'
-
-        barrier_vals, weights = [], []
-        for barrier_lim in barrier_limits:
-            h, length = self._interval_barrier(barrier_lim, typ)
-            barrier_vals.append(h)
-            weights.append(length)
-
-        # return continuous_composition(self.composite_kappa, *barrier_vals, weights=weights)
-        return continuous_composition(self.composite_kappa, *barrier_vals)
+        dS = np.block([[ dS00  , dS01 ], 
+                       [ dS01.T, dS11 ]])
+        
+        eigS = np.linalg.eigvals(dS)
+        lowerbound = min(eigS)
+        return lowerbound
 
     def update(self, **kwargs):
         '''
@@ -546,20 +398,6 @@ class QFunction():
         self.pencil.update( M=newM, N=newN )
         self._compute_polynomials()
 
-    def satisfy_clf(self):
-        ''' Checks if given CLF satisfy the CLF condition '''
-
-        if isinstance(self.plant, LinearSystem):
-            A, B = self.plant.A, self.plant.B
-        else:
-            raise NotImplementedError("CLF condition test not implemented for non-LTI systems.")
-        
-        Hv = self.clf.H
-        Q = Hv @ A + A.T @ Hv
-        eigsQ = np.linalg.eigvals(Q)
-
-        return np.all(eigsQ < 0)
-
     def is_compatible(self):
         ''' 
         Test if Q-function is compatible or not.
@@ -575,6 +413,10 @@ class QFunction():
                         return False
 
         return True
+
+    def is_monotonic(self):
+        ''' Test if S(λ) is monotonically increasing '''
+        return self.lowerbound_dS_SoS() >= -1e-8
 
     def get_polys(self) -> tuple[Poly, Poly]:
         '''
@@ -624,7 +466,27 @@ class QFunction():
 
     def compatibilize(self, verbose=False):
         '''
-        Computes a compatible CLF.
+        Computes a compatible satisfying the CLF condition.
+        Necessary assumptions:
+
+            - Matrix A is Lipschitz.
+
+            - The CLF minimum is inside the safe set. This implies z(0) > 0, 
+            and since S(+-∞) = +-∞, at least one negative root of z(λ) must exist.
+            Negative roots of z(λ) are ignored for compatibilization.
+
+        The algorithm uses the following ideas:
+
+            - Tries to minimize the distance from the original CLF;
+
+            - Guarantees that the first n.d.s. interval is the only one by making S'(λ) >> 0;
+
+            - Guarantees that no positive roots of z(λ) exist on the first n.d.s. interval by 
+            computing suitable barriers for each root;
+
+            - The algorithm decision variable is a vectorized symmetric matrix Q 
+            defining the Hessian used throughout the algorithm as Q'Q = - H A - A' H.
+            This way, the produced p.s.d. Hessian satisfies the CLF condition by construction.
         '''
         Hv0 = self.Hv
 
@@ -634,47 +496,78 @@ class QFunction():
             A, B = np.zeros((self.plant.n)), self.eye(self.plant.n)
 
         G = B @ B.T
+# ------------------------------------------------------- #
+        def var2H(var: np.ndarray):
+            ''' Parametrization uses the CLF condition itself. '''
 
+            Q = vector2sym(var)
+            if np.all([ eig.real  < 0 for eig in np.linalg.eigvals(A) ]):        # if A is Lipschitz        
+                return solve_continuous_lyapunov(A, -Q.T @ Q)
+            else:
+                return Q.T @ Q
+# ------------------------------------------------------- #
+        def H2var(H: np.ndarray):
+            ''' Inverse parametrization '''
+
+            if np.all([ eig.real  < 0 for eig in np.linalg.eigvals(A) ]):        # if A is Lipschitz        
+                Q = - ( H @ A + A.T @ H )
+                eigQ, rotQ = np.linalg.eig(Q)
+                eigQfilter = [ eig if eig >= 0 else 0.0 for eig in eigQ ]
+                Qfilter = rotQ @ np.diag(eigQfilter) @ rotQ.T
+                return sym2vector( sqrtm(Qfilter).real )
+            else:
+                return sym2vector( sqrtm(H).real )
+# ------------------------------------------------------- #
         def ellipsoid_vol(Hv):
             ''' Proportional to the ellipsoid volume '''
             return - np.log( np.linalg.det(Hv) )
-
+# ------------------------------------------------------- #
         def cost(var: np.ndarray):
             ''' Seeks to minimize the distance from reference CLF and ellipsoid volume '''
-            Hv = self.clf.param2Hv(var)
+            Hv = var2H(var)
             # print( f"Eigenvalues of Hv = { np.linalg.eigvals(Hv) }" )
 
             cost = np.linalg.norm( Hv - Hv0, 'fro' )
-            cost += ellipsoid_vol(Hv)
+            # cost += ellipsoid_vol(Hv)
             return cost
+# ------------------------------------------------------- #
+        def qfun_update(var: np.ndarray):
+            ''' Updates Q-function with current var value '''
 
-        def compatibility(var: np.ndarray):
-            ''' Returns compatibility barrier '''
-
-            Hv = self.clf.param2Hv(var)
+            Hv = var2H(var)
             new_N = self.p * G @ Hv - A
             new_w = new_N @ ( self.cbf.center - self.clf.center )
             self.update( N=new_N, w=new_w )
+# ------------------------------------------------------- #
+        def compatibility(var: np.ndarray):
+            ''' Guarantees no roots on first (inevitable) n.s.d. interval '''
 
-            constr = self.composite_barrier()
+            qfun_update(var)
+            constr = self.compatibility_barrier()
+
+            # print(f"Compatibility barrier = {constr}")
+
             return constr
+# ------------------------------------------------------- #
+        def monotonicityS(var: np.ndarray):
+            ''' Guarantees monotonicity of S(λ) '''
 
-        def clf_condition(var: np.ndarray):
-            ''' Satisfies the CLF condition '''
+            qfun_update(var)
+            constr = self.lowerbound_dS_SoS()
 
-            Hv = self.clf.param2Hv(var)
-            eigs = np.linalg.eigvals( Hv @ A + A.T @ Hv )
-            return - eigs
+            # print(f"Lowerbound on dS = {constr}")
 
-        var0 = self.clf.param
-        constr = []
-        constr += [ {"type": "ineq", "fun": compatibility} ]
-        constr += [ {"type": "ineq", "fun": clf_condition} ]
-        sol = minimize( fun=cost, x0=var0, constraints=constr, method='SLSQP', options={"disp": True, "maxiter": 1000} )
+            return constr
+# ------------------------------------------------------- #
+        constraints = [ {"type": "ineq", "fun": compatibility}, 
+                        {"type": "ineq", "fun": monotonicityS} ]
+        
+        sol = minimize( fun=cost, x0=H2var(Hv0), constraints=constraints, 
+                       method='SLSQP', options={"disp": True, "maxiter": 1000} )
 
         # DO NOT update the self.clf after compatibilization;
         # Instead, update only the Q-function parameters
-        Hv = self.clf.param2Hv(sol.x)
+        Hv = var2H(sol.x)
         new_N = self.p * G @ Hv - A
         new_w = new_N @ ( self.cbf.center - self.clf.center )
         self.update( N=new_N, w=new_w )
@@ -682,7 +575,7 @@ class QFunction():
         results = {"Hv": Hv,
                    "cost": cost(sol.x),
                    "compatibility": compatibility(sol.x),
-                   "clf_conditon": clf_condition(sol.x)}
+                   "monotonicity": monotonicityS(sol.x) }
         
         if verbose:
             print("Compatibilization results: ")
@@ -694,8 +587,10 @@ class QFunction():
         ''' Initializes plot config '''
 
         self.plot_configs = {"inertia": True,
-                             "qfunction": True,
-                             "zfunction": True }
+                             "ones": True,
+                             "qfunction": False,
+                             "zfunction": True,
+                             "z2function": False }
 
         max_hor_lim = 1000
         max_ver_lim = 1000
@@ -713,6 +608,7 @@ class QFunction():
         zmin, zmax = max(min(z_range),-max_ver_lim), min(max(z_range),+max_ver_lim)
 
         self.plot_configs["hor"] = [lmin-5, lmax+5]
+        # self.plot_configs["ver"] = [zmin-10, zmax+10]
         self.plot_configs["ver"] = [zmin-10, zmax+10]
 
     def init_graphics(self, ax: Axes, res=0.01):
@@ -733,13 +629,17 @@ class QFunction():
         zmin, zmax = self.plot_configs["ver"]
         self.strip_size = np.abs(zmax-zmin)/20
 
+        if self.plot_configs["ones"]:
+            self.ones_plot, = ax.plot(self.lambda_array,[ 1.0 for l in self.lambda_array ],'k--',lw=1.0)
+
         if self.plot_configs["qfunction"]:
             self.q_plot, = ax.plot([],[],'b',lw=0.8, label='$q(\lambda) = \dfrac{n(\lambda)}{|P(\lambda)|^2}$')
 
         if self.plot_configs["zfunction"]:
-            self.z_plot, = ax.plot([],[],'g',lw=0.8, label='$z(\lambda) = n(\lambda) - |P(\lambda)|^2$')
+            self.z_plot, = ax.plot([],[],'b',lw=0.8, label='$z(\lambda) = n(\lambda) - |P(\lambda)|^2$')
 
-        self.ones_plot, = ax.plot(self.lambda_array,[ 1.0 for l in self.lambda_array ],'k--',lw=1.0)
+        if self.plot_configs["z2function"]:
+            self.z2_plot, = ax.plot([],[],'b--',lw=0.8, label='$z(\lambda)^2$')
 
         self.stable_pts, = ax.plot([], [], 'or' )
         self.unstable_pts, = ax.plot([], [], 'ob' )
@@ -776,23 +676,26 @@ class QFunction():
         self.lambda_array = np.arange(hor_limits[0], hor_limits[1], self.lambda_res)
 
         # Plot of 1.0 solution line
-        self.ones_plot.set_data(self.lambda_array, [ 1.0 for l in self.lambda_array ])
-
-        print(self.epsilon_comp)
+        if self.plot_configs["ones"]:
+            self.ones_plot.set_data(self.lambda_array, [ 1.0 for l in self.lambda_array ])
 
         # Q-function polynomial
         if self.plot_configs["qfunction"]:
-            # q_array = [ self.n_poly(l)/self.d_poly(l) for l in self.lambda_array ]
-            q_array = [ self.zero_poly(l)**2 - self.epsilon_comp for l in self.lambda_array ]
-
+            q_array = [ self.n_poly(l)/self.d_poly(l) for l in self.lambda_array ]
             self.q_plot.set_data(self.lambda_array, q_array)
             graphical_elements.append( self.q_plot )
 
         # Zero polynomial
         if self.plot_configs["zfunction"]:
-            z_array = [ self.zero_poly(l) for l in self.lambda_array ]
+            z_array = [ self.safe_zero_poly(l) for l in self.lambda_array ]
             self.z_plot.set_data(self.lambda_array, z_array)
             graphical_elements.append( self.z_plot )
+
+        # Zero polynomial squared
+        if self.plot_configs["z2function"]:
+            z2_array = [ self.zero_poly(l)**2 - self.epsilon_comp for l in self.lambda_array ]
+            self.z2_plot.set_data(self.lambda_array, z2_array)
+            graphical_elements.append( self.z2_plot )
 
         # Definiteness intervals
         num_updated = 0

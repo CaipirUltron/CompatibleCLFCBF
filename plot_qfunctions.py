@@ -1,14 +1,20 @@
 import sys, importlib
 import matplotlib.pyplot as plt
-
+import numpy as np
 from common import optimal_arrangement
-from controllers import CompatibleQP
 from controllers.compatibility import QFunction
 
 sim_config = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples.simulation."+sim_config, package=None)
 
 Qfunctions = [ QFunction(sim.plant, sim.clf, cbf, p=1.0) for cbf in sim.cbfs ]
+
+for k, qfun in enumerate(Qfunctions):
+
+    barrier = qfun.compatibility_barrier()
+    lower = qfun.lowerbound_dS_SoS()
+    print(f"Compatibility = {barrier}")
+    print(f"Lowerbound = {lower}")
 
 ''' --------------------------------- Plot ------------------------------------- '''
 size = 3.0

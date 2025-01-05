@@ -1,27 +1,15 @@
-'''
-Compatibilizes CLF with CBF and plant for a given KernelTriplet.
-The results are stored in a json file.
-'''
 import sys
-import json
 import importlib
-import numpy as np
 
-# Load simulation file
-simulation_file = sys.argv[1].replace(".json","")
-sim = importlib.import_module("examples."+simulation_file, package=None)
+from controllers import CompatibleQP
 
-if sim.kerneltriplet.is_compatible():
-    print("Given CLF is already compatible with CBF and plant.")
-else: 
-    print("Given CLF is not compatible with CBF and plant.")
+''' ------------------------- Load simulation example ------------------------------ '''
+sim_config = sys.argv[1].replace(".json","")
+sim = importlib.import_module("examples.simulation."+sim_config, package=None)
 
-    Ninit, _ = sim.kerneltriplet.get_N(sim.Pquadratic)
-    compatibility_result = sim.kerneltriplet.compatibilize(Ninit, sim.clf_center, verbose=True, animate=True)
+control_opts = {"compatibilization": True, "active": True}
 
-    try:
-        with open("logs/"+simulation_file+"_comp.json", "w") as file:
-            json.dump(compatibility_result, file, indent=4)
-            print("Compatibilization file saved successfully.")
-    except IOError:
-        print("Error saving compatibilization file.")
+''' ---------------------------- Load controller ---------------------------------- '''
+sample_time = 2e-2
+controller = CompatibleQP(sim.plant, sim.clf, sim.cbfs, alpha = [1.0, 2.0], beta = 1.0, p = [1.0, 1.0], 
+                          dt = sample_time, **control_opts, verbose=True)

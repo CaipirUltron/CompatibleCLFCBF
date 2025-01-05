@@ -32,8 +32,8 @@ if control_mode == 'compatible':
                     "active": True}
 
 ''' ---------------------------- Load controller ---------------------------------- '''
-sample_time = 2e-2
-controller = CompatibleQP(sim.plant, sim.clf, sim.cbfs, alpha = [1.0, 10.0], beta = 1.0, p = [1.0, 1.0], 
+sample_time = 1e-2
+controller = CompatibleQP(sim.plant, sim.clf, sim.cbfs, alpha = 1.0, beta = 10.0, p = 1.0, kappa = 10.0,
                           dt = sample_time,
                           **control_opts,
                           verbose=True)
@@ -65,7 +65,7 @@ for step in range(0, num_steps):
 
     # Send actuation commands
     controller.update_clf_dynamics(upi_control)
-    sim.plant.set_control(u_control) 
+    sim.plant.set_control(u_control)
     sim.plant.actuate(sample_time)
 
 # Collect simulation logs and save in .json file ------------------------------------
@@ -73,7 +73,7 @@ logs = {"dt": sample_time,
         "time": time_list,
         "state": sim.plant.state_log,
         "control": sim.plant.control_log,
-        "clf_log": controller.clf.dynamics.state_log,
+        "clf_log": controller.clf_dynamics.state_log,
         "equilibria": controller.equilibrium_points,
         "tracking": None
         }

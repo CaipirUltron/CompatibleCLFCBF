@@ -8,15 +8,16 @@ Must define the following methods:
 '''
 
 import numpy as np
-from common import hessian_quadratic, rot2D, interpolation, is_controllable
+from common import hessian_quadratic, rot2D, rot3D, interpolation
 
 ''' ---------------------------------- Define system ---------------------------------- '''
-# A, B = genStableLTI(n, m, type='float', Alims=(-2, 2), Blims=(1, 5), place=True)
+A = np.array([[-1, 0, 0],
+              [ 0,-1, 0],
+              [ 0, 0,-1]])
 
-A = np.array([[0,0],
-              [0,0]])
-B = np.array([[1,0],
-              [0,1]])
+B = np.array([[1,0,0],
+              [0,1,0],
+              [0,0,1]])
 
 def Afun(t): 
     return A
@@ -28,12 +29,12 @@ n, m = A.shape[0], B.shape[1]
 
 ''' ---------------------------- CLF parameters--------------------------- '''
 def Hvfun(t):
-    eigs1 = np.array([1.0, 8.0])
-    eigs2 = np.array([1.0, 8.0])
+    eigs1 = np.array([1.0, 8.0, 2.0])
+    eigs2 = np.array([1.0, 8.0, 2.0])
     eigs_fun = interpolation(eigs1, eigs2)
 
-    angle1, angle2 = 0.0, 180.0
-    R1, R2 = rot2D(angle1), rot2D(angle2)
+    R1 = rot3D(theta=  0.0, axis=[1.0, 0.0, 0.0])
+    R2 = rot3D(theta=270.0, axis=[1.0, 0.0, 1.0])
     Rfun = interpolation(R1, R2)
     
     return hessian_quadratic( eigs_fun(t), Rfun(t) )
@@ -44,18 +45,18 @@ def V0_fun(t):
 
 ''' ---------------------------- CBF parameters --------------------------- '''
 def Hhfun(t):
-    eigs1 = np.array([2.0, 1.0])
-    eigs2 = np.array([2.0, 1.0])
+    eigs1 = np.array([2.0, 1.0, 3.0])
+    eigs2 = np.array([2.0, 1.0, 3.0])
     eigs_fun = interpolation(eigs1, eigs2)
 
-    angle1, angle2 = 10.0, 10.0
-    R1, R2 = rot2D(angle1), rot2D(angle2)
+    R1 = rot3D(theta=0.0, axis=[1.0, 0.0, 0.0])
+    R2 = rot3D(theta=0.0, axis=[1.0, 0.0, 0.0])
     Rfun = interpolation(R1, R2)
     
     return hessian_quadratic( eigs_fun(t), Rfun(t) )
 
 def h0_fun(t):
-    CBFcenter = np.array([6.0, 0.0])
+    CBFcenter = np.array([6.0, 0.0, 2.0])
     return CBFcenter
 
 p = 1.0

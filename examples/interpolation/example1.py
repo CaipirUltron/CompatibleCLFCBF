@@ -11,8 +11,9 @@ import numpy as np
 from common import hessian_quadratic, rot2D, interpolation, is_controllable
 
 ''' ---------------------------------- Define system ---------------------------------- '''
-A = np.array([[-2, 0],
-              [ 0,-2]])
+A = np.array([[ 0, 1],
+              [-1,-1]])
+
 B = np.array([[1,0],
               [0,1]])
 
@@ -26,11 +27,11 @@ n, m = A.shape[0], B.shape[1]
 
 ''' ---------------------------- CLF parameters--------------------------- '''
 def Hvfun(t):
-    eigs1 = np.array([1.0, 8.0])
-    eigs2 = np.array([1.0, 8.0])
+    eigs1 = np.array([5.0, 2.0])
+    eigs2 = np.array([8.0, 1.0])
     eigs_fun = interpolation(eigs1, eigs2)
 
-    angle1, angle2 = 0.0, 180.0
+    angle1, angle2 = 10.0, 10.0
     R1, R2 = rot2D(angle1), rot2D(angle2)
     Rfun = interpolation(R1, R2)
     
@@ -42,8 +43,8 @@ def V0_fun(t):
 
 ''' ---------------------------- CBF parameters --------------------------- '''
 def Hhfun(t):
-    eigs1 = np.array([2.0, 1.0])
-    eigs2 = np.array([2.0, 1.0])
+    eigs1 = np.array([1.0, 1.0])
+    eigs2 = np.array([1.0, 1.0])
     eigs_fun = interpolation(eigs1, eigs2)
 
     angle1, angle2 = 10.0, 10.0

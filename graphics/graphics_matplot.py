@@ -5,10 +5,11 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as anim
 import matplotlib.colors as mcolors
 
-from matplotlib import gridspec
 from matplotlib.axes import Axes
 from matplotlib.patches import Rectangle, Ellipse
-from functions import Quadratic
+
+from dynamic_systems import ControlSystem
+from functions import Quadratic, QuadraticLyapunov, QuadraticBarrier, H2param, param2H
 
 class PlotQuadraticSim():
     '''
@@ -35,7 +36,7 @@ class PlotQuadraticSim():
 
         return quad.center, 2*a, 2*b, angle
 
-    def __init__(self, logs, plant, clf, cbfs, **kwargs):
+    def __init__(self, logs, plant: ControlSystem, clf: QuadraticLyapunov, cbfs: list[QuadraticBarrier], **kwargs):
         
         # Default plot parameters
         self.plot_config = {
@@ -144,7 +145,8 @@ class PlotQuadraticSim():
 
     def update_levelsets(self):
 
-        self.clf.set_params( param=self.curr_clf_state )
+        Hv = param2H(self.curr_clf_shape)
+        self.clf.set_params(hessian=Hv)
 
         V = self.clf(self.curr_state)
         xy, width, height, angle = PlotQuadraticSim.get_ellipse(self.clf, V)
@@ -156,7 +158,8 @@ class PlotQuadraticSim():
         for k, cbf in enumerate(self.cbfs):
 
             if self.cbf_logs:
-                cbf.set_params( param=self.curr_cbf_state )
+                Hh = param2H(self.curr_cbf_shape[k])
+                cbf.set_params(hessian=Hh)
             
             xy, width, height, angle = PlotQuadraticSim.get_ellipse(cbf, 0.0)
             self.cbf_levelsets[k].set_center(xy)
@@ -171,11 +174,11 @@ class PlotQuadraticSim():
         self.curr_state = [ self.state_log[0][i], self.state_log[1][i] ]
         self.curr_trajectory = [ self.state_log[0][0:i], self.state_log[1][0:i] ]
 
-        self.curr_clf_state = [ self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i] ]
-
+        self.curr_clf_shape = [ self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i] ]
+        self.curr_cbf_shape = [ [] for _ in self.cbfs ]
         for k in range(self.num_cbfs):
             if self.cbf_logs:
-                self.curr_cbf_state = [ self.cbf_logs[k][0][i], self.cbf_logs[k][1][i], self.cbf_logs[k][2][i] ]
+                self.curr_cbf_shape[k] = [ self.cbf_logs[k][0][i], self.cbf_logs[k][1][i], self.cbf_logs[k][2][i] ]
 
     def update(self, i):
 

@@ -4,23 +4,24 @@ Simulation example. Has to define the following objects:
 2) clf: QuadraticLyapunov - CLF moding the stabilization requirement
 3) cbfs: list[QuadraticBarrier] - list of quadratic CBFs modeling the safety requirements
 '''
-
 import numpy as np
 
-from common import is_controllable
+from common import is_controllable, rot3D
 from dynamic_systems import LinearSystem, DriftLess
 from functions import QuadraticLyapunov, QuadraticBarrier
 
 limits = 9*np.array((-1,1,-1,1))
 
 ''' --------------------------------- Define LTI system ------------------------------------- '''
-x0 = np.array([1, 8])
+x0 = np.array([8, -3, -1])
 
-A = np.array([[-2, 0],
-              [ 0,-2]])
+A = np.array([[-1, 0, 0],
+              [ 0,-1, 0],
+              [ 0, 0,-1]])
 
-B = np.array([[1,0],
-              [0,1]])
+B = np.array([[1,0,0],
+              [0,1,0],
+              [0,0,1]])
 
 n = A.shape[0]
 m = B.shape[1]
@@ -35,34 +36,30 @@ else:
 plant = LinearSystem(A=A, B=B, state = x0)
 
 ''' ------------------------ Define CLF (varying Hessian eigenvalues) ----------------------- '''
-CLFaxes = np.array([1.0, 2.0])
-CLFangle = 10.0
-CLFcenter = np.zeros(2)
-clf = QuadraticLyapunov.geometry2D(CLFaxes, CLFangle, CLFcenter, level=1)
-
-# Hv = np.array([[0.37662463, 0.50150596],
-#                [0.50150596, 0.66779565]])
-# clf = QuadraticLyapunov(hessian=Hv, center=CLFcenter)
+CLFaxes = np.array([1.0, 4.0, 2.0])
+CLFrot = rot3D(theta=0.0, axis=[1.0, 0.0, 0.0])
+CLFcenter = np.zeros(n)
+clf = QuadraticLyapunov.geometry(CLFaxes, CLFrot, CLFcenter, level=1)
 
 ''' ------------------------ Define CBF (varying Hessian eigenvalues) ----------------------- '''
-CBFaxes = [4.0, 1.0]
-CBFangle = 5.0
-CBFcenter = np.array([0.0, 5.0])
-cbf1 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter)
+CBFaxes = [4.0, 2.0, 1.0]
+CBFrot = rot3D(theta=10.0, axis=[1.0, 0.0, 1.0])
+CBFcenter = np.array([0.0, 5.0, 3.0])
+cbf1 = QuadraticBarrier.geometry(CBFaxes, CBFrot, CBFcenter)
 
-CBFaxes = [4.0, 1.0]
-CBFangle = 5.0
-CBFcenter = np.array([6.0, 0.0])
-cbf2 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter)
+CBFaxes = [4.0, 2.0, 1.0]
+CBFrot = rot3D(theta=10.0, axis=[1.0, 0.0, 1.0])
+CBFcenter = np.array([6.0, 0.0, 2.0])
+cbf2 = QuadraticBarrier.geometry(CBFaxes, CBFrot, CBFcenter)
 
-CBFaxes = [1.0, 2.0]
-CBFangle = -10.0
-CBFcenter = np.array([-6.0, 2.0])
-cbf3 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter)
+CBFaxes = [1.0, 2.0, 3.0]
+CBFrot = rot3D(theta=10.0, axis=[1.0, 0.0, 1.0])
+CBFcenter = np.array([-6.0, 2.0, -1.0])
+cbf3 = QuadraticBarrier.geometry(CBFaxes, CBFrot, CBFcenter)
 
 # cbfs = []
-# cbfs = [cbf1]
-cbfs = [cbf1, cbf2, cbf3]
+cbfs = [cbf2]
+# cbfs = [cbf1, cbf2, cbf3]
 num_cbfs = len(cbfs)
 
 ''' ------------------------------ Configure plot ----------------------------------- '''

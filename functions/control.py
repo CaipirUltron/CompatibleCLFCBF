@@ -19,6 +19,44 @@ import contourpy as ctp
 import matplotlib.colors as mcolors
 import platform, os
 
+def param2H(param: np.ndarray):
+    '''
+    Converts a parameter vector of dimension n(n+1)/2 into a p.s.d. matrix H.
+    '''
+    L = vector2sym(param)
+    H = L.T @ L
+    return H
+
+def H2param(H: np.ndarray):
+    '''
+    Converts a symmetric p.s.d. matrix H into the flattened version
+    of its unique square root ( a vector of dimension n(n+1)/2 ).
+    '''
+    if np.linalg.norm(H - H.T) > 1e-6:
+        raise TypeError("Passed matrix is not symmetric.")
+
+    eigHv = np.linalg.eigvals(H)
+    if np.any(eigHv) < 0.0:
+        raise TypeError("Passed matrix is not p.s.d.")
+
+    L = sp.linalg.sqrtm(H)
+    return sym2vector(L)
+
+def dV_matrix(H: np.ndarray, A: np.ndarray, tol: float = 0):
+    ''' 
+    Returns the corresponding time derivative matrix of the Lyapunov function 
+    V = x H x for the LTI autonomous system dx = A x. 
+    If tol was passed, add it as an eigenvalue tolerance. 
+    '''
+    if A.shape != H.shape:
+        raise Exception("Matrices A and H must be of the same shape.")
+    dim = A.shape[0]
+
+    if np.any([ eig.real > 0 for eig in np.linalg.eigvals(A) ]):
+        raise Exception("Passed A matrix is not Lipshitz.")
+
+    return H @ A + A.T @ H + tol*np.eye(dim)
+
 class QuadraticLyapunov(Quadratic):
     '''
     Class for Quadratic Lyapunov functions of the type (x-x0)'Hv(x-x0), parametrized by vector pi_v.
@@ -27,57 +65,59 @@ class QuadraticLyapunov(Quadratic):
     '''
     def __init__(self, *args, **kwargs):
 
-        self.epsilon = 1e-3
         kwargs["height"] = 0.0
         super().__init__(*args, **kwargs)
 
-        from dynamic_systems import Integrator
-        self.param = self.Hv2param( self.H )
-        self.dynamics = Integrator(n=len(self.param), state = self.param)
+        self.tol_CLFcond = 1e-1
 
-    def param2Hv(self, param):
-        ''' Function to compute Hv from parameters '''
+    def _init_clf_opt(self, A: np.ndarray):
+        ''' Setup convex optimization for CLF condition '''
 
-        L = vector2sym(param)
-        return L.T @ L + self.epsilon * np.eye(self._dim)
+        self.Hvar = cvx.Variable( shape=(self._dim, self._dim), PSD=True )
+        cost = cvx.norm( self.Hvar - self.H ) 
+        constraint = [ dV_matrix(self.Hvar, A, self.tol_CLFcond) << 0 ]
+        self.clf_cond_prob = cvx.Problem( cvx.Minimize( cost ), constraints=constraint )
 
-    def Hv2param(self, Hv):
-        ''' Function to compute parameters from Hv '''
-        R = Hv - self.epsilon * np.eye(self._dim)
-        eigR = np.linalg.eigvals(R) 
-        if np.any(eigR) < 0.0:
-            warnings.warn("Non-invertible transformation.")
-        L = sp.linalg.sqrtm(R)
-        return sym2vector(L)
+    def find_clf(self):
+        ''' Returns a new CLF Hessian satisfying the CLF condition '''
 
-    def set_params(self, **kwargs):
-        super().set_params(**kwargs)
+        self.clf_cond_prob.solve(solver = 'SCS', verbose=False)
+        return self.Hvar.value
 
-        if "epsilon" in kwargs.keys():
-            self.epsilon = kwargs["epsilon"]
+    def satisfy_clf(self, A):
+        ''' 
+        Test if QuadraticLyapunov satisfies the CLF condition for LTI system with state matrix A.
+        If not, computes a new valid CLF.
+        '''
+        if np.all(A == np.zeros(A.shape)):              # ignore if system is driftless
+            return True 
 
-        if "param" in kwargs.keys():
-            self.param = kwargs["param"]
-            self.H = self.param2Hv(self.param)
+        self._init_clf_opt(A)
+        Hv = self.H
+        Q = dV_matrix(Hv, A, self.tol_CLFcond)
+        eigsQ = np.linalg.eigvals(Q)
+        is_clf = np.all(eigsQ < 0)
+
+        if is_clf:
+            print(f"CLF satisfies the CLF condition.")
+        else:
+            newHv = self.find_clf()
+            self.set_params(hessian = newHv)
+            print(f"CLF does not satisfy the CLF condition. Closest valid CLF = \n{self.H}")
+
+        return is_clf
 
     def partial_Hv(self):
-        '''
-        Returns the partial derivatives of Hv wrt to the parameters.
-        '''
+        ''' Returns the partial derivatives of Hv wrt to the parameters '''
+
         sym_basis = symmetric_basis(self._dim)
-        partial_Hv = np.zeros([ len(self.param), self._dim, self._dim ])
-        for i,j in zip(range(len(self.param)), range(len(self.param))):
-                partial_Hv[i,:,:] = partial_Hv[i,:,:] + ( sym_basis[i].T @ sym_basis[j] + sym_basis[j].T @ sym_basis[i] )*self.param[j]
+        param = H2param( self.H )
+
+        partial_Hv = np.zeros([ len(param), self._dim, self._dim ])
+        for i,j in zip(range(len(param)), range(len(param))):
+            partial_Hv[i,:,:] = partial_Hv[i,:,:] + ( sym_basis[i].T @ sym_basis[j] + sym_basis[j].T @ sym_basis[i] )*param[j]
 
         return partial_Hv
-
-    def update(self, param_ctrl, dt):
-        '''
-        Integrates the parameters.
-        '''
-        self.dynamics.set_control(param_ctrl)
-        self.dynamics.actuate(dt)
-        self.set_params( param = self.dynamics.get_state())
 
     def gamma_transform(self, x: np.ndarray, gamma: npPoly):
         ''' 
@@ -111,7 +151,7 @@ class QuadraticLyapunov(Quadratic):
         '''
         if not isinstance(gamma, npPoly):
             raise TypeError("Gamma function is not a polynomial.")
-        
+                
         gamma_der = npPoly( polyder(gamma.coef) )
         gamma_int = npPoly( polyint(gamma.coef) )
         
@@ -137,15 +177,18 @@ class QuadraticLyapunov(Quadratic):
         return V, gradV, Hv
 
     @classmethod
-    def geometry2D(cls, semiaxes: tuple, angle: float, center: list | np.ndarray, level: float, **kwargs):
-        ''' Create Quadratic from geometric parameters '''
-        a, b = semiaxes
-        R = rot2D(angle)
+    def geometry(cls, semiaxes: tuple, R: np.ndarray, center: list | np.ndarray, **kwargs):
+        ''' Create QuadraticLyapunov from geometric parameters: semiaxes lengths, rotation matrix R and center '''
 
-        lamb1 = 2*level/(a**2)
-        lamb2 = 2*level/(b**2)
-        H = R @ np.diag([lamb1, lamb2]) @ R.T
+        eigs = [ 1/(ax**2) for ax in semiaxes ]
+        H = R @ np.diag(eigs) @ R.T
         return cls(hessian=H, center=center, height=0.0, **kwargs)
+
+    @classmethod
+    def geometry2D(cls, semiaxes: tuple, angle: float, center: list | np.ndarray, **kwargs):
+        ''' Create QuadraticLyapunov from 2D geometric parameters: semiaxes lengths, angle and center '''
+        R = rot2D(angle)   
+        return QuadraticLyapunov.geometry(semiaxes, R, center, **kwargs)
 
 class QuadraticBarrier(Quadratic):
     '''
@@ -157,72 +200,20 @@ class QuadraticBarrier(Quadratic):
         kwargs["height"] = -0.5
         super().__init__(*args, **kwargs)
 
-        # from dynamic_systems import Integrator
-        # self.param = sym2vector(self._hessian)
-        # self.dynamics = Integrator(self.param,np.zeros(len(self.param)))
-        # self.last_gamma_sol = 0.0
-        # self.gamma_min = -np.pi/2
-        # self.gamma_max = +np.pi/2
+    @classmethod
+    def geometry(cls, semiaxes: tuple, R: np.ndarray, center: list | np.ndarray, **kwargs):
+        ''' Create Quadratic from geometric parameters: semiaxes lengths, rotation matrix R and center '''
+
+        eigs = [ 1/(ax**2) for ax in semiaxes ]
+        H = R @ np.diag(eigs) @ R.T
+        return cls(hessian=H, center=center, height=-0.5, **kwargs)
 
     @classmethod
     def geometry2D(cls, semiaxes: tuple, angle: float, center: list | np.ndarray, **kwargs):
-        ''' Create Quadratic from geometric parameters '''
-        a, b = semiaxes
-        R = rot2D(angle)
-        lamb1 = 1/(a**2) 
-        lamb2 = 1/(b**2)
-        H = R @ np.diag([lamb1, lamb2]) @ R.T
-        return cls(hessian=H, center=center, height=-0.5, **kwargs)
+        ''' Create QuadraticBarrier from 2D geometric parameters: semiaxes lengths, angle and center '''
 
-    # def set_params(self, param):
-    #     '''
-    #     Sets the barrier function parameters.
-    #     '''
-    #     self.param = param
-    #     super().set_params(hessian = vector2sym(param))
-
-    # def update(self, param_ctrl, dt):
-    #     '''
-    #     Integrates the barrier function parameters.
-    #     '''
-    #     self.dynamics.set_control(param_ctrl)
-    #     self.dynamics.actuate(dt)
-    #     self.set_param(self.dynamics.get_state())
-
-    # @classmethod
-    # def from_parameters(self, set_parameters):
-    #     '''
-    #     Computes the barrier with respect to a set defined by set_parameters
-    #     '''
-    #     r = set_parameters["radius"]
-    #     p_center = set_parameters["center"]
-    #     theta = set_parameters["orientation"]
-
-    #     def compute_pt(gamma):
-    #         return np.array(p_center) + r*rot2D(theta) @ np.array([np.cos(gamma), np.sin(gamma)]).reshape(2)
-
-    #     def necessary_cond(gamma):
-    #         p_gamma = compute_pt( gamma )
-    #         nablah = self.evaluate_gradient(*p_gamma)[0]
-    #         return nablah.dot(np.array([-np.sin(theta+gamma), np.cos(theta+gamma)]))
-
-    #     def cost(gamma):
-    #         p_gamma = compute_pt(gamma)
-    #         return self.evaluate_function(*p_gamma)[0]
-
-    #     # Solve optimization problem
-    #     import scipy.optimize as opt
-    #     results = opt.minimize( cost, self.last_gamma_sol )
-    #     gamma_opt = results.x[0]
-
-    #     h = cost(gamma_opt)
-
-    #     p_gamma_opt = compute_pt( gamma_opt )
-    #     nablah = self.evaluate_gradient(*p_gamma_opt)[0]
-
-    #     self.last_gamma_sol = gamma_opt
-
-    #     return h, nablah, p_gamma_opt, gamma_opt
+        R = rot2D(angle)    
+        return QuadraticBarrier.geometry(semiaxes, R, center, **kwargs)
 
 class KernelLyapunov(KernelQuadratic):
     '''

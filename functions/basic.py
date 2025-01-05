@@ -120,7 +120,7 @@ class Function(ABC):
                     spacing - grid spacing for contour generation
         '''        
         if self._dim != 2:
-            # logging.warning("Contour plot can only be used for 2D functions.")
+            logging.warning("Contour plot can only be used for 2D functions.")
             self.contour = None
             return
 
@@ -235,9 +235,11 @@ class Quadratic(Function):
         for key in kwargs:
             if key == "hessian":
                 self.H = np.array(kwargs[key])
+                self._dim = self.H.shape[0]
                 continue
             if key == "center":
                 self.center = np.array(kwargs[key])
+                self._dim = len(self.center)
                 continue
             if key == "height":
                 self.height = kwargs[key]

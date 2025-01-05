@@ -26,11 +26,11 @@ n, m = A.shape[0], B.shape[1]
 
 ''' ---------------------------- CLF parameters--------------------------- '''
 def Hvfun(t):
-    eigs1 = np.array([1.0, 8.0])
+    eigs1 = np.array([5.2, 1.2])
     eigs2 = np.array([1.0, 8.0])
     eigs_fun = interpolation(eigs1, eigs2)
 
-    angle1, angle2 = 0.0, 180.0
+    angle1, angle2 = 30.0, 30.0
     R1, R2 = rot2D(angle1), rot2D(angle2)
     Rfun = interpolation(R1, R2)
     

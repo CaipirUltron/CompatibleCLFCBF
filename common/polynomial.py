@@ -310,6 +310,7 @@ class Eigen():
     eigenvalue: complex
     rightEigenvectors: list | np.ndarray
     leftEigenvectors: list | np.ndarray
+    isreal: bool
 
 class MatrixPolynomial():
     '''
@@ -366,11 +367,12 @@ class MatrixPolynomial():
         for index, _ in np.ndenumerate(self.poly_array):
             self.poly_array[index] = Poly([0.0], symbol=self.symbol)
 
+        self.realEigenTol = 1e-10           # Tolerance to consider an eigenvalue as real
+
         # Sets coefficients
         self.update(coef=coef)
 
         ''' Parameters '''
-        self.realEigenTol = 1e-10           # Tolerance to consider an eigenvalue as real
         self.max_order = 2                 # Max. polynomial order to compute nullspace solutions
 
         ''' Setups the SOS decomposition problem in CVXPY '''
@@ -694,6 +696,15 @@ class MatrixPolynomial():
 
         return sos_matrix
 
+    def deriv(self):
+        ''' Derivative of Matrix Polynomial '''
+
+        diff_poly = np.zeros(self.shape, dtype=Poly)
+        for index, item in np.ndenumerate(self.poly_array):
+            diff_poly[index] = item.deriv()
+
+        return MatrixPolynomial(coef=diff_poly)
+
     @property
     def T(self):
         ''' Transpose operation '''
@@ -836,10 +847,14 @@ class MatrixPencil(MatrixPolynomial):
             zRight = null_space(P, rcond=1e-11)
             zLeft = null_space(P.T, rcond=1e-11)
 
+            isreal = False
+            if np.abs(alpha.imag) < self.realEigenTol: 
+                isreal = True
+
             if beta != 0:
-                eigens.append( Eigen(alpha, beta, alpha/beta, zRight, zLeft) )
+                eigens.append( Eigen(alpha, beta, alpha/beta, zRight, zLeft, isreal) )
             else:
-                eigens.append( Eigen(alpha, 0.0, np.inf if alpha.real > 0 else -np.inf, zRight, zLeft) )
+                eigens.append( Eigen(alpha, 0.0, np.inf if alpha.real > 0 else -np.inf, zRight, zLeft, True) )
 
         return eigens
 

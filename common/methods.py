@@ -8,13 +8,12 @@ import quaternion
 import numpy as np
 
 from numpy.polynomial import Polynomial as Poly
-from scipy.spatial import geometric_slerp
 from scipy.spatial.transform import Rotation as R
 
 from itertools import product, combinations
 from functools import wraps
 from scipy.spatial import ConvexHull
-from scipy.optimize import fsolve, minimize
+from scipy.optimize import fsolve
 from shapely.geometry import LineString, LinearRing, Polygon
 from shapely.ops import unary_union
 from shapely import is_geometry
