@@ -80,7 +80,7 @@ class QFunction():
         self.real_tol = 1e-6
         self.infty_tol = 1e+7
 
-        self.safe_tol = 1.5                  # Should be a bigger than one
+        self.safe_tol = 1.8                  # Should be a bigger than one
 
         # Initialize stability matrix S(λ)
         self.stb_dim = self.dim-1
@@ -528,7 +528,7 @@ class QFunction():
             # print( f"Eigenvalues of Hv = { np.linalg.eigvals(Hv) }" )
 
             cost = np.linalg.norm( Hv - Hv0, 'fro' )
-            # cost += ellipsoid_vol(Hv)
+            cost += ellipsoid_vol(Hv)
             return cost
 # ------------------------------------------------------- #
         def qfun_update(var: np.ndarray):
@@ -588,7 +588,7 @@ class QFunction():
 
         self.plot_configs = {"inertia": True,
                              "ones": True,
-                             "qfunction": False,
+                             "qfunction": True,
                              "zfunction": True,
                              "z2function": False }
 
@@ -636,7 +636,7 @@ class QFunction():
             self.q_plot, = ax.plot([],[],'b',lw=0.8, label='$q(\lambda) = \dfrac{n(\lambda)}{|P(\lambda)|^2}$')
 
         if self.plot_configs["zfunction"]:
-            self.z_plot, = ax.plot([],[],'b',lw=0.8, label='$z(\lambda) = n(\lambda) - |P(\lambda)|^2$')
+            self.z_plot, = ax.plot([],[],'b--',lw=0.8, label='$z(\lambda) = n(\lambda) - |P(\lambda)|^2$')
 
         if self.plot_configs["z2function"]:
             self.z2_plot, = ax.plot([],[],'b--',lw=0.8, label='$z(\lambda)^2$')
@@ -687,7 +687,7 @@ class QFunction():
 
         # Zero polynomial
         if self.plot_configs["zfunction"]:
-            z_array = [ self.safe_zero_poly(l) for l in self.lambda_array ]
+            z_array = [ self.zero_poly(l) for l in self.lambda_array ]
             self.z_plot.set_data(self.lambda_array, z_array)
             graphical_elements.append( self.z_plot )
 

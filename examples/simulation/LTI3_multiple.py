@@ -52,6 +52,8 @@ CBFrot = rot3D(theta=10.0, axis=[1.0, 0.0, 1.0])
 CBFcenter = np.array([6.0, 0.0, 2.0])
 cbf2 = QuadraticBarrier.geometry(CBFaxes, CBFrot, CBFcenter)
 
+print(2*cbf2.H)
+
 CBFaxes = [1.0, 2.0, 3.0]
 CBFrot = rot3D(theta=10.0, axis=[1.0, 0.0, 1.0])
 CBFcenter = np.array([-6.0, 2.0, -1.0])

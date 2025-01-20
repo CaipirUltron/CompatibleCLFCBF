@@ -14,7 +14,7 @@ from functions import QuadraticLyapunov, QuadraticBarrier
 limits = 9*np.array((-1,1,-1,1))
 
 ''' --------------------------------- Define LTI system ------------------------------------- '''
-x0 = np.array([5,3])
+x0 = np.array([8,3])
 
 A = np.array([[ 0, 1],
               [-1,-1]])
@@ -34,14 +34,14 @@ else:
 plant = LinearSystem(A=A, B=B, state = x0)
 
 ''' ------------------------ Define CLF (varying Hessian eigenvalues) ----------------------- '''
-CLFaxes = np.array([1.0, 4.0])
+CLFaxes = np.array([7.0, 1.0])
 CLFangle = 0.0
 CLFcenter = np.zeros(2)
 clf = QuadraticLyapunov.geometry2D(CLFaxes, CLFangle, CLFcenter, level=1)
 
-# Hv = np.array([[ 1.17130219, -1.08155948],
-#                [-1.08155948, 7.82869781 ]])
-# clf = QuadraticLyapunov(hessian=Hv, center=CLFcenter)
+Hv = np.array([[ 1.17130219, -1.08155948],
+               [-1.08155948, 7.82869781 ]])
+clf = QuadraticLyapunov(hessian=Hv, center=CLFcenter)
 
 ''' ------------------------ Define CBF (varying Hessian eigenvalues) ----------------------- '''
 CBFaxes = [4.0, 1.0]
@@ -49,7 +49,7 @@ CBFangle = 10.0
 CBFcenter = np.array([0.0, 5.0])
 cbf1 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter)
 
-CBFaxes = [4.0, 1.0]
+CBFaxes = [1.0, 4.0]
 CBFangle = 10.0
 CBFcenter = np.array([6.0, 0.0])
 cbf2 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter)
@@ -60,8 +60,8 @@ CBFcenter = np.array([-6.0, 2.0])
 cbf3 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter)
 
 # cbfs = []
-# cbfs = [cbf2]
-cbfs = [cbf1, cbf2, cbf3]
+cbfs = [cbf2]
+# cbfs = [cbf1, cbf2, cbf3]
 num_cbfs = len(cbfs)
 
 ''' ------------------------------ Configure plot ----------------------------------- '''

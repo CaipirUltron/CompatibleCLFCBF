@@ -50,7 +50,7 @@ CBFangle = 5.0
 CBFcenter = np.array([0.0, 5.0])
 cbf1 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter)
 
-CBFaxes = [4.0, 1.0]
+CBFaxes = [1.0, 4.0]
 CBFangle = 5.0
 CBFcenter = np.array([6.0, 0.0])
 cbf2 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter)
@@ -61,7 +61,7 @@ CBFcenter = np.array([-6.0, 2.0])
 cbf3 = QuadraticBarrier.geometry2D(CBFaxes, CBFangle, CBFcenter)
 
 # cbfs = []
-# cbfs = [cbf1]
+# cbfs = [cbf2]
 cbfs = [cbf1, cbf2, cbf3]
 num_cbfs = len(cbfs)
 

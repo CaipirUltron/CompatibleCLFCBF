@@ -3,13 +3,15 @@ import matplotlib.pyplot as plt
 
 from graphics import PlotQuadraticSim
 
-simulation = "LTI1_multiple"
+simulation = "LTI2_multiple"
 file_names = [simulation+"_nominal", simulation+"_compatible"]
 
-times = [ 0.0, 6.8, 7.5 ]
+nom_times = [ 0.0, 5, 9.9 ]
+# com_times = [ 0.2, 0.4, 1.0 ]
+com_times = [ 0.2, 1.0, 3.0 ]
 
 num_files = len(file_names)
-num_times = len(times)
+num_times = len(nom_times)
 
 hor_size, ver_size = 7.0, 4.0
 fig, ax = plt.subplots(nrows=num_files, ncols=num_times, figsize=(hor_size, ver_size), 
@@ -21,6 +23,10 @@ fig.suptitle('Nominal vs Compatible CLF-CBF QP-controller')
 fig.tight_layout(pad=0.1)
 
 for f_index, file_name in enumerate(file_names):
+    if "nominal" in file_name:
+        times = nom_times
+    elif "compatible" in file_name:
+        times = com_times
     for t_index, time in enumerate(times):
 
         file_path = "examples.simulation." + simulation

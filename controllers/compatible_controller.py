@@ -277,7 +277,7 @@ class CompatibleQP():
         # CLF constraint for the first QP
         a_clf = np.hstack([ LgV, -1.0 ])
         b_clf = - self.alpha * self.V - LfV
-        b_clf += - self.nablaV_pi.T @ self.u_v
+        # b_clf += - self.nablaV_pi.T @ self.u_v
 
         return a_clf, b_clf
 
@@ -380,6 +380,7 @@ class CompatibleQP():
                 if arr[index] == True:
                     return index
         
+        return 0
         return -1
 
 class CompatiblePF(CompatibleQP):
