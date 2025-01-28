@@ -17,7 +17,7 @@ x0 = np.array([8, -3, -1])
 
 A = np.array([[-1, 0, 0],
               [ 0,-1, 0],
-              [ 0, 0,-1]])
+              [ 0, 1,-1]])
 
 B = np.array([[1,0,0],
               [0,1,0],
@@ -60,7 +60,7 @@ CBFcenter = np.array([-6.0, 2.0, -1.0])
 cbf3 = QuadraticBarrier.geometry(CBFaxes, CBFrot, CBFcenter)
 
 # cbfs = []
-cbfs = [cbf2]
+cbfs = [cbf1]
 # cbfs = [cbf1, cbf2, cbf3]
 num_cbfs = len(cbfs)
 

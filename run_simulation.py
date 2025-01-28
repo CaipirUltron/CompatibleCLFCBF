@@ -33,7 +33,7 @@ if control_mode == 'compatible':
 
 ''' ---------------------------- Load controller ---------------------------------- '''
 sample_time = 1e-2
-controller = CompatibleQP(sim.plant, sim.clf, sim.cbfs, alpha = 1.0, beta = 10.0, p = 1.0, kappa = 10.0,
+controller = CompatibleQP(sim.plant, sim.clf, sim.cbfs, alpha = 1.0, beta = 1.0, p = 1.0, kappa = 10.0,
                           dt = sample_time,
                           **control_opts,
                           verbose=True)

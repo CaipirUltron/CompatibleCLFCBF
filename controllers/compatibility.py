@@ -586,11 +586,15 @@ class QFunction():
     def configure_plot(self):
         ''' Initializes plot config '''
 
-        self.plot_configs = {"inertia": True,
+        self.plot_configs = {"hor_default": (-10, 40),
+                             "ver_default": (-5, 5),
+                             "stripsize": 10.0,
+                             "inertia": True,
                              "ones": True,
                              "qfunction": True,
                              "zfunction": True,
-                             "z2function": False }
+                             "z2function": False,
+                             "dynamic_limits": True }
 
         max_hor_lim = 1000
         max_ver_lim = 1000
@@ -607,15 +611,19 @@ class QFunction():
         z_range += [ self.zero_poly(lmax) ]
         zmin, zmax = max(min(z_range),-max_ver_lim), min(max(z_range),+max_ver_lim)
 
-        self.plot_configs["hor"] = [lmin-5, lmax+5]
-        # self.plot_configs["ver"] = [zmin-10, zmax+10]
-        self.plot_configs["ver"] = [zmin-10, zmax+10]
+        if self.plot_configs["dynamic_limits"]:
+            self.plot_configs["hor"] = [lmin-5, lmax+5]
+            self.plot_configs["ver"] = [zmin-10, zmax+10]
+        else:
+            self.plot_configs["hor"] = self.plot_configs["hor_default"]
+            self.plot_configs["ver"] = self.plot_configs["ver_default"]
 
     def init_graphics(self, ax: Axes, res=0.01):
         ''' Initialize graphical objects '''
 
         # Get horizontal and vertical ranges for plotting
         self.configure_plot()
+
         hor_limits = self.plot_configs["hor"]
         ver_limits = self.plot_configs["ver"]
 
@@ -626,8 +634,9 @@ class QFunction():
         self.lambda_res = res
         self.lambda_array = np.arange(hor_limits[0], hor_limits[1], self.lambda_res)
 
-        zmin, zmax = self.plot_configs["ver"]
-        self.strip_size = np.abs(zmax-zmin)/20
+        # zmin, zmax = self.plot_configs["ver"]
+        # self.strip_size = np.abs(zmax-zmin)/20
+        self.strip_size = self.plot_configs["stripsize"]
 
         if self.plot_configs["ones"]:
             self.ones_plot, = ax.plot(self.lambda_array,[ 1.0 for l in self.lambda_array ],'k--',lw=1.0)
