@@ -72,5 +72,5 @@ plot_config = {
     "drawlevel": True,
     "resolution": 50,
     "fps":60,
-    "equilibria": False,
+    "equilibria": True,
     }

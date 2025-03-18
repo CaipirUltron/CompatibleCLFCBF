@@ -250,7 +250,7 @@ class CompatibleQP():
             f = self.plant.f(x)
             g = self.plant.g(x)
 
-        # print(f"State = {x}")
+        print(f"State = {x}")
 
         return x, f, g
 
@@ -380,7 +380,7 @@ class CompatibleQP():
                 if arr[index] == True:
                     return index
         
-        return 0
+        # return 0
         return -1
 
 class CompatiblePF(CompatibleQP):

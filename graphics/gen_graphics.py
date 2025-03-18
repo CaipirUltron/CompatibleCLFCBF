@@ -32,9 +32,31 @@ else:
     # plotSim.main_ax.set_title("Path Following with Obstacle Avoidance using CLF-CBFs", fontsize=12)
 
 figsize = (5, 5)
-fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize, layout="constrained")
-fig.suptitle('CLF-CBF-QP Control', fontsize=12)
-# fig.tight_layout(pad=1)
-# ax.set_aspect('equal', adjustable='box')
+
+if sim.plant.n == 2:
+    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize, layout="constrained")
+elif sim.plant.n == 3:
+    fig = plt.figure(figsize=figsize)  # Square figure
+    ax = fig.add_subplot(projection='3d')
+    ax.set_box_aspect((1,1,1))
+    ax.set_xlabel('$x$')
+    ax.set_ylabel('$y$')
+    ax.set_zlabel('$z$')
+
+    ax.set_yticklabels([])
+    ax.set_xticklabels([])
+
+    # ax.set_xticks([])
+    # ax.set_yticks([])
+
+    # fig.tight_layout()
+else:
+    raise Exception("Plotting not implemented")
+
+# fig.suptitle('CLF-CBF-QP Control', fontsize=12)
+# fig.suptitle('Undesirable Equilibrium Points in CLF-CBF QP Control', fontsize=12)
+
+fig.tight_layout(pad=1)
+ax.set_aspect('equal', adjustable='box')
 
 plotSim.init_graphics(ax)

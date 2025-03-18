@@ -32,14 +32,14 @@ if control_mode == 'compatible':
                     "active": True}
 
 ''' ---------------------------- Load controller ---------------------------------- '''
-sample_time = 1e-2
-controller = CompatibleQP(sim.plant, sim.clf, sim.cbfs, alpha = 1.0, beta = 10.0, p = 1.0, kappa = 10.0,
+sample_time = 4e-2
+controller = CompatibleQP(sim.plant, sim.clf, sim.cbfs, alpha = 5.0, beta = 10.0, p = 1.0, kappa = 10.0,
                           dt = sample_time,
                           **control_opts,
                           verbose=True)
 
 ''' ----------------------------- Simulation loop --------------------------------- '''
-T = 10
+T = 25
 if len(sys.argv) > 3:
     T = float(sys.argv[3])
 

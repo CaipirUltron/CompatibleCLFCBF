@@ -23,7 +23,6 @@ class PlotQuadraticSim():
             return [0,0], 0, 0, 0
         
         term = 2*( level - quad.height )
-
         eigs, R = np.linalg.eig(quad.H)
 
         if np.any(eigs <= 0):
@@ -33,8 +32,34 @@ class PlotQuadraticSim():
 
         a = np.sqrt(term/eigs[0])
         b = np.sqrt(term/eigs[1])
+        
+        if len(eigs) == 2:                          # 2D ellipses
+            return quad.center, 2*a, 2*b, angle
+        elif len(eigs) == 3:                        # 3D ellipses
+            c = np.sqrt(term/eigs[2])
+            return quad.center, a, b, c, R
 
-        return quad.center, 2*a, 2*b, angle
+    def get_elliptical_surf(ax, center, rx, ry, rz, R, color='b'):
+        ''' Returns 3D artist to be plotted '''
+
+        # Set of all spherical angles:
+        u = np.linspace(0, 2 * np.pi, 100)
+        v = np.linspace(0, np.pi, 100)
+
+        # Cartesian coordinates that correspond to the spherical angles:
+        # (this is the equation of an ellipsoid):
+        x = rx * np.outer(np.cos(u), np.sin(v))
+        y = ry*np.outer(np.sin(u), np.sin(v))
+        z = rz*np.outer(np.ones_like(u), np.cos(v))
+
+        t = np.transpose(np.array([x,y,z]), (1,2,0))
+        x,y,z = np.transpose(t @ R, (2,0,1))
+
+        x += center[0]
+        y += center[1]
+        z += center[2]
+
+        return ax.plot_surface(x, y, z, rstride=4, cstride=4, color=color, antialiased=False, shade = True, alpha = 0.15)
 
     def __init__(self, logs, plant: ControlSystem, clf: QuadraticLyapunov, cbfs: list[QuadraticBarrier], **kwargs):
         
@@ -42,20 +67,28 @@ class PlotQuadraticSim():
         self.plot_config = {
             "xlimits": (-6,6),
             "ylimits": (-6,6),
+            "zlimits": (-6,6),
             "drawlevel": True,
             "resolution": 50,
             "fps":60,
             "equilibria": False,
+            "arrows": False,
+            "arrow_size": 0.6
             }
         
         if "plot_config" in kwargs.keys():
-            self.plot_config = kwargs["plot_config"]
-        
+            for key in kwargs["plot_config"].keys():
+                self.plot_config[key] = kwargs["plot_config"][key]
+                        
         # Get plant, CLF and CBF
         self.robot = plant
         self.clf = clf
         self.cbfs = cbfs
         self.num_cbfs = len(self.cbfs)
+
+        self.dim = self.robot.n
+        if self.dim > 3:
+            raise NotImplementedError("ARE YOU A HYPERDIMENSIONAL BEING??")
 
         # Get logs
         self.sample_time = logs["dt"]
@@ -65,8 +98,8 @@ class PlotQuadraticSim():
         self.final_time = self.time[1]
 
         self.state_log = logs["state"]
-        self.initial_state = [ self.state_log[0][0], self.state_log[1][0] ]
-        self.final_state = [ self.state_log[0][-1], self.state_log[1][-1] ]
+        self.initial_state = [ state_dim_log[0] for state_dim_log in self.state_log ]
+        self.final_state = [ state_dim_log[-1] for state_dim_log in self.state_log ]
 
         if "clf_log" in logs.keys():
             self.clf_log = logs["clf_log"]
@@ -84,7 +117,10 @@ class PlotQuadraticSim():
 
         self.xlimits = self.plot_config["xlimits"]
         self.ylimits = self.plot_config["ylimits"]
-        
+
+        if self.dim == 3:
+            self.zlimits = self.plot_config["zlimits"]
+
         self.running = False
 
     def init_graphics(self, ax: Axes):
@@ -95,35 +131,62 @@ class PlotQuadraticSim():
         self.clf_color = mcolors.TABLEAU_COLORS['tab:blue']
         self.cbf_color = mcolors.TABLEAU_COLORS['tab:red']
 
-        self.clf_levelset = Ellipse(xy=[0,0], width=4, height=4, angle=0, color=self.clf_color, alpha=0.2)
-        self.cbf_levelsets = [ Ellipse(xy=[0,0], width=0, height=0, angle=0, color=self.cbf_color, alpha=0.2) for _ in range(self.num_cbfs) ]
+        if self.dim == 2:
+            self.clf_levelset = Ellipse(xy=[0,0], width=4, height=4, angle=0, color=self.clf_color, alpha=0.2)
+            self.cbf_levelsets = [ Ellipse(xy=[0,0], width=0, height=0, angle=0, color=self.cbf_color, alpha=0.2) for _ in range(self.num_cbfs) ]
 
-        ax.add_patch(self.clf_levelset)
-        for cbf_levelset in self.cbf_levelsets:
-            ax.add_patch(cbf_levelset)
+            ax.add_patch(self.clf_levelset)
+            for cbf_levelset in self.cbf_levelsets:
+                ax.add_patch(cbf_levelset)
+
+            self.time_text = ax.text(0.7, 0.95, s = str("Time"), fontsize=8, horizontalalignment='center', verticalalignment='center', transform=ax.transAxes)
+        else:
+            # V = self.clf(self.initial_state)
+            V = 0.21
+            clf_ellipsoid = PlotQuadraticSim.get_ellipse(self.clf, V)
+            cbf_ellipsoids = [ PlotQuadraticSim.get_ellipse(cbf, 0.0) for cbf in self.cbfs ]
+
+            self.clf_levelset = PlotQuadraticSim.get_elliptical_surf(ax, *clf_ellipsoid, self.clf_color)
+            self.cbf_levelsets = [ PlotQuadraticSim.get_elliptical_surf(ax, *cbf_ellipsoid, self.cbf_color) for cbf_ellipsoid in cbf_ellipsoids ]
+
+            self.time_text = ax.text(0.7, 0.95, 0.85, s = str("Time"), fontsize=8, horizontalalignment='center', verticalalignment='center', transform=ax.transAxes)
 
         # Initalize some graphical objects
-        self.time_text = ax.text(0.7, 0.95, s = str("Time"), fontsize=8, horizontalalignment='center', verticalalignment='center', transform=ax.transAxes)
+        self.trajectory, = ax.plot(*[[] for _ in self.initial_state],lw=2)
+        self.init_state_pt, = ax.plot(*[[coords] for coords in self.initial_state],'b*',lw=2)
+        self.clf_center, = ax.plot(*[[coords] for coords in self.clf.center],'kx',lw=2)
 
-        self.trajectory, = ax.plot([],[],lw=2)
-        self.init_state_pt, = ax.plot([self.initial_state[0]],[self.initial_state[1]],'b*',lw=2)
-        self.clf_center, = ax.plot([self.clf.center[0]],[self.clf.center[1]],'kx',lw=2)
-
-        eq_x_coors, eq_y_coors, eq_colors = [], [], []
+        eq_coors, eq_colors = [[] for _ in range(self.robot.n) ], []
         for eq in self.equilibria:
-            eq_pt = eq["point"]
-            eq_x_coors.append(eq_pt[0])
-            eq_y_coors.append(eq_pt[1])
-            if eq["stability"] <= 0: eq_colors.append("red")
-            if eq["stability"] > 0: eq_colors.append("blue")
+            if "point" in eq.keys():
 
-        self.equilibria_plot = ax.scatter( eq_x_coors, eq_y_coors, c=eq_colors, alpha=0.8, marker='o', linewidths=0.01 )
+                for k, coord in enumerate(eq["point"]):
+                    eq_coors[k].append(coord)
+
+                if eq["stability"] <= 0: eq_colors.append("red")
+                if eq["stability"] > 0: eq_colors.append("blue")
+
+        if self.plot_config["equilibria"]: 
+            self.equilibria_plot = ax.scatter( *eq_coors, c=eq_colors, alpha=0.8, marker='o', linewidths=0.01 )
+
+        self.cbf_arrows = [ ax.plot([],[],'r',lw=1.2)[0] for _ in self.cbfs ]
+
         self.update_plot_state(0)
 
         ax.set_xlim(self.xlimits)
         ax.set_ylim(self.ylimits)
-        ax.set_aspect('equal', adjustable='box')
 
+        if self.dim == 3: ax.set_zlim(self.zlimits)
+
+        # Plot 3D circle
+        radius = 0.85
+        theta = np.linspace(0, 2 * np.pi, 201)
+        x = np.zeros_like(theta)
+        y = radius * np.cos(theta)
+        z = radius * np.sin(theta) + 3.0
+        self.intersection, = ax.plot(x, y, z, color='black', lw=1.5)
+
+        ax.set_aspect('equal', adjustable='box')
         self.running = True
 
         return self.blit()
@@ -138,12 +201,21 @@ class PlotQuadraticSim():
         graphical_elements.append(self.init_state_pt)
         if self.plot_config["equilibria"]: 
             graphical_elements.append(self.equilibria_plot)
-        graphical_elements.append(self.clf_levelset)
+
+        if self.dim == 2:
+            graphical_elements.append(self.clf_levelset)
+            
         graphical_elements += self.cbf_levelsets
+        graphical_elements += self.cbf_arrows
+
+        graphical_elements.append(self.intersection)
 
         return graphical_elements
 
     def update_levelsets(self):
+
+        if self.dim > 2:
+            return
 
         Hv = param2H(self.curr_clf_shape)
         self.clf.set_params(hessian=Hv)
@@ -171,26 +243,47 @@ class PlotQuadraticSim():
         ''' Updates the state of every relevant data for plotting '''
         
         self.curr_time = np.around(self.time[i], decimals = 2)
-        self.curr_state = [ self.state_log[0][i], self.state_log[1][i] ]
-        self.curr_trajectory = [ self.state_log[0][0:i], self.state_log[1][0:i] ]
+        
+        self.curr_state = [ self.state_log[dim][i] for dim in range(self.dim) ]
+        self.curr_trajectory = [ self.state_log[dim][0:i] for dim in range(self.dim) ]
 
-        self.curr_clf_shape = [ self.clf_log[0][i], self.clf_log[1][i], self.clf_log[2][i] ]
+        symm_dim = int(self.dim*(self.dim+1)/2)
+        self.curr_clf_shape = [ self.clf_log[dim][i] for dim in range(symm_dim) ]
         self.curr_cbf_shape = [ [] for _ in self.cbfs ]
         for k in range(self.num_cbfs):
             if self.cbf_logs:
-                self.curr_cbf_shape[k] = [ self.cbf_logs[k][0][i], self.cbf_logs[k][1][i], self.cbf_logs[k][2][i] ]
+                self.curr_cbf_shape[k] = [ self.cbf_logs[k][dim][i] for dim in range(symm_dim) ]
 
     def update(self, i):
 
         if i < self.num_steps:
 
             self.update_plot_state(i)
+            self.trajectory.set_data(self.curr_trajectory[0] , self.curr_trajectory[1] )
+            if self.dim == 3:
+                self.trajectory.set_3d_properties(self.curr_trajectory[2])
 
-            self.trajectory.set_data(self.curr_trajectory[0] , self.curr_trajectory[1])
             self.time_text.set_text("Time = " + str(self.curr_time) + "s")
+
             if self.plot_config["drawlevel"]:
                 self.update_levelsets()
 
+            if self.plot_config["arrows"]:
+
+                arrow_size = self.plot_config["arrow_size"]
+
+                for k, cbf in enumerate(self.cbfs):
+                    grad_h = cbf.gradient(self.curr_state)
+                    norm_grad_h = arrow_size*( grad_h / np.linalg.norm(grad_h) )
+
+                    self.cbf_arrows[k].set_data( 
+                        [ self.curr_state[0], self.curr_state[0] + norm_grad_h[0] ], 
+                        [ self.curr_state[1], self.curr_state[1] + norm_grad_h[1] ] )
+
+                    if self.dim == 3:
+                        self.cbf_arrows[k].set_3d_properties(
+                            [ self.curr_state[2], self.curr_state[2] + norm_grad_h[2] ])
+                        
         else:
             self.running = False
 
