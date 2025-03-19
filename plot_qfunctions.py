@@ -1,11 +1,15 @@
 import sys, importlib
 import matplotlib.pyplot as plt
-import numpy as np
+
 from common import optimal_arrangement
 from controllers.compatibility import QFunction
 
+''' ---------------------------- Load simulation ------------------------------- '''
+
 sim_config = sys.argv[1].replace(".json","")
 sim = importlib.import_module("examples.simulation."+sim_config, package=None)
+
+''' -------------------------- Create Q-functions ------------------------------ '''
 
 Qfunctions = [ QFunction(sim.plant, sim.clf, cbf, p=1.0) for cbf in sim.cbfs ]
 
@@ -17,7 +21,7 @@ for k, qfun in enumerate(Qfunctions):
     print(f"Lowerbound = {lower}")
 
 ''' --------------------------------- Plot ------------------------------------- '''
-size = 3.0
+size = 4.0
 nrows, ncols = optimal_arrangement(len(sim.cbfs))
 
 fig = plt.figure(figsize=(1.8*size*ncols, size*nrows), layout='constrained')

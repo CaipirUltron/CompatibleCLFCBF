@@ -42,8 +42,9 @@ mercury = Body("Mercury", mass=1e2, radius=2, color="grey", position=(+50, 0), v
 venus = Body("Venus", mass=1e2, radius=3, color="yellow", position=(+80, 0), velocity=(0, +60))
 earth = Body("Earth", mass=1e2, radius=4, color="cyan", position=(+110, 0), velocity=(0, +60))
 mars = Body("Mars", mass=1e2, radius=3, color="red", position=(+140, 0), velocity=(0, +60))
+jupiter = Body("Jupiter", mass=1e2, radius=1, color="black", position=(+160, 0), velocity=(0, +10))
 
-bodies = [ sun, mercury, venus, earth, mars ]
+bodies = [ sun, mercury, venus, earth, mars, jupiter ]
 
 def bodies2state(bodies):
     ''' Computes multibody system '''
