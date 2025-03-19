@@ -184,7 +184,7 @@ class PlotQuadraticSim():
         x = np.zeros_like(theta)
         y = radius * np.cos(theta)
         z = radius * np.sin(theta) + 3.0
-        self.intersection, = ax.plot(x, y, z, color='black', lw=1.5)
+        self.intersection, = ax.plot(x, y, z, '--', color='black', lw=1.5)
 
         ax.set_aspect('equal', adjustable='box')
         self.running = True
@@ -263,7 +263,8 @@ class PlotQuadraticSim():
             if self.dim == 3:
                 self.trajectory.set_3d_properties(self.curr_trajectory[2])
 
-            self.time_text.set_text("Time = " + str(self.curr_time) + "s")
+            # self.time_text.set_text("Time = " + str(self.curr_time) + "s")
+            self.time_text.set_text("")
 
             if self.plot_config["drawlevel"]:
                 self.update_levelsets()

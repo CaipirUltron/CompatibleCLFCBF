@@ -39,12 +39,15 @@ elif sim.plant.n == 3:
     fig = plt.figure(figsize=figsize)  # Square figure
     ax = fig.add_subplot(projection='3d')
     ax.set_box_aspect((1,1,1))
-    ax.set_xlabel('$x$')
-    ax.set_ylabel('$y$')
-    ax.set_zlabel('$z$')
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_zlabel('z')
 
     ax.set_yticklabels([])
     ax.set_xticklabels([])
+
+    plt.rcParams['pdf.fonttype'] = 42  # Ensures Type 2 (TrueType) instead of Type 3
+    plt.rcParams['ps.fonttype'] = 42
 
     # ax.set_xticks([])
     # ax.set_yticks([])
