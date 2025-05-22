@@ -39,7 +39,7 @@ controller = CompatibleQP(sim.plant, sim.clf, sim.cbfs, alpha = 5.0, beta = 10.0
                           verbose=True)
 
 ''' ----------------------------- Simulation loop --------------------------------- '''
-T = 25
+T = 50
 if len(sys.argv) > 3:
     T = float(sys.argv[3])
 
@@ -54,9 +54,9 @@ for step in range(0, num_steps):
 
     # Simulation time
     t = step*sample_time
-    if platform.system().lower() != 'windows':
-        os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
-    print("Simulating instant t = " + str(float(f'{t:.3f}')) + " s")
+    # if platform.system().lower() != 'windows':
+    #     os.system('var=$(tput lines) && line=$((var-2)) && tput cup $line 0 && tput ed')           # clears just the last line of the terminal
+    # print("Simulating instant t = " + str(float(f'{t:.3f}')) + " s")
     time_list.append( t )
 
     # Control

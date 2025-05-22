@@ -32,7 +32,7 @@ class CompatibleQP():
 
         # Checks if CLF satisfies the CLF condition BEFORE creating the Q-functions
         self.clf = clf
-        self.clf.satisfy_clf(A=self.plant.A)
+        # self.clf.satisfy_clf(A=self.plant.A)
         self.ref_clf = QuadraticLyapunov(hessian=self.clf.H, center=self.clf.center)
 
         if not isinstance(cbfs, list):
@@ -54,6 +54,8 @@ class CompatibleQP():
         self.verbose = False
         self.active = True
         self.compatibilization = True
+        self.equilibrium_points = []
+        
         if "active" in kwargs.keys():
             self.active = kwargs["active"]
         if "compatibilization" in kwargs.keys():
@@ -103,8 +105,10 @@ class CompatibleQP():
             self.radius = 1.0
 
         # Create Q-function list
-        self.Qfunctions: list[QFunction] = [ QFunction(self.plant, self.ref_clf, cbf, self.p) for cbf in self.cbfs ]
-        self.compatible_Hv = [ None for _ in self.Qfunctions ]
+        self.Qfunctions, self.compatible_Hv = [], [ self.clf.H for _ in range(self.num_cbfs) ]
+        if self.compatibilization:
+            self.Qfunctions: list[QFunction] = [ QFunction(self.plant, self.ref_clf, cbf, self.p) for cbf in self.cbfs ]
+            self.compatible_Hv = [ None for _ in self.Qfunctions ]
 
         self.active_index = None
         self.compatibilized = False
@@ -112,7 +116,7 @@ class CompatibleQP():
         if self.active and self.compatibilization:
             self.compatibilize(verbose=self.verbose)
 
-        self.get_equilibria()
+        # self.get_equilibria()
 
     def compatibilize(self, **kwargs):
         ''' 
@@ -205,6 +209,7 @@ class CompatibleQP():
         # active_index = self.active_cbf_index()
         # print(f"Active CBF = {active_index}")
 
+        self.compute_stability()
         return self.u
 
     def get_clf_control(self):
@@ -254,6 +259,52 @@ class CompatibleQP():
 
         return x, f, g
 
+    def compute_stability(self):
+        ''' Verifies if equilibrium conditions hold '''
+
+        if not isinstance(self.plant, LinearSystem ):
+            warnings.warn("Stability conditions only currently implemented for LTI systems.")
+
+        ''' Plant '''
+        x, f, g = self.get_plant_state()
+        G = g @ g.T
+        A, B = self.plant.A, self.plant.B
+
+        ''' CLF and CBF'''
+        V, nablaV, Hv = self.ref_clf.get_values(x)
+        h_list, nablah_list, Hh_list = [], [], []
+        for cbf in self.cbfs:
+            h, nablah, Hh = cbf.get_values(x)
+            h_list.append(h) 
+            nablah_list.append(nablah.reshape(-1,1))
+            Hh_list.append(Hh)
+
+        '''CBF KKT multipliers '''
+        Ua = np.hstack(nablah_list)
+        lambda_0_eq = self.p * self.gamma_poly(V)
+        lambda_a = np.linalg.inv(Ua.T @ G @ Ua) @ Ua.T @ ( lambda_0_eq * G @ nablaV - f )
+
+        for i, l in enumerate(lambda_a):
+            lambda_a[i] = max(l,0)
+
+        ''' Projection matrices '''
+        c = (1/self.p) + nablaV @ G @ nablaV
+        Pv = np.eye(self.n) - (1/c) * G @ np.outer(nablaV, nablaV)
+        Sa = Ua.T @ Pv @ G @ Ua
+        PUa = np.eye(self.n) - Pv @ G @ Ua @ np.linalg.inv(Sa) @ Ua.T
+
+        ''' Equilibrium manifold and its Jacobian'''
+        fa = f - lambda_0_eq * G @ nablaV + G @ sum([ l * nablah for l, nablah in zip(lambda_a,nablah_list) ]).flatten()
+        Jfa = A - lambda_0_eq * G @ Hv + G @ sum([ l * Hh  for l, Hh in zip(lambda_a,Hh_list) ])
+
+        ''' Jacobian projection '''
+        projected_Jfa = PUa.T @ (Jfa + Jfa.T) @ PUa
+        eigs = np.linalg.eigvals(projected_Jfa)
+        # eigs.sort()
+
+        print(f"||fA|| = {np.linalg.norm(fa)}")
+        print(f"Eigenvalues of projected JfA = {eigs}")
+
     def get_active_clf_constraint(self):
         ''' Returns the active Lyapunov constraint. '''
 
@@ -261,7 +312,8 @@ class CompatibleQP():
         x, f, g = self.get_plant_state()
 
         # Lyapunov function and gradient
-        self.V, nablaV, Hv = self.clf.inverse_gamma_transform(x, self.gamma_poly)
+        # self.V, nablaV, Hv = self.clf.inverse_gamma_transform(x, self.gamma_poly)
+        self.V, nablaV, Hv = self.ref_clf.get_values(x)
 
         # Lie derivatives
         LfV = nablaV.dot(f)
@@ -282,13 +334,15 @@ class CompatibleQP():
         return a_clf, b_clf
 
     def get_cbf_constraint(self, cbf: QuadraticBarrier):
-        ''' Returns the CBF constraint. '''
+        ''' Returns the CBF constraint '''
 
         # Get plant state
         x, f, g = self.get_plant_state()
 
         # Barrier function and gradient
         h, nablah = cbf(x), cbf.gradient(x)
+
+        print(f"Barrier = {h}")
 
         # Lie derivatives
         Lfh = nablah.dot(f)
@@ -307,7 +361,8 @@ class CompatibleQP():
         x, f, g = self.get_plant_state()
 
         # Lyapunov function and gradient
-        ref_V, ref_nablaV, ref_Hv = self.ref_clf.inverse_gamma_transform(x, self.gamma_poly)
+        # ref_V, ref_nablaV, ref_Hv = self.ref_clf.inverse_gamma_transform(x, self.gamma_poly)
+        ref_V, ref_nablaV, ref_Hv = self.ref_clf.get_values(x)
 
         # Lie derivatives
         LfV = ref_nablaV.dot(f)

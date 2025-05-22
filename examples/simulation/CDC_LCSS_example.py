@@ -14,14 +14,19 @@ limits = 9*np.array((-1,1,-1,1))
 
 ''' --------------------------------- Define LTI system ------------------------------------- '''
 x0 = np.array([-1, 0.5, 6])
+# x0 = np.array([0.001, 0.001, 3.866])     # at equilibrium on intersection
 
 # A = -0.01*np.eye(3)
 # A = 0.1*np.array([[ 0, 1, 0], [ -1,-1, 0], [ 0, 0,-1]])
-A = np.zeros([3,3])
+# A = np.zeros([3,3])
 
-B = np.array([[1,0,-2],
-              [0,1,0],
-              [-2,0,1]])
+A = (0e-0)*np.array([[-1, 0, 0],
+                     [ 0,-1, 0],
+                     [ 0, 0,-1]])
+
+B = np.array([[ 1, 0,-2],
+              [ 0, 1, 0],
+              [-2, 0, 1]])
 
 n = A.shape[0]
 m = B.shape[1]
@@ -40,17 +45,20 @@ CLFaxes = np.array([2.0, 2.0, 6.0])
 CLFrot = rot3D(theta=0.0, axis=[1.0, 0.0, 0.0])
 CLFcenter = np.zeros(n)
 clf = QuadraticLyapunov.geometry(CLFaxes, CLFrot, CLFcenter, level=1)
+print(clf)
 
 ''' ------------------------ Define CBF (varying Hessian eigenvalues) ----------------------- '''
 CBFaxes = [2.0, 1.0, 1.0]
 CBFrot = rot3D(theta=0.0, axis=[0.0, 0.0, 1.0])
 CBFcenter = np.array([-1.0, 0.0, 3.0])
 cbf1 = QuadraticBarrier.geometry(CBFaxes, CBFrot, CBFcenter)
+print(cbf1)
 
 CBFaxes = [2.0, 1.0, 1.0]
 CBFrot = rot3D(theta=0.0, axis=[1.0, 0.0, 1.0])
 CBFcenter = np.array([1.0, 0.0, 3.0])
 cbf2 = QuadraticBarrier.geometry(CBFaxes, CBFrot, CBFcenter)
+print(cbf2)
 
 CBFaxes = [1.0, 2.0, 3.0]
 CBFrot = rot3D(theta=10.0, axis=[1.0, 0.0, 1.0])

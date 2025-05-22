@@ -268,6 +268,15 @@ class Quadratic(Function):
         '''
         return ( self.A + self.A.T )
 
+    def get_values(self, x):
+        '''  
+        Returns function, gradient and Hessian values at an input point x
+        '''
+        fun = self(x)
+        nabla_fun = self.gradient(x)
+        Hfun = self.hessian(x)
+        return fun, nabla_fun, Hfun
+
     def eig(self):
         eigs, Q = np.linalg.eig(self.H)
         return eigs, Q
@@ -275,6 +284,9 @@ class Quadratic(Function):
     def eigvals(self):
         eigs, Q = self.eig()
         return eigs
+
+    def __str__(self):
+        return f"Quadratic 0.5 (x - p)'H(x-p) with H = \n{self.H}\n and center = {self.center} "
 
 class Gaussian(Function):
     '''
